@@ -11,6 +11,8 @@
     "test": "pnpm run test:bridge && pnpm run test:openclaw",
     "test:bridge": "pnpm --dir plugins/message-bridge test",
     "test:openclaw": "pnpm --dir plugins/message-bridge-openclaw test",
-    "verify:workspace": "pnpm run build && pnpm run test && pnpm run build:openclaw:bundle"
+    "verify:workspace": "pnpm run build && pnpm run test && pnpm run build:openclaw:bundle",
+    "verify:integration:fixture": "node ./scripts/verify-integration-fixture.mjs",
+    "verify:integration:smoke": "pnpm run verify:integration:fixture && pnpm --dir plugins/message-bridge run test:e2e:smoke && pnpm run build:openclaw:bundle"
   }
 }
