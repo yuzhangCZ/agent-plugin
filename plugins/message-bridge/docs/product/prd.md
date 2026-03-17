@@ -5,7 +5,7 @@
 **Status:** 冻结稿  
 **Owner:** message-bridge maintainers  
 **Related:** `../architecture/overview.md`, `../quality/test-strategy.md`  
-**实现目录**: `/Users/zy/Code/opencode/opencode-CUI/plugins/message-bridge`
+**实现目录**: `<repo-root>/plugins/message-bridge`
 
 ## 一、摘要
 本需求文档定义 `message-bridge` 插件首版交付范围、协议契约、扩展机制、验收标准与外部依赖。  

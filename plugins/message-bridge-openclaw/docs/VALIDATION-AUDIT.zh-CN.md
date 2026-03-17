@@ -6,7 +6,7 @@
 
 ## 1. 执行基线
 
-- 仓库：`/Users/zy/.codex/worktrees/3eda/opencode-CUI`
+- 仓库：`<repo-root>`
 - OpenClaw profile：`~/.openclaw-dev`
 - OpenClaw gateway：`openclaw --dev gateway run --allow-unconfigured --verbose`
 - 当前 `message-bridge` dev 扩展已重新安装为当前 worktree bundle

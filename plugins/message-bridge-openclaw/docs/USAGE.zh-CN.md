@@ -10,7 +10,7 @@
 
 当前插件目录：
 
-- `/Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw`
+- `<repo-root>/plugins/message-bridge-openclaw`
 
 当前插件能力边界：
 
@@ -77,7 +77,7 @@ OpenClaw profile 常见路径：
 macOS / Linux：
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm install
 npm run build
 npm test
@@ -149,7 +149,7 @@ Copy-Item .\openclaw.plugin.json "$target\openclaw.plugin.json" -Force
 ### 5.1 macOS / Linux
 
 ```bash
-ln -sfn /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw \
+ln -sfn <repo-root>/plugins/message-bridge-openclaw \
   ~/.openclaw-dev/extensions/message-bridge
 
 npm run build
@@ -179,7 +179,7 @@ npm run build
 ### 6.1 执行 bundle
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run install:bundle:dev
 ```
 
@@ -393,7 +393,7 @@ openclaw gateway run --allow-unconfigured --verbose
 
 当前本机日志路径：
 
-- `/Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log`
+- `<repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log`
 
 OpenClaw 自身文件日志（插件日志也在其中）默认路径：
 
@@ -419,7 +419,7 @@ openclaw logs --follow --json
 
 ```bash
 # 3) 直接跟踪 ai-gateway 日志（本地联调）
-tail -f /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+tail -f <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 - 会打印 ai-gateway 收发与转发日志，适合看 Redis 下行与上行 `tool_event/tool_done/tool_error` 记录。

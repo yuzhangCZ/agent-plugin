@@ -13,6 +13,7 @@ Chinese usage guide:
 - `docs/USAGE.zh-CN.md`
 - `docs/LOGGING-MATRIX.zh-CN.md`（日志事件矩阵）
 - `docs/CONFIGURATION.zh-CN.md`（配置字段、配置位置、优先级）
+- `docs/protocol-compat-matrix.zh-CN.md`（与 message-bridge 协议语义对照）
 
 Configuration reference:
 
@@ -113,7 +114,7 @@ The plugin assumes the active OpenClaw profile already has:
 ## Build
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm install
 npm run build
 npm run build:bundle
@@ -138,9 +139,9 @@ Sync the plugin contents into that directory:
 ```bash
 rm -rf /Users/zy/.openclaw-dev/extensions/message-bridge
 mkdir -p /Users/zy/.openclaw-dev/extensions/message-bridge
-cp -R /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw/dist /Users/zy/.openclaw-dev/extensions/message-bridge/
-cp /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw/package.json /Users/zy/.openclaw-dev/extensions/message-bridge/
-cp /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw/openclaw.plugin.json /Users/zy/.openclaw-dev/extensions/message-bridge/
+cp -R <repo-root>/plugins/message-bridge-openclaw/dist /Users/zy/.openclaw-dev/extensions/message-bridge/
+cp <repo-root>/plugins/message-bridge-openclaw/package.json /Users/zy/.openclaw-dev/extensions/message-bridge/
+cp <repo-root>/plugins/message-bridge-openclaw/openclaw.plugin.json /Users/zy/.openclaw-dev/extensions/message-bridge/
 ```
 
 安装目录中不要包含：
@@ -235,7 +236,7 @@ Healthy startup should show:
 Run:
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run install:bundle:dev
 ```
 
@@ -284,7 +285,7 @@ find ~/.openclaw-dev/extensions/message-bridge -maxdepth 2 -type d | grep node_m
 
 Check the gateway log:
 
-`/Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log`
+`<repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log`
 
 Expected result:
 

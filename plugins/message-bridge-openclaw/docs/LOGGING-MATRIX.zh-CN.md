@@ -98,12 +98,12 @@ OpenClaw 文件日志默认路径（插件日志也在其中）：
 
 本地联调 `ai-gateway` 日志路径：
 
-- `/Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log`
+- `<repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log`
 
 如需实时观察，可先执行：
 
 ```bash
-tail -f /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+tail -f <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 命令输出说明：
@@ -123,7 +123,7 @@ Get-Content "C:\\path\\to\\opencode-CUI\\logs\\local-stack\\ai-gateway.log" -Wai
 
 ```bash
 rg -n "downstream.normalization_failed|runtime.downstream_ignored_non_protocol|runtime.tool_error.sending" \
-  /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+  <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 重点看字段：
@@ -138,7 +138,7 @@ rg -n "downstream.normalization_failed|runtime.downstream_ignored_non_protocol|r
 
 ```bash
 rg -n "gateway.state.changed|gateway.connect.started|gateway.register.sent|gateway.register.accepted|gateway.ready|gateway.close|gateway.reconnect.scheduled|gateway.reconnect.attempt|gateway.reconnect.failed|gateway.error" \
-  /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+  <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 重点看链路是否完整：
@@ -149,7 +149,7 @@ rg -n "gateway.state.changed|gateway.connect.started|gateway.register.sent|gatew
 
 ```bash
 rg -n "runtime.downstream.received|runtime.invoke.received|runtime.downstream_ignored_no_connection|gateway.message.received_not_ready" \
-  /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+  <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 判定思路：
@@ -160,7 +160,7 @@ rg -n "runtime.downstream.received|runtime.invoke.received|runtime.downstream_ig
 
 ```bash
 rg -n "bridge.chat.started|bridge.chat.model_selected|bridge.chat.first_chunk|bridge.chat.chunk|bridge.chat.failed|bridge.chat.completed" \
-  /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+  <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 重点看：
@@ -174,7 +174,7 @@ rg -n "bridge.chat.started|bridge.chat.model_selected|bridge.chat.first_chunk|br
 
 ```bash
 rg -n "runtime.tool_event.sending|runtime.tool_done.sending|runtime.tool_error.sending|runtime.tool_done.skipped_no_connection|runtime.tool_error.skipped_no_connection" \
-  /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+  <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 判定思路：

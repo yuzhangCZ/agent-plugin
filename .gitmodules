@@ -1,0 +1,3 @@
+[submodule "integration/opencode-cui"]
+	path = integration/opencode-cui
+	url = https://github.com/Llllviaaaa/opencode-CUI.git

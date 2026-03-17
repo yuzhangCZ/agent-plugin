@@ -99,14 +99,14 @@ openclaw --dev doctor
 ### 全量自动化回归
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm test
 ```
 
 ### 只跑阶段一相关测试
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
 node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
 ```
@@ -128,7 +128,7 @@ node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
 ### 只跑阶段二相关测试
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
 node --test tests/config-status.test.mjs
 ```
@@ -150,7 +150,7 @@ node --test tests/config-status.test.mjs
 先执行：
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
 node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
 ```
@@ -179,7 +179,7 @@ openclaw --dev gateway run --allow-unconfigured --verbose
 
 查看 `ai-gateway` 日志：
 
-- `/Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log`
+- `<repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log`
 
 预期结果：
 
@@ -280,7 +280,7 @@ redis-cli publish agent:test-ak-openclaw-001 '{"type":"invoke","action":"questio
 先执行：
 
 ```bash
-cd /Users/zy/.codex/worktrees/3eda/opencode-CUI/plugins/message-bridge-openclaw
+cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
 node --test tests/config-status.test.mjs
 ```
@@ -513,7 +513,7 @@ openclaw --dev channels remove --channel message-bridge --delete
 ### 查看 `ai-gateway` 日志
 
 ```bash
-tail -f /Users/zy/Code/opencode/opencode-CUI/logs/local-stack/ai-gateway.log
+tail -f <repo-root>/integration/opencode-cui/logs/local-stack/ai-gateway.log
 ```
 
 ### 查看当前 channel 状态
