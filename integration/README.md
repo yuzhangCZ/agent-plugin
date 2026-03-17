@@ -26,7 +26,7 @@ The repository provides a manual GitHub Actions workflow:
 Design rules:
 
 - trigger manually with `workflow_dispatch`
-- run on `self-hosted`
+- run on `self-hosted` runners labeled `integration-smoke`
 - keep it out of the default hosted CI path
 
 ## Submodule Bump Policy
@@ -35,3 +35,11 @@ Design rules:
 - after each bump, run `pnpm verify:integration:fixture`
 - before release or merge of risky fixture changes, run `pnpm verify:integration:smoke`
 - do not treat the fixture repository as the primary development location for migrated plugins
+
+## Runner Requirements
+
+The dedicated smoke workflow assumes a self-hosted runner that:
+
+- has labels `self-hosted` and `integration-smoke`
+- can access the services required by the current smoke path
+- has Node 24 and pnpm available through the workflow setup steps

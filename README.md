@@ -33,3 +33,5 @@ GitHub Actions validates:
 The heavier `verify:integration:smoke` command remains a manual or dedicated-environment gate.
 
 A dedicated manual workflow is available at `.github/workflows/integration-smoke.yml`.
+
+That workflow expects a self-hosted runner labeled `integration-smoke`.

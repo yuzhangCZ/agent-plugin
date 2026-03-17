@@ -2,6 +2,11 @@ name: Integration Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: Why the dedicated integration smoke is being triggered
+        required: false
+        default: manual verification
 
 concurrency:
   group: integration-smoke-${{ github.ref }}
@@ -12,6 +17,7 @@ jobs:
     name: Integration Smoke
     runs-on:
       - self-hosted
+      - integration-smoke
 
     steps:
       - name: Checkout repository
@@ -35,3 +41,8 @@ jobs:
 
       - name: Run integration smoke
         run: pnpm verify:integration:smoke
+
+      - name: Print trigger context
+        run: |
+          echo "reason=${{ inputs.reason }}"
+          echo "ref=${{ github.ref }}"
