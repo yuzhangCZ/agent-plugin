@@ -86,7 +86,7 @@ npm test
 Windows PowerShell：
 
 ```powershell
-cd C:\path\to\opencode-CUI\plugins\message-bridge-openclaw
+cd C:\path\to\agent-plugin\plugins\message-bridge-openclaw
 npm install
 npm run build
 npm test
@@ -161,7 +161,7 @@ npm run build
 New-Item `
   -ItemType SymbolicLink `
   -Path "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge" `
-  -Target "C:\path\to\opencode-CUI\plugins\message-bridge-openclaw"
+  -Target "C:\path\to\agent-plugin\plugins\message-bridge-openclaw"
 
 npm run build
 ```

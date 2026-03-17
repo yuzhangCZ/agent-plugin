@@ -1,5 +1,7 @@
 # Message Bridge OpenClaw Plugin
 
+> 迁移说明：`message-bridge-openclaw` 的主开发仓已迁移到 [agent-plugin](https://github.com/yuzhangCZ/agent-plugin)。当前仓库中的内容用于联调夹具与历史参考。
+
 `message-bridge` is an OpenClaw channel plugin that connects an OpenClaw runtime
 to the existing `ai-gateway` WebSocket protocol used by the OpenCode
 `message-bridge` plugin.
@@ -137,11 +139,12 @@ The current dev plugin location is:
 Sync the plugin contents into that directory:
 
 ```bash
-rm -rf /Users/zy/.openclaw-dev/extensions/message-bridge
-mkdir -p /Users/zy/.openclaw-dev/extensions/message-bridge
-cp -R <repo-root>/plugins/message-bridge-openclaw/dist /Users/zy/.openclaw-dev/extensions/message-bridge/
-cp <repo-root>/plugins/message-bridge-openclaw/package.json /Users/zy/.openclaw-dev/extensions/message-bridge/
-cp <repo-root>/plugins/message-bridge-openclaw/openclaw.plugin.json /Users/zy/.openclaw-dev/extensions/message-bridge/
+export OPENCLAW_EXT_DIR="${HOME}/.openclaw-dev/extensions/message-bridge"
+rm -rf "$OPENCLAW_EXT_DIR"
+mkdir -p "$OPENCLAW_EXT_DIR"
+cp -R <repo-root>/plugins/message-bridge-openclaw/dist "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/package.json "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/openclaw.plugin.json "$OPENCLAW_EXT_DIR/"
 ```
 
 安装目录中不要包含：
@@ -322,7 +325,7 @@ Expected result in `ai-gateway.log`:
 
 Confirm the actual assistant output in the latest session file under:
 
-`/Users/zy/.openclaw-dev/agents/main/sessions`
+`~/.openclaw-dev/agents/main/sessions`
 
 ## Known limitations
 
