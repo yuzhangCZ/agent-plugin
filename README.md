@@ -20,3 +20,14 @@ Monorepo for `message-bridge` and `message-bridge-openclaw`.
 - `pnpm build`
 - `pnpm test`
 - `pnpm verify:workspace`
+- `pnpm verify:integration:fixture`
+- `pnpm verify:integration:smoke`
+
+## CI
+
+GitHub Actions validates:
+
+- `pnpm verify:workspace`
+- `pnpm verify:integration:fixture`
+
+The heavier `verify:integration:smoke` command remains a manual or dedicated-environment gate.
