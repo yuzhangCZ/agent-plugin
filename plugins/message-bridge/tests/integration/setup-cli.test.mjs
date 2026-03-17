@@ -242,6 +242,7 @@ describe('setup cli', () => {
           HOME: home,
           USERPROFILE: home,
           APPDATA: appData,
+          XDG_CONFIG_HOME: '',
           MB_SETUP_PLATFORM: 'win32',
         },
         input: 'ak-win\nsk-win\ny\n',
