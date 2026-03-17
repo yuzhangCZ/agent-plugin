@@ -1,0 +1,56 @@
+{
+  "name": "message-bridge",
+  "version": "0.1.0",
+  "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "bundle",
+    "README.md",
+    "docs",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "install:bundle:dev": "node -e \"const {execSync}=require('node:child_process'); const isWin=process.platform==='win32'; const cmd=isWin ? 'powershell -ExecutionPolicy Bypass -File scripts/install-bundle-dev.ps1' : 'sh scripts/install-bundle-dev.sh'; execSync('npm run build:bundle', {stdio:'inherit'}); execSync(cmd, {stdio:'inherit'});\"",
+    "validate:skill-relay": "node scripts/skill-relay-live-check.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/**/*.test.mjs"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.11"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.27.4",
+    "openclaw": "2026.3.11",
+    "typescript": "^5.7.2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "message-bridge",
+      "label": "Message Bridge",
+      "selectionLabel": "Message Bridge",
+      "docsPath": "/channels/message-bridge",
+      "blurb": "Bridge ai-gateway sessions into OpenClaw."
+    },
+    "install": {
+      "localPath": "extensions/message-bridge",
+      "defaultChoice": "local"
+    }
+  }
+}
