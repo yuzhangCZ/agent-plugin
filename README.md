@@ -31,3 +31,5 @@ GitHub Actions validates:
 - `pnpm verify:integration:fixture`
 
 The heavier `verify:integration:smoke` command remains a manual or dedicated-environment gate.
+
+A dedicated manual workflow is available at `.github/workflows/integration-smoke.yml`.
