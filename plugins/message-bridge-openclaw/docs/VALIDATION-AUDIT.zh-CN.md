@@ -21,8 +21,8 @@
 
 | 场景 | 当前状态 | 证据 | 备注 |
 | --- | --- | --- | --- |
-| 阶段一自动化：`downstream-normalization + bridge-chat` | 通过 | `node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs`，`19/19` 通过 | 已补齐 `status_query/status_response`、`create_session`、`close_session`、`abort_session` |
-| 阶段二自动化：`config-status + plugin-load + session-registry` | 通过 | `node --test tests/config-status.test.mjs tests/plugin-load.test.mjs tests/session-registry.test.mjs`，`11/11` 通过 | 覆盖 `configSchema/setup/onboarding/probe/status/issues` |
+| 阶段一自动化：`downstream-normalization + bridge-chat` | 通过 | `node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridge-chat.test.mjs`，`19/19` 通过 | 已补齐 `status_query/status_response`、`create_session`、`close_session`、`abort_session` |
+| 阶段二自动化：`config-status + plugin-load + session-registry` | 通过 | `node --test tests/unit/config-status.test.mjs tests/integration/plugin-load.test.mjs tests/unit/session-registry.test.mjs`，`11/11` 通过 | 覆盖 `configSchema/setup/onboarding/probe/status/issues` |
 | `openclaw --dev channels add --channel message-bridge ...` | 通过 | CLI 输出 `Added Message Bridge account "default".` | 已写入 `channels.message-bridge` 顶层单账号配置 |
 | `openclaw --dev channels remove --channel message-bridge` | 通过 | CLI 输出 `Disabled Message Bridge account "default".` | 配置中的 `enabled` 变为 `false` |
 | `openclaw --dev channels remove --channel message-bridge --delete` | 通过 | CLI 输出 `Deleted Message Bridge account "default".` | 随后已重新 `add` 恢复环境 |
@@ -35,7 +35,7 @@
 | `chat` | 部分通过 | `ai-gateway.log` 记录 `tool_event`/`tool_done`；本地 session 文件产出精确回复 | 本地 OpenClaw 执行成功；上游 skill relay 被 `source_not_allowed` 拦截 |
 | `close_session` | 部分通过 | `sessions.json` 中 `message-bridge:default:session-stage1-001` 已消失，且未出现 `tool_error` | 本地会话清理成功；`close_session` 成功路径不再发送 `tool_done` |
 | unsupported `permission_reply/question_reply` fail-closed | 部分通过 | `ai-gateway.log` 记录 `type=tool_error` | 本地 fail-closed 生效；上游 skill relay 被 `source_not_allowed` 拦截 |
-| 交互式 `onboarding` 重试/legacy skip | 仅自动化覆盖 | `tests/config-status.test.mjs` 通过 | 本轮未重复做完整手工 wizard 录屏式验证 |
+| 交互式 `onboarding` 重试/legacy skip | 仅自动化覆盖 | `tests/unit/config-status.test.mjs` 通过 | 本轮未重复做完整手工 wizard 录屏式验证 |
 
 ### 2.1 本地 session 证据
 
@@ -54,18 +54,18 @@
 
 | 手册场景 | 现有覆盖 | 测试文件 |
 | --- | --- | --- |
-| 下行协议归一化 | 自动化已覆盖 | `tests/downstream-normalization.test.mjs` |
-| `status_query -> status_response` | 自动化已覆盖，本轮补齐 | `tests/bridge-chat.test.mjs` |
-| `create_session -> session_created` | 自动化已覆盖，本轮补齐 | `tests/bridge-chat.test.mjs` |
-| `chat -> tool_event -> tool_done` | 自动化已覆盖 | `tests/bridge-chat.test.mjs` |
-| runtime reply / fallback / timeout / tool lifecycle / runTimeoutMs | 自动化已覆盖 | `tests/bridge-chat.test.mjs` |
-| `close_session`（成功无 `tool_done`） | 自动化已覆盖，本轮补齐 | `tests/bridge-chat.test.mjs` |
-| `abort_session` 成功 / `unknown_tool_session` | 自动化已覆盖，本轮补齐 | `tests/bridge-chat.test.mjs` |
-| ready / inbound / outbound / heartbeat 运行态时间戳 | 自动化已覆盖 | `tests/bridge-chat.test.mjs` |
-| unsupported `permission_reply/question_reply` fail-closed | 自动化已覆盖 | `tests/bridge-chat.test.mjs` |
-| `configSchema` / 单账号 / `setup` / `onboarding` / `probe/status/issues` / 启停删除 | 自动化已覆盖 | `tests/config-status.test.mjs` |
-| 插件注册与 runtime store | 自动化已覆盖 | `tests/plugin-load.test.mjs` |
-| session registry | 自动化已覆盖 | `tests/session-registry.test.mjs` |
+| 下行协议归一化 | 自动化已覆盖 | `tests/unit/downstream-normalization.test.mjs` |
+| `status_query -> status_response` | 自动化已覆盖，本轮补齐 | `tests/integration/bridge-chat.test.mjs` |
+| `create_session -> session_created` | 自动化已覆盖，本轮补齐 | `tests/integration/bridge-chat.test.mjs` |
+| `chat -> tool_event -> tool_done` | 自动化已覆盖 | `tests/integration/bridge-chat.test.mjs` |
+| runtime reply / fallback / timeout / tool lifecycle / runTimeoutMs | 自动化已覆盖 | `tests/integration/bridge-chat.test.mjs` |
+| `close_session`（成功无 `tool_done`） | 自动化已覆盖，本轮补齐 | `tests/integration/bridge-chat.test.mjs` |
+| `abort_session` 成功 / `unknown_tool_session` | 自动化已覆盖，本轮补齐 | `tests/integration/bridge-chat.test.mjs` |
+| ready / inbound / outbound / heartbeat 运行态时间戳 | 自动化已覆盖 | `tests/integration/bridge-chat.test.mjs` |
+| unsupported `permission_reply/question_reply` fail-closed | 自动化已覆盖 | `tests/integration/bridge-chat.test.mjs` |
+| `configSchema` / 单账号 / `setup` / `onboarding` / `probe/status/issues` / 启停删除 | 自动化已覆盖 | `tests/unit/config-status.test.mjs` |
+| 插件注册与 runtime store | 自动化已覆盖 | `tests/integration/plugin-load.test.mjs` |
+| session registry | 自动化已覆盖 | `tests/unit/session-registry.test.mjs` |
 | `channels add` 成功写入单账号配置 | 已新增测试，当前环境未执行 | `plugins/openclaw/src/commands/channels.message-bridge.test.ts` |
 | `channels add` 拒绝非 `default` 账号 | 已新增测试，当前环境未执行 | `plugins/openclaw/src/commands/channels.message-bridge.test.ts` |
 | `channels remove` disable / delete | 已新增测试，当前环境未执行 | `plugins/openclaw/src/commands/channels.message-bridge.test.ts` |

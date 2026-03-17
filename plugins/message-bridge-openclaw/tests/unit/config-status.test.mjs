@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Ajv from "ajv";
-import { messageBridgePlugin } from "../dist/index.js";
+import { messageBridgePlugin } from "../../dist/index.js";
 import {
   applyMessageBridgeSetupConfig,
   deleteMessageBridgeAccount,
@@ -12,14 +12,14 @@ import {
   resolveUnconfiguredReason,
   setMessageBridgeAccountEnabled,
   validateMessageBridgeSetupInput,
-} from "../dist/config.js";
+} from "../../dist/config.js";
 import {
   buildMessageBridgeAccountSnapshot,
   buildMessageBridgeChannelSummary,
   collectMessageBridgeStatusIssues,
   probeMessageBridgeAccount,
-} from "../dist/status.js";
-import { MESSAGE_BRIDGE_TOOL_TYPE, resolveRegisterMetadata } from "../dist/runtime/RegisterMetadata.js";
+} from "../../dist/status.js";
+import { MESSAGE_BRIDGE_TOOL_TYPE, resolveRegisterMetadata } from "../../dist/runtime/RegisterMetadata.js";
 
 function createConfig(overrides = {}) {
   return {

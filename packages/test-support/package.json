@@ -1,0 +1,19 @@
+{
+  "name": "@agent-plugin/test-support",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "exports": {
+    ".": "./index.mjs",
+    "./fixtures": "./fixtures/index.mjs",
+    "./transport": "./transport/index.mjs",
+    "./assertions": "./assertions/index.mjs",
+    "./timing": "./timing/index.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.mjs"
+  }
+}

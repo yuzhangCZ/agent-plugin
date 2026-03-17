@@ -13,9 +13,9 @@ Rules:
 - `pnpm verify:integration:fixture`
   - fast check
   - validates that the submodule is present and structurally usable
-- `pnpm verify:integration:smoke`
+- `pnpm run test:openclaw:runtime`
   - heavier gate
-  - runs the current `message-bridge` e2e smoke and `message-bridge-openclaw` bundle build from the monorepo root
+  - runs the isolated OpenClaw host runtime smoke for `message-bridge-openclaw`
 
 ## Dedicated Smoke Workflow
 
@@ -33,7 +33,7 @@ Design rules:
 
 - bump `integration/opencode-cui` only in dedicated changes
 - after each bump, run `pnpm verify:integration:fixture`
-- before release or merge of risky fixture changes, run `pnpm verify:integration:smoke`
+- before release or merge of risky fixture changes, run `pnpm run test:openclaw:runtime`
 - do not treat the fixture repository as the primary development location for migrated plugins
 
 ## Runner Requirements

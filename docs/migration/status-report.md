@@ -12,13 +12,13 @@ Completed:
 - `integration/opencode-cui` submodule connected as fixture
 - root verification commands established
 - hosted CI established for `verify:workspace` and `verify:integration:fixture`
-- dedicated self-hosted workflow established for `verify:integration:smoke`
+- dedicated self-hosted workflow established for `test:openclaw:runtime`
 
 ## Verification Commands
 
 - `pnpm verify:workspace`
 - `pnpm verify:integration:fixture`
-- `pnpm verify:integration:smoke`
+- `pnpm run test:openclaw:runtime`
 
 ## CI Layers
 

@@ -39,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run integration smoke
-        run: pnpm verify:integration:smoke
+      - name: Run OpenClaw runtime smoke
+        run: pnpm run test:openclaw:runtime
 
       - name: Print trigger context
         run: |

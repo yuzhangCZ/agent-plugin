@@ -267,7 +267,7 @@
 - `src/channel.ts`
 - `src/status.ts`
 - `src/onboarding.ts`
-- `tests/config-status.test.mjs`
+- `tests/unit/config-status.test.mjs`
 
 ### 4. 联调与验证状态
 

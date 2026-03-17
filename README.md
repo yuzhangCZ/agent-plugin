@@ -21,7 +21,7 @@ Monorepo for `message-bridge` and `message-bridge-openclaw`.
 - `pnpm test`
 - `pnpm verify:workspace`
 - `pnpm verify:integration:fixture`
-- `pnpm verify:integration:smoke`
+- `pnpm run test:openclaw:runtime`
 
 ## CI
 
@@ -30,7 +30,7 @@ GitHub Actions validates:
 - `pnpm verify:workspace`
 - `pnpm verify:integration:fixture`
 
-The heavier `verify:integration:smoke` command remains a manual or dedicated-environment gate.
+The heavier OpenClaw runtime smoke remains a manual or dedicated-environment gate.
 
 A dedicated manual workflow is available at `.github/workflows/integration-smoke.yml`.
 

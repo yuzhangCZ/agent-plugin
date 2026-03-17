@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import plugin from "../dist/index.js";
+import plugin from "../../dist/index.js";
 
 test("plugin registers channel and stores runtime", async () => {
   let registered = null;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDownstreamMessage } from "../dist/protocol/downstream.js";
+import { normalizeDownstreamMessage } from "../../dist/protocol/downstream.js";
 
 test("normalizes chat invoke message", () => {
   const result = normalizeDownstreamMessage({

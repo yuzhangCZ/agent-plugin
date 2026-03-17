@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OpenClawGatewayBridge } from "../dist/OpenClawGatewayBridge.js";
+import {
+  assertNoSuccessMessageOnInvalidInput,
+  assertSessionCreatedShape,
+  assertStatusResponseShape,
+  assertToolDoneShape,
+  assertToolErrorShape,
+} from "@agent-plugin/test-support/assertions";
+import {
+  createChatInvokeMessage,
+  createCompatInvalidInvokeStatusQueryMessage,
+  createCreateSessionInvokeMessage,
+  createStatusQueryMessage,
+} from "@agent-plugin/test-support/fixtures";
+import { OpenClawGatewayBridge } from "../../dist/OpenClawGatewayBridge.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -177,20 +190,24 @@ function createBridge(runtimeOverride, options = {}) {
 test("chat invoke produces tool_event and tool_done", async () => {
   const { bridge, connection } = createBridge();
   await bridge.start();
-  await bridge.handleDownstreamMessage({
-    type: "invoke",
-    welinkSessionId: "wl_1",
-    action: "chat",
-    payload: {
-      toolSessionId: "tool_1",
-      text: "hello",
-    },
-  });
+  await bridge.handleDownstreamMessage(
+    createChatInvokeMessage({
+      welinkSessionId: "wl_1",
+      payload: {
+        toolSessionId: "tool_1",
+        text: "hello",
+      },
+    }),
+  );
 
   const types = connection.sent.map((item) => item.type);
   assert.deepEqual(types, ["tool_event", "tool_event", "tool_event", "tool_event", "tool_done"]);
   assert.equal(connection.sent[1].event.type, "message.updated");
   assert.equal(connection.sent[2].event.type, "message.part.updated");
+  assertToolDoneShape(connection.sent.at(-1), {
+    welinkSessionId: "wl_1",
+    toolSessionId: "tool_1",
+  });
 });
 
 test("chat without welinkSessionId does not backfill from session registry", async () => {
@@ -1057,16 +1074,13 @@ test("logs websocket state changes on start and stop", async () => {
 test("status_query returns status_response", async () => {
   const { bridge, connection } = createBridge();
   await bridge.start();
-  await bridge.handleDownstreamMessage({
-    type: "status_query",
-  });
+  await bridge.handleDownstreamMessage(createStatusQueryMessage());
 
-  assert.deepEqual(connection.sent, [
-    {
-      type: "status_response",
-      opencodeOnline: true,
-    },
-  ]);
+  assert.equal(connection.sent.length, 1);
+  assertStatusResponseShape(connection.sent[0], {
+    opencodeOnline: true,
+    envelopeFree: true,
+  });
 });
 
 test("status_query returns false when bridge is stopped", async () => {
@@ -1075,40 +1089,50 @@ test("status_query returns false when bridge is stopped", async () => {
   await bridge.stop();
   connection.sent.length = 0;
   connection.state = "READY";
-  await bridge.handleDownstreamMessage({
-    type: "status_query",
-  });
+  await bridge.handleDownstreamMessage(createStatusQueryMessage());
 
-  assert.deepEqual(connection.sent, [
-    {
-      type: "status_response",
-      opencodeOnline: false,
-    },
-  ]);
+  assert.equal(connection.sent.length, 1);
+  assertStatusResponseShape(connection.sent[0], {
+    opencodeOnline: false,
+    envelopeFree: true,
+  });
+});
+
+test("invoke/status_query compatibility shape fails closed with standard tool_error", async () => {
+  const { bridge, connection } = createBridge();
+  await bridge.start();
+  await bridge.handleDownstreamMessage(
+    createCompatInvalidInvokeStatusQueryMessage({
+      welinkSessionId: "wl_invalid_status_query",
+    }),
+  );
+
+  assert.equal(connection.sent.length, 1);
+  assertToolErrorShape(connection.sent[0], {
+    welinkSessionId: "wl_invalid_status_query",
+    hasCode: false,
+  });
+  assertNoSuccessMessageOnInvalidInput(connection.sent);
 });
 
 test("create_session returns session_created with bridged session id", async () => {
   const { bridge, connection } = createBridge();
   await bridge.start();
-  await bridge.handleDownstreamMessage({
-    type: "invoke",
-    welinkSessionId: "wl_create_1",
-    action: "create_session",
-    payload: {
-      sessionId: "tool_create_1",
-    },
-  });
-
-  assert.deepEqual(connection.sent, [
-    {
-      type: "session_created",
+  await bridge.handleDownstreamMessage(
+    createCreateSessionInvokeMessage({
       welinkSessionId: "wl_create_1",
-      toolSessionId: "tool_create_1",
-      session: {
+      payload: {
         sessionId: "tool_create_1",
       },
-    },
-  ]);
+    }),
+  );
+
+  assert.equal(connection.sent.length, 1);
+  assertSessionCreatedShape(connection.sent[0], {
+    welinkSessionId: "wl_create_1",
+    toolSessionId: "tool_create_1",
+  });
+  assert.equal(connection.sent[0].session.sessionId, "tool_create_1");
 });
 
 test("close_session deletes session without returning tool_done", async () => {
@@ -1154,10 +1178,12 @@ test("close_session returns unknown_tool_session for missing session", async () 
     },
   });
 
-  assert.equal(connection.sent.at(-1).type, "tool_error");
-  assert.equal(connection.sent.at(-1).toolSessionId, "tool_close_missing");
-  assert.equal(connection.sent.at(-1).error, "unknown_tool_session");
-  assert.equal(connection.sent.at(-1).reason, "session_not_found");
+  assertToolErrorShape(connection.sent.at(-1), {
+    toolSessionId: "tool_close_missing",
+    error: "unknown_tool_session",
+    reason: "session_not_found",
+    hasCode: false,
+  });
 });
 
 test("abort_session soft-terminates session and returns tool_done", async () => {
@@ -1188,8 +1214,10 @@ test("abort_session soft-terminates session and returns tool_done", async () => 
   });
 
   assert.deepEqual(deletedSessions, []);
-  assert.equal(connection.sent.at(-1).type, "tool_done");
-  assert.equal(connection.sent.at(-1).toolSessionId, "tool_abort_1");
+  assertToolDoneShape(connection.sent.at(-1), {
+    welinkSessionId: "wl_abort_1",
+    toolSessionId: "tool_abort_1",
+  });
 });
 
 test("abort_session keeps session mapping after soft termination", async () => {
@@ -1256,10 +1284,12 @@ test("abort_session returns unknown_tool_session for missing session", async () 
     },
   });
 
-  assert.equal(connection.sent.at(-1).type, "tool_error");
-  assert.equal(connection.sent.at(-1).toolSessionId, "tool_abort_missing");
-  assert.equal(connection.sent.at(-1).error, "unknown_tool_session");
-  assert.equal(connection.sent.at(-1).reason, "session_not_found");
+  assertToolErrorShape(connection.sent.at(-1), {
+    toolSessionId: "tool_abort_missing",
+    error: "unknown_tool_session",
+    reason: "session_not_found",
+    hasCode: false,
+  });
 });
 
 test("abort_session suppresses late chat output after successful termination", async () => {
@@ -1381,7 +1411,11 @@ test("unsupported permission_reply and question_reply fail closed with standard 
     },
   });
 
-  assert.equal(connection.sent.at(-1).type, "tool_error");
+  assertToolErrorShape(connection.sent.at(-1), {
+    welinkSessionId: "wl_1",
+    toolSessionId: "tool_1",
+    hasCode: false,
+  });
   assert.match(connection.sent.at(-1).error, /unsupported_in_openclaw_v1:permission_reply/);
 
   await bridge.handleDownstreamMessage({
@@ -1394,10 +1428,13 @@ test("unsupported permission_reply and question_reply fail closed with standard 
     },
   });
 
-  assert.equal(connection.sent.at(-1).type, "tool_error");
+  assertToolErrorShape(connection.sent.at(-1), {
+    welinkSessionId: "wl_2",
+    toolSessionId: "tool_2",
+    hasCode: false,
+  });
   assert.match(connection.sent.at(-1).error, /unsupported_in_openclaw_v1:question_reply/);
-  assert.equal(connection.sent.some((message) => message.type === "tool_done"), false);
-  assert.equal(connection.sent.some((message) => message.type === "session_created"), false);
+  assertNoSuccessMessageOnInvalidInput(connection.sent);
 });
 
 test("invalid payload for permission_reply and question_reply returns structured tool_error", async () => {

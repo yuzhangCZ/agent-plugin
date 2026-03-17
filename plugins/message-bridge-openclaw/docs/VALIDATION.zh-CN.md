@@ -108,7 +108,7 @@ npm test
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
-node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
+node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridge-chat.test.mjs
 ```
 
 覆盖点：
@@ -130,7 +130,7 @@ node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
-node --test tests/config-status.test.mjs
+node --test tests/unit/config-status.test.mjs
 ```
 
 覆盖点：
@@ -152,7 +152,7 @@ node --test tests/config-status.test.mjs
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
-node --test tests/downstream-normalization.test.mjs tests/bridge-chat.test.mjs
+node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridge-chat.test.mjs
 ```
 
 通过标准：
@@ -282,7 +282,7 @@ redis-cli publish agent:test-ak-openclaw-001 '{"type":"invoke","action":"questio
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
 npm run build
-node --test tests/config-status.test.mjs
+node --test tests/unit/config-status.test.mjs
 ```
 
 重点观察这些断言是否通过：
@@ -487,7 +487,7 @@ openclaw --dev channels remove --channel message-bridge --delete
 关于“仅改显示名时不应重新启用已禁用账号”：
 
 - 这个场景已由自动化测试覆盖
-- 推荐以 `tests/config-status.test.mjs` 为准
+- 推荐以 `tests/unit/config-status.test.mjs` 为准
 - 如果要手工复现，需先构造 disabled 配置，再走交互式 `channels add` 的 `Add display names for these accounts?` 分支
 
 关于 `abort_session`：

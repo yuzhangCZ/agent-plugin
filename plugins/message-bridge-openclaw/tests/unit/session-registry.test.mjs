@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SessionRegistry } from "../dist/session/SessionRegistry.js";
+import { SessionRegistry } from "../../dist/session/SessionRegistry.js";
 
 test("ensure creates stable session mapping", () => {
   const registry = new SessionRegistry("bridge:default");
