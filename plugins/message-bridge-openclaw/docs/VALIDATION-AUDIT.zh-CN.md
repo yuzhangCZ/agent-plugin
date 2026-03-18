@@ -94,22 +94,24 @@
 - 插件侧 Node 测试已实跑通过
 - 宿主命令级测试仍需在已安装 `plugins/openclaw` 依赖的环境里补跑一次
 
-### 4.3 live `probe` 与“已在线 runtime”冲突
+### 4.3 live `probe` 与“已在线 runtime”冲突（历史现象）
 
-当前 `message-bridge` 运行态已经在线时，`probeAccount` 会再次发起短连接，被 ai-gateway 以 `duplicate_connection` 拒绝。
+历史上，当前 `message-bridge` 运行态已经在线时，`probeAccount` 会再次发起短连接，被 ai-gateway 以 `duplicate_connection` 拒绝。
 
-这导致：
+这曾导致：
 
-- `channels status --probe` 不会得到 `probe.state=ready`
-- `doctor` 会输出“网关拒绝注册：duplicate_connection”
+- `channels status --probe` 不能稳定得到 `probe.state=ready`
+- `doctor` 可能输出“网关拒绝注册：duplicate_connection”
 
-但与此同时：
+该问题现已收敛为 runtime / probe 连接仲裁修复项，归档结论见：
 
-- `connected=true`
-- `lastReadyAt` 有值
-- 心跳和收发时间戳在更新
+- `docs/topics/mb-p0-probe-runtime-connection-race.md`
 
-因此这更像“探活策略和上游单连接约束的碰撞”，不是基础链路不可用。
+修复后的目标行为是：
+
+- runtime `ready` 时，probe 直接短路成功
+- runtime `connecting` 时，probe 等待或返回 `state=connecting`
+- probe 不再因为健康运行态而额外建立第二条 websocket
 
 ### 4.4 live 上游回写被 `source_not_allowed` 拦截
 

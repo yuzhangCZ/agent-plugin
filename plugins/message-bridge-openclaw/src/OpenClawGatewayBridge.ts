@@ -24,6 +24,7 @@ import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
 import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
 import { normalizeDownstreamMessage } from "./protocol/downstream.js";
 import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
+import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 
 export interface OpenClawGatewayBridgeOptions {
@@ -213,6 +214,10 @@ interface ToolAgentEvent {
 
 type ChatExecutionPath = "runtime_reply" | "subagent_fallback";
 type RetryAttempt = 0 | 1;
+type ChatExecutionPathReason =
+  | "runtime_reply_available"
+  | "missing_route_resolver"
+  | "missing_reply_runtime";
 
 interface SelectedModelState {
   provider: string | null;
@@ -348,6 +353,11 @@ export class OpenClawGatewayBridge {
   private status: MessageBridgeStatusSnapshot;
   private unsubscribeAgentEvents: (() => boolean) | null = null;
 
+  private publishStatus(): void {
+    updateRuntimeSnapshot(this.options.account.accountId, { ...this.status });
+    this.options.setStatus({ ...this.status });
+  }
+
   constructor(private readonly options: OpenClawGatewayBridgeOptions) {
     this.runtime = options.runtime;
     this.registerMetadata = options.registerMetadata ?? resolveRegisterMetadata(options.logger);
@@ -378,6 +388,7 @@ export class OpenClawGatewayBridge {
       accountId: options.account.accountId,
       running: false,
       connected: false,
+      runtimePhase: "idle",
       lastStartAt: null,
       lastStopAt: null,
       lastError: null,
@@ -394,21 +405,31 @@ export class OpenClawGatewayBridge {
       this.options.logger.info("gateway.state.changed", { state });
       this.status.connected = state === "CONNECTED" || state === "READY";
       if (state === "READY") {
+        this.status.runtimePhase = "ready";
+        markRuntimePhase(this.options.account.accountId, "ready");
+      } else if (state === "CONNECTING" || state === "CONNECTED") {
+        this.status.runtimePhase = "connecting";
+        markRuntimePhase(this.options.account.accountId, "connecting");
+      } else if (state === "DISCONNECTED") {
+        this.status.runtimePhase = this.running ? "connecting" : "idle";
+        markRuntimePhase(this.options.account.accountId, this.running ? "connecting" : "idle");
+      }
+      if (state === "READY") {
         this.status.lastReadyAt = now;
       }
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("inbound", () => {
       this.status.lastInboundAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("outbound", () => {
       this.status.lastOutboundAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("heartbeat", () => {
       this.status.lastHeartbeatAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("message", (message) => {
       this.handleDownstreamMessage(message).catch((error) => {
@@ -419,7 +440,7 @@ export class OpenClawGatewayBridge {
     });
     this.connection.on("error", (error) => {
       this.status.lastError = error.message;
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
   }
 
@@ -435,8 +456,10 @@ export class OpenClawGatewayBridge {
     }
     this.running = true;
     this.status.running = true;
+    this.status.runtimePhase = "connecting";
     this.status.lastStartAt = Date.now();
-    this.options.setStatus({ ...this.status });
+    markRuntimePhase(this.options.account.accountId, "connecting");
+    this.publishStatus();
     if (!this.unsubscribeAgentEvents && this.runtime.events?.onAgentEvent) {
       this.unsubscribeAgentEvents = this.runtime.events.onAgentEvent((evt: ToolAgentEvent) => {
         this.handleRuntimeAgentEvent(evt);
@@ -463,6 +486,8 @@ export class OpenClawGatewayBridge {
       return;
     }
     this.running = false;
+    this.status.runtimePhase = "stopping";
+    markRuntimePhase(this.options.account.accountId, "stopping");
     this.connection.disconnect();
     this.unsubscribeAgentEvents?.();
     this.unsubscribeAgentEvents = null;
@@ -470,8 +495,10 @@ export class OpenClawGatewayBridge {
     this.activeRunToSessionKey.clear();
     this.status.running = false;
     this.status.connected = false;
+    this.status.runtimePhase = "idle";
     this.status.lastStopAt = Date.now();
-    this.options.setStatus({ ...this.status });
+    markRuntimePhase(this.options.account.accountId, "idle");
+    this.publishStatus();
     this.options.logger.info("runtime.stop.completed", {
       accountId: this.options.account.accountId,
     });
@@ -602,10 +629,8 @@ export class OpenClawGatewayBridge {
     const chatRequestId = randomUUID();
     const configuredTimeoutMs = this.options.account.runTimeoutMs;
     const selectedModel = createSelectedModelState();
-    const executionPath: ChatExecutionPath =
-      this.runtime.channel?.routing && this.runtime.channel?.reply
-        ? "runtime_reply"
-        : "subagent_fallback";
+    const pathSelection = this.resolveChatExecutionPath();
+    const executionPath = pathSelection.executionPath;
     this.activeToolSessions.set(record.sessionKey, {
       toolSessionId: record.toolSessionId,
       runId: null,
@@ -618,6 +643,16 @@ export class OpenClawGatewayBridge {
       toolSessionId: record.toolSessionId,
       event: buildBusyEvent(record.sessionKey),
     }, context);
+    this.logChatPathSelected({
+      toolSessionId: record.toolSessionId,
+      welinkSessionId: record.welinkSessionId,
+      sessionKey: record.sessionKey,
+      configuredTimeoutMs,
+      executionPath,
+      reason: pathSelection.reason,
+      chatRequestId,
+      retryAttempt: 0,
+    });
     this.logChatStarted({
       toolSessionId: record.toolSessionId,
       welinkSessionId: record.welinkSessionId,
@@ -1417,6 +1452,49 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs: params.configuredTimeoutMs,
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
+      chatRequestId: params.chatRequestId,
+      retryAttempt: params.retryAttempt,
+    });
+  }
+
+  private resolveChatExecutionPath(): {
+    executionPath: ChatExecutionPath;
+    reason: ChatExecutionPathReason;
+  } {
+    const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
+    const hasReplyRuntime = !!this.runtime.channel?.reply;
+
+    if (hasRouteResolver && hasReplyRuntime) {
+      return {
+        executionPath: "runtime_reply",
+        reason: "runtime_reply_available",
+      };
+    }
+
+    return {
+      executionPath: "subagent_fallback",
+      reason: hasRouteResolver ? "missing_reply_runtime" : "missing_route_resolver",
+    };
+  }
+
+  private logChatPathSelected(params: {
+    toolSessionId: string;
+    welinkSessionId?: string;
+    sessionKey: string;
+    configuredTimeoutMs: number;
+    executionPath: ChatExecutionPath;
+    reason: ChatExecutionPathReason;
+    chatRequestId: string;
+    retryAttempt: RetryAttempt;
+  }): void {
+    this.options.logger.info("bridge.chat.path_selected", {
+      toolSessionId: params.toolSessionId,
+      welinkSessionId: params.welinkSessionId,
+      sessionKey: params.sessionKey,
+      configuredTimeoutMs: params.configuredTimeoutMs,
+      runTimeoutMs: params.configuredTimeoutMs,
+      executionPath: params.executionPath,
+      reason: params.reason,
       chatRequestId: params.chatRequestId,
       retryAttempt: params.retryAttempt,
     });

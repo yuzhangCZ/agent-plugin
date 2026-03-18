@@ -24,8 +24,14 @@ import type {
   MessageBridgeStatusSnapshot,
 } from "./types.js";
 import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
+import {
+  beginProbeConnect,
+  finishProbeConnect,
+  getConnectionCoord,
+} from "./runtime/ConnectionCoordinator.js";
 
 const HEARTBEAT_GRACE_MS = 5_000;
+const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
 
 const silentLogger: BridgeLogger = {
   info() {},
@@ -112,8 +118,26 @@ function isRuntimeHealthyForDuplicateConnection(
   return nowAt - snapshot.lastHeartbeatAt <= heartbeatThresholdMs;
 }
 
-function createProbeConnection(account: MessageBridgeResolvedAccount): GatewayConnection {
-  const registerMetadata = resolveRegisterMetadata(silentLogger);
+function isRuntimeHealthy(
+  runtime: MessageBridgeStatusSnapshot | undefined,
+  heartbeatIntervalMs: number,
+  nowAt: number,
+): boolean {
+  if (!runtime || runtime.connected !== true || typeof runtime.lastReadyAt !== "number") {
+    return false;
+  }
+  if (typeof runtime.lastHeartbeatAt !== "number") {
+    return true;
+  }
+  const heartbeatThresholdMs = heartbeatIntervalMs > 0 ? heartbeatIntervalMs * 2 + HEARTBEAT_GRACE_MS : 0;
+  if (heartbeatThresholdMs <= 0) {
+    return true;
+  }
+  return nowAt - runtime.lastHeartbeatAt <= heartbeatThresholdMs;
+}
+
+function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayConnection {
+  const registerMetadata = resolveRegisterMetadata(logger);
   return new DefaultGatewayConnection({
     url: account.gateway.url,
     reconnectBaseMs: account.gateway.reconnect.baseMs,
@@ -130,13 +154,14 @@ function createProbeConnection(account: MessageBridgeResolvedAccount): GatewayCo
       toolType: registerMetadata.toolType,
       toolVersion: registerMetadata.toolVersion,
     },
-    logger: silentLogger,
+    logger,
   });
 }
 
 export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSnapshot {
   return createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID, {
     connected: false,
+    runtimePhase: "idle" as const,
     lastReadyAt: null,
     lastInboundAt: null,
     lastOutboundAt: null,
@@ -150,15 +175,113 @@ export async function probeMessageBridgeAccount(
   params: {
     account: MessageBridgeResolvedAccount;
     timeoutMs: number;
+    runtime?: MessageBridgeStatusSnapshot | ChannelAccountSnapshot;
+    logger?: BridgeLogger;
   },
   deps: {
     connectionFactory?: ProbeConnectionFactory;
     now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<MessageBridgeProbeResult> {
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const startedAt = now();
-  const connection = deps.connectionFactory?.(params.account) ?? createProbeConnection(params.account);
+  const logger = params.logger ?? silentLogger;
+  const runtime = params.runtime as MessageBridgeStatusSnapshot | undefined;
+  const accountId = params.account.accountId;
+  const gatewayUrl = params.account.gateway.url;
+  const runtimeCoord = getConnectionCoord(accountId);
+  logger.info("probe.requested", {
+    accountId,
+    gatewayUrl,
+    timeoutMs: params.timeoutMs,
+    runtimePhase: runtimeCoord.runtimePhase,
+    runtimeConnected: runtime?.connected ?? false,
+    lastReadyAt: runtime?.lastReadyAt ?? null,
+    lastHeartbeatAt: runtime?.lastHeartbeatAt ?? null,
+  });
+
+  if (runtimeCoord.runtimePhase === "ready") {
+    const result = {
+      ok: true,
+      state: "ready",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_coord_ready",
+    } satisfies MessageBridgeProbeResult;
+    logger.info("probe.short_circuit.runtime_ready", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason,
+    });
+    return result;
+  }
+
+  if (runtimeCoord.runtimePhase === "connecting") {
+    const waitMs = Math.min(params.timeoutMs, PROBE_RUNTIME_WAIT_CAP_MS);
+    logger.info("probe.wait_runtime.started", {
+      accountId,
+      gatewayUrl,
+      waitMs,
+    });
+    await sleep(waitMs);
+    const afterWaitCoord = getConnectionCoord(accountId);
+    logger.info("probe.wait_runtime.completed", {
+      accountId,
+      gatewayUrl,
+      waitMs,
+      runtimePhase: afterWaitCoord.runtimePhase,
+    });
+    if (afterWaitCoord.runtimePhase === "ready") {
+      const result = {
+        ok: true,
+        state: "ready",
+        latencyMs: elapsedMs(startedAt, now),
+        reason: "runtime_connected_after_wait",
+      } satisfies MessageBridgeProbeResult;
+      logger.info("probe.short_circuit.runtime_ready", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
+      });
+      return result;
+    }
+
+    const result = {
+      ok: false,
+      state: "connecting",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_connecting_probe_skipped",
+    } satisfies MessageBridgeProbeResult;
+    logger.warn("probe.short_circuit.runtime_connecting", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason,
+    });
+    return result;
+  }
+
+  if (isRuntimeHealthy(runtime, params.account.gateway.heartbeatIntervalMs, startedAt)) {
+    const result = {
+      ok: true,
+      state: "ready",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_snapshot_healthy",
+    } satisfies MessageBridgeProbeResult;
+    logger.info("probe.short_circuit.runtime_ready", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason,
+    });
+    return result;
+  }
+
+  const { abortController } = beginProbeConnect(accountId, now);
+  const connection = deps.connectionFactory?.(params.account) ?? createProbeConnection(params.account, logger);
 
   return await new Promise((resolve) => {
     let settled = false;
@@ -169,6 +292,8 @@ export async function probeMessageBridgeAccount(
       }
       settled = true;
       clearTimeout(timer);
+      abortController.signal.removeEventListener("abort", onAbort);
+      finishProbeConnect(accountId, abortController);
       try {
         connection.disconnect();
       } catch {
@@ -177,53 +302,117 @@ export async function probeMessageBridgeAccount(
       resolve(result);
     };
 
+    const onAbort = () => {
+      const result = {
+        ok: false,
+        state: "cancelled",
+        latencyMs: elapsedMs(startedAt, now),
+        reason: "probe_cancelled_for_runtime_start",
+      } satisfies MessageBridgeProbeResult;
+      logger.info("probe.connect.cancelled_for_runtime", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
+      });
+      finish(result);
+    };
+
+    abortController.signal.addEventListener("abort", onAbort, { once: true });
+
     const timer = setTimeout(() => {
-      finish({
+      const result = {
         ok: false,
         state: "timeout",
         latencyMs: elapsedMs(startedAt, now),
         reason: "probe timed out before READY",
+      } satisfies MessageBridgeProbeResult;
+      logger.warn("probe.connect.timeout", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
       });
+      finish(result);
     }, params.timeoutMs);
+
+    logger.info("probe.connect.started", {
+      accountId,
+      gatewayUrl,
+      timeoutMs: params.timeoutMs,
+      runtimePhase: getConnectionCoord(accountId).runtimePhase,
+    });
 
     connection.on("stateChange", (state) => {
       if (state === "READY") {
-        finish({
+        const result = {
           ok: true,
           state: "ready",
           latencyMs: elapsedMs(startedAt, now),
+          reason: "probe_connected",
+        } satisfies MessageBridgeProbeResult;
+        logger.info("probe.connect.ready", {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason,
         });
+        finish(result);
         return;
       }
 
       if (state === "DISCONNECTED") {
-        finish({
+        const result = {
           ok: false,
           state: "connect_error",
           latencyMs: elapsedMs(startedAt, now),
           reason: "probe disconnected before READY",
+        } satisfies MessageBridgeProbeResult;
+        logger.warn("probe.connect.error", {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason,
         });
+        finish(result);
       }
     });
 
     connection.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
-      finish({
+      const result = {
         ok: false,
         state: isRejectedProbeError(message) ? "rejected" : "connect_error",
         latencyMs: elapsedMs(startedAt, now),
         reason: message,
-      });
+      } satisfies MessageBridgeProbeResult;
+      logger[result.state === "rejected" ? "warn" : "error"](
+        result.state === "rejected" ? "probe.connect.rejected" : "probe.connect.error",
+        {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason,
+        },
+      );
+      finish(result);
     });
 
     connection.connect().catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
-      finish({
+      const result = {
         ok: false,
         state: "connect_error",
         latencyMs: elapsedMs(startedAt, now),
         reason: message,
+      } satisfies MessageBridgeProbeResult;
+      logger.error("probe.connect.error", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
       });
+      finish(result);
     });
   });
 }
@@ -393,6 +582,14 @@ export function collectMessageBridgeStatusIssues(
           }),
         );
       }
+    }
+
+    if (probe && probe.state === "connecting") {
+      continue;
+    }
+
+    if (probe && probe.state === "cancelled" && probeReason === "probe_cancelled_for_runtime_start") {
+      continue;
     }
 
     if (probe && probe.state === "connect_error") {

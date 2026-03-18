@@ -29,7 +29,9 @@ export interface MessageBridgeResolvedAccount extends MessageBridgeAccountConfig
   accountId: string;
 }
 
-export type MessageBridgeProbeState = "ready" | "rejected" | "connect_error" | "timeout";
+export type MessageBridgeProbeState = "ready" | "rejected" | "connect_error" | "timeout" | "connecting" | "cancelled";
+
+export type MessageBridgeRuntimePhase = "idle" | "connecting" | "ready" | "stopping";
 
 export interface MessageBridgeProbeResult {
   ok: boolean;
@@ -48,6 +50,7 @@ export interface MessageBridgeStatusSnapshot {
   accountId: string;
   running: boolean;
   connected: boolean;
+  runtimePhase?: MessageBridgeRuntimePhase;
   lastStartAt: number | null;
   lastStopAt: number | null;
   lastError: string | null;
