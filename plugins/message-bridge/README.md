@@ -232,7 +232,7 @@ Important normalization and extraction failures are logged as:
 - `event.extraction_failed`
 - `downstream.normalization_failed`
 
-`BRIDGE_DEBUG=true` enables richer local debug output when log delivery is unavailable.
+`debug` 默认关闭。启用 `debug`（例如设置 `BRIDGE_DEBUG=true`）后，bridge 除了保留原有 debug 级诊断信息，还会以 `info` 级输出可读的原始 WebSocket 上下行报文，例如 `「onMessage」===>「...」`、`「sendMessage」===>「...」`，便于联调时落盘和检索。日志投递不可用时，`BRIDGE_DEBUG=true` 仍会输出本地 `console.debug` fallback 提示。
 
 ## Build and Test
 

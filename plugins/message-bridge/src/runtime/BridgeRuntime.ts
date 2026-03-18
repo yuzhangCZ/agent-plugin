@@ -41,7 +41,6 @@ import type { HostClientLike, OpencodeClient } from '../types/index.js';
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
   client: unknown;
-  debug?: boolean;
 }
 
 export interface BridgeRuntimeStartOptions {
@@ -80,19 +79,21 @@ export class BridgeRuntime {
   private sdkClient: OpencodeClient | null;
   private readonly missingSdkCapabilities: ReturnType<typeof getMissingSdkCapabilities>;
   private readonly workspacePath?: string;
-  private readonly debug?: boolean;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
-    this.debug = options.debug;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(this.rawClient, { component: 'runtime' }, undefined, undefined, options.debug);
+    this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
     this.sdkClient = createSdkAdapter(options.client);
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
+  }
+
+  protected async resolveConfig() {
+    return loadConfig(this.workspacePath, this.logger);
   }
 
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
@@ -108,18 +109,18 @@ export class BridgeRuntime {
     }
 
     let config;
+    let effectiveDebug = false;
     try {
       this.logger.info('runtime.config.loading', { workspacePath: this.workspacePath });
-      config = await loadConfig(this.workspacePath, this.logger);
-      if (this.debug === undefined && typeof config.debug === 'boolean') {
-        this.logger = new AppLogger(
-          this.rawClient,
-          { component: 'runtime' },
-          this.logger.getTraceId(),
-          undefined,
-          config.debug,
-        );
-      }
+      config = await this.resolveConfig();
+      effectiveDebug = !!config.debug;
+      this.logger = new AppLogger(
+        this.rawClient,
+        { component: 'runtime' },
+        this.logger.getTraceId(),
+        undefined,
+        effectiveDebug,
+      );
       this.logger.info('runtime.config.loaded_successfully', {
         config_version: config.config_version,
         enabled: config.enabled,
@@ -150,6 +151,7 @@ export class BridgeRuntime {
 
     const connection = new DefaultGatewayConnection({
       url: config.gateway.url,
+      debug: effectiveDebug,
       reconnectBaseMs: config.gateway.reconnect.baseMs,
       reconnectMaxMs: config.gateway.reconnect.maxMs,
       reconnectExponential: config.gateway.reconnect.exponential,

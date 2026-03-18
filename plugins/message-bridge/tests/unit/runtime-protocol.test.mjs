@@ -47,6 +47,46 @@ function createRuntimeClient(overrides = {}) {
   };
 }
 
+function createResolvedConfig(overrides = {}) {
+  return {
+    config_version: 1,
+    enabled: true,
+    debug: false,
+    gateway: {
+      url: 'ws://localhost:8081/ws/agent',
+      channel: 'opencode',
+      heartbeatIntervalMs: 30000,
+      reconnect: {
+        baseMs: 1000,
+        maxMs: 30000,
+        exponential: true,
+      },
+    },
+    sdk: {
+      timeoutMs: 10000,
+    },
+    auth: {
+      ak: 'test-ak-001',
+      sk: 'test-sk-secret-001',
+    },
+    events: {
+      allowlist: ['message.updated'],
+    },
+    ...overrides,
+  };
+}
+
+function createRuntimeWithResolvedConfig(config, options = {}) {
+  return new (class extends BridgeRuntime {
+    async resolveConfig() {
+      return config;
+    }
+  })({
+    client: createRuntimeClient(),
+    ...options,
+  });
+}
+
 async function writeEnabledConfig(workspace) {
   await mkdir(join(workspace, '.opencode'), { recursive: true });
   await writeFile(
@@ -605,37 +645,6 @@ describe('runtime protocol strictness', () => {
   });
 
   test('applies config.debug to runtime fallback logging after config load', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-'));
-    await mkdir(join(workspace, '.opencode'), { recursive: true });
-    await writeFile(
-      join(workspace, '.opencode', 'message-bridge.jsonc'),
-      JSON.stringify({
-        config_version: 1,
-        enabled: false,
-        debug: true,
-        gateway: {
-          url: 'ws://localhost:8081/ws/agent',
-          heartbeatIntervalMs: 30000,
-          reconnect: {
-            baseMs: 1000,
-            maxMs: 30000,
-            exponential: true,
-          },
-        },
-        sdk: {
-          timeoutMs: 10000,
-        },
-        auth: {
-          ak: '',
-          sk: '',
-        },
-        events: {
-          allowlist: ['message.updated'],
-        },
-      }),
-      'utf8',
-    );
-
     const debugCalls = [];
     const originalDebug = console.debug;
     console.debug = (...args) => {
@@ -643,8 +652,14 @@ describe('runtime protocol strictness', () => {
     };
 
     try {
-      const runtime = new BridgeRuntime({
-        workspacePath: workspace,
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({
+        enabled: false,
+        debug: true,
+        auth: {
+          ak: '',
+          sk: '',
+        },
+      }), {
         client: {},
       });
 
@@ -654,7 +669,57 @@ describe('runtime protocol strictness', () => {
       assert.ok(debugCalls.some((args) => args.includes('runtime.start.disabled_by_config')));
     } finally {
       console.debug = originalDebug;
-      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('consumes config.debug consistently for runtime debug logs and connection raw frame logs', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+
+    const logs = [];
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({
+        enabled: true,
+        debug: true,
+      }), {
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              logs.push(options);
+              return true;
+            },
+          },
+        }),
+      });
+
+      await runtime.start();
+      await runtime.handleEvent({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg-debug-1',
+            sessionID: 'tool-debug-1',
+            role: 'user',
+          },
+        },
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      assert.ok(logs.some((entry) => entry?.body?.level === 'debug' && entry.body.message === 'event.received'));
+      assert.ok(
+        logs.some(
+          (entry) =>
+            entry?.body?.level === 'info' &&
+            typeof entry.body.message === 'string' &&
+            entry.body.message.includes('「sendMessage」===>「{"type":"register"'),
+        ),
+      );
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
     }
   });
 

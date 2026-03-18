@@ -8,7 +8,6 @@ describe('event uplink via hook boundary', () => {
   test('unsupported upstream events fail closed before forwarding', async () => {
     const logs = [];
     const runtime = new BridgeRuntime({
-      debug: true,
       client: {
         app: {
           log: async (options) => {

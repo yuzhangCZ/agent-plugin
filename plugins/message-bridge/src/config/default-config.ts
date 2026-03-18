@@ -3,6 +3,7 @@ import type { BridgeConfig } from '../types/index.js';
 
 export const DEFAULT_BRIDGE_CONFIG = {
   enabled: true,
+  debug: false,
   config_version: 1,
   gateway: {
     url: 'ws://localhost:8081/ws/agent',

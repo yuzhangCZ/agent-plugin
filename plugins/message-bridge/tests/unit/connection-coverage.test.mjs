@@ -470,6 +470,81 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
+  test('emits readable raw websocket frame logs at info level when debug is enabled', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push({
+      autoRegisterOk: false,
+      errorOnOpen: true,
+      errorEvent: {
+        type: 'error',
+        message: 'socket error',
+        target: { readyState: 0 },
+      },
+    });
+
+    const connectFailingConn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      debug: true,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    connectFailingConn.on('error', () => {});
+    await assert.rejects(connectFailingConn.connect());
+
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      debug: true,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    const ws = ScriptedWebSocket.instances.at(-1);
+    ws.emitMessage(JSON.stringify({ type: 'invoke', action: 'chat', payload: { toolSessionId: 's-1', text: 'hi' } }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const rawOpenLog = entries.find((entry) => entry.level === 'info' && entry.message.startsWith('「onOpen」===>「'));
+    const rawSendLog = entries.find(
+      (entry) => entry.level === 'info' && entry.message.includes('「sendMessage」===>「{"type":"register"'),
+    );
+    const rawMessageLog = entries.find(
+      (entry) => entry.level === 'info' && entry.message.includes('「onMessage」===>「{"type":"invoke"'),
+    );
+    const rawErrorLog = entries.find(
+      (entry) => entry.level === 'info' && entry.message.includes('「onError」===>「{"type":"error","message":"socket error"'),
+    );
+
+    assert.notStrictEqual(rawOpenLog, undefined);
+    assert.notStrictEqual(rawSendLog, undefined);
+    assert.notStrictEqual(rawMessageLog, undefined);
+    assert.notStrictEqual(rawErrorLog, undefined);
+
+    conn.disconnect();
+    connectFailingConn.disconnect();
+  });
+
+  test('does not emit raw websocket frame logs when debug is disabled', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      debug: false,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    const ws = ScriptedWebSocket.instances[0];
+    ws.emitMessage(JSON.stringify({ type: 'invoke', action: 'chat', payload: { toolSessionId: 's-1', text: 'hi' } }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.ok(entries.some((entry) => entry.message === 'gateway.send'));
+    assert.ok(entries.some((entry) => entry.message === 'gateway.message.received'));
+    assert.strictEqual(entries.some((entry) => typeof entry.message === 'string' && entry.message.startsWith('「on')), false);
+    assert.strictEqual(entries.some((entry) => entry.message === '「sendMessage」===>「{"type":"register","deviceName":"dev","macAddress":"aa:bb:cc:dd:ee:ff","os":"darwin","toolType":"channel","toolVersion":"1.0.0"}」'), false);
+
+    conn.disconnect();
+  });
+
   test('logs frame bytes and gatewayMessageId for received frames', async () => {
     const { logger, entries } = createLoggerRecorder();
     const conn = new DefaultGatewayConnection({
