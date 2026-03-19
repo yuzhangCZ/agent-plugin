@@ -26,10 +26,10 @@
 
 **Settings → Secrets and variables → Actions → New repository secret:**
 
-| Name | Value |
-|------|-------|
-| `OPENAI_API_KEY` | `sk-xxxxxxxxxxxxxxxx`（你的 DashScope API Key） |
-| `OPENAI_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Name | Value | 说明 |
+|------|-------|------|
+| `OPENAI_API_KEY` | `sk-xxxxxxxxxxxxxxxx` | **必需** - API Key |
+| `OPENAI_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | **必需** - Base URL |
 
 **Settings → Variables → Actions → New repository variable:**
 
@@ -82,8 +82,8 @@ curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions 
 在 GitHub 仓库中确认以下配置：
 
 ### Secrets（必需）
-- [ ] `OPENAI_API_KEY` - API Key（必需）
-- [ ] `OPENAI_BASE_URL` - Base URL（可选，默认 OpenAI）
+- [ ] `OPENAI_API_KEY` - API Key（**必需**）
+- [ ] `OPENAI_BASE_URL` - Base URL（**必需**，不设置会报错）
 
 ### Variables（可选）
 - [ ] `OPENAI_MODEL` - 模型名称（可选，默认 gpt-4o）

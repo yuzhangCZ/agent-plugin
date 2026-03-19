@@ -18,9 +18,22 @@ from github import Github
 
 # ============== 配置 ==============
 API_KEY = os.getenv('OPENAI_API_KEY')
-BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
+BASE_URL = os.getenv('OPENAI_BASE_URL')  # 必须从环境变量取，不硬编码默认值
 MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o')
 STYLE = os.getenv('REVIEW_STYLE', 'concise')
+
+# 验证必需的环境变量
+if not API_KEY:
+    print("❌ 错误：缺少 OPENAI_API_KEY 环境变量")
+    sys.exit(1)
+
+if not BASE_URL:
+    print("❌ 错误：缺少 OPENAI_BASE_URL 环境变量")
+    print("💡 提示：请在 GitHub Secrets 或环境变量中设置")
+    print("   例如：OPENAI_BASE_URL=https://api.openai.com/v1")
+    sys.exit(1)
+
+BASE_URL = BASE_URL.rstrip('/')
 
 # 文件过滤
 IGNORE_PATTERNS = ['*.md', '*.txt', '*.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']
