@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 AI PR Reviewer - 自动代码审查脚本
-仅支持 OpenAI 兼容接口（OpenAI / DeepSeek / 通义千问等）
+支持 OpenAI 兼容 API（OpenAI / DeepSeek / 通义千问等）
 
 环境变量:
-- OPENAI_API_KEY: API Key
-- OPENAI_BASE_URL: API Base URL (可选，默认 https://api.openai.com/v1)
-- OPENAI_MODEL: 模型名称 (可选，默认 gpt-4o)
-- REVIEW_STYLE: 审查风格 (可选：concise/detailed/strict)
+- OPENAI_API_KEY: API Key（必需）
+- OPENAI_BASE_URL: API Base URL（可选，默认 https://api.openai.com/v1）
+- OPENAI_MODEL: 模型名称（可选，默认 gpt-4o）
+- REVIEW_STYLE: 审查风格（可选：concise/detailed/strict）
 """
 
 import os
@@ -28,7 +28,7 @@ IGNORE_DIRS = ['vendor/', 'node_modules/', 'dist/', 'build/', '.git/']
 MAX_FILES = 15
 MAX_PATCH_SIZE = 5000
 
-# ============== 提示词模板（业界最佳实践） ==============
+# ============== 提示词模板 ==============
 
 SYSTEM_PROMPT = """你是一位资深代码审查专家，拥有 15 年软件工程经验。你的任务是审查 Pull Request 的代码变更，发现潜在问题并提供建设性意见。
 
@@ -66,25 +66,23 @@ USER_PROMPT_TEMPLATE = """## PR 信息
 ```json
 {{
   "summary": "一句话总结变更内容和整体质量",
-  "score": 7,  // 1-10 分，10 分表示完美
+  "score": 7,
   "has_critical_issues": false,
   "comments": [
     {{
-      "severity": "critical",  // critical | warning | suggestion
-      "category": "bug",  // bug | security | performance | style | readability | test
+      "severity": "critical",
+      "category": "bug",
       "file": "src/example.js",
-      "line": 42,  // 如果知道行号，否则 null
+      "line": 42,
       "title": "简短的问题标题",
       "description": "详细描述问题和影响",
       "suggestion": "具体的修复建议或代码示例"
     }}
   ],
   "positive_feedback": ["做得好的地方 1", "做得好的地方 2"],
-  "approved": true  // 是否建议批准（有 critical 问题时为 false）
+  "approved": true
 }}
 ```"""
-
-# ============== 代码审查提示词增强 ==============
 
 CRITICAL_ISSUES_CHECKLIST = """
 ## 重点检查以下问题：
@@ -94,47 +92,39 @@ CRITICAL_ISSUES_CHECKLIST = """
 - 敏感信息硬编码（密码、API Key、Token）
 - 不安全的反序列化
 - 权限校验缺失
-- 文件路径遍历
 
 ### 逻辑错误
 - 空指针/未定义检查
 - 边界条件处理
 - 并发/竞态条件
-- 资源泄漏（文件、连接、内存）
+- 资源泄漏
 - 异常处理缺失
 
 ### 性能问题
 - N+1 查询
 - 循环内重复计算
-- 大对象未释放
 - 不必要的同步操作
-- 缓存缺失
 
 ### 代码质量
 - 函数过长/复杂度过高
 - 重复代码
 - 魔术数字
 - 命名不清晰
-- 缺少注释（复杂逻辑）
 """
 
 # ============== 工具函数 ==============
 
 def should_ignore_file(filename):
     """检查文件是否应该被忽略"""
-    # 检查扩展名
     for pattern in IGNORE_PATTERNS:
         if pattern.startswith('*.'):
             if filename.endswith(pattern[1:]):
                 return True
         elif pattern in filename:
             return True
-    
-    # 检查目录
     for dir_pattern in IGNORE_DIRS:
         if dir_pattern in filename:
             return True
-    
     return False
 
 def get_pr_diff(github_token, repo, pr_number):
@@ -148,18 +138,16 @@ def get_pr_diff(github_token, repo, pr_number):
             print(f"⏭️  跳过：{f.filename}")
             continue
         
-        # 限制 patch 大小
         patch = f.patch or ''
         if len(patch) > MAX_PATCH_SIZE:
             patch = patch[:MAX_PATCH_SIZE] + '\n...(内容过长，已截断)'
         
         files.append({
             'filename': f.filename,
-            'status': f.status,  # added, modified, removed, renamed
+            'status': f.status,
             'additions': f.additions,
             'deletions': f.deletions,
-            'patch': patch,
-            'changes_url': f.contents_url
+            'patch': patch
         })
     
     return files[:MAX_FILES], pr
@@ -172,7 +160,6 @@ def build_prompt(files, pr_title, pr_body):
         file_contents += f"\n### {i}. {status_icon} {f['filename']} (+{f['additions']} -{f['deletions']})\n"
         file_contents += f"```diff\n{f['patch']}\n```\n\n"
     
-    # 添加检查清单
     file_contents += CRITICAL_ISSUES_CHECKLIST
     
     return USER_PROMPT_TEMPLATE.format(
@@ -190,10 +177,10 @@ def call_openai_api(prompt):
     
     endpoint = f"{BASE_URL}/chat/completions"
     
-    print(f"🔑 API Key: {'已设置' + '(' + API_KEY[:8] + '...)' if API_KEY else '❌ 未设置'}")
-    print(f"🌐 Base URL: {endpoint}")
-    print(f"🤖 模型：{MODEL}")
-    print(f"📡 正在调用 API...")
+    print(f"🔑 OPENAI_API_KEY: {'✅ 已设置 (' + API_KEY[:6] + '...)' if API_KEY else '❌ 未设置'}")
+    print(f"🔑 OPENAI_BASE_URL: {BASE_URL}")
+    print(f"🔑 OPENAI_MODEL: {MODEL}")
+    print(f"📡 正在调用 API: {endpoint}...")
     
     headers = {
         'Authorization': f'Bearer {API_KEY}',
@@ -207,10 +194,7 @@ def call_openai_api(prompt):
             {'role': 'user', 'content': prompt}
         ],
         'max_tokens': 3000,
-        'temperature': 0.2,  # 低温度保证输出稳定
-        'top_p': 0.9,
-        'frequency_penalty': 0.1,
-        'presence_penalty': 0.1
+        'temperature': 0.2
     }
     
     try:
@@ -237,16 +221,13 @@ def call_openai_api(prompt):
 
 def parse_ai_response(content):
     """解析 AI 返回的 JSON"""
-    # 尝试提取 JSON（处理 AI 可能包裹 markdown 的情况）
     import re
     
-    # 尝试直接解析
     try:
         return json.loads(content)
     except:
         pass
     
-    # 尝试提取 ```json 块
     json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', content, re.DOTALL)
     if json_match:
         try:
@@ -254,7 +235,6 @@ def parse_ai_response(content):
         except:
             pass
     
-    # 尝试提取第一个 { 到最后一个 }
     start = content.find('{')
     end = content.rfind('}') + 1
     if start != -1 and end > start:
@@ -272,7 +252,6 @@ def post_review(pr, review_data):
     score = review_data.get('score', 'N/A')
     summary = review_data.get('summary', '无总结')
     
-    # 构建评论
     comment = f"""{emoji} **AI 代码审查完成**
 
 **评分**: {score}/10
@@ -280,7 +259,6 @@ def post_review(pr, review_data):
 
 """
     
-    # 添加正面反馈
     positive = review_data.get('positive_feedback', [])
     if positive:
         comment += "### 👍 做得好的地方\n"
@@ -288,12 +266,10 @@ def post_review(pr, review_data):
             comment += f"- {p}\n"
         comment += "\n"
     
-    # 添加详细意见
     comments = review_data.get('comments', [])
     if comments:
         comment += "### 📋 详细意见\n\n"
         
-        # 按严重程度分组
         critical = [c for c in comments if c.get('severity') == 'critical']
         warning = [c for c in comments if c.get('severity') == 'warning']
         suggestion = [c for c in comments if c.get('severity') == 'suggestion']
@@ -312,20 +288,16 @@ def post_review(pr, review_data):
             comment += "\n#### 🟢 Suggestion ({})\n".format(len(suggestion))
             for c in suggestion:
                 comment += format_comment(c)
-    
     else:
         comment += "**未发现明显问题**，代码质量良好！\n"
     
-    # 添加免责声明
     comment += """
 ---
 *此审查由 AI 生成，仅供参考。请结合人工判断进行最终决策。*
 """
     
-    # 发布总结评论
     pr.create_issue_comment(comment)
     
-    # 发布行内评论（如果有行号）
     for c in comments:
         if c.get('line') and c.get('file'):
             try:
@@ -335,7 +307,7 @@ def post_review(pr, review_data):
                     icon = {'critical': '🔴', 'warning': '🟡', 'suggestion': '🟢'}.get(c.get('severity'), '💬')
                     body = f"{icon} **{c.get('title', '')}**\n\n{c.get('description', '')}\n\n💡 {c.get('suggestion', '')}"
                     pr.create_review_comment(
-                        body=body[:8000],  # GitHub 限制
+                        body=body[:8000],
                         path=c['file'],
                         position=c['line'],
                         commit=latest_commit
@@ -368,7 +340,6 @@ def main():
         print("❌ 缺少 GITHUB_TOKEN 环境变量")
         sys.exit(1)
     
-    # 从 GitHub Actions 环境获取 PR 信息
     event_path = os.getenv('GITHUB_EVENT_PATH')
     if not event_path:
         print("❌ 不在 GitHub Actions 环境中")
@@ -390,7 +361,6 @@ def main():
     print(f"📁 仓库：{repo}")
     print(f"🎨 风格：{STYLE}")
     
-    # 获取变更
     print("\n📄 获取 PR 变更...")
     files, pr = get_pr_diff(github_token, repo, pr_number)
     
@@ -403,12 +373,10 @@ def main():
     for f in files:
         print(f"   - {f['filename']} (+{f['additions']} -{f['deletions']})")
     
-    # 构建提示词
     print("\n📝 构建提示词...")
     prompt = build_prompt(files, pr_title, pr_body)
     print(f"📊 Prompt 长度：{len(prompt)} 字符")
     
-    # 调用 AI
     print("\n🤖 调用 AI 进行审查...")
     review_content = call_openai_api(prompt)
     
@@ -418,13 +386,12 @@ def main():
 
 请检查以下配置：
 1. `OPENAI_API_KEY` - API Key 是否正确
-2. `OPENAI_BASE_URL` - Base URL 是否正确（如使用非 OpenAI 服务）
+2. `OPENAI_BASE_URL` - Base URL 是否正确
 3. `OPENAI_MODEL` - 模型名称是否正确
 
 查看 workflow 日志获取详细错误信息。""")
         sys.exit(1)
     
-    # 解析结果
     print("\n📋 解析 AI 返回结果...")
     review_data = parse_ai_response(review_content)
     
@@ -433,7 +400,6 @@ def main():
         pr.create_issue_comment(f"⚠️ AI 审查完成，但返回格式无法解析。\n\n原始返回：\n```\n{review_content[:1000]}...```")
         sys.exit(1)
     
-    # 发布评论
     print("\n📝 发布审查意见...")
     post_review(pr, review_data)
     
