@@ -31,3 +31,4 @@ function dangerousEval(userInput) {
 const API_KEY = "sk-1234567890abcdef";
 
 module.exports = { testFunction, dangerousEval };
+// Test 3 - debug env vars
