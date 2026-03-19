@@ -53,8 +53,7 @@ type ChatPayload = {
 };
 
 type CreateSessionPayload = {
-  sessionId?: string;
-  metadata?: Record<string, unknown>;
+  title?: string;
 };
 
 type CloseSessionPayload = {
@@ -85,6 +84,26 @@ Notes:
 - `close_session` calls `session.delete()`
 - `abort_session` also calls `session.abort()`
 - `question_reply` resolves a pending question through the raw question API chain
+
+### 2.1.1 `create_session.payload` Decision Narrowing
+
+This repository is intentionally distinguishing between:
+
+- historical implementation residue
+- formal protocol contract
+
+Formal decision:
+
+- the formal `create_session.payload` contract is `title?: string`
+- this decision is derived from the traced upstream business chain:
+  - UI `CreateSessionParams`
+  - skill-server `buildCreateSessionPayload(title)`
+  - gateway `invoke.create_session` examples
+
+Implementation note:
+
+- bridge types and normalization now align to `title?: string`
+- any broader residual references should be treated as historical, not current protocol
 
 ### 2.2 `status_query`
 
@@ -163,8 +182,10 @@ type StatusResponseMessage = {
 
 Completion behavior:
 
+- `chat` success may emit a compat `tool_done`
 - `session.idle` continues to be forwarded upstream as `tool_event`
-- the bridge may synthesize a compat `tool_done` for legacy/UI completion consumers
+- when no compat completion has been emitted for the same execution, `session.idle` may trigger a fallback `tool_done`
+- `create_session`, `close_session`, `abort_session`, `permission_reply`, and `question_reply` do not emit proactive `tool_done` in the current implementation
 
 ## 5. Failure Semantics
 

@@ -12,6 +12,7 @@ export interface ActionContext {
   connectionState: ConnectionState;
   agentId: string;
   welinkSessionId?: string;
+  effectiveDirectory?: string;
   logger?: {
     debug(message: string, extra?: Record<string, unknown>): void;
     info(message: string, extra?: Record<string, unknown>): void;

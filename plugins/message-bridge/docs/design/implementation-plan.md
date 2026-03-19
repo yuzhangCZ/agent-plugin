@@ -128,7 +128,7 @@
 
 ### Concrete Work Items
 1. 定义 compat 层输入输出接口
-2. 在 `chat`、`question_reply`、`permission_reply` 成功后接入 compat 判定，并在需要时发送 `tool_done`
+2. 在 `chat` 成功后接入 compat 判定，并在需要时发送 `tool_done`
 3. 在 `session.idle` 上游路径保留 `tool_event` 透传，再由 compat 兜底补发 `tool_done`
 4. 在 compat 内部维护“已主动完成，等待 idle 去重”的状态集合
 5. 增加 compat 专属日志，避免与主协议日志混淆
@@ -136,8 +136,8 @@
 
 ### Test Plan
 - `chat` 成功后发送 `tool_done`
-- `question_reply` 成功后发送 `tool_done`
-- `permission_reply` 成功后发送 `tool_done`
+- `question_reply` 成功不发送 `tool_done`
+- `permission_reply` 成功不发送 `tool_done`
 - `create_session` 成功不发送 `tool_done`
 - `close_session` / `abort_session` 成功不发送 `tool_done`
 - 仅收到 `session.idle` 时会兜底发送 `tool_done`

@@ -231,7 +231,9 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'tool-100' },
-      body: { parts: [{ type: 'text', text: 'hello' }] },
+      body: {
+        parts: [{ type: 'text', text: 'hello' }],
+      },
     });
     assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].type, 'tool_done');
@@ -378,8 +380,13 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        path: { id: 'tool-perm-1', permissionID: 'perm-a' },
-        body: { response: 'once' },
+        path: {
+          id: 'tool-perm-1',
+          permissionID: 'perm-a',
+        },
+        body: {
+          response: 'once',
+        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
@@ -915,6 +922,74 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(deleteCalls, [{ path: { id: 'tool-close-1' } }]);
     assert.strictEqual((sent).length, 0);
+  });
+
+  test('reuses effectiveDirectory across create_session and chat while keeping workspacePath for config lookup', async () => {
+    const createCalls = [];
+    const promptCalls = [];
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      workspacePath: '/workspace/current',
+      hostDirectory: '/workspace/current',
+      client: createRuntimeClient({
+        session: {
+          create: async (options) => {
+            createCalls.push(options);
+            return { data: { id: 'created-dir-1' } };
+          },
+          prompt: async (options) => {
+            promptCalls.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    runtime.effectiveDirectory = '/env/bridge-root';
+    runtime.gatewayConnection = { send: () => {} };
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-create-dir',
+      action: 'create_session',
+      payload: {
+        title: 'Dir session',
+      },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-chat-dir',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'created-dir-1',
+        text: 'hello from bridge directory',
+      },
+    });
+
+    assert.deepStrictEqual(createCalls, [
+      {
+        body: {
+          title: 'Dir session',
+        },
+        query: {
+          directory: '/env/bridge-root',
+        },
+      },
+    ]);
+    assert.deepStrictEqual(promptCalls, [
+      {
+        path: {
+          id: 'created-dir-1',
+        },
+        body: {
+          parts: [{ type: 'text', text: 'hello from bridge directory' }],
+        },
+        query: {
+          directory: '/env/bridge-root',
+        },
+      },
+    ]);
+    assert.strictEqual(runtime.workspacePath, '/workspace/current');
   });
 
   test('runtime.start sends register with runtime-derived metadata', async () => {

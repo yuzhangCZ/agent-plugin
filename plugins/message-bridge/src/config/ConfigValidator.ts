@@ -36,6 +36,16 @@ export class ConfigValidator {
       errors.push({ path: 'enabled', code: 'INVALID_TYPE', message: 'enabled must be boolean' });
     }
 
+    if (c.bridgeDirectory !== undefined) {
+      if (typeof c.bridgeDirectory !== 'string' || !c.bridgeDirectory.trim()) {
+        errors.push({
+          path: 'bridgeDirectory',
+          code: 'INVALID_TYPE',
+          message: 'bridgeDirectory must be a non-empty string',
+        });
+      }
+    }
+
     if (c.gateway?.url !== undefined) {
       if (typeof c.gateway.url !== 'string' || !/^wss?:\/\//.test(c.gateway.url)) {
         errors.push({ path: 'gateway.url', code: 'INVALID_URL', message: 'gateway.url must start with ws:// or wss://' });

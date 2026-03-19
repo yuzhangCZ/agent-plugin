@@ -91,8 +91,13 @@ describe('protocol permission-roundtrip', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        path: { id: 'ses_permission_1', permissionID: 'perm_fixture_1' },
-        body: { response: 'always' },
+        path: {
+          id: 'ses_permission_1',
+          permissionID: 'perm_fixture_1',
+        },
+        body: {
+          response: 'always',
+        },
       },
     ]);
     assert.strictEqual(sent.length, 1);

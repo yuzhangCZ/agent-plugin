@@ -28,7 +28,7 @@
     "test:unit": "node --import tsx/esm --test-isolation=none --test --test-force-exit tests/unit/*.test.mjs",
     "test:integration": "node --import tsx/esm --test-isolation=none --test tests/integration/*.test.mjs",
     "test:e2e": "node --import tsx/esm --test-isolation=none --test tests/e2e/*.test.mjs",
-    "test:e2e:smoke": "node --import tsx/esm --test-isolation=none --test tests/e2e/connect-register.test.mjs tests/e2e/chat-stream.test.mjs tests/e2e/permission-roundtrip.test.mjs",
+    "test:e2e:smoke": "node ./scripts/test-e2e-smoke.mjs",
     "test:coverage": "node ./scripts/check-coverage.mjs",
     "smoke:e2e": "node ./scripts/e2e-smoke.mjs",
     "debug:e2e": "node ./scripts/debug-e2e.mjs",

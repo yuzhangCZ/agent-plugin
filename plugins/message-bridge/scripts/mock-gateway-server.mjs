@@ -7,6 +7,8 @@ const scenario = process.argv[3] ?? 'connect-register';
 
 let wsRef = null;
 const eventCounts = new Map();
+let directoryCreateSent = false;
+let directoryChatSent = false;
 
 const server = http.createServer((_req, res) => {
   res.writeHead(200);
@@ -41,6 +43,38 @@ wss.on('connection', (ws) => {
             }));
             console.log('[mock-gateway] invoke:permission_reply');
           }
+        }
+        return;
+      }
+
+      if (scenario === 'directory-context' && type === 'status_response' && !directoryCreateSent) {
+        console.log('[mock-gateway] status_response');
+        directoryCreateSent = true;
+        ws.send(JSON.stringify({
+          type: 'invoke',
+          welinkSessionId: 'wl-directory-create',
+          action: 'create_session',
+          payload: { title: 'bridge-directory-e2e' },
+        }));
+        console.log('[mock-gateway] invoke:create_session');
+        return;
+      }
+
+      if (scenario === 'directory-context' && type === 'session_created' && !directoryChatSent) {
+        console.log('[mock-gateway] session_created');
+        const toolSessionId = parsed?.toolSessionId;
+        if (typeof toolSessionId === 'string' && toolSessionId) {
+          directoryChatSent = true;
+          ws.send(JSON.stringify({
+            type: 'invoke',
+            welinkSessionId: 'wl-directory-chat',
+            action: 'chat',
+            payload: {
+              toolSessionId,
+              text: 'E2E verify BRIDGE_DIRECTORY reuse',
+            },
+          }));
+          console.log('[mock-gateway] invoke:chat');
         }
         return;
       }

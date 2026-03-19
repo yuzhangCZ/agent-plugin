@@ -166,10 +166,15 @@ export function normalizeCreateSessionPayload(payload: unknown, welinkSessionId?
   if (!isRecord(payload)) {
     return invalidFieldType('payload', 'payload', 'an object', 'invoke', 'create_session', welinkSessionId);
   }
-  return ok({
-    sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
-    metadata: isRecord(payload.metadata) ? payload.metadata : undefined,
-  });
+  if (payload.title !== undefined && typeof payload.title !== 'string') {
+    return invalidFieldType('payload', 'payload.title', 'a string', 'invoke', 'create_session', welinkSessionId);
+  }
+
+  const title = typeof payload.title === 'string' && payload.title.trim()
+    ? payload.title
+    : undefined;
+
+  return ok(title ? { title } : {});
 }
 
 export function normalizeCloseSessionPayload(payload: unknown, welinkSessionId?: string): NormalizeResult<CloseSessionPayload> {

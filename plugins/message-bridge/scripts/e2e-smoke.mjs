@@ -40,6 +40,7 @@ const timeoutMs = Number(env.MB_E2E_TIMEOUT_MS ?? '300000');
 let tmpHome = '';
 let gatewayProc;
 let opencodeProc;
+let effectiveBridgeDirectory = '';
 
 async function resolvePort(preferredPort) {
   const candidate = await findAvailablePort(preferredPort);
@@ -158,8 +159,10 @@ async function startStack() {
   }
 
   tmpHome = await createTempDir('mb-smoke-home-');
+  effectiveBridgeDirectory = env.BRIDGE_DIRECTORY ?? path.join(tmpHome, 'bridge-root');
   await mkdir(logDir, { recursive: true });
   await mkdir(path.join(tmpHome, '.config', 'opencode'), { recursive: true });
+  await mkdir(effectiveBridgeDirectory, { recursive: true });
   await writeJson(path.join(tmpHome, '.config', 'opencode', 'opencode.json'), {
     plugin: [`file://${pluginDir}`],
   });
@@ -183,6 +186,7 @@ async function startStack() {
         BRIDGE_AUTH_AK: bridgeAuthAk,
         BRIDGE_AUTH_SK: bridgeAuthSk,
         BRIDGE_GATEWAY_URL: bridgeGatewayUrl,
+        BRIDGE_DIRECTORY: scenario === 'directory-context' ? effectiveBridgeDirectory : env.BRIDGE_DIRECTORY,
         BRIDGE_DEBUG: env.BRIDGE_DEBUG ?? 'true',
         OPENCODE_PERMISSION: opencodePermission,
       },
@@ -227,7 +231,7 @@ async function triggerChatFlow(opencodePort) {
       '-d',
       JSON.stringify({
         parts: [{ type: 'text', text: promptText }],
-        noReply: scenario === 'connect-register',
+        noReply: scenario === 'connect-register' || scenario === 'directory-context',
       }),
     ],
     { stdio: 'ignore' },
@@ -236,7 +240,7 @@ async function triggerChatFlow(opencodePort) {
   return { sessionId };
 }
 
-function assertScenario(scenarioName, opencodeLogText, gatewayLogText) {
+function assertScenario(scenarioName, opencodeLogText, gatewayLogText, bridgeDirectory) {
   const baseChecks =
     opencodeLogText.includes('gateway.ready') &&
     gatewayLogText.includes('[mock-gateway] register') &&
@@ -262,6 +266,21 @@ function assertScenario(scenarioName, opencodeLogText, gatewayLogText) {
       gatewayLogText.includes('[mock-gateway] tool_event:permission.asked') &&
       gatewayLogText.includes('[mock-gateway] invoke:permission_reply') &&
       opencodeLogText.includes('action.permission_reply.started')
+    );
+  }
+
+  if (scenarioName === 'directory-context') {
+    return (
+      gatewayLogText.includes('[mock-gateway] invoke:create_session') &&
+      gatewayLogText.includes('[mock-gateway] session_created') &&
+      gatewayLogText.includes('[mock-gateway] invoke:chat') &&
+      !gatewayLogText.includes('[mock-gateway] tool_error') &&
+      opencodeLogText.includes('runtime.directory.resolved') &&
+      opencodeLogText.includes('action.create_session.started') &&
+      opencodeLogText.includes('action.chat.started') &&
+      opencodeLogText.includes(`effectiveDirectory=${bridgeDirectory}`) &&
+      opencodeLogText.includes(`"directory":"${bridgeDirectory}"`) &&
+      opencodeLogText.includes(bridgeDirectory)
     );
   }
 
@@ -312,22 +331,35 @@ async function main() {
   );
   let sessionId = null;
 
-  const result = await withTimeout(
-    () => triggerChatFlow(opencodePort),
-    timeoutMs,
-    'triggerChatFlow',
-    'E2E_SCENARIO_FAILED',
-    'E2E_TIMEOUT',
-  );
-  sessionId = result.sessionId;
-  console.log('[3/5] Waiting for protocol activity...');
-  await sleep(scenario === 'chat-stream' ? 2000 : scenario === 'permission-roundtrip' ? 8000 : 1200);
+  if (scenario === 'directory-context') {
+    console.log('[3/5] Warming plugin before gateway-driven create_session + chat...');
+    const result = await withTimeout(
+      () => triggerChatFlow(opencodePort),
+      timeoutMs,
+      'warmupChatFlow',
+      'E2E_SCENARIO_FAILED',
+      'E2E_TIMEOUT',
+    );
+    sessionId = result.sessionId;
+    await sleep(5000);
+  } else {
+    const result = await withTimeout(
+      () => triggerChatFlow(opencodePort),
+      timeoutMs,
+      'triggerChatFlow',
+      'E2E_SCENARIO_FAILED',
+      'E2E_TIMEOUT',
+    );
+    sessionId = result.sessionId;
+    console.log('[3/5] Waiting for protocol activity...');
+    await sleep(scenario === 'chat-stream' ? 2000 : scenario === 'permission-roundtrip' ? 8000 : 1200);
+  }
 
   console.log('[4/5] Collecting evidence...');
   const { opencodeLogText, gatewayLogText } = await collectEvidence();
 
   console.log('[5/5] Asserting scenario...');
-  const pass = assertScenario(scenario, opencodeLogText, gatewayLogText);
+  const pass = assertScenario(scenario, opencodeLogText, gatewayLogText, effectiveBridgeDirectory);
   console.log(pass ? 'E2E PASS' : 'E2E FAIL');
   console.log(`scenario=${scenario}`);
   console.log(`session_id=${sessionId ?? ''}`);

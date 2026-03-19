@@ -224,6 +224,11 @@ flowchart LR
 
 以下内容是推荐的 `skill-server <-> ai-gateway` 样例，目的是让 `B2` 和 `B3` 能够平滑衔接；真正冻结契约应以服务端仓为准。
 
+补充说明：
+
+- 下文中的 `create_session` 示例已按 UI -> skill-server -> gateway 的上游追溯结果收敛为 `payload.title`
+- `directory` 已按统一 `effectiveDirectory` 模型落地到相关下行调用
+
 #### 4.5.1 B2 下行源数据样例：skill-server 请求 gateway 创建 OpenCode 会话
 
 ```json
@@ -231,10 +236,7 @@ flowchart LR
   "welinkSessionId": "skill-42",
   "action": "create_session",
   "payload": {
-    "sessionId": "skill-42",
-    "metadata": {
-      "scene": "copilot"
-    }
+    "title": "帮我创建一个 React 项目"
   }
 }
 ```
@@ -252,10 +254,7 @@ flowchart LR
     "welinkSessionId": "skill-42",
     "action": "create_session",
     "payload": {
-      "sessionId": "skill-42",
-      "metadata": {
-        "scene": "copilot"
-      }
+      "title": "帮我创建一个 React 项目"
     }
   }
 }
@@ -272,10 +271,7 @@ flowchart LR
   "welinkSessionId": "skill-42",
   "action": "create_session",
   "payload": {
-    "sessionId": "skill-42",
-    "metadata": {
-      "scene": "copilot"
-    }
+    "title": "帮我创建一个 React 项目"
   }
 }
 ```
@@ -415,7 +411,7 @@ type NormalizedDownstreamMessage =
 | action | 内部 payload 结构 |
 |---|---|
 | `chat` | `{ toolSessionId: string, text: string }` |
-| `create_session` | `{ sessionId?: string, metadata?: Record<string, unknown> }` |
+| `create_session` | `{ title?: string }` |
 | `close_session` | `{ toolSessionId: string }` |
 | `abort_session` | `{ toolSessionId: string }` |
 | `permission_reply` | `{ permissionId: string, toolSessionId: string, response: 'once' | 'always' | 'reject' }` |
@@ -554,7 +550,7 @@ type NormalizedUpstreamEvent = {
 
 | action | 源数据 |
 |---|---|
-| `create_session` | `{ sessionId?, metadata? }` |
+| `create_session` | `{ title? }` |
 | `chat` | `{ toolSessionId, text }` |
 | `close_session` | `{ toolSessionId }` |
 | `abort_session` | `{ toolSessionId }` |
@@ -566,12 +562,12 @@ type NormalizedUpstreamEvent = {
 
 | action | SDK/raw API 输出请求 |
 |---|---|
-| `create_session` | `session.create({ body: payload })` |
-| `chat` | `session.prompt({ path: { id: toolSessionId }, body: { parts: [{ type: 'text', text }] } })` |
-| `close_session` | `session.delete({ path: { id: toolSessionId } })` |
-| `abort_session` | `session.abort({ path: { id: toolSessionId } })` |
-| `permission_reply` | `postSessionIdPermissionsPermissionId({ path: { id: toolSessionId, permissionID: permissionId }, body: { response } })` |
-| `question_reply` | `GET /question` -> 解析 `requestId` -> `POST /question/{requestID}/reply` with `{ answers: [[answer]] }` |
+| `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory` |
+| `chat` | 按 SDK 正式参数传递 `sessionID` 与消息体，并在该调用中复用 `effectiveDirectory` |
+| `close_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
+| `abort_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
+| `permission_reply` | 通过 bridge 当前 permission reply 映射传递响应，并在该调用中复用 `effectiveDirectory` |
+| `question_reply` | 在问题查询与回复链路中统一复用 `effectiveDirectory` |
 | `status_query` | `app.health()` |
 
 `chat` 的 B4 输出样例：
@@ -598,7 +594,7 @@ type NormalizedUpstreamEvent = {
 |---|---|---|
 | `create_session` | 含 `sessionId` 的返回对象 | 映射为 `session_created` |
 | `chat` | prompt 成功/失败 | 成功后走 compat `tool_done`，后续再由 OpenCode 事件产出 `tool_event` |
-| `close_session/abort_session/permission_reply/question_reply` | 成功/失败 | 成功通常不额外上行业务消息；失败回 `tool_error` |
+| `close_session/abort_session/permission_reply/question_reply` | 成功/失败 | 成功不发送 `tool_done` 等额外完成消息；失败回 `tool_error` |
 | `status_query` | `health` 成功/失败 | 映射为 `status_response` |
 
 ### 6.4 B4 上行：SDK 事件进入 bridge
@@ -896,16 +892,22 @@ sequenceDiagram
   participant BRIDGE as message-bridge
   participant SDK as OpenCode SDK
 
-  UI->>SKILL: B1 源数据\n{ uiSessionId, skillSessionId, type:'create_session' }
-  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'create_session', payload }
+  UI->>SKILL: B1 源数据\n{ ak, title?, imGroupId? }
+  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'create_session', payload:{ title? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { messageId, welinkSessionId, action:'create_session', payload }
   BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
-  BRIDGE->>SDK: B4 下行输出\nsession.create({ body: payload })
+  BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory? })
   SDK-->>BRIDGE: B4 返回值\n{ sessionId, ... }
   BRIDGE->>GW: B3 上行输出\nsession_created { welinkSessionId, toolSessionId, session }
   GW->>SKILL: B2 上行结果\n{ welinkSessionId, toolSessionId, type:'session_created' }
   SKILL->>UI: B1 回包\n{ uiSessionId, status:'completed', data:{ welinkSessionId, toolSessionId } }
 ```
+
+目标态补充：
+
+- `directory` 不应只在 `create_session` 单点考虑
+- 当 `BRIDGE_DIRECTORY` 能力落地后，bridge 将先统一决策 `effectiveDirectory`
+- 相关下行 SDK 调用将复用同一目录上下文
 
 ### 8.2 `chat -> tool_done + tool_event`
 

@@ -102,26 +102,46 @@ describe('createSdkAdapter coverage', () => {
     };
 
     const adapted = createSdkAdapter(raw);
-    const r1 = await adapted.session.create({ body: { metadata: { a: 1 } } });
-    const r2 = await adapted.session.abort({ path: { id: 's1' } });
-    const r3 = await adapted.session.delete({ path: { id: 's1' } });
+    const r1 = await adapted.session.create({ title: 'session-1', directory: '/tmp/bridge' });
+    const r2 = await adapted.session.abort({ sessionID: 's1', directory: '/tmp/bridge' });
+    const r3 = await adapted.session.delete({ sessionID: 's1', directory: '/tmp/bridge' });
     const r4 = await adapted.session.prompt({
-      path: { id: 's1' },
-      body: { parts: [{ type: 'text', text: 'hi' }] },
+      sessionID: 's1',
+      directory: '/tmp/bridge',
+      parts: [{ type: 'text', text: 'hi' }],
     });
     const r5 = await adapted.postSessionIdPermissionsPermissionId({
-      path: { id: 's1', permissionID: 'p1' },
-      body: { response: 'once' },
+      sessionID: 's1',
+      permissionID: 'p1',
+      directory: '/tmp/bridge',
+      response: 'once',
     });
     const r6 = await adapted._client.get({ url: '/question' });
     const r7 = await adapted._client.post({ url: '/question/reply' });
 
     assert.deepStrictEqual(calls, { create: 1, abort: 1, delete: 1, prompt: 1, permission: 1, get: 1, post: 1 });
-    assert.strictEqual(r1.data.body.metadata.a, 1);
-    assert.strictEqual(r2.data.path.id, 's1');
-    assert.strictEqual(r3.data.path.id, 's1');
-    assert.strictEqual(r4.data.body.parts[0].text, 'hi');
-    assert.strictEqual(r5.data.path.permissionID, 'p1');
+    assert.deepStrictEqual(r1.data, {
+      body: { title: 'session-1' },
+      query: { directory: '/tmp/bridge' },
+    });
+    assert.deepStrictEqual(r2.data, {
+      path: { id: 's1' },
+      query: { directory: '/tmp/bridge' },
+    });
+    assert.deepStrictEqual(r3.data, {
+      path: { id: 's1' },
+      query: { directory: '/tmp/bridge' },
+    });
+    assert.deepStrictEqual(r4.data, {
+      path: { id: 's1' },
+      query: { directory: '/tmp/bridge' },
+      body: { parts: [{ type: 'text', text: 'hi' }] },
+    });
+    assert.deepStrictEqual(r5.data, {
+      path: { id: 's1', permissionID: 'p1' },
+      query: { directory: '/tmp/bridge' },
+      body: { response: 'once' },
+    });
     assert.strictEqual(r6.data.url, '/question');
     assert.strictEqual(r7.data.url, '/question/reply');
   });

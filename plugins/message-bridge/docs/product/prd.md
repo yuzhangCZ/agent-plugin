@@ -192,6 +192,15 @@
 - `compatible`
 - `legacy`
 
+### FR-MB-11（P1）`BRIDGE_DIRECTORY` 统一目录上下文
+新增环境变量 `BRIDGE_DIRECTORY`，用于为插件提供统一目录上下文。
+
+实现约束：
+2. `BRIDGE_DIRECTORY` 只影响 SDK 请求目录上下文，不影响插件配置文件查找路径。  
+3. 目录优先级为：`BRIDGE_DIRECTORY > input.worktree || input.directory > undefined`。  
+4. 目录决策应统一沉淀为 `effectiveDirectory`，并复用于相关下行 SDK 调用，而不是只在 `create_session` 单点生效。  
+5. `create_session.payload` 的正式字段依据 UI -> skill-server -> gateway 追溯收敛为 `title?: string`。  
+
 ## 六、非功能需求（NFR）
 ### NFR-MB-01 可用性
 - 连接可用性 >= 99.9%
@@ -268,6 +277,8 @@
 8. 配置发现/优先级/JSONC/version 校验。  
 9. 新增事件或 action 不改核心引擎的扩展性验证。  
 10. 状态到错误码映射一致：`DISCONNECTED/CONNECTING -> GATEWAY_UNREACHABLE`，`CONNECTED -> AGENT_NOT_READY`。  
+11. `BRIDGE_DIRECTORY` 目标态验证：相关下行 SDK 调用共享同一目录上下文。  
+12. `create_session.payload` 目标态验证：仅按追溯后的正式字段集合映射到 SDK。  
 
 ### 9.3 质量门槛
 - `typecheck` 通过  
@@ -302,3 +313,4 @@
 2. 幂等与一致性由服务端负责。  
 3. 首版仅网关桥接，不扩展多平台能力。  
 4. 本文档为后续架构设计、方案设计、测试构建的唯一基线，变更需评审。  
+5. `BRIDGE_DIRECTORY` 与 `create_session.payload` 已按本文档约束完成实现，后续变更需同步维护协议、设计与测试文档。  

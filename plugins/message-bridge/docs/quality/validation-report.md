@@ -76,6 +76,7 @@ Execution semantics:
 - Release gate: `verify:release` (includes `verify:env` + `test:e2e:smoke` + `verify:opencode-load`)
 - Release rehearsal: `verify:release:dry` (same chain, no publish action)
 - Environment-dependent checks: `test:e2e`, `test:e2e:smoke`, `smoke:e2e`, `debug:e2e`, `verify:opencode-load`
+- `test:e2e:smoke` uses a single smoke-entry script to maintain the scenario set
 - Coverage scope: `unit+integration` (the coverage script prints `coverage_scope=unit+integration`)
 
 ## 5. Compatibility Conclusions

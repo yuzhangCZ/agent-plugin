@@ -195,6 +195,33 @@ var INVOKE_ACTIONS = [
 ];
 var ACTION_NAMES = [...INVOKE_ACTIONS, "status_query"];
 
+// src/action/directory.ts
+function isRecord2(value) {
+  return typeof value === "object" && value !== null;
+}
+function attachDirectory(parameters, effectiveDirectory) {
+  if (!effectiveDirectory) {
+    return parameters;
+  }
+  return {
+    ...parameters,
+    directory: effectiveDirectory
+  };
+}
+function attachDirectoryQuery(parameters, effectiveDirectory) {
+  if (!effectiveDirectory) {
+    return parameters;
+  }
+  const query = isRecord2(parameters.query) ? parameters.query : {};
+  return {
+    ...parameters,
+    query: {
+      ...query,
+      directory: effectiveDirectory
+    }
+  };
+}
+
 // src/action/ChatAction.ts
 var ChatAction = class {
   constructor() {
@@ -227,12 +254,12 @@ var ChatAction = class {
     }
     return "Unknown error";
   }
-  async sendPrompt(client, toolSessionId, text) {
+  async sendPrompt(client, toolSessionId, text, effectiveDirectory) {
     const executionResult = await safeExecute(
-      client.session.prompt({
-        path: { id: toolSessionId },
-        body: { parts: [{ type: "text", text }] }
-      }),
+      client.session.prompt(attachDirectory({
+        sessionID: toolSessionId,
+        parts: [{ type: "text", text }]
+      }, effectiveDirectory)),
       (error) => this.formatUnknownError(error)
     );
     if (executionResult.success) {
@@ -251,7 +278,8 @@ var ChatAction = class {
     const startedAt = Date.now();
     context.logger?.info("action.chat.started", {
       toolSessionId: payload.toolSessionId,
-      messageLength: payload.text.length
+      messageLength: payload.text.length,
+      effectiveDirectory: context.effectiveDirectory
     });
     if (context.connectionState !== "READY") {
       context.logger?.warn("action.chat.rejected_state", { state: context.connectionState });
@@ -263,7 +291,7 @@ var ChatAction = class {
     }
     const client = context.client;
     try {
-      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text);
+      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, context.effectiveDirectory);
       if (executionResult.success) {
         return {
           success: true
@@ -334,7 +362,8 @@ var CreateSessionAction = class {
   async execute(payload, context) {
     const startedAt = Date.now();
     context.logger?.info("action.create_session.started", {
-      payloadKeys: Object.keys(payload ?? {})
+      payloadKeys: Object.keys(payload ?? {}),
+      effectiveDirectory: context.effectiveDirectory
     });
     try {
       if (context.connectionState !== "READY") {
@@ -346,7 +375,9 @@ var CreateSessionAction = class {
         };
       }
       const executionResult = await safeExecute(
-        context.client.session.create({ body: payload }),
+        context.client.session.create(attachDirectory({
+          ...payload.title ? { title: payload.title } : {}
+        }, context.effectiveDirectory)),
         (error) => `Create session failed: ${getErrorMessage(error)}`
       );
       if (executionResult.success) {
@@ -367,7 +398,8 @@ var CreateSessionAction = class {
         const errorField = executionResult.data && typeof executionResult.data === "object" && "error" in executionResult.data ? executionResult.data.error : void 0;
         const errorMessage = errorField !== void 0 ? getErrorMessage(errorField) : "Unknown error";
         context.logger?.error("action.create_session.sdk_error_payload", {
-          requestedSessionId: payload.sessionId,
+          requestedTitle: payload.title,
+          effectiveDirectory: context.effectiveDirectory,
           payloadKeys: Object.keys(payload ?? {}),
           error: errorMessage,
           ...errorField !== void 0 ? getErrorDetailsForLog(errorField) : {},
@@ -380,7 +412,8 @@ var CreateSessionAction = class {
         };
       }
       context.logger?.error("action.create_session.failed", {
-        requestedSessionId: payload.sessionId,
+        requestedTitle: payload.title,
+        effectiveDirectory: context.effectiveDirectory,
         payloadKeys: Object.keys(payload ?? {}),
         error: executionResult.error,
         latencyMs: Date.now() - startedAt
@@ -394,7 +427,8 @@ var CreateSessionAction = class {
       const errorCode = this.errorMapper(error);
       const errorMessage = getErrorMessage(error);
       context.logger?.error("action.create_session.exception", {
-        requestedSessionId: payload.sessionId,
+        requestedTitle: payload.title,
+        effectiveDirectory: context.effectiveDirectory,
         payloadKeys: Object.keys(payload ?? {}),
         error: errorMessage,
         errorCode,
@@ -439,7 +473,8 @@ var CloseSessionAction = class {
   async execute(payload, context) {
     const startedAt = Date.now();
     context.logger?.info("action.close_session.started", {
-      toolSessionId: payload.toolSessionId
+      toolSessionId: payload.toolSessionId,
+      effectiveDirectory: context.effectiveDirectory
     });
     try {
       if (context.connectionState !== "READY") {
@@ -452,9 +487,9 @@ var CloseSessionAction = class {
       }
       const client = context.client;
       const executionResult = await safeExecute(
-        client.session.delete({
-          path: { id: payload.toolSessionId }
-        }),
+        client.session.delete(attachDirectory({
+          sessionID: payload.toolSessionId
+        }, context.effectiveDirectory)),
         (error) => `Close session failed: ${error instanceof Error ? error.message : String(error)}`
       );
       if (executionResult.success) {
@@ -541,7 +576,8 @@ var PermissionReplyAction = class {
     context.logger?.info("action.permission_reply.started", {
       permissionId: payload.permissionId,
       toolSessionId: payload.toolSessionId,
-      response: payload.response
+      response: payload.response,
+      effectiveDirectory: context.effectiveDirectory
     });
     try {
       if (context.connectionState !== "READY") {
@@ -553,10 +589,11 @@ var PermissionReplyAction = class {
         };
       }
       const executionResult = await safeExecute(
-        context.client.postSessionIdPermissionsPermissionId({
-          path: { id: payload.toolSessionId, permissionID: payload.permissionId },
-          body: { response: payload.response }
-        }),
+        context.client.postSessionIdPermissionsPermissionId(attachDirectory({
+          sessionID: payload.toolSessionId,
+          permissionID: payload.permissionId,
+          response: payload.response
+        }, context.effectiveDirectory)),
         (error) => `Permission reply failed: ${error instanceof Error ? error.message : String(error)}`
       );
       if (executionResult.success) {
@@ -710,7 +747,8 @@ var AbortSessionAction = class {
   async execute(payload, context) {
     const startedAt = Date.now();
     context.logger?.info("action.abort_session.started", {
-      toolSessionId: payload.toolSessionId
+      toolSessionId: payload.toolSessionId,
+      effectiveDirectory: context.effectiveDirectory
     });
     try {
       if (context.connectionState !== "READY") {
@@ -722,9 +760,9 @@ var AbortSessionAction = class {
         };
       }
       const executionResult = await safeExecute(
-        context.client.session.abort({
-          path: { id: payload.toolSessionId }
-        }),
+        context.client.session.abort(attachDirectory({
+          sessionID: payload.toolSessionId
+        }, context.effectiveDirectory)),
         (error) => `Abort session failed: ${getErrorMessage(error)}`
       );
       if (executionResult.success) {
@@ -816,7 +854,9 @@ var QuestionReplyAction = class {
     return result;
   }
   async findPendingQuestionRequestId(context, toolSessionId, toolCallId) {
-    const listResult = await context.client._client.get({ url: "/question" });
+    const listResult = await context.client._client.get(attachDirectoryQuery({
+      url: "/question"
+    }, context.effectiveDirectory));
     const pendingQuestions = this.extractResultData(listResult);
     const requests = Array.isArray(pendingQuestions) ? pendingQuestions.filter((item) => item !== null && typeof item === "object") : [];
     const matchedRequests = requests.filter((request) => {
@@ -843,7 +883,8 @@ var QuestionReplyAction = class {
     context.logger?.info("action.question_reply.started", {
       toolSessionId: payload.toolSessionId,
       toolCallId: payload.toolCallId,
-      answerLength: payload.answer.length
+      answerLength: payload.answer.length,
+      effectiveDirectory: context.effectiveDirectory
     });
     if (context.connectionState !== "READY") {
       context.logger?.warn("action.question_reply.rejected_state", { state: context.connectionState });
@@ -867,14 +908,14 @@ var QuestionReplyAction = class {
           errorMessage: payload.toolCallId ? `Unable to resolve pending question request for toolSessionId=${payload.toolSessionId}, toolCallId=${payload.toolCallId}` : `Unable to resolve a unique pending question request for toolSessionId=${payload.toolSessionId}`
         };
       }
-      await client._client.post({
+      await client._client.post(attachDirectoryQuery({
         url: "/question/{requestID}/reply",
         path: { requestID: requestId },
         body: { answers: [[payload.answer]] },
         headers: {
           "Content-Type": "application/json"
         }
-      });
+      }, context.effectiveDirectory));
       return {
         success: true,
         data: {
@@ -1007,7 +1048,7 @@ import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 import { promises } from "fs";
 
-// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
+// ../../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
   const len = text.length;
   let pos = 0, value = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
@@ -1428,7 +1469,7 @@ var CharacterCodes;
   CharacterCodes2[CharacterCodes2["tab"] = 9] = "tab";
 })(CharacterCodes || (CharacterCodes = {}));
 
-// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/string-intern.js
+// ../../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/string-intern.js
 var cachedSpaces = new Array(20).fill(0).map((_, index) => {
   return " ".repeat(index);
 });
@@ -1458,7 +1499,7 @@ var cachedBreakLinesWithSpaces = {
   }
 };
 
-// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/parser.js
+// ../../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/parser.js
 var ParseOptions;
 (function(ParseOptions2) {
   ParseOptions2.DEFAULT = {
@@ -1814,7 +1855,7 @@ function visit(text, visitor, options = ParseOptions.DEFAULT) {
   return true;
 }
 
-// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js
+// ../../node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js
 var ScanError;
 (function(ScanError2) {
   ScanError2[ScanError2["None"] = 0] = "None";
@@ -1904,6 +1945,8 @@ var JsoncParser = class {
 // src/config/default-config.ts
 var DEFAULT_BRIDGE_CONFIG = {
   enabled: true,
+  debug: false,
+  bridgeDirectory: void 0,
   config_version: 1,
   gateway: {
     url: "ws://localhost:8081/ws/agent",
@@ -2042,6 +2085,10 @@ var ConfigResolver = class {
     if (process.env.BRIDGE_DEBUG !== void 0) {
       envConfig.debug = process.env.BRIDGE_DEBUG.toLowerCase() === "true";
     }
+    const bridgeDirectory = process.env.BRIDGE_DIRECTORY?.trim();
+    if (bridgeDirectory) {
+      envConfig.bridgeDirectory = this.substituteEnvVars(bridgeDirectory);
+    }
     if (process.env.BRIDGE_CONFIG_VERSION !== void 0) {
       envConfig.config_version = parseInt(process.env.BRIDGE_CONFIG_VERSION, 10);
     }
@@ -2096,6 +2143,12 @@ var ConfigResolver = class {
   }
   normalizeConfig(config) {
     const normalized = { ...config };
+    if (typeof normalized.bridgeDirectory === "string") {
+      const trimmed = normalized.bridgeDirectory.trim();
+      normalized.bridgeDirectory = trimmed || void 0;
+    } else {
+      normalized.bridgeDirectory = void 0;
+    }
     if (!normalized.gateway) {
       normalized.gateway = {};
     }
@@ -2200,6 +2253,15 @@ var ConfigValidator = class {
     if (c.enabled !== void 0 && typeof c.enabled !== "boolean") {
       errors.push({ path: "enabled", code: "INVALID_TYPE", message: "enabled must be boolean" });
     }
+    if (c.bridgeDirectory !== void 0) {
+      if (typeof c.bridgeDirectory !== "string" || !c.bridgeDirectory.trim()) {
+        errors.push({
+          path: "bridgeDirectory",
+          code: "INVALID_TYPE",
+          message: "bridgeDirectory must be a non-empty string"
+        });
+      }
+    }
     if (c.gateway?.url !== void 0) {
       if (typeof c.gateway.url !== "string" || !/^wss?:\/\//.test(c.gateway.url)) {
         errors.push({ path: "gateway.url", code: "INVALID_URL", message: "gateway.url must start with ws:// or wss://" });
@@ -2252,14 +2314,14 @@ var ConfigValidator = class {
 
 // src/runtime/AppLogger.ts
 import { randomUUID } from "crypto";
-function isRecord2(value) {
+function isRecord3(value) {
   return value !== null && typeof value === "object";
 }
 function redact(value) {
   if (Array.isArray(value)) {
     return value.map((item) => redact(item));
   }
-  if (!isRecord2(value)) {
+  if (!isRecord3(value)) {
     return value;
   }
   const sensitive = ["ak", "sk", "token", "authorization", "cookie", "secret", "password"];
@@ -2275,11 +2337,11 @@ function redact(value) {
   return output;
 }
 function getAppLog(client) {
-  if (!isRecord2(client)) {
+  if (!isRecord3(client)) {
     return null;
   }
   const app = client.app;
-  if (!isRecord2(app) || typeof app.log !== "function") {
+  if (!isRecord3(app) || typeof app.log !== "function") {
     return null;
   }
   return app.log.bind(app);
@@ -2442,12 +2504,60 @@ function buildGatewaySendLogExtra(messageType, payloadBytes, logContext) {
   };
 }
 var GATEWAY_REJECTION_CLOSE_CODES = /* @__PURE__ */ new Set([4403, 4408, 4409]);
-function isRecord3(value) {
+function safeStringify2(value) {
+  const seen = /* @__PURE__ */ new WeakSet();
+  try {
+    return JSON.stringify(value, (_key, raw) => {
+      if (typeof raw === "bigint") {
+        return raw.toString();
+      }
+      if (raw instanceof Error) {
+        return {
+          name: raw.name,
+          message: raw.message,
+          stack: raw.stack
+        };
+      }
+      if (raw && typeof raw === "object") {
+        if (seen.has(raw)) {
+          return "[Circular]";
+        }
+        seen.add(raw);
+      }
+      return raw;
+    });
+  } catch {
+    return String(value);
+  }
+}
+function formatRawPayload(payload) {
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (payload === null || payload === void 0) {
+    return "";
+  }
+  if (typeof payload === "number" || typeof payload === "boolean" || typeof payload === "bigint") {
+    return String(payload);
+  }
+  if (payload instanceof ArrayBuffer) {
+    return `[binary ArrayBuffer byteLength=${payload.byteLength}]`;
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return `[binary ${payload.constructor.name} byteLength=${payload.byteLength}]`;
+  }
+  if (typeof Blob !== "undefined" && payload instanceof Blob) {
+    return `[binary Blob size=${payload.size} type=${payload.type || "application/octet-stream"}]`;
+  }
+  const json = safeStringify2(payload);
+  return json === void 0 ? String(payload) : json;
+}
+function isRecord4(value) {
   return value !== null && typeof value === "object";
 }
 function extractWebSocketErrorDetails(event) {
   const details = {};
-  if (!isRecord3(event)) {
+  if (!isRecord4(event)) {
     return {
       ...getErrorDetailsForLog(event)
     };
@@ -2461,7 +2571,7 @@ function extractWebSocketErrorDetails(event) {
     details.errorDetail = event.message;
   }
   const target = event.target;
-  if (isRecord3(target) && typeof target.readyState === "number") {
+  if (isRecord4(target) && typeof target.readyState === "number") {
     details.readyState = target.readyState;
   }
   return details;
@@ -2473,7 +2583,7 @@ function buildAuthSubprotocol(payload) {
   return `auth.${encodeBase64Url(JSON.stringify(payload))}`;
 }
 function isGatewayControlMessage(message) {
-  if (!isRecord3(message) || typeof message.type !== "string") {
+  if (!isRecord4(message) || typeof message.type !== "string") {
     return false;
   }
   return message.type === "register_ok" || message.type === "register_rejected";
@@ -2492,6 +2602,12 @@ var DefaultGatewayConnection = class extends EventEmitter {
     this.manuallyDisconnected = false;
     this.state = "DISCONNECTED";
     this.lastMessageSummary = null;
+  }
+  logRawFrame(eventName, payload) {
+    if (!this.options.debug || !this.options.logger) {
+      return;
+    }
+    this.options.logger.info(`\u300C${eventName}\u300D===>\u300C${formatRawPayload(payload)}\u300D`);
   }
   async connect() {
     this.options.logger?.info("gateway.connect.started", { url: this.options.url, state: this.state });
@@ -2545,9 +2661,10 @@ var DefaultGatewayConnection = class extends EventEmitter {
         const ws = protocols ? new WebSocket(url.toString(), protocols) : new WebSocket(url.toString());
         this.ws = ws;
         this.manuallyDisconnected = false;
-        ws.onopen = () => {
+        ws.onopen = (event) => {
           opened = true;
           this.reconnectAttempts = 0;
+          this.logRawFrame("onOpen", event);
           this.options.logger?.info("gateway.open");
           this.setState("CONNECTED");
           this.send(this.options.registerMessage);
@@ -2592,6 +2709,7 @@ var DefaultGatewayConnection = class extends EventEmitter {
           }
         };
         ws.onerror = (event) => {
+          this.logRawFrame("onError", event);
           const error = new Error("gateway_websocket_error");
           const errorDetails = extractWebSocketErrorDetails(event);
           this.options.logger?.error("gateway.error", {
@@ -2663,6 +2781,9 @@ var DefaultGatewayConnection = class extends EventEmitter {
     this.options.logger?.debug("gateway.send", {
       ...buildGatewaySendLogExtra(messageType, payloadBytes, logContext)
     });
+    if (this.options.debug && this.options.logger) {
+      this.options.logger.info(`\u300CsendMessage\u300D===>\u300C${serialized}\u300D`);
+    }
     this.ws.send(serialized);
   }
   isConnected() {
@@ -2738,6 +2859,7 @@ var DefaultGatewayConnection = class extends EventEmitter {
       text = await event.data.text();
     }
     const frameBytes = Buffer.byteLength(text, "utf8");
+    this.logRawFrame("onMessage", text);
     try {
       const message = JSON.parse(text);
       const messageType = message && typeof message === "object" && "type" in message ? String(message.type ?? "") : "unknown";
@@ -2770,7 +2892,7 @@ var DefaultGatewayConnection = class extends EventEmitter {
     }
   }
   extractGatewayMessageId(message) {
-    if (!isRecord3(message)) {
+    if (!isRecord4(message)) {
       return void 0;
     }
     return typeof message.messageId === "string" ? message.messageId : void 0;
@@ -3187,7 +3309,7 @@ function isSupportedInvokeAction(value) {
 
 // src/protocol/downstream/DownstreamMessageNormalizer.ts
 var DOWNSTREAM_NORMALIZATION_LOG_EVENT = "downstream.normalization_failed";
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null;
 }
 function ok2(value) {
@@ -3257,7 +3379,7 @@ function requireNonEmptyString2(value, stage, field, messageType, action, welink
   return ok2(value);
 }
 function buildEventPreview2(raw) {
-  if (!isRecord4(raw)) {
+  if (!isRecord5(raw)) {
     return { kind: typeof raw };
   }
   return {
@@ -3278,7 +3400,7 @@ function logDownstreamNormalizationFailure(logger, raw, error) {
   });
 }
 function normalizeChatPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "chat", welinkSessionId);
   }
   const toolSessionId = requireNonEmptyString2(payload.toolSessionId, "payload", "payload.toolSessionId", "invoke", "chat", welinkSessionId);
@@ -3291,16 +3413,17 @@ function normalizeChatPayload(payload, welinkSessionId) {
   });
 }
 function normalizeCreateSessionPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "create_session", welinkSessionId);
   }
-  return ok2({
-    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : void 0,
-    metadata: isRecord4(payload.metadata) ? payload.metadata : void 0
-  });
+  if (payload.title !== void 0 && typeof payload.title !== "string") {
+    return invalidFieldType2("payload", "payload.title", "a string", "invoke", "create_session", welinkSessionId);
+  }
+  const title = typeof payload.title === "string" && payload.title.trim() ? payload.title : void 0;
+  return ok2(title ? { title } : {});
 }
 function normalizeCloseSessionPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "close_session", welinkSessionId);
   }
   const toolSessionId = requireNonEmptyString2(
@@ -3315,7 +3438,7 @@ function normalizeCloseSessionPayload(payload, welinkSessionId) {
   return ok2({ toolSessionId: toolSessionId.value });
 }
 function normalizePermissionReplyPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "permission_reply", welinkSessionId);
   }
   const permissionId = requireNonEmptyString2(
@@ -3346,7 +3469,7 @@ function normalizePermissionReplyPayload(payload, welinkSessionId) {
   });
 }
 function normalizeAbortSessionPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "abort_session", welinkSessionId);
   }
   const toolSessionId = requireNonEmptyString2(
@@ -3361,7 +3484,7 @@ function normalizeAbortSessionPayload(payload, welinkSessionId) {
   return ok2({ toolSessionId: toolSessionId.value });
 }
 function normalizeQuestionReplyPayload(payload, welinkSessionId) {
-  if (!isRecord4(payload)) {
+  if (!isRecord5(payload)) {
     return invalidFieldType2("payload", "payload", "an object", "invoke", "question_reply", welinkSessionId);
   }
   const toolSessionId = requireNonEmptyString2(
@@ -3447,7 +3570,7 @@ function normalizeInvokePayload(action, payload, welinkSessionId) {
   }
 }
 function normalizeDownstreamMessage(raw, logger) {
-  if (!isRecord4(raw)) {
+  if (!isRecord5(raw)) {
     const error = errorOf(invalidFieldType2("message", "message", "an object"));
     logDownstreamNormalizationFailure(logger, raw, error);
     return fail2(error);
@@ -3498,7 +3621,7 @@ var REQUIRED_SDK_CAPABILITIES = [
   "_client.get",
   "_client.post"
 ];
-function isRecord5(value) {
+function isRecord6(value) {
   return value !== null && typeof value === "object";
 }
 function asFunction(value, bindTarget) {
@@ -3508,20 +3631,68 @@ function asFunction(value, bindTarget) {
   return bindTarget ? value.bind(bindTarget) : value;
 }
 function normalizeHealthResponse(response) {
-  if (isRecord5(response) && "error" in response && response.error !== void 0) {
+  if (isRecord6(response) && "error" in response && response.error !== void 0) {
     const error = response.error;
-    const message = isRecord5(error) && typeof error.message === "string" ? error.message : typeof error === "string" ? error : "OpenCode health request failed";
+    const message = isRecord6(error) && typeof error.message === "string" ? error.message : typeof error === "string" ? error : "OpenCode health request failed";
     throw new Error(message);
   }
-  const payload = isRecord5(response) && "data" in response ? response.data : response;
-  if (!isRecord5(payload) || typeof payload.healthy !== "boolean") {
+  const payload = isRecord6(response) && "data" in response ? response.data : response;
+  if (!isRecord6(payload) || typeof payload.healthy !== "boolean") {
     throw new Error("Invalid global health response");
   }
   return payload;
 }
+function buildLegacyCreateOptions(parameters) {
+  if (!parameters) {
+    return {};
+  }
+  const body = {};
+  if (parameters.parentID !== void 0) body.parentID = parameters.parentID;
+  if (parameters.title !== void 0) body.title = parameters.title;
+  if (parameters.permission !== void 0) body.permission = parameters.permission;
+  return {
+    ...Object.keys(body).length > 0 ? { body } : {},
+    ...parameters.directory ? { query: { directory: parameters.directory } } : {}
+  };
+}
+function buildLegacySessionTarget(parameters) {
+  return {
+    path: { id: parameters.sessionID },
+    ...parameters.directory ? { query: { directory: parameters.directory } } : {}
+  };
+}
+function buildLegacyPromptOptions(parameters) {
+  const body = {};
+  if (parameters.messageID !== void 0) body.messageID = parameters.messageID;
+  if (parameters.model !== void 0) body.model = parameters.model;
+  if (parameters.agent !== void 0) body.agent = parameters.agent;
+  if (parameters.noReply !== void 0) body.noReply = parameters.noReply;
+  if (parameters.tools !== void 0) body.tools = parameters.tools;
+  if (parameters.format !== void 0) body.format = parameters.format;
+  if (parameters.system !== void 0) body.system = parameters.system;
+  if (parameters.variant !== void 0) body.variant = parameters.variant;
+  if (parameters.parts !== void 0) body.parts = parameters.parts;
+  return {
+    path: { id: parameters.sessionID },
+    body,
+    ...parameters.directory ? { query: { directory: parameters.directory } } : {}
+  };
+}
+function buildLegacyPermissionReplyOptions(parameters) {
+  return {
+    path: {
+      id: parameters.sessionID,
+      permissionID: parameters.permissionID
+    },
+    body: {
+      response: parameters.response
+    },
+    ...parameters.directory ? { query: { directory: parameters.directory } } : {}
+  };
+}
 function adaptGlobalHealth(root) {
-  const global = isRecord5(root?.global) ? root.global : void 0;
-  const rawClient = isRecord5(root?._client) ? root._client : void 0;
+  const global = isRecord6(root?.global) ? root.global : void 0;
+  const rawClient = isRecord6(root?._client) ? root._client : void 0;
   const globalHealth = asFunction(
     global?.health,
     global
@@ -3536,9 +3707,9 @@ function adaptGlobalHealth(root) {
   return async () => normalizeHealthResponse(await rawGet({ url: "/global/health" }));
 }
 function getMissingSdkCapabilities(client) {
-  const root = isRecord5(client) ? client : void 0;
-  const session = isRecord5(root?.session) ? root.session : void 0;
-  const rawClient = isRecord5(root?._client) ? root._client : void 0;
+  const root = isRecord6(client) ? client : void 0;
+  const session = isRecord6(root?.session) ? root.session : void 0;
+  const rawClient = isRecord6(root?._client) ? root._client : void 0;
   return REQUIRED_SDK_CAPABILITIES.filter((capability) => {
     switch (capability) {
       case "session.create":
@@ -3561,8 +3732,8 @@ function getMissingSdkCapabilities(client) {
   });
 }
 function toHostClientLike(client) {
-  const root = isRecord5(client) ? client : void 0;
-  const app = isRecord5(root?.app) ? root.app : void 0;
+  const root = isRecord6(client) ? client : void 0;
+  const app = isRecord6(root?.app) ? root.app : void 0;
   return {
     global: {
       health: adaptGlobalHealth(root)
@@ -3579,15 +3750,15 @@ function createSdkAdapter(client) {
   const root = client;
   return {
     session: {
-      create: root.session.create.bind(root.session),
-      prompt: root.session.prompt.bind(root.session),
-      abort: root.session.abort.bind(root.session),
-      delete: root.session.delete.bind(root.session)
+      create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
+      prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
+      abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
+      delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters))
     },
-    postSessionIdPermissionsPermissionId: root.postSessionIdPermissionsPermissionId.bind(root),
+    postSessionIdPermissionsPermissionId: (parameters) => root.postSessionIdPermissionsPermissionId(buildLegacyPermissionReplyOptions(parameters)),
     _client: {
-      get: root._client.get.bind(root._client),
-      post: root._client.post.bind(root._client)
+      get: (options) => root._client.get(options),
+      post: (options) => root._client.post(options)
     }
   };
 }
@@ -3785,16 +3956,22 @@ var BridgeRuntime = class {
     this.started = false;
     this.toolDoneCompat = new ToolDoneCompat();
     this.workspacePath = options.workspacePath;
-    this.debug = options.debug;
+    this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(this.rawClient, { component: "runtime" }, void 0, void 0, options.debug);
+    this.logger = new AppLogger(this.rawClient, { component: "runtime" });
     this.sdkClient = createSdkAdapter(options.client);
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
+  async resolveConfig() {
+    return loadConfig(this.workspacePath, this.logger);
+  }
   async start(options = {}) {
-    this.logger.info("runtime.start.requested", { workspacePath: this.workspacePath });
+    this.logger.info("runtime.start.requested", {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory
+    });
     if (this.started) {
       this.logger.debug("runtime.start.skipped_already_started");
       return;
@@ -3804,22 +3981,23 @@ var BridgeRuntime = class {
       throw new Error("runtime_start_aborted");
     }
     let config;
+    let effectiveDebug = false;
     try {
       this.logger.info("runtime.config.loading", { workspacePath: this.workspacePath });
-      config = await loadConfig(this.workspacePath, this.logger);
-      if (this.debug === void 0 && typeof config.debug === "boolean") {
-        this.logger = new AppLogger(
-          this.rawClient,
-          { component: "runtime" },
-          this.logger.getTraceId(),
-          void 0,
-          config.debug
-        );
-      }
+      config = await this.resolveConfig();
+      effectiveDebug = !!config.debug;
+      this.logger = new AppLogger(
+        this.rawClient,
+        { component: "runtime" },
+        this.logger.getTraceId(),
+        void 0,
+        effectiveDebug
+      );
       this.logger.info("runtime.config.loaded_successfully", {
         config_version: config.config_version,
         enabled: config.enabled,
-        gateway_url: config.gateway.url
+        gateway_url: config.gateway.url,
+        bridgeDirectory: config.bridgeDirectory
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -3834,6 +4012,13 @@ var BridgeRuntime = class {
       this.started = true;
       return;
     }
+    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.logger.info("runtime.directory.resolved", {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory,
+      effectiveDirectory: this.effectiveDirectory,
+      directorySource: config.bridgeDirectory ? "env" : this.hostDirectory ? "host_input" : "none"
+    });
     const startupValidation = await this.validateStartupPrerequisites();
     this.sdkClient = startupValidation.sdkClient;
     const agentId = this.stateManager.generateAndBindAgentId();
@@ -3843,6 +4028,7 @@ var BridgeRuntime = class {
     const authPayloadProvider = () => auth.generateAuthPayload();
     const connection = new DefaultGatewayConnection({
       url: config.gateway.url,
+      debug: effectiveDebug,
       reconnectBaseMs: config.gateway.reconnect.baseMs,
       reconnectMaxMs: config.gateway.reconnect.maxMs,
       reconnectExponential: config.gateway.reconnect.exponential,
@@ -4160,6 +4346,7 @@ var BridgeRuntime = class {
       connectionState: this.stateManager.getState(),
       agentId: this.stateManager.getAgentId() ?? "unknown-agent",
       welinkSessionId,
+      effectiveDirectory: this.effectiveDirectory,
       logger: logger.child({
         component: "action",
         agentId: this.stateManager.getAgentId() ?? "unknown-agent",
@@ -4328,18 +4515,18 @@ var BridgeRuntime = class {
 };
 
 // src/runtime/clientShapeSummary.ts
-function isRecord6(value) {
+function isRecord7(value) {
   return value !== null && typeof value === "object";
 }
 function listKeys(value) {
-  return isRecord6(value) ? Object.keys(value).sort() : [];
+  return isRecord7(value) ? Object.keys(value).sort() : [];
 }
 function buildClientShapeSummary(client) {
-  const root = isRecord6(client) ? client : void 0;
-  const global = isRecord6(root?.global) ? root.global : void 0;
-  const app = isRecord6(root?.app) ? root.app : void 0;
-  const session = isRecord6(root?.session) ? root.session : void 0;
-  const rawClient = isRecord6(root?._client) ? root._client : void 0;
+  const root = isRecord7(client) ? client : void 0;
+  const global = isRecord7(root?.global) ? root.global : void 0;
+  const app = isRecord7(root?.app) ? root.app : void 0;
+  const session = isRecord7(root?.session) ? root.session : void 0;
+  const rawClient = isRecord7(root?._client) ? root._client : void 0;
   return {
     clientTopLevelKeys: listKeys(root),
     globalKeys: listKeys(global),
@@ -4377,6 +4564,7 @@ async function getOrCreateRuntime(input) {
   logger.info("runtime.singleton.client_shape", buildClientShapeSummary(input.client));
   const candidate = new BridgeRuntime({
     workspacePath: input.worktree || input.directory,
+    hostDirectory: input.worktree || input.directory,
     client: input.client
   });
   const token = ++generation;

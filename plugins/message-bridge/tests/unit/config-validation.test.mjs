@@ -12,6 +12,7 @@ import {
 import { AppLogger } from '../../src/runtime/AppLogger.ts';
 
 const originalHome = process.env.HOME;
+const originalBridgeDirectory = process.env.BRIDGE_DIRECTORY;
 
 const createValidConfig = (overrides = {}) => ({
   config_version: 1,
@@ -42,9 +43,15 @@ const createValidConfig = (overrides = {}) => ({
 afterEach(() => {
   if (originalHome === undefined) {
     delete process.env.HOME;
-    return;
+  } else {
+    process.env.HOME = originalHome;
   }
-  process.env.HOME = originalHome;
+
+  if (originalBridgeDirectory === undefined) {
+    delete process.env.BRIDGE_DIRECTORY;
+  } else {
+    process.env.BRIDGE_DIRECTORY = originalBridgeDirectory;
+  }
 });
 
 describe('config validation for sdk.baseUrl compatibility', () => {
@@ -543,6 +550,50 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       } else {
         process.env.BRIDGE_GATEWAY_CHANNEL = originalChannel;
       }
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('loads bridgeDirectory from BRIDGE_DIRECTORY and trims whitespace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-dir-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_DIRECTORY = '  /tmp/bridge-dir  ';
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(createValidConfig()),
+      'utf8',
+    );
+
+    try {
+      const config = await loadConfig(workspace);
+      assert.strictEqual(config.bridgeDirectory, '/tmp/bridge-dir');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('treats blank BRIDGE_DIRECTORY as unset', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-dir-blank-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_DIRECTORY = '   ';
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(createValidConfig()),
+      'utf8',
+    );
+
+    try {
+      const config = await loadConfig(workspace);
+      assert.strictEqual(config.bridgeDirectory, undefined);
+    } finally {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }

@@ -17,6 +17,7 @@ function readyContext(client, overrides = {}) {
     connectionState: 'READY',
     agentId: 'agent-1',
     sessionId: 'ctx-session',
+    effectiveDirectory: overrides.effectiveDirectory,
     ...overrides,
   };
 }
@@ -39,8 +40,8 @@ describe('ChatAction coverage', () => {
     const result = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext(client));
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      path: { id: 's-1' },
-      body: { parts: [{ type: 'text', text: 'hi' }] },
+      sessionID: 's-1',
+      parts: [{ type: 'text', text: 'hi' }],
     });
   });
 
@@ -115,10 +116,35 @@ describe('CreateSessionAction coverage', () => {
       },
       postSessionIdPermissionsPermissionId: async () => ({}),
     };
-    const result = await action.execute({ metadata: { source: 'x' } }, readyContext(client));
+    const result = await action.execute({ title: 'Session X' }, readyContext(client));
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.data.sessionId, 'new-1');
-    assert.deepStrictEqual(calls[0], { body: { metadata: { source: 'x' } } });
+    assert.deepStrictEqual(calls[0], { title: 'Session X' });
+  });
+
+  test('attaches effectiveDirectory to create_session parameters', async () => {
+    const action = new CreateSessionAction();
+    const calls = [];
+    const client = {
+      session: {
+        create: async (options) => {
+          calls.push(options);
+          return { data: { sessionId: 'new-2' } };
+        },
+        abort: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute({ title: 'With directory' }, readyContext(client, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], {
+      title: 'With directory',
+      directory: '/tmp/bridge-dir',
+    });
   });
 
   test('execute handles sdk failures', async () => {
@@ -156,7 +182,7 @@ describe('CloseSessionAction coverage', () => {
     const ok = await action.execute({ toolSessionId: 's1' }, readyContext(okClient));
     assert.strictEqual(ok.success, true);
     assert.strictEqual(ok.data.closed, true);
-    assert.deepStrictEqual(calls[0], { path: { id: 's1' } });
+    assert.deepStrictEqual(calls[0], { sessionID: 's1' });
   });
 });
 
@@ -183,8 +209,9 @@ describe('PermissionReplyAction coverage', () => {
 
     assert.strictEqual(allow.success, true);
     assert.deepStrictEqual(calls[0], {
-      path: { id: 's-tool', permissionID: 'p1' },
-      body: { response: 'once' },
+      sessionID: 's-tool',
+      permissionID: 'p1',
+      response: 'once',
     });
   });
 });
@@ -290,7 +317,7 @@ describe('AbortSessionAction coverage', () => {
     const result = await action.execute({ toolSessionId: 'abort-1' }, readyContext(client));
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { sessionId: 'abort-1', aborted: true });
-    assert.deepStrictEqual(calls[0], { path: { id: 'abort-1' } });
+    assert.deepStrictEqual(calls[0], { sessionID: 'abort-1' });
   });
 });
 

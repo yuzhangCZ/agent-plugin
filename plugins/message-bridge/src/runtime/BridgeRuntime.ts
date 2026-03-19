@@ -40,6 +40,7 @@ import type { HostClientLike, OpencodeClient } from '../types/index.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
+  hostDirectory?: string;
   client: unknown;
 }
 
@@ -79,11 +80,14 @@ export class BridgeRuntime {
   private sdkClient: OpencodeClient | null;
   private readonly missingSdkCapabilities: ReturnType<typeof getMissingSdkCapabilities>;
   private readonly workspacePath?: string;
+  private readonly hostDirectory?: string;
+  private effectiveDirectory?: string;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
+    this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
     this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
@@ -97,7 +101,10 @@ export class BridgeRuntime {
   }
 
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
-    this.logger.info('runtime.start.requested', { workspacePath: this.workspacePath });
+    this.logger.info('runtime.start.requested', {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory,
+    });
     if (this.started) {
       this.logger.debug('runtime.start.skipped_already_started');
       return;
@@ -125,6 +132,7 @@ export class BridgeRuntime {
         config_version: config.config_version,
         enabled: config.enabled,
         gateway_url: config.gateway.url,
+        bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -139,6 +147,14 @@ export class BridgeRuntime {
       this.started = true;
       return;
     }
+
+    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.logger.info('runtime.directory.resolved', {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory,
+      effectiveDirectory: this.effectiveDirectory,
+      directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
+    });
 
     const startupValidation = await this.validateStartupPrerequisites();
     this.sdkClient = startupValidation.sdkClient;
@@ -515,6 +531,7 @@ export class BridgeRuntime {
       connectionState: this.stateManager.getState(),
       agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
       welinkSessionId,
+      effectiveDirectory: this.effectiveDirectory,
       logger: logger.child({
         component: 'action',
         agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
