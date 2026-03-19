@@ -176,24 +176,40 @@ def call_qwen(prompt):
     """调用通义千问 (阿里云)"""
     api_key = os.getenv('DASHSCOPE_API_KEY')
     if not api_key:
+        print("❌ 缺少 DASHSCOPE_API_KEY")
         return None
     
+    print(f"🔑 使用模型：{MODEL}")
+    print(f"📡 调用 DashScope API...")
+    
+    # 通义千问 API 格式 (兼容 OpenAI 格式)
     response = requests.post(
-        'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+        'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         headers={
             'Authorization': f'Bearer {api_key}',
             'content-type': 'application/json'
         },
         json={
             'model': MODEL,
-            'input': {'messages': [{'role': 'user', 'content': prompt}]},
-            'parameters': {'max_tokens': 2000}
+            'messages': [
+                {'role': 'system', 'content': '你是一个专业的代码审查员。请用中文输出 JSON 格式的审查结果。'},
+                {'role': 'user', 'content': prompt}
+            ],
+            'max_tokens': 2000,
+            'temperature': 0.3
         }
     )
     
+    print(f"📡 API 响应状态码：{response.status_code}")
+    
     if response.ok:
-        return response.json()['output']['text']
-    print(f"Qwen API 错误：{response.status_code} - {response.text}")
+        result = response.json()
+        content = result['choices'][0]['message']['content']
+        print(f"✅ AI 返回内容长度：{len(content)}")
+        return content
+    
+    print(f"❌ Qwen API 错误：{response.status_code}")
+    print(f"响应内容：{response.text[:500]}")
     return None
 
 def call_moonshot(prompt):
@@ -321,6 +337,10 @@ def main():
     pr_body = event['pull_request'].get('body', '')
     
     print(f"🔍 开始审查 PR #{pr_number}: {pr_title}")
+    print(f"📁 仓库：{repo}")
+    print(f"🔑 GITHUB_TOKEN: {'已设置' if github_token else '❌ 未设置'}")
+    print(f"🔑 DASHSCOPE_API_KEY: {'已设置' if os.getenv('DASHSCOPE_API_KEY') else '❌ 未设置'}")
+    print(f"🤖 模型：{MODEL}")
     
     # 获取变更
     files, pr = get_pr_diff(github_token, repo, pr_number)
@@ -328,16 +348,19 @@ def main():
         print("✅ 没有需要审查的代码变更")
         return
     
-    print(f"📄 发现 {len(files)} 个文件变更")
+    print(f"📄 发现 {len(files)} 个文件变更:")
+    for f in files:
+        print(f"  - {f['filename']} (+{f['additions']} -{f['deletions']})")
     
     # 调用 AI
     prompt = build_prompt(files, pr_title, pr_body)
+    print(f"📝 Prompt 长度：{len(prompt)} 字符")
     print("🤖 正在调用 AI...")
     
     review = call_ai(prompt)
     if not review:
         print("❌ AI 调用失败")
-        pr.create_issue_comment("⚠️ AI 审查服务暂时不可用")
+        pr.create_issue_comment("⚠️ AI 审查服务暂时不可用\n\n请检查:\n1. DASHSCOPE_API_KEY 是否正确配置\n2. 查看 workflow 日志获取详细错误")
         return
     
     # 发布评论
