@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 AI PR Reviewer - 自动代码审查脚本
-支持 OpenAI / Anthropic / 本地模型
+仅支持 OpenAI 兼容接口（OpenAI / DeepSeek / 通义千问等）
+
+环境变量:
+- OPENAI_API_KEY: API Key
+- OPENAI_BASE_URL: API Base URL (可选，默认 https://api.openai.com/v1)
+- OPENAI_MODEL: 模型名称 (可选，默认 gpt-4o)
+- REVIEW_STYLE: 审查风格 (可选：concise/detailed/strict)
 """
 
 import os
@@ -11,13 +17,126 @@ import requests
 from github import Github
 
 # ============== 配置 ==============
-MODEL = os.getenv('REVIEW_MODEL', 'claude-3.5-sonnet')
+API_KEY = os.getenv('OPENAI_API_KEY')
+BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
+MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o')
 STYLE = os.getenv('REVIEW_STYLE', 'concise')
-IGNORE_PATTERNS = ['*.md', '*.txt', 'vendor/**', 'node_modules/**', '*.lock']
-MAX_FILES = 10  # 单次审查最多文件数
-MAX_LINES_PER_FILE = 200  # 单文件最大行数
 
-# ============== GitHub API ==============
+# 文件过滤
+IGNORE_PATTERNS = ['*.md', '*.txt', '*.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']
+IGNORE_DIRS = ['vendor/', 'node_modules/', 'dist/', 'build/', '.git/']
+MAX_FILES = 15
+MAX_PATCH_SIZE = 5000
+
+# ============== 提示词模板（业界最佳实践） ==============
+
+SYSTEM_PROMPT = """你是一位资深代码审查专家，拥有 15 年软件工程经验。你的任务是审查 Pull Request 的代码变更，发现潜在问题并提供建设性意见。
+
+## 审查原则
+1. **准确性优先** - 只报告确定的问题，避免误报
+2. **建设性反馈** - 每个问题都要给出可操作的修复建议
+3. **分级报告** - 按严重程度分类（Critical/Warning/Suggestion）
+4. **上下文感知** - 理解变更的整体意图，不要断章取义
+5. **尊重原作者** - 用词专业、友好，避免指责性语言
+
+## 审查维度（按优先级）
+1. 🔴 **Critical** - 安全漏洞、逻辑错误、会导致崩溃的 bug
+2. 🟡 **Warning** - 性能问题、潜在的 bug、代码异味
+3. 🟢 **Suggestion** - 代码风格、可读性改进、最佳实践
+
+## 输出要求
+- 使用中文输出
+- 只审查变更的代码（diff），不要对未变更的代码指手画脚
+- 忽略纯格式变更（假设有 linter 处理）
+- 如果代码没有问题，明确说明"未发现明显问题"
+- 对于复杂变更，先总结变更意图再给意见"""
+
+USER_PROMPT_TEMPLATE = """## PR 信息
+**标题**: {title}
+**描述**: {description}
+
+## 变更文件 ({file_count} 个)
+
+{file_contents}
+
+## 输出格式
+
+请严格按照以下 JSON 格式输出（只输出 JSON，不要其他内容）：
+
+```json
+{{
+  "summary": "一句话总结变更内容和整体质量",
+  "score": 7,  // 1-10 分，10 分表示完美
+  "has_critical_issues": false,
+  "comments": [
+    {{
+      "severity": "critical",  // critical | warning | suggestion
+      "category": "bug",  // bug | security | performance | style | readability | test
+      "file": "src/example.js",
+      "line": 42,  // 如果知道行号，否则 null
+      "title": "简短的问题标题",
+      "description": "详细描述问题和影响",
+      "suggestion": "具体的修复建议或代码示例"
+    }}
+  ],
+  "positive_feedback": ["做得好的地方 1", "做得好的地方 2"],
+  "approved": true  // 是否建议批准（有 critical 问题时为 false）
+}}
+```"""
+
+# ============== 代码审查提示词增强 ==============
+
+CRITICAL_ISSUES_CHECKLIST = """
+## 重点检查以下问题：
+
+### 安全问题
+- SQL 注入、XSS、CSRF 漏洞
+- 敏感信息硬编码（密码、API Key、Token）
+- 不安全的反序列化
+- 权限校验缺失
+- 文件路径遍历
+
+### 逻辑错误
+- 空指针/未定义检查
+- 边界条件处理
+- 并发/竞态条件
+- 资源泄漏（文件、连接、内存）
+- 异常处理缺失
+
+### 性能问题
+- N+1 查询
+- 循环内重复计算
+- 大对象未释放
+- 不必要的同步操作
+- 缓存缺失
+
+### 代码质量
+- 函数过长/复杂度过高
+- 重复代码
+- 魔术数字
+- 命名不清晰
+- 缺少注释（复杂逻辑）
+"""
+
+# ============== 工具函数 ==============
+
+def should_ignore_file(filename):
+    """检查文件是否应该被忽略"""
+    # 检查扩展名
+    for pattern in IGNORE_PATTERNS:
+        if pattern.startswith('*.'):
+            if filename.endswith(pattern[1:]):
+                return True
+        elif pattern in filename:
+            return True
+    
+    # 检查目录
+    for dir_pattern in IGNORE_DIRS:
+        if dir_pattern in filename:
+            return True
+    
+    return False
+
 def get_pr_diff(github_token, repo, pr_number):
     """获取 PR 变更 diff"""
     g = Github(github_token)
@@ -25,297 +144,228 @@ def get_pr_diff(github_token, repo, pr_number):
     
     files = []
     for f in pr.get_files():
-        # 跳过忽略的文件
-        if any(f.filename.endswith(p.replace('*', '')) for p in IGNORE_PATTERNS):
+        if should_ignore_file(f.filename):
+            print(f"⏭️  跳过：{f.filename}")
             continue
-        if 'vendor/' in f.filename or 'node_modules/' in f.filename:
-            continue
-            
+        
+        # 限制 patch 大小
+        patch = f.patch or ''
+        if len(patch) > MAX_PATCH_SIZE:
+            patch = patch[:MAX_PATCH_SIZE] + '\n...(内容过长，已截断)'
+        
         files.append({
             'filename': f.filename,
-            'status': f.status,
+            'status': f.status,  # added, modified, removed, renamed
             'additions': f.additions,
             'deletions': f.deletions,
-            'patch': f.patch[:3000] if f.patch else ''  # 限制 patch 大小
+            'patch': patch,
+            'changes_url': f.contents_url
         })
     
     return files[:MAX_FILES], pr
 
-# ============== AI 审查 ==============
 def build_prompt(files, pr_title, pr_body):
     """构建审查提示词"""
-    style_instructions = {
-        'concise': '只指出关键问题，每条意见不超过 2 句话',
-        'detailed': '详细分析每个问题，给出修复建议和示例代码',
-        'strict': '严格审查，包括代码风格、潜在 bug、安全漏洞'
+    file_contents = ""
+    for i, f in enumerate(files, 1):
+        status_icon = {'added': '🆕', 'modified': '✏️', 'removed': '🗑️', 'renamed': '📝'}.get(f['status'], '📄')
+        file_contents += f"\n### {i}. {status_icon} {f['filename']} (+{f['additions']} -{f['deletions']})\n"
+        file_contents += f"```diff\n{f['patch']}\n```\n\n"
+    
+    # 添加检查清单
+    file_contents += CRITICAL_ISSUES_CHECKLIST
+    
+    return USER_PROMPT_TEMPLATE.format(
+        title=pr_title,
+        description=pr_body[:500] if pr_body else "无描述",
+        file_count=len(files),
+        file_contents=file_contents
+    )
+
+def call_openai_api(prompt):
+    """调用 OpenAI 兼容 API"""
+    if not API_KEY:
+        print("❌ 缺少 OPENAI_API_KEY 环境变量")
+        return None
+    
+    endpoint = f"{BASE_URL}/chat/completions"
+    
+    print(f"🔑 API Key: {'已设置' + '(' + API_KEY[:8] + '...)' if API_KEY else '❌ 未设置'}")
+    print(f"🌐 Base URL: {endpoint}")
+    print(f"🤖 模型：{MODEL}")
+    print(f"📡 正在调用 API...")
+    
+    headers = {
+        'Authorization': f'Bearer {API_KEY}',
+        'Content-Type': 'application/json'
     }
     
-    file_context = "\n\n".join([
-        f"文件：{f['filename']}\n状态：{f['status']}\n变更:\n{f['patch']}"
-        for f in files
-    ])
+    payload = {
+        'model': MODEL,
+        'messages': [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': prompt}
+        ],
+        'max_tokens': 3000,
+        'temperature': 0.2,  # 低温度保证输出稳定
+        'top_p': 0.9,
+        'frequency_penalty': 0.1,
+        'presence_penalty': 0.1
+    }
     
-    return f"""你是一个资深代码审查员。请审查以下 PR 变更。
-
-PR 标题：{pr_title}
-PR 描述：{pr_body[:500]}
-
-审查要求：
-- 风格：{style_instructions.get(STYLE, style_instructions['concise'])}
-- 关注：安全漏洞、逻辑错误、性能问题、代码规范
-- 忽略：格式问题（假设有 linter）、纯文档变更
-
-变更内容：
-{file_context}
-
-请按以下 JSON 格式输出审查意见（只输出 JSON，不要其他内容）：
-{{
-  "summary": "PR 整体评价（1-2 句话）",
-  "score": 1-10 的分数，
-  "comments": [
-    {{
-      "file": "文件名",
-      "line": 行号（如果知道）,
-      "type": "bug|security|performance|style|question",
-      "message": "审查意见"
-    }}
-  ],
-  "approved": true/false（是否建议批准）
-}}
-"""
-
-def call_ai(prompt):
-    """调用 AI 模型"""
-    if MODEL.startswith('claude'):
-        return call_anthropic(prompt)
-    elif MODEL.startswith('gpt'):
-        return call_openai(prompt)
-    elif MODEL.startswith('deepseek'):
-        return call_deepseek(prompt)
-    elif MODEL.startswith('qwen'):
-        return call_qwen(prompt)
-    elif MODEL.startswith('kimi') or MODEL.startswith('moonshot'):
-        return call_moonshot(prompt)
-    elif MODEL.startswith('glm'):
-        return call_zhipu(prompt)
-    else:
-        return call_generic(prompt)
-
-def call_anthropic(prompt):
-    """调用 Anthropic Claude"""
-    api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
-        return None
+    try:
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
         
-    response = requests.post(
-        'https://api.anthropic.com/v1/messages',
-        headers={
-            'x-api-key': api_key,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'max_tokens': 2000,
-            'messages': [{'role': 'user', 'content': prompt}]
-        }
-    )
-    
-    if response.ok:
-        return response.json()['content'][0]['text']
-    return None
-
-def call_openai(prompt):
-    """调用 OpenAI GPT"""
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        return None
+        print(f"📡 API 响应状态码：{response.status_code}")
         
-    response = requests.post(
-        'https://api.openai.com/v1/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 2000
-        }
-    )
-    
-    if response.ok:
-        return response.json()['choices'][0]['message']['content']
-    return None
-
-def call_deepseek(prompt):
-    """调用 DeepSeek (深度求索)"""
-    api_key = os.getenv('DEEPSEEK_API_KEY')
-    if not api_key:
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            print(f"✅ AI 返回内容长度：{len(content)}")
+            return content
+        else:
+            print(f"❌ API 错误：{response.status_code}")
+            print(f"响应内容：{response.text[:500]}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("❌ API 请求超时（>60 秒）")
         return None
-    
-    response = requests.post(
-        'https://api.deepseek.com/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 2000
-        }
-    )
-    
-    if response.ok:
-        return response.json()['choices'][0]['message']['content']
-    print(f"DeepSeek API 错误：{response.status_code} - {response.text}")
-    return None
-
-def call_qwen(prompt):
-    """调用通义千问 (阿里云)"""
-    api_key = os.getenv('DASHSCOPE_API_KEY')
-    if not api_key:
-        print("❌ 缺少 DASHSCOPE_API_KEY")
+    except Exception as e:
+        print(f"❌ 请求失败：{e}")
         return None
+
+def parse_ai_response(content):
+    """解析 AI 返回的 JSON"""
+    # 尝试提取 JSON（处理 AI 可能包裹 markdown 的情况）
+    import re
     
-    print(f"🔑 使用模型：{MODEL}")
-    print(f"📡 调用 DashScope API...")
+    # 尝试直接解析
+    try:
+        return json.loads(content)
+    except:
+        pass
     
-    # 通义千问 API 格式 (兼容 OpenAI 格式)
-    response = requests.post(
-        'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'messages': [
-                {'role': 'system', 'content': '你是一个专业的代码审查员。请用中文输出 JSON 格式的审查结果。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'max_tokens': 2000,
-            'temperature': 0.3
-        }
-    )
+    # 尝试提取 ```json 块
+    json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', content, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1))
+        except:
+            pass
     
-    print(f"📡 API 响应状态码：{response.status_code}")
+    # 尝试提取第一个 { 到最后一个 }
+    start = content.find('{')
+    end = content.rfind('}') + 1
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start:end])
+        except:
+            pass
     
-    if response.ok:
-        result = response.json()
-        content = result['choices'][0]['message']['content']
-        print(f"✅ AI 返回内容长度：{len(content)}")
-        return content
-    
-    print(f"❌ Qwen API 错误：{response.status_code}")
-    print(f"响应内容：{response.text[:500]}")
+    print("❌ 无法解析 AI 返回的 JSON")
     return None
 
-def call_moonshot(prompt):
-    """调用 Kimi (月之暗面)"""
-    api_key = os.getenv('MOONSHOT_API_KEY')
-    if not api_key:
-        return None
-    
-    response = requests.post(
-        'https://api.moonshot.cn/v1/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 2000
-        }
-    )
-    
-    if response.ok:
-        return response.json()['choices'][0]['message']['content']
-    print(f"Moonshot API 错误：{response.status_code} - {response.text}")
-    return None
-
-def call_zhipu(prompt):
-    """调用智谱 GLM"""
-    api_key = os.getenv('ZHIPU_API_KEY')
-    if not api_key:
-        return None
-    
-    response = requests.post(
-        'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'content-type': 'application/json'
-        },
-        json={
-            'model': MODEL,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 2000
-        }
-    )
-    
-    if response.ok:
-        return response.json()['choices'][0]['message']['content']
-    print(f"Zhipu API 错误：{response.status_code} - {response.text}")
-    return None
-
-def call_generic(prompt):
-    """调用其他模型（兼容接口）"""
-    # 可扩展支持 Ollama、vLLM 等本地模型
-    return None
-
-# ============== 发布评论 ==============
 def post_review(pr, review_data):
     """发布审查评论到 PR"""
-    try:
-        data = json.loads(review_data)
-    except:
-        # AI 返回的不是有效 JSON，直接发文本
-        pr.create_issue_comment(
-            f"🤖 AI 审查完成（解析失败）:\n\n```\n{review_data}\n```"
-        )
-        return
+    emoji = '✅' if review_data.get('approved') else '⚠️'
+    score = review_data.get('score', 'N/A')
+    summary = review_data.get('summary', '无总结')
     
-    # 发布总结评论
-    emoji = '✅' if data.get('approved') else '⚠️'
-    summary = f"""{emoji} **AI 代码审查完成**
+    # 构建评论
+    comment = f"""{emoji} **AI 代码审查完成**
 
-**评分**: {data.get('score', 'N/A')}/10
-**总结**: {data.get('summary', '无')}
+**评分**: {score}/10
+**总结**: {summary}
 
 """
     
-    if data.get('comments'):
-        summary += "**详细意见**:\n\n"
-        for c in data['comments']:
-            icon = {'bug': '🐛', 'security': '🔒', 'performance': '⚡', 'style': '📖', 'question': '❓'}.get(c.get('type'), '💬')
-            summary += f"- {icon} `{c.get('file', 'unknown')}`: {c.get('message', '')}\n"
+    # 添加正面反馈
+    positive = review_data.get('positive_feedback', [])
+    if positive:
+        comment += "### 👍 做得好的地方\n"
+        for p in positive[:3]:
+            comment += f"- {p}\n"
+        comment += "\n"
     
-    pr.create_issue_comment(summary)
+    # 添加详细意见
+    comments = review_data.get('comments', [])
+    if comments:
+        comment += "### 📋 详细意见\n\n"
+        
+        # 按严重程度分组
+        critical = [c for c in comments if c.get('severity') == 'critical']
+        warning = [c for c in comments if c.get('severity') == 'warning']
+        suggestion = [c for c in comments if c.get('severity') == 'suggestion']
+        
+        if critical:
+            comment += "#### 🔴 Critical ({})\n".format(len(critical))
+            for c in critical:
+                comment += format_comment(c)
+        
+        if warning:
+            comment += "\n#### 🟡 Warning ({})\n".format(len(warning))
+            for c in warning:
+                comment += format_comment(c)
+        
+        if suggestion:
+            comment += "\n#### 🟢 Suggestion ({})\n".format(len(suggestion))
+            for c in suggestion:
+                comment += format_comment(c)
+    
+    else:
+        comment += "**未发现明显问题**，代码质量良好！\n"
+    
+    # 添加免责声明
+    comment += """
+---
+*此审查由 AI 生成，仅供参考。请结合人工判断进行最终决策。*
+"""
+    
+    # 发布总结评论
+    pr.create_issue_comment(comment)
     
     # 发布行内评论（如果有行号）
-    for c in data.get('comments', []):
+    for c in comments:
         if c.get('line') and c.get('file'):
             try:
-                # 找到对应的 commit
                 commits = pr.get_commits()
-                latest_commit = commits[0] if commits.totalCount > 0 else None
-                if latest_commit:
+                if commits.totalCount > 0:
+                    latest_commit = commits[0]
+                    icon = {'critical': '🔴', 'warning': '🟡', 'suggestion': '🟢'}.get(c.get('severity'), '💬')
+                    body = f"{icon} **{c.get('title', '')}**\n\n{c.get('description', '')}\n\n💡 {c.get('suggestion', '')}"
                     pr.create_review_comment(
-                        body=f"{c.get('message', '')}",
+                        body=body[:8000],  # GitHub 限制
                         path=c['file'],
                         position=c['line'],
                         commit=latest_commit
                     )
             except Exception as e:
-                pass  # 行内评论失败不影响主评论
+                print(f"⚠️ 行内评论失败：{e}")
+
+def format_comment(c):
+    """格式化单条评论"""
+    icon = {'critical': '🔴', 'warning': '🟡', 'suggestion': '🟢'}.get(c.get('severity'), '💬')
+    file_ref = f"`{c.get('file', 'unknown')}`"
+    if c.get('line'):
+        file_ref += f":L{c['line']}"
+    
+    return f"""- {icon} **{c.get('title', '问题')}** ({file_ref})
+  {c.get('description', '')}
+  > 💡 {c.get('suggestion', '无建议')}
+
+"""
 
 # ============== 主函数 ==============
+
 def main():
+    print("=" * 60)
+    print("🤖 AI PR Reviewer 启动")
+    print("=" * 60)
+    
     github_token = os.getenv('GITHUB_TOKEN')
     if not github_token:
-        print("❌ 缺少 GITHUB_TOKEN")
+        print("❌ 缺少 GITHUB_TOKEN 环境变量")
         sys.exit(1)
     
     # 从 GitHub Actions 环境获取 PR 信息
@@ -329,44 +379,67 @@ def main():
     
     if 'pull_request' not in event:
         print("⏭️ 不是 PR 事件，跳过")
-        return
+        sys.exit(0)
     
     pr_number = event['pull_request']['number']
     repo = event['repository']['full_name']
     pr_title = event['pull_request']['title']
     pr_body = event['pull_request'].get('body', '')
     
-    print(f"🔍 开始审查 PR #{pr_number}: {pr_title}")
+    print(f"\n🔍 审查 PR #{pr_number}: {pr_title}")
     print(f"📁 仓库：{repo}")
-    print(f"🔑 GITHUB_TOKEN: {'已设置' if github_token else '❌ 未设置'}")
-    print(f"🔑 DASHSCOPE_API_KEY: {'已设置' if os.getenv('DASHSCOPE_API_KEY') else '❌ 未设置'}")
-    print(f"🤖 模型：{MODEL}")
+    print(f"🎨 风格：{STYLE}")
     
     # 获取变更
+    print("\n📄 获取 PR 变更...")
     files, pr = get_pr_diff(github_token, repo, pr_number)
+    
     if not files:
         print("✅ 没有需要审查的代码变更")
-        return
+        pr.create_issue_comment("🤖 AI 审查：未发现需要审查的代码变更（可能是纯文档更新）")
+        sys.exit(0)
     
-    print(f"📄 发现 {len(files)} 个文件变更:")
+    print(f"✅ 获取到 {len(files)} 个文件变更")
     for f in files:
-        print(f"  - {f['filename']} (+{f['additions']} -{f['deletions']})")
+        print(f"   - {f['filename']} (+{f['additions']} -{f['deletions']})")
+    
+    # 构建提示词
+    print("\n📝 构建提示词...")
+    prompt = build_prompt(files, pr_title, pr_body)
+    print(f"📊 Prompt 长度：{len(prompt)} 字符")
     
     # 调用 AI
-    prompt = build_prompt(files, pr_title, pr_body)
-    print(f"📝 Prompt 长度：{len(prompt)} 字符")
-    print("🤖 正在调用 AI...")
+    print("\n🤖 调用 AI 进行审查...")
+    review_content = call_openai_api(prompt)
     
-    review = call_ai(prompt)
-    if not review:
+    if not review_content:
         print("❌ AI 调用失败")
-        pr.create_issue_comment("⚠️ AI 审查服务暂时不可用\n\n请检查:\n1. DASHSCOPE_API_KEY 是否正确配置\n2. 查看 workflow 日志获取详细错误")
-        return
+        pr.create_issue_comment("""⚠️ **AI 审查服务暂时不可用**
+
+请检查以下配置：
+1. `OPENAI_API_KEY` - API Key 是否正确
+2. `OPENAI_BASE_URL` - Base URL 是否正确（如使用非 OpenAI 服务）
+3. `OPENAI_MODEL` - 模型名称是否正确
+
+查看 workflow 日志获取详细错误信息。""")
+        sys.exit(1)
+    
+    # 解析结果
+    print("\n📋 解析 AI 返回结果...")
+    review_data = parse_ai_response(review_content)
+    
+    if not review_data:
+        print("❌ 无法解析 AI 返回的 JSON")
+        pr.create_issue_comment(f"⚠️ AI 审查完成，但返回格式无法解析。\n\n原始返回：\n```\n{review_content[:1000]}...```")
+        sys.exit(1)
     
     # 发布评论
-    print("📝 发布审查意见...")
-    post_review(pr, review)
-    print("✅ 审查完成")
+    print("\n📝 发布审查意见...")
+    post_review(pr, review_data)
+    
+    print("\n" + "=" * 60)
+    print("✅ 审查完成！")
+    print("=" * 60)
 
 if __name__ == '__main__':
     main()

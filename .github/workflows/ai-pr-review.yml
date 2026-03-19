@@ -27,10 +27,11 @@ jobs:
       - name: AI Code Review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 阿里云 DashScope API Key（通义千问）
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          # 模型选择：qwen-max / qwen-coder-plus / qwen-plus
-          REVIEW_MODEL: 'qwen-max'
+          # OpenAI 兼容 API 配置
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o' }}
+          # 审查风格：concise / detailed / strict
           REVIEW_STYLE: 'concise'
         run: python .github/scripts/ai_reviewer.py
         continue-on-error: true
