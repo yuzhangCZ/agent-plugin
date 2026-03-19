@@ -90,6 +90,14 @@ def call_ai(prompt):
         return call_anthropic(prompt)
     elif MODEL.startswith('gpt'):
         return call_openai(prompt)
+    elif MODEL.startswith('deepseek'):
+        return call_deepseek(prompt)
+    elif MODEL.startswith('qwen'):
+        return call_qwen(prompt)
+    elif MODEL.startswith('kimi') or MODEL.startswith('moonshot'):
+        return call_moonshot(prompt)
+    elif MODEL.startswith('glm'):
+        return call_zhipu(prompt)
     else:
         return call_generic(prompt)
 
@@ -138,6 +146,102 @@ def call_openai(prompt):
     
     if response.ok:
         return response.json()['choices'][0]['message']['content']
+    return None
+
+def call_deepseek(prompt):
+    """调用 DeepSeek (深度求索)"""
+    api_key = os.getenv('DEEPSEEK_API_KEY')
+    if not api_key:
+        return None
+    
+    response = requests.post(
+        'https://api.deepseek.com/chat/completions',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'content-type': 'application/json'
+        },
+        json={
+            'model': MODEL,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': 2000
+        }
+    )
+    
+    if response.ok:
+        return response.json()['choices'][0]['message']['content']
+    print(f"DeepSeek API 错误：{response.status_code} - {response.text}")
+    return None
+
+def call_qwen(prompt):
+    """调用通义千问 (阿里云)"""
+    api_key = os.getenv('DASHSCOPE_API_KEY')
+    if not api_key:
+        return None
+    
+    response = requests.post(
+        'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'content-type': 'application/json'
+        },
+        json={
+            'model': MODEL,
+            'input': {'messages': [{'role': 'user', 'content': prompt}]},
+            'parameters': {'max_tokens': 2000}
+        }
+    )
+    
+    if response.ok:
+        return response.json()['output']['text']
+    print(f"Qwen API 错误：{response.status_code} - {response.text}")
+    return None
+
+def call_moonshot(prompt):
+    """调用 Kimi (月之暗面)"""
+    api_key = os.getenv('MOONSHOT_API_KEY')
+    if not api_key:
+        return None
+    
+    response = requests.post(
+        'https://api.moonshot.cn/v1/chat/completions',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'content-type': 'application/json'
+        },
+        json={
+            'model': MODEL,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': 2000
+        }
+    )
+    
+    if response.ok:
+        return response.json()['choices'][0]['message']['content']
+    print(f"Moonshot API 错误：{response.status_code} - {response.text}")
+    return None
+
+def call_zhipu(prompt):
+    """调用智谱 GLM"""
+    api_key = os.getenv('ZHIPU_API_KEY')
+    if not api_key:
+        return None
+    
+    response = requests.post(
+        'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'content-type': 'application/json'
+        },
+        json={
+            'model': MODEL,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': 2000
+        }
+    )
+    
+    if response.ok:
+        return response.json()['choices'][0]['message']['content']
+    print(f"Zhipu API 错误：{response.status_code} - {response.text}")
     return None
 
 def call_generic(prompt):
