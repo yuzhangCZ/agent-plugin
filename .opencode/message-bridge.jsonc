@@ -1,0 +1,13 @@
+{
+  // Project-local debug config for running the plugin inside this workspace.
+  "enabled": true,
+  "debug": true,
+  "gateway": {
+    "url": "ws://localhost:8081/ws/agent",
+    "channel": "opencode"
+  },
+  "auth": {
+    "ak": "test-ak-001",
+    "sk": "test-sk-secret-001"
+  }
+}
