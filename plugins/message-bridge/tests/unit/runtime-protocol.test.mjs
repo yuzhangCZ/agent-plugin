@@ -47,6 +47,46 @@ function createRuntimeClient(overrides = {}) {
   };
 }
 
+function createResolvedConfig(overrides = {}) {
+  return {
+    config_version: 1,
+    enabled: true,
+    debug: false,
+    gateway: {
+      url: 'ws://localhost:8081/ws/agent',
+      channel: 'opencode',
+      heartbeatIntervalMs: 30000,
+      reconnect: {
+        baseMs: 1000,
+        maxMs: 30000,
+        exponential: true,
+      },
+    },
+    sdk: {
+      timeoutMs: 10000,
+    },
+    auth: {
+      ak: 'test-ak-001',
+      sk: 'test-sk-secret-001',
+    },
+    events: {
+      allowlist: ['message.updated'],
+    },
+    ...overrides,
+  };
+}
+
+function createRuntimeWithResolvedConfig(config, options = {}) {
+  return new (class extends BridgeRuntime {
+    async resolveConfig() {
+      return config;
+    }
+  })({
+    client: createRuntimeClient(),
+    ...options,
+  });
+}
+
 async function writeEnabledConfig(workspace) {
   await mkdir(join(workspace, '.opencode'), { recursive: true });
   await writeFile(
@@ -191,7 +231,9 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'tool-100' },
-      body: { parts: [{ type: 'text', text: 'hello' }] },
+      body: {
+        parts: [{ type: 'text', text: 'hello' }],
+      },
     });
     assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].type, 'tool_done');
@@ -338,8 +380,13 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        path: { id: 'tool-perm-1', permissionID: 'perm-a' },
-        body: { response: 'once' },
+        path: {
+          id: 'tool-perm-1',
+          permissionID: 'perm-a',
+        },
+        body: {
+          response: 'once',
+        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
@@ -605,37 +652,6 @@ describe('runtime protocol strictness', () => {
   });
 
   test('applies config.debug to runtime fallback logging after config load', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-'));
-    await mkdir(join(workspace, '.opencode'), { recursive: true });
-    await writeFile(
-      join(workspace, '.opencode', 'message-bridge.jsonc'),
-      JSON.stringify({
-        config_version: 1,
-        enabled: false,
-        debug: true,
-        gateway: {
-          url: 'ws://localhost:8081/ws/agent',
-          heartbeatIntervalMs: 30000,
-          reconnect: {
-            baseMs: 1000,
-            maxMs: 30000,
-            exponential: true,
-          },
-        },
-        sdk: {
-          timeoutMs: 10000,
-        },
-        auth: {
-          ak: '',
-          sk: '',
-        },
-        events: {
-          allowlist: ['message.updated'],
-        },
-      }),
-      'utf8',
-    );
-
     const debugCalls = [];
     const originalDebug = console.debug;
     console.debug = (...args) => {
@@ -643,8 +659,14 @@ describe('runtime protocol strictness', () => {
     };
 
     try {
-      const runtime = new BridgeRuntime({
-        workspacePath: workspace,
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({
+        enabled: false,
+        debug: true,
+        auth: {
+          ak: '',
+          sk: '',
+        },
+      }), {
         client: {},
       });
 
@@ -654,7 +676,57 @@ describe('runtime protocol strictness', () => {
       assert.ok(debugCalls.some((args) => args.includes('runtime.start.disabled_by_config')));
     } finally {
       console.debug = originalDebug;
-      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('consumes config.debug consistently for runtime debug logs and connection raw frame logs', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+
+    const logs = [];
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({
+        enabled: true,
+        debug: true,
+      }), {
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              logs.push(options);
+              return true;
+            },
+          },
+        }),
+      });
+
+      await runtime.start();
+      await runtime.handleEvent({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg-debug-1',
+            sessionID: 'tool-debug-1',
+            role: 'user',
+          },
+        },
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      assert.ok(logs.some((entry) => entry?.body?.level === 'debug' && entry.body.message === 'event.received'));
+      assert.ok(
+        logs.some(
+          (entry) =>
+            entry?.body?.level === 'info' &&
+            typeof entry.body.message === 'string' &&
+            entry.body.message.includes('「sendMessage」===>「{"type":"register"'),
+        ),
+      );
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
     }
   });
 
@@ -850,6 +922,74 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(deleteCalls, [{ path: { id: 'tool-close-1' } }]);
     assert.strictEqual((sent).length, 0);
+  });
+
+  test('reuses effectiveDirectory across create_session and chat while keeping workspacePath for config lookup', async () => {
+    const createCalls = [];
+    const promptCalls = [];
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      workspacePath: '/workspace/current',
+      hostDirectory: '/workspace/current',
+      client: createRuntimeClient({
+        session: {
+          create: async (options) => {
+            createCalls.push(options);
+            return { data: { id: 'created-dir-1' } };
+          },
+          prompt: async (options) => {
+            promptCalls.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    runtime.effectiveDirectory = '/env/bridge-root';
+    runtime.gatewayConnection = { send: () => {} };
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-create-dir',
+      action: 'create_session',
+      payload: {
+        title: 'Dir session',
+      },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-chat-dir',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'created-dir-1',
+        text: 'hello from bridge directory',
+      },
+    });
+
+    assert.deepStrictEqual(createCalls, [
+      {
+        body: {
+          title: 'Dir session',
+        },
+        query: {
+          directory: '/env/bridge-root',
+        },
+      },
+    ]);
+    assert.deepStrictEqual(promptCalls, [
+      {
+        path: {
+          id: 'created-dir-1',
+        },
+        body: {
+          parts: [{ type: 'text', text: 'hello from bridge directory' }],
+        },
+        query: {
+          directory: '/env/bridge-root',
+        },
+      },
+    ]);
+    assert.strictEqual(runtime.workspacePath, '/workspace/current');
   });
 
   test('runtime.start sends register with runtime-derived metadata', async () => {

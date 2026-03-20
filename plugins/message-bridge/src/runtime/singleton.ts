@@ -25,6 +25,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
 
   const candidate = new BridgeRuntime({
     workspacePath: input.worktree || input.directory,
+    hostDirectory: input.worktree || input.directory,
     client: input.client,
   });
   const token = ++generation;

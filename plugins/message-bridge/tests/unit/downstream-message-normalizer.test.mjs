@@ -209,6 +209,64 @@ describe('downstream message normalizer', () => {
     assert.strictEqual(result.error.welinkSessionId, '   ');
   });
 
+  test('normalizes create_session title payload and drops empty title', () => {
+    const { logger } = createLogger();
+    const withTitle = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-create-1',
+        action: 'create_session',
+        payload: {
+          title: 'Bridge session',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(withTitle.ok, true);
+    assert.deepStrictEqual(withTitle.value, {
+      type: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'skill-create-1',
+      payload: {
+        title: 'Bridge session',
+      },
+    });
+
+    const emptyTitle = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-create-2',
+        action: 'create_session',
+        payload: {
+          title: '   ',
+        },
+      },
+      logger,
+    );
+    assert.strictEqual(emptyTitle.ok, true);
+    assert.deepStrictEqual(emptyTitle.value.payload, {});
+  });
+
+  test('rejects non-string create_session title', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-create-3',
+        action: 'create_session',
+        payload: {
+          title: 123,
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error.code, 'invalid_field_type');
+    assert.strictEqual(result.error.field, 'payload.title');
+  });
+
   test('normalizes invoke/abort_session payload', () => {
     const { logger } = createLogger();
     const result = normalizeDownstreamMessage(

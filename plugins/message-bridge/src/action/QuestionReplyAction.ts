@@ -8,6 +8,7 @@ import {
   stateToErrorCode,
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import { attachDirectoryQuery } from './directory.js';
 
 export class QuestionReplyAction implements Action<'question_reply', QuestionReplyPayload, QuestionReplyResultData> {
   name: 'question_reply' = 'question_reply';
@@ -38,7 +39,9 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
     toolSessionId: string,
     toolCallId?: string,
   ): Promise<string | undefined> {
-    const listResult = await context.client._client.get({ url: '/question' });
+    const listResult = await context.client._client.get(attachDirectoryQuery({
+      url: '/question',
+    }, context.effectiveDirectory));
     const pendingQuestions = this.extractResultData<unknown>(listResult);
     const requests = Array.isArray(pendingQuestions)
       ? pendingQuestions.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
@@ -78,6 +81,7 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
       toolSessionId: payload.toolSessionId,
       toolCallId: payload.toolCallId,
       answerLength: payload.answer.length,
+      effectiveDirectory: context.effectiveDirectory,
     });
 
     if (context.connectionState !== 'READY') {
@@ -107,14 +111,14 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
         };
       }
 
-      await client._client.post({
+      await client._client.post(attachDirectoryQuery({
         url: '/question/{requestID}/reply',
         path: { requestID: requestId },
         body: { answers: [[payload.answer]] },
         headers: {
           'Content-Type': 'application/json',
         },
-      });
+      }, context.effectiveDirectory));
 
       return {
         success: true,

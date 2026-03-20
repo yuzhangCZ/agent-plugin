@@ -22,20 +22,28 @@ export interface HostClientLike {
 }
 
 export interface OpencodeSessionClient {
-  create(options?: { body?: Record<string, unknown> }): Promise<unknown>;
-  abort(options: { path: { id: string } }): Promise<unknown>;
-  delete(options: { path: { id: string } }): Promise<unknown>;
+  create(options?: {
+    directory?: string;
+    parentID?: string;
+    title?: string;
+    permission?: Record<string, unknown>;
+  }): Promise<unknown>;
+  abort(options: { sessionID: string; directory?: string }): Promise<unknown>;
+  delete(options: { sessionID: string; directory?: string }): Promise<unknown>;
   prompt(options: {
-    path: { id: string };
-    body: { parts: Array<{ type: 'text'; text: string }> };
+    sessionID: string;
+    directory?: string;
+    parts?: Array<{ type: 'text'; text: string }>;
   }): Promise<unknown>;
 }
 
 export interface OpencodeClient {
   session: OpencodeSessionClient;
   postSessionIdPermissionsPermissionId: (options: {
-    path: { id: string; permissionID: string };
-    body: { response: 'once' | 'always' | 'reject' };
+    sessionID: string;
+    permissionID: string;
+    directory?: string;
+    response: 'once' | 'always' | 'reject';
   }) => Promise<unknown>;
   _client: {
     get: (options: Record<string, unknown>) => Promise<unknown>;

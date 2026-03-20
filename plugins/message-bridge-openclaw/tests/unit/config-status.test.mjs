@@ -19,6 +19,14 @@ import {
   collectMessageBridgeStatusIssues,
   probeMessageBridgeAccount,
 } from "../../dist/status.js";
+import {
+  __resetConnectionCoordinatorForTests,
+  getAccountLogger,
+  getRuntimeSnapshot,
+  markRuntimePhase,
+  resetRuntimeCoord,
+  setAccountLogger,
+} from "../../dist/runtime/ConnectionCoordinator.js";
 import { MESSAGE_BRIDGE_TOOL_TYPE, resolveRegisterMetadata } from "../../dist/runtime/RegisterMetadata.js";
 
 function createConfig(overrides = {}) {
@@ -245,6 +253,7 @@ test("message bridge listAccountIds is fixed to default and rejects non-default 
 });
 
 test("probeMessageBridgeAccount covers ready, rejected, connect_error, disconnect-before-ready and timeout", async () => {
+  __resetConnectionCoordinatorForTests();
   const account = createAccount();
 
   const ready = await probeMessageBridgeAccount(
@@ -313,6 +322,90 @@ test("probeMessageBridgeAccount covers ready, rejected, connect_error, disconnec
   assert.equal(timeout.ok, false);
   assert.equal(timeout.state, "timeout");
   assert.match(timeout.reason, /timed out/);
+});
+
+test("probeMessageBridgeAccount short-circuits from connection coordinator before connecting", async () => {
+  __resetConnectionCoordinatorForTests();
+  const account = createAccount();
+  markRuntimePhase(account.accountId, "ready", () => 100);
+  let createdConnections = 0;
+
+  const result = await probeMessageBridgeAccount(
+    {
+      account,
+      timeoutMs: 50,
+    },
+    {
+      connectionFactory: () => {
+        createdConnections += 1;
+        return new FakeProbeConnection("ready");
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, "ready");
+  assert.equal(result.reason, "runtime_coord_ready");
+  assert.equal(createdConnections, 0);
+});
+
+test("probeMessageBridgeAccount falls back to healthy runtime snapshot without runtimePhase", async () => {
+  __resetConnectionCoordinatorForTests();
+  const account = createAccount();
+  let createdConnections = 0;
+
+  const result = await probeMessageBridgeAccount(
+    {
+      account,
+      timeoutMs: 50,
+      runtime: {
+        accountId: "default",
+        running: true,
+        connected: true,
+        lastStartAt: 1,
+        lastStopAt: null,
+        lastError: null,
+        lastReadyAt: 10,
+        lastInboundAt: 12,
+        lastOutboundAt: 13,
+        lastHeartbeatAt: 14,
+        probe: null,
+        lastProbeAt: null,
+      },
+    },
+    {
+      now: () => 20,
+      connectionFactory: () => {
+        createdConnections += 1;
+        return new FakeProbeConnection("ready");
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, "ready");
+  assert.equal(result.reason, "runtime_snapshot_healthy");
+  assert.equal(createdConnections, 0);
+});
+
+test("connection coordinator can reuse account logger and reset stale runtime state", async () => {
+  __resetConnectionCoordinatorForTests();
+  const logger = {
+    info() {},
+    warn() {},
+    error() {},
+  };
+
+  setAccountLogger("default", logger);
+  markRuntimePhase("default", "connecting", () => 10);
+  assert.equal(getAccountLogger("default"), logger);
+
+  resetRuntimeCoord("default");
+  assert.equal(getRuntimeSnapshot("default"), undefined);
+  assert.equal(getAccountLogger("default"), logger);
+
+  setAccountLogger("default", null);
+  assert.equal(getAccountLogger("default"), undefined);
 });
 
 test("single-account config still requires an explicit gateway url and setup writes top-level config", async () => {

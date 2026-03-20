@@ -139,6 +139,11 @@ export class ConfigResolver {
       envConfig.debug = process.env.BRIDGE_DEBUG.toLowerCase() === 'true';
     }
 
+    const bridgeDirectory = process.env.BRIDGE_DIRECTORY?.trim();
+    if (bridgeDirectory) {
+      envConfig.bridgeDirectory = this.substituteEnvVars(bridgeDirectory);
+    }
+
     if (process.env.BRIDGE_CONFIG_VERSION !== undefined) {
       envConfig.config_version = parseInt(process.env.BRIDGE_CONFIG_VERSION, 10);
     }
@@ -204,6 +209,13 @@ export class ConfigResolver {
 
   private normalizeConfig(config: BridgeConfig): BridgeConfig {
     const normalized = { ...config };
+
+    if (typeof normalized.bridgeDirectory === 'string') {
+      const trimmed = normalized.bridgeDirectory.trim();
+      normalized.bridgeDirectory = trimmed || undefined;
+    } else {
+      normalized.bridgeDirectory = undefined;
+    }
 
     if (!normalized.gateway) {
       normalized.gateway = {} as BridgeConfig['gateway'];

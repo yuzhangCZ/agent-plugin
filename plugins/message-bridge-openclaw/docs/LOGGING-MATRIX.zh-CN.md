@@ -60,6 +60,7 @@
 
 | 阶段 | 事件名 | 级别 | 关键字段 | 说明 |
 | --- | --- | --- | --- | --- |
+| 路径选择 | `bridge.chat.path_selected` | info | `executionPath`,`reason`,`configuredTimeoutMs`,`chatRequestId`,`retryAttempt` | 本次 chat 选择主路径或 fallback 的原因 |
 | 请求开始 | `bridge.chat.started` | info | `chatText`,`textLength`,`executionPath`,`configuredTimeoutMs`,`chatRequestId`,`retryAttempt` | chat 调用开始 |
 | 模型选定 | `bridge.chat.model_selected` | info | `provider`,`model`,`thinkLevel` | runtime_reply 路径模型选择 |
 | 首块输出 | `bridge.chat.first_chunk` | info | `deltaText`,`chunkLength`,`latencyMs`,`retryAttempt` | 第一段文本产出 |
@@ -78,7 +79,23 @@
 | 重复停止 | `runtime.stop.skipped_not_running` | info | `accountId` | 未运行，跳过 |
 | 停止完成 | `runtime.stop.completed` | info | `accountId` | 停止完成 |
 
-## 7. 建议检索顺序（定位“消息返回为空”）
+## 7. Probe 探活与连接仲裁
+
+| 阶段 | 事件名 | 级别 | 关键字段 | 说明 |
+| --- | --- | --- | --- | --- |
+| 探活请求 | `probe.requested` | info | `accountId`,`gatewayUrl`,`timeoutMs`,`runtimePhase`,`runtimeConnected` | probe 入口 |
+| 运行态短路成功 | `probe.short_circuit.runtime_ready` | info | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | runtime 已健康在线，probe 不建连 |
+| 运行态建连中 | `probe.short_circuit.runtime_connecting` | warn | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | runtime 正在首连或重连，probe 被跳过 |
+| 等待运行态开始 | `probe.wait_runtime.started` | info | `accountId`,`gatewayUrl`,`waitMs` | probe 正等待 runtime 完成 |
+| 等待运行态结束 | `probe.wait_runtime.completed` | info | `accountId`,`gatewayUrl`,`waitMs`,`runtimePhase` | probe 等待结束 |
+| probe 发起建连 | `probe.connect.started` | info | `accountId`,`gatewayUrl`,`timeoutMs`,`runtimePhase` | probe 开始真实 websocket 建连 |
+| probe 建连成功 | `probe.connect.ready` | info | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | probe 真实建连进入 READY |
+| probe 被拒绝 | `probe.connect.rejected` | warn | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | probe 被 ai-gateway 拒绝 |
+| probe 超时 | `probe.connect.timeout` | warn | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | probe 在超时内未 READY |
+| probe 错误 | `probe.connect.error` | error/warn | `accountId`,`gatewayUrl`,`latencyMs`,`reason` | probe 真实建连失败或提前断开 |
+| probe 被 runtime 取消 | `probe.connect.cancelled_for_runtime` | info | `accountId`,`gatewayUrl?`,`latencyMs?`,`reason` | runtime 启动抢占 probe 连接 |
+
+## 8. 建议检索顺序（定位“消息返回为空”）
 
 1. `runtime.downstream.received`：确认请求是否到达插件。
 2. `downstream.normalization_failed` / `runtime.downstream_ignored_non_protocol`：确认是否协议校验失败。
@@ -87,7 +104,7 @@
 5. `runtime.tool_error.sending` / `runtime.tool_done.sending` / `runtime.tool_event.sending`：确认上行回传是否发生。
 6. 若看到 `*.skipped_no_connection`：优先排查 `gateway.state.changed`、`gateway.reconnect.*`。
 
-## 8. 常用检索命令（按问题类型）
+## 9. 常用检索命令（按问题类型）
 
 ### 8.0 日志文件位置与查看方式
 

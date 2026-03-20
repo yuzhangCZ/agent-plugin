@@ -10,6 +10,7 @@ import {
   stateToErrorCode,
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import { attachDirectory } from './directory.js';
 
 export class AbortSessionAction implements Action<'abort_session', AbortSessionPayload, AbortSessionResultData> {
   name: 'abort_session' = 'abort_session';
@@ -21,6 +22,7 @@ export class AbortSessionAction implements Action<'abort_session', AbortSessionP
     const startedAt = Date.now();
     context.logger?.info('action.abort_session.started', {
       toolSessionId: payload.toolSessionId,
+      effectiveDirectory: context.effectiveDirectory,
     });
 
     try {
@@ -34,9 +36,9 @@ export class AbortSessionAction implements Action<'abort_session', AbortSessionP
       }
 
       const executionResult = await safeExecute(
-        context.client.session.abort({
-          path: { id: payload.toolSessionId },
-        }),
+        context.client.session.abort(attachDirectory({
+          sessionID: payload.toolSessionId,
+        }, context.effectiveDirectory)),
         (error) => `Abort session failed: ${getErrorMessage(error)}`,
       );
 

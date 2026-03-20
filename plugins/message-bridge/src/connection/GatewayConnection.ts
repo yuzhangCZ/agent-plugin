@@ -51,6 +51,7 @@ function buildGatewaySendLogExtra(messageType: string, payloadBytes: number, log
 
 export interface GatewayConnectionOptions {
   url: string;
+  debug?: boolean;
   reconnectBaseMs?: number;
   reconnectMaxMs?: number;
   reconnectExponential?: boolean;
@@ -72,6 +73,57 @@ interface RegisterOkMessage {
 interface RegisterRejectedMessage {
   type: 'register_rejected';
   reason?: string;
+}
+
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value, (_key, raw) => {
+      if (typeof raw === 'bigint') {
+        return raw.toString();
+      }
+      if (raw instanceof Error) {
+        return {
+          name: raw.name,
+          message: raw.message,
+          stack: raw.stack,
+        };
+      }
+      if (raw && typeof raw === 'object') {
+        if (seen.has(raw)) {
+          return '[Circular]';
+        }
+        seen.add(raw);
+      }
+      return raw;
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+function formatRawPayload(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (payload === null || payload === undefined) {
+    return '';
+  }
+  if (typeof payload === 'number' || typeof payload === 'boolean' || typeof payload === 'bigint') {
+    return String(payload);
+  }
+  if (payload instanceof ArrayBuffer) {
+    return `[binary ArrayBuffer byteLength=${payload.byteLength}]`;
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return `[binary ${payload.constructor.name} byteLength=${payload.byteLength}]`;
+  }
+  if (typeof Blob !== 'undefined' && payload instanceof Blob) {
+    return `[binary Blob size=${payload.size} type=${payload.type || 'application/octet-stream'}]`;
+  }
+
+  const json = safeStringify(payload);
+  return json === undefined ? String(payload) : json;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,6 +204,13 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     super();
   }
 
+  private logRawFrame(eventName: 'onOpen' | 'onMessage' | 'onError', payload: unknown): void {
+    if (!this.options.debug || !this.options.logger) {
+      return;
+    }
+    this.options.logger.info(`「${eventName}」===>「${formatRawPayload(payload)}」`);
+  }
+
   async connect(): Promise<void> {
     this.options.logger?.info('gateway.connect.started', { url: this.options.url, state: this.state });
     if (this.options.abortSignal?.aborted) {
@@ -213,9 +272,10 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
         this.ws = ws;
         this.manuallyDisconnected = false;
 
-        ws.onopen = () => {
+        ws.onopen = (event) => {
           opened = true;
           this.reconnectAttempts = 0;
+          this.logRawFrame('onOpen', event);
           this.options.logger?.info('gateway.open');
           this.setState('CONNECTED');
 
@@ -265,6 +325,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
         };
 
         ws.onerror = (event?: unknown) => {
+          this.logRawFrame('onError', event);
           const error = new Error('gateway_websocket_error');
           const errorDetails = extractWebSocketErrorDetails(event);
           this.options.logger?.error('gateway.error', {
@@ -350,6 +411,9 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     this.options.logger?.debug('gateway.send', {
       ...buildGatewaySendLogExtra(messageType, payloadBytes, logContext),
     });
+    if (this.options.debug && this.options.logger) {
+      this.options.logger.info(`「sendMessage」===>「${serialized}」`);
+    }
     this.ws.send(serialized);
   }
 
@@ -442,6 +506,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       text = await (event.data as Blob).text();
     }
     const frameBytes = Buffer.byteLength(text, 'utf8');
+    this.logRawFrame('onMessage', text);
 
     try {
       const message = JSON.parse(text);

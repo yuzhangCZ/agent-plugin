@@ -14,6 +14,7 @@ import {
   createStatusQueryMessage,
 } from "@agent-plugin/test-support/fixtures";
 import { OpenClawGatewayBridge } from "../../dist/OpenClawGatewayBridge.js";
+import { __resetConnectionCoordinatorForTests } from "../../dist/runtime/ConnectionCoordinator.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -63,6 +64,7 @@ class FakeConnection {
 }
 
 function createBridge(runtimeOverride, options = {}) {
+  __resetConnectionCoordinatorForTests();
   const connection = new FakeConnection();
   let agentEventListener = null;
   const statusSnapshots = [];
@@ -186,6 +188,19 @@ function createBridge(runtimeOverride, options = {}) {
     },
   };
 }
+
+test("runtime disconnect while still running keeps runtimePhase in connecting", async () => {
+  const { bridge, connection, getLatestStatus } = createBridge();
+  await bridge.start();
+
+  connection.disconnect();
+
+  const latestStatus = getLatestStatus();
+  assert.equal(latestStatus?.runtimePhase, "connecting");
+  assert.equal(latestStatus?.connected, false);
+
+  await bridge.stop();
+});
 
 test("chat invoke produces tool_event and tool_done", async () => {
   const { bridge, connection } = createBridge();
@@ -437,8 +452,11 @@ test("chat invoke passes runTimeoutMs to reply dispatcher and logs model selecti
   });
 
   assert.equal(timeoutOverrideSeconds, 6);
+  const pathSelectedLog = logs.info.find((entry) => entry.message === "bridge.chat.path_selected");
   const startedLog = logs.info.find((entry) => entry.message === "bridge.chat.started");
   const modelSelectedLog = logs.info.find((entry) => entry.message === "bridge.chat.model_selected");
+  assert.equal(pathSelectedLog?.meta.executionPath, "runtime_reply");
+  assert.equal(pathSelectedLog?.meta.reason, "runtime_reply_available");
   assert.equal(startedLog?.meta.configuredTimeoutMs, 5501);
   assert.equal(startedLog?.meta.executionPath, "runtime_reply");
   assert.equal(modelSelectedLog?.meta.provider, "openai-codex");
@@ -473,7 +491,7 @@ test("chat invoke falls back when routing lacks resolveAgentRoute", async () => 
     },
   };
 
-  const { bridge, connection } = createBridge(runtime);
+  const { bridge, connection, logs } = createBridge(runtime);
   await bridge.start();
   await bridge.handleDownstreamMessage({
     type: "invoke",
@@ -485,6 +503,9 @@ test("chat invoke falls back when routing lacks resolveAgentRoute", async () => 
     },
   });
 
+  const pathSelectedLog = logs.info.find((entry) => entry.message === "bridge.chat.path_selected");
+  assert.equal(pathSelectedLog?.meta.executionPath, "subagent_fallback");
+  assert.equal(pathSelectedLog?.meta.reason, "missing_route_resolver");
   const messageTypes = connection.sent.map((message) => message.type);
   assert.deepEqual(messageTypes, ["tool_event", "tool_event", "tool_event", "tool_event", "tool_done"]);
   assert.equal(connection.sent[1].event.type, "message.updated");

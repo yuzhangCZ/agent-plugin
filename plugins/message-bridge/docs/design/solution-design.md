@@ -109,13 +109,10 @@ The refactor preserves external behavior:
 
 ## 6.1 Tool Done Compatibility Design
 
-This section defines the target-state design for the planned `tool_done`
-compatibility recovery. The current implementation still does not emit
-`tool_done` until that recovery is implemented.
+This section defines the current `tool_done` compatibility design.
 
 ### Problem Statement
 
-- current `message-bridge` does not emit `tool_done`
 - legacy `pc-agent` emits `tool_done` as a completion signal
 - the UI currently consumes `tool_done`
 - forwarding `session.idle` as `tool_event` remains required, but it does not replace the compatibility contract expected by older consumers
@@ -162,12 +159,12 @@ Non-acceptable approaches:
 
 - proactive completion trigger:
   - `chat`
-  - `question_reply`
-  - `permission_reply`
 - non-completion actions do not trigger `tool_done`:
   - `create_session`
   - `close_session`
   - `abort_session`
+  - `permission_reply`
+  - `question_reply`
 - fallback trigger:
   - when upstream `session.idle` arrives and no `tool_done` has been emitted for the same execution, the compat layer emits one
 
@@ -181,7 +178,7 @@ Non-acceptable approaches:
 ### Compatibility Output Semantics
 
 - `session.idle -> tool_event` remains unchanged
-- `tool_done` is restored as a UI-facing compatibility completion signal in the target design
+- `tool_done` is restored as a UI-facing compatibility completion signal for the current implementation
 - `tool_done` does not replace `tool_event(session.idle)`; both may coexist
 - `tool_done` does not require `usage` in this recovery
 
@@ -202,21 +199,64 @@ Recommended fields:
 - `action`
 - `traceId`
 
-### Required Corrections
-
-The documentation set must no longer describe the bridge as never emitting `tool_done`.
-
-Required updates:
-
-- `solution-design.md`
-- `implementation-plan.md`
-- `architecture/overview.md`
-- `operations/logging-reference.md`
-- `quality/test-strategy.md`
-
 ## 7. Config and Distribution
 
 Current design also keeps:
+
+## 8. Directory Context Design
+
+This section records the implemented design for `BRIDGE_DIRECTORY`.
+
+### 8.1 Problem
+
+The bridge currently uses `workspacePath` for config discovery, while the
+directory context expected by SDK calls is not modeled as a single explicit
+runtime concept.
+
+### 8.2 Target-State Model
+
+The implementation uses a three-layer single-source-of-truth model:
+
+1. `BridgeRuntime` decides `effectiveDirectory`
+2. `ActionContext` distributes `effectiveDirectory`
+3. a shared SDK parameter helper attaches `directory` to supported requests
+
+### 8.3 Decision Rules
+
+- `workspacePath` remains dedicated to config discovery
+- `effectiveDirectory` is resolved once using:
+  1. `BRIDGE_DIRECTORY`
+  2. otherwise `input.worktree || input.directory`
+  3. otherwise `undefined`
+- actions must not read `process.env.BRIDGE_DIRECTORY` directly
+- actions must not implement their own directory fallback logic
+
+### 8.4 Request Scope
+
+The implementation treats `directory` as a request-context value, not a
+create-only field. For bridge actions that already map to SDK methods
+supporting `directory`, the same `effectiveDirectory` should be reused
+consistently across related calls.
+
+### 8.5 `create_session` Payload Decision
+
+The formal contract for `create_session.payload` is traced from the
+upstream business chain:
+
+- UI request model
+- skill-server payload construction
+- gateway downstream invoke contract
+
+Based on that chain, the formal payload is:
+
+```ts
+type CreateSessionPayload = {
+  title?: string;
+};
+```
+
+Historical residual fields have been removed from the bridge-side payload
+contract and SDK mapping.
 
 - multi-source config resolution with json/jsonc project and user config
 - structured logging through `client.app.log()`

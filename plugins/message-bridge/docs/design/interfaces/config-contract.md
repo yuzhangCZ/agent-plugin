@@ -40,6 +40,7 @@
 | `auth.ak` | `""` | Access Key，启用时必填 |
 | `auth.sk` | `""` | Secret Key，启用时必填 |
 | `events.allowlist` | `DEFAULT_EVENT_ALLOWLIST` | 上行事件白名单 |
+| `debug` | `false` | 关闭原始 WebSocket 报文日志与额外调试输出 |
 
 ## 3. 最小可用配置
 
@@ -101,7 +102,7 @@
 | 配置键 | 类型 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `enabled` | `boolean` | 否 | `true` | 为 `false` 时安全禁用，且不要求 `auth.ak/sk` |
-| `debug` | `boolean` | 否 | `false` | 调试日志开关；常由环境变量覆盖 |
+| `debug` | `boolean` | 否 | `false` | 调试日志开关；开启后额外以 `info` 级输出可读的原始 WebSocket 上下行报文 |
 | `config_version` | `number` | 否 | `1` | 当前只支持 `1` |
 | `gateway.url` | `string` | 否 | `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
 | `gateway.channel` | `string` | 否 | `opencode` | 注册消息中的 `toolType` 来源 |
@@ -120,7 +121,7 @@
 | 环境变量 | 映射配置键 | 说明 |
 |---|---|---|
 | `BRIDGE_ENABLED` | `enabled` | 仅当值为 `true` 时解析为 `true`，其余值解析为 `false` |
-| `BRIDGE_DEBUG` | `debug` | 仅当值为 `true` 时解析为 `true`，其余值解析为 `false` |
+| `BRIDGE_DEBUG` | `debug` | 仅当值为 `true` 时解析为 `true`，其余值解析为 `false`；开启后额外输出原始 WebSocket 报文 |
 | `BRIDGE_CONFIG_VERSION` | `config_version` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_GATEWAY_URL` | `gateway.url` | 支持 `${VAR_NAME}` 替换 |
 | `BRIDGE_GATEWAY_CHANNEL` | `gateway.channel` | 支持 `${VAR_NAME}` 替换；会在归一化阶段 `trim()` |
@@ -213,3 +214,10 @@ BRIDGE_EVENTS_ALLOWLIST=message.updated,session.status
 - `config.source.load_failed`
 - `config.validation.passed`
 - `config.validation.failed`
+
+当 `debug=true` 时，连接层还会额外输出以下 `info` 级原始报文日志：
+
+- `「onOpen」===>「...」`
+- `「onMessage」===>「...」`
+- `「onError」===>「...」`
+- `「sendMessage」===>「...」`

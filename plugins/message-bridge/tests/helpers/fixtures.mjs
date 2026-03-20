@@ -109,7 +109,7 @@ export function createChatPayload(overrides = {}) {
  */
 export function createCreateSessionPayload(overrides = {}) {
   return {
-    userId: 'user-123',
+    title: 'New session',
     ...overrides
   };
 }

@@ -53,6 +53,11 @@ P0 参考专题（feishu-openclaw 能力需求清单）:
   - FR: `FR-MB-OPENCLAW-P0-FEISHU-REFERENCE`
   - 内容：需求描述 + 优先级 + OpenClaw 插件接口一对一主依赖映射
 
+P0 连接仲裁专题（probe / runtime / duplicate_connection）:
+
+- `docs/topics/mb-p0-probe-runtime-connection-race.md`
+  - 内容：问题现象、根因、连接状态机、修复原则与验证口径
+
 ## 安装方式
 
 当前仓库已验证的安装方式都属于本地扩展安装：

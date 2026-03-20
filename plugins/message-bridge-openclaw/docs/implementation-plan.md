@@ -254,6 +254,7 @@
   - 已支持 `buildAccountSnapshot`
   - 已支持 `collectStatusIssues`
   - `openclaw channels status --probe` 与 `openclaw doctor` 可以消费这些结果
+  - probe / runtime 连接竞争与 `duplicate_connection` 修复归档见 `docs/topics/mb-p0-probe-runtime-connection-race.md`
   - **v0.6 新增诊断增强**：
     - duplicate_connection 抑制逻辑（避免健康运行时误报）
     - `getHeartbeatThresholdMs` 辅助函数

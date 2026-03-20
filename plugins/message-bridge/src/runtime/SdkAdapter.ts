@@ -50,6 +50,88 @@ function normalizeHealthResponse(response: unknown): OpencodeHealthResult {
 
 type AdaptedGlobalHealth = NonNullable<HostClientLike['global']>['health'];
 
+function buildLegacyCreateOptions(parameters?: {
+  directory?: string;
+  parentID?: string;
+  title?: string;
+  permission?: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (!parameters) {
+    return {};
+  }
+
+  const body: Record<string, unknown> = {};
+  if (parameters.parentID !== undefined) body.parentID = parameters.parentID;
+  if (parameters.title !== undefined) body.title = parameters.title;
+  if (parameters.permission !== undefined) body.permission = parameters.permission;
+
+  return {
+    ...(Object.keys(body).length > 0 ? { body } : {}),
+    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
+function buildLegacySessionTarget(parameters: { sessionID: string; directory?: string }): Record<string, unknown> {
+  return {
+    path: { id: parameters.sessionID },
+    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
+function buildLegacyPromptOptions(parameters: {
+  sessionID: string;
+  directory?: string;
+  messageID?: string;
+  model?: {
+    providerID: string;
+    modelID: string;
+  };
+  agent?: string;
+  noReply?: boolean;
+  tools?: {
+    [key: string]: boolean;
+  };
+  format?: unknown;
+  system?: string;
+  variant?: string;
+  parts?: Array<{ type: 'text'; text: string }>;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (parameters.messageID !== undefined) body.messageID = parameters.messageID;
+  if (parameters.model !== undefined) body.model = parameters.model;
+  if (parameters.agent !== undefined) body.agent = parameters.agent;
+  if (parameters.noReply !== undefined) body.noReply = parameters.noReply;
+  if (parameters.tools !== undefined) body.tools = parameters.tools;
+  if (parameters.format !== undefined) body.format = parameters.format;
+  if (parameters.system !== undefined) body.system = parameters.system;
+  if (parameters.variant !== undefined) body.variant = parameters.variant;
+  if (parameters.parts !== undefined) body.parts = parameters.parts;
+
+  return {
+    path: { id: parameters.sessionID },
+    body,
+    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
+function buildLegacyPermissionReplyOptions(parameters: {
+  sessionID: string;
+  permissionID: string;
+  directory?: string;
+  response: 'once' | 'always' | 'reject';
+}): Record<string, unknown> {
+  return {
+    path: {
+      id: parameters.sessionID,
+      permissionID: parameters.permissionID,
+    },
+    body: {
+      response: parameters.response,
+    },
+    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
 function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGlobalHealth {
   const global = isRecord(root?.global) ? root.global : undefined;
   const rawClient = isRecord(root?._client) ? root._client : undefined;
@@ -118,12 +200,12 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
 
   const root = client as {
     session: {
-      create: OpencodeClient['session']['create'];
-      prompt: OpencodeClient['session']['prompt'];
-      abort: OpencodeClient['session']['abort'];
-      delete: OpencodeClient['session']['delete'];
+      create: (options?: Record<string, unknown>) => Promise<unknown>;
+      prompt: (options: Record<string, unknown>) => Promise<unknown>;
+      abort: (options: Record<string, unknown>) => Promise<unknown>;
+      delete: (options: Record<string, unknown>) => Promise<unknown>;
     };
-    postSessionIdPermissionsPermissionId: OpencodeClient['postSessionIdPermissionsPermissionId'];
+    postSessionIdPermissionsPermissionId: (options: Record<string, unknown>) => Promise<unknown>;
     _client: {
       get: OpencodeClient['_client']['get'];
       post: OpencodeClient['_client']['post'];
@@ -132,15 +214,16 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
 
   return {
     session: {
-      create: root.session.create.bind(root.session),
-      prompt: root.session.prompt.bind(root.session),
-      abort: root.session.abort.bind(root.session),
-      delete: root.session.delete.bind(root.session),
+      create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
+      prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
+      abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
+      delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),
     },
-    postSessionIdPermissionsPermissionId: root.postSessionIdPermissionsPermissionId.bind(root),
+    postSessionIdPermissionsPermissionId: (parameters) =>
+      root.postSessionIdPermissionsPermissionId(buildLegacyPermissionReplyOptions(parameters)),
     _client: {
-      get: root._client.get.bind(root._client),
-      post: root._client.post.bind(root._client),
+      get: (options) => root._client.get(options),
+      post: (options) => root._client.post(options),
     },
   };
 }

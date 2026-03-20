@@ -10,6 +10,7 @@ import {
   stateToErrorCode
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import { attachDirectory } from './directory.js';
 
 /**
  * Concrete implementation of create_session action for creating OpenCode sessions
@@ -24,6 +25,7 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
     const startedAt = Date.now();
     context.logger?.info('action.create_session.started', {
       payloadKeys: Object.keys(payload ?? {}),
+      effectiveDirectory: context.effectiveDirectory,
     });
 
     try {
@@ -37,7 +39,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       }
 
       const executionResult = await safeExecute(
-        context.client.session.create({ body: payload as Record<string, unknown> }),
+        context.client.session.create(attachDirectory({
+          ...(payload.title ? { title: payload.title } : {}),
+        }, context.effectiveDirectory)),
         (error) => `Create session failed: ${getErrorMessage(error)}`
       );
 
@@ -70,7 +74,8 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         const errorMessage = errorField !== undefined ? getErrorMessage(errorField) : 'Unknown error';
 
         context.logger?.error('action.create_session.sdk_error_payload', {
-          requestedSessionId: payload.sessionId,
+          requestedTitle: payload.title,
+          effectiveDirectory: context.effectiveDirectory,
           payloadKeys: Object.keys(payload ?? {}),
           error: errorMessage,
           ...(errorField !== undefined ? getErrorDetailsForLog(errorField) : {}),
@@ -84,7 +89,8 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       }
 
       context.logger?.error('action.create_session.failed', {
-        requestedSessionId: payload.sessionId,
+        requestedTitle: payload.title,
+        effectiveDirectory: context.effectiveDirectory,
         payloadKeys: Object.keys(payload ?? {}),
         error: executionResult.error,
         latencyMs: Date.now() - startedAt,
@@ -98,7 +104,8 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       const errorCode = this.errorMapper(error);
       const errorMessage = getErrorMessage(error);
       context.logger?.error('action.create_session.exception', {
-        requestedSessionId: payload.sessionId,
+        requestedTitle: payload.title,
+        effectiveDirectory: context.effectiveDirectory,
         payloadKeys: Object.keys(payload ?? {}),
         error: errorMessage,
         errorCode,

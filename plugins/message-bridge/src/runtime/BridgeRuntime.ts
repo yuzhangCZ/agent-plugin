@@ -40,8 +40,8 @@ import type { HostClientLike, OpencodeClient } from '../types/index.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
+  hostDirectory?: string;
   client: unknown;
-  debug?: boolean;
 }
 
 export interface BridgeRuntimeStartOptions {
@@ -80,23 +80,31 @@ export class BridgeRuntime {
   private sdkClient: OpencodeClient | null;
   private readonly missingSdkCapabilities: ReturnType<typeof getMissingSdkCapabilities>;
   private readonly workspacePath?: string;
-  private readonly debug?: boolean;
+  private readonly hostDirectory?: string;
+  private effectiveDirectory?: string;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
-    this.debug = options.debug;
+    this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(this.rawClient, { component: 'runtime' }, undefined, undefined, options.debug);
+    this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
     this.sdkClient = createSdkAdapter(options.client);
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
 
+  protected async resolveConfig() {
+    return loadConfig(this.workspacePath, this.logger);
+  }
+
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
-    this.logger.info('runtime.start.requested', { workspacePath: this.workspacePath });
+    this.logger.info('runtime.start.requested', {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory,
+    });
     if (this.started) {
       this.logger.debug('runtime.start.skipped_already_started');
       return;
@@ -108,22 +116,23 @@ export class BridgeRuntime {
     }
 
     let config;
+    let effectiveDebug = false;
     try {
       this.logger.info('runtime.config.loading', { workspacePath: this.workspacePath });
-      config = await loadConfig(this.workspacePath, this.logger);
-      if (this.debug === undefined && typeof config.debug === 'boolean') {
-        this.logger = new AppLogger(
-          this.rawClient,
-          { component: 'runtime' },
-          this.logger.getTraceId(),
-          undefined,
-          config.debug,
-        );
-      }
+      config = await this.resolveConfig();
+      effectiveDebug = !!config.debug;
+      this.logger = new AppLogger(
+        this.rawClient,
+        { component: 'runtime' },
+        this.logger.getTraceId(),
+        undefined,
+        effectiveDebug,
+      );
       this.logger.info('runtime.config.loaded_successfully', {
         config_version: config.config_version,
         enabled: config.enabled,
         gateway_url: config.gateway.url,
+        bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -139,6 +148,14 @@ export class BridgeRuntime {
       return;
     }
 
+    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.logger.info('runtime.directory.resolved', {
+      workspacePath: this.workspacePath,
+      hostDirectory: this.hostDirectory,
+      effectiveDirectory: this.effectiveDirectory,
+      directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
+    });
+
     const startupValidation = await this.validateStartupPrerequisites();
     this.sdkClient = startupValidation.sdkClient;
     const agentId = this.stateManager.generateAndBindAgentId();
@@ -150,6 +167,7 @@ export class BridgeRuntime {
 
     const connection = new DefaultGatewayConnection({
       url: config.gateway.url,
+      debug: effectiveDebug,
       reconnectBaseMs: config.gateway.reconnect.baseMs,
       reconnectMaxMs: config.gateway.reconnect.maxMs,
       reconnectExponential: config.gateway.reconnect.exponential,
@@ -513,6 +531,7 @@ export class BridgeRuntime {
       connectionState: this.stateManager.getState(),
       agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
       welinkSessionId,
+      effectiveDirectory: this.effectiveDirectory,
       logger: logger.child({
         component: 'action',
         agentId: this.stateManager.getAgentId() ?? 'unknown-agent',

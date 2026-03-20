@@ -1,31 +1,31 @@
 # Message Bridge Plugin
 
-`message-bridge` is an OpenCode local plugin that bridges a local OpenCode instance and a remote gateway over WebSocket.
+`message-bridge` 是一个 OpenCode 本地插件，用于通过 WebSocket 在本地 OpenCode 实例与远端 gateway 之间建立消息桥接。
 
-The current implementation uses a layered boundary architecture:
+当前实现采用分层边界架构：
 
-- `contracts/`: external boundary contracts
-- `protocol/`: raw message normalization and extraction
-- `runtime/`: orchestration and transport
-- `action/`: execute-only business actions
+- `contracts/`：外部边界契约
+- `protocol/`：原始消息归一化与提取
+- `runtime/`：编排、连接与传输
+- `action/`：只负责业务执行
 
-Related documentation:
+相关文档：
 
-- [Architecture Overview](./docs/architecture/overview.md)
-- [Source Layout](./docs/architecture/source-layout.md)
-- [Protocol Contract](./docs/design/interfaces/protocol-contract.md)
-- [Config Contract](./docs/design/interfaces/config-contract.md)
-- [Validation Report](./docs/quality/validation-report.md)
-- [NPM Publish Guide](./docs/operations/npm-publish-guide.md)
+- [架构总览](./docs/architecture/overview.md)
+- [源码布局](./docs/architecture/source-layout.md)
+- [协议契约](./docs/design/interfaces/protocol-contract.md)
+- [配置契约](./docs/design/interfaces/config-contract.md)
+- [验证报告](./docs/quality/validation-report.md)
+- [NPM 发布指南](./docs/operations/npm-publish-guide.md)
 
-## Supported Downstream Messages
+## 支持的下行消息
 
-The gateway can send these downstream message types:
+gateway 当前可以发送以下下行消息类型：
 
 - `invoke`
 - `status_query`
 
-Supported `invoke.action` values:
+支持的 `invoke.action` 包括：
 
 - `chat`
 - `create_session`
@@ -47,12 +47,13 @@ payload: {
 
 ```ts
 payload: {
-  sessionId?: string;
-  metadata?: Record<string, unknown>;
+  title?: string;
 }
 ```
 
-`welinkSessionId` remains optional for `create_session`; when present it is passed through to `session_created` / `tool_error`.
+当前 `create_session.payload` 已收敛为 `title?: string`。这个契约来自 UI -> skill-server -> gateway 的上游链路追溯，不再把 payload 当作任意透传对象处理。
+
+`create_session` 还要求顶层 `welinkSessionId` 为非空字符串；缺失时 runtime 会直接返回 `tool_error`，不会调用 SDK 创建会话。
 
 ### `close_session`
 
@@ -62,7 +63,7 @@ payload: {
 }
 ```
 
-Current implementation uses `session.delete()` for `close_session`.
+当前实现通过 `session.delete()` 执行 `close_session`。
 
 ### `permission_reply`
 
@@ -76,7 +77,7 @@ payload: {
 
 ### `status_query`
 
-Standalone:
+独立消息形状：
 
 ```ts
 { type: 'status_query' }
@@ -100,11 +101,34 @@ payload: {
 }
 ```
 
-The action resolves a pending question with `GET /question` and replies with `POST /question/{requestID}/reply`.
+该 action 会先通过 `GET /question` 查找 pending question，再通过 `POST /question/{requestID}/reply` 回复。
 
-## Supported Upstream Events
+## 目录上下文
 
-The default allowlist is an exact event list:
+`BRIDGE_DIRECTORY` 已实现为 bridge 级目录上下文覆盖项：
+
+- `workspacePath` 仅用于配置发现
+- `effectiveDirectory` 只在 runtime 中统一决策一次
+- 所有相关 SDK/raw API 调用都会复用同一个 `effectiveDirectory`
+
+目录优先级为：
+
+1. `BRIDGE_DIRECTORY`
+2. `input.worktree || input.directory`
+3. 不显式传递目录
+
+## 当前 `tool_done` 行为
+
+当前兼容层（compat）行为如下：
+
+- `chat` 成功后主动发送 compat `tool_done`
+- `session.idle` 仍会作为 `tool_event` 上行
+- 如果同一次执行尚未发送 compat 完成信号，则 `session.idle` 会兜底发送 `tool_done`
+- `create_session`、`close_session`、`abort_session`、`permission_reply`、`question_reply` 成功时当前不会主动发送 `tool_done`
+
+## 支持的上行事件
+
+默认 allowlist 是一个精确事件列表：
 
 - `message.updated`
 - `message.part.updated`
@@ -118,9 +142,9 @@ The default allowlist is an exact event list:
 - `permission.asked`
 - `question.asked`
 
-Wildcard defaults such as `message.*` and `session.*` are no longer used.
+不再使用 `message.*`、`session.*` 这类 wildcard 默认值。
 
-Upstream transport shape remains:
+上行传输消息保持为：
 
 ```ts
 {
@@ -130,9 +154,9 @@ Upstream transport shape remains:
 }
 ```
 
-## Transport Messages
+## 传输消息
 
-Bridge-to-gateway transport messages currently include:
+bridge 到 gateway 的上行消息当前包括：
 
 - `register`
 - `heartbeat`
@@ -141,51 +165,51 @@ Bridge-to-gateway transport messages currently include:
 - `session_created`
 - `status_response`
 
-Transport response shapes:
+响应形状：
 
-- `tool_error`: `{ type, welinkSessionId?, toolSessionId?, error }`
-- `session_created`: `{ type, welinkSessionId?, toolSessionId?, session }`
-- `status_response`: `{ type, opencodeOnline }`
+- `tool_error`：`{ type, welinkSessionId?, toolSessionId?, error }`
+- `session_created`：`{ type, welinkSessionId?, toolSessionId?, session }`
+- `status_response`：`{ type, opencodeOnline }`
 
-## Configuration
+## 配置
 
-Interactive setup CLI:
+交互式安装/配置 CLI：
 
 - `node ./scripts/setup-message-bridge.mjs`
 
-Self-contained startup example (idempotent `.npmrc` + runtime `OPENCODE_CONFIG_CONTENT` plugin injection + `opencode serve`):
+自包含启动示例（幂等写入 `.npmrc`，通过运行时 `OPENCODE_CONFIG_CONTENT` 注入 plugin 配置，再启动 `opencode serve`）：
 
 - `node ./scripts/minimal-start-opencode.mjs`
 
-The CLI will:
+CLI 当前会：
 
-- prompt for `ak` and `sk`
-- write `message-bridge.jsonc` in user scope by default
-- enable `@opencode-cui/message-bridge` in OpenCode `plugin` config
-- create a default `.npmrc` scope entry for `@opencode-cui`
+- 提示输入 `ak` 和 `sk`
+- 默认在用户级写入 `message-bridge.jsonc`
+- 在 OpenCode `plugin` 配置中启用 `@opencode-cui/message-bridge`
+- 为 `@opencode-cui` 写入默认 `.npmrc` scope 条目
 
-The CLI does not prompt for `gateway.url`; existing values are preserved and missing values fall back to the bridge default.
+CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 
-User-scope `.npmrc` path resolution follows this order:
+用户级 `.npmrc` 路径解析顺序：
 
-- `NPM_CONFIG_USERCONFIG`, if explicitly set
-- Windows: `%USERPROFILE%\\.npmrc` (falls back to `%HOMEDRIVE%%HOMEPATH%\\.npmrc`)
-- macOS / Linux: `~/.npmrc`
+- `NPM_CONFIG_USERCONFIG`，若显式设置
+- Windows：`%USERPROFILE%\\.npmrc`（回退到 `%HOMEDRIVE%%HOMEPATH%\\.npmrc`）
+- macOS / Linux：`~/.npmrc`
 
-On Windows, the user-scope OpenCode config directory follows the same path convention as OpenCode itself: `%USERPROFILE%\\.config\\opencode`. The generated npm scope placeholder is written to the resolved `.npmrc` path above and currently keeps the registry value empty for later internal registry completion.
+在 Windows 上，用户级 OpenCode 配置目录与 OpenCode 本身一致：`%USERPROFILE%\\.config\\opencode`。生成的 npm scope 占位值会写入解析后的 `.npmrc` 路径，registry 当前保留为空，供后续内部仓库补全。
 
-Configuration priority, high to low:
+配置优先级从高到低：
 
-1. `BRIDGE_*` environment variables
-2. project config: `.opencode/message-bridge.jsonc` then `.opencode/message-bridge.json`
-3. user config: `~/.config/opencode/message-bridge.jsonc` then `.json`
-4. built-in defaults
+1. `BRIDGE_*` 环境变量
+2. 项目级配置：`.opencode/message-bridge.jsonc`，其次 `.opencode/message-bridge.json`
+3. 用户级配置：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
+4. 内置默认值
 
-Defaults are defined in:
+默认值定义见：
 
 - [default-config.ts](./src/config/default-config.ts)
 
-### Minimal Config
+### 最小配置
 
 ```jsonc
 {
@@ -196,7 +220,7 @@ Defaults are defined in:
 }
 ```
 
-### Key Defaults
+### 关键默认值
 
 | Key | Default |
 |---|---|
@@ -213,28 +237,28 @@ Defaults are defined in:
 | `sdk.timeoutMs` | `10000` |
 | `events.allowlist` | `DEFAULT_EVENT_ALLOWLIST` |
 
-`gateway.channel` is mapped to register payload field `toolType` when the bridge connects to ai-gateway.
+`gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `toolType` 字段。
 
-## Logging
+## 日志
 
-The bridge emits structured logs through `client.app.log()` when available.
+bridge 会在可用时通过 `client.app.log()` 输出结构化日志。
 
-Register metadata is auto-collected at runtime:
+register 元数据会在运行时自动收集：
 
-- `deviceName` comes from `os.hostname()`
-- `toolVersion` comes from `client.global.health().version`, or from a raw `GET /global/health` fallback when the injected SDK surface does not expose `global.health()`
-- `runtime.start()` fails before connect/register when the `global.health` probe fails or returns without a non-empty `version`
-- `macAddress` comes from the first usable local network interface, or `""` when unavailable
-- `macAddress` is currently a pre-provisioned field for Gateway compatibility; the server must treat `""` as missing
+- `deviceName` 来自 `os.hostname()`
+- `toolVersion` 来自 `client.global.health().version`；若注入 SDK 不暴露 `global.health()`，则回退到原始 `GET /global/health`
+- 如果 `global.health` 探测失败或返回缺少非空 `version`，`runtime.start()` 会在 connect/register 前失败
+- `macAddress` 来自第一个可用的本地网卡；若不可用则写 `""`
+- `macAddress` 当前是为 Gateway 兼容预留的字段；服务端应将 `""` 视为缺失值
 
-Important normalization and extraction failures are logged as:
+重要的归一化/提取失败会记录为：
 
 - `event.extraction_failed`
 - `downstream.normalization_failed`
 
-`BRIDGE_DEBUG=true` enables richer local debug output when log delivery is unavailable.
+`debug` 默认关闭。启用 `debug`（例如设置 `BRIDGE_DEBUG=true`）后，bridge 除了保留原有 debug 级诊断信息，还会以 `info` 级输出可读的原始 WebSocket 上下行报文，例如 `「onMessage」===>「...」`、`「sendMessage」===>「...」`，便于联调与落盘检索。即使日志投递不可用，`BRIDGE_DEBUG=true` 仍会输出本地 `console.debug` fallback 提示。
 
-## Build and Test
+## 构建与测试
 
 ```bash
 pnpm install
@@ -244,6 +268,7 @@ pnpm test
 pnpm run test:unit
 pnpm run test:integration
 pnpm run test:e2e
+pnpm run test:e2e:smoke
 pnpm run test:coverage
 ```
 
@@ -270,16 +295,16 @@ pnpm run test:coverage
 pnpm run test:integration && pnpm run test:e2e:smoke
 ```
 
-该组合命令会顺序执行：
+`pnpm run test:e2e:smoke` 通过统一 smoke 入口脚本维护场景集合，当前覆盖：
 
-- `tests/integration`
-- `tests/e2e/connect-register.test.mjs`
-- `tests/e2e/chat-stream.test.mjs`
-- `tests/e2e/permission-roundtrip.test.mjs`
+- `connect-register`
+- `chat-stream`
+- `permission-roundtrip`
+- `directory-context`
 
-适合作为修改需求代码后的主回归入口，用于验证 `message-bridge` 与 `ai-gateway` 的协议主链路仍然正确。
+适合作为需求代码修改后的主回归入口，用于验证 `message-bridge` 与 `ai-gateway` 的协议主链路仍然正确。
 
-Distribution and load verification:
+发布产物与加载验证：
 
 ```bash
 node --import tsx/esm --test tests/integration/plugin-distribution.test.mjs
@@ -287,13 +312,13 @@ pnpm run verify:opencode-load
 pnpm run verify:release
 ```
 
-失败排查顺序建议：
+失败排查建议顺序：
 
 1. 先看 `logs/verify-env-*.json`（环境缺失、版本不匹配、端口冲突）
 2. 再看 `logs/e2e-smoke-*/summary.json`（协议场景失败分类）
 3. 最后看 `logs/opencode-load-verify-*/summary.json`（OpenCode 加载失败分类）
 
-Package installation is the primary path for OpenCode:
+OpenCode 的主要安装方式是包安装：
 
 ```json
 {
@@ -301,9 +326,9 @@ Package installation is the primary path for OpenCode:
 }
 ```
 
-Single-file copy into `.opencode/plugins/` remains available as a compatibility path after `pnpm run build`.
+在执行 `pnpm run build` 后，仍保留单文件复制到 `.opencode/plugins/` 的兼容路径。
 
-## Publishing
+## 发布
 
 维护者发布流程、beta 包约定以及私仓切换方式见：
 

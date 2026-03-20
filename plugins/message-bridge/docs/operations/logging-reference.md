@@ -17,6 +17,12 @@
   - `error`：执行失败、异常、需要重点排查的问题
 - 失败策略：日志上报失败不阻断业务链路（best effort）
 
+补充说明：
+
+- `debug` 默认关闭
+- 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文
+- 这些原始报文日志固定使用 `info` 级别，避免依赖宿主 `debug` 级过滤后丢失
+
 ## 2. 字段字典
 
 `client.app.log()` 请求体（`body`）：
@@ -33,7 +39,7 @@
 | 场景 | 行为 |
 |---|---|
 | 默认（`BRIDGE_DEBUG` 未开启） | 输出脱敏后的完整字段 |
-| `BRIDGE_DEBUG=true` | 不改变 `extra` 内容；仅在 fallback / send-failed 时输出 `console.debug` 提示 |
+| `BRIDGE_DEBUG=true` | 不改变 `extra` 内容；除了 fallback / send-failed 的 `console.debug` 提示外，还会在连接层额外输出 `info` 级原始 WebSocket 报文 |
 | 脱敏键 | key 包含 `ak/sk/token/authorization/cookie/secret/password` 时值替换为 `***` |
 | 无 `client.app.log` 能力 | 不抛错；仅在 `BRIDGE_DEBUG=true` 时 `console.debug` 提示 `log-fallback` |
 | `client.app.log` 抛错 | 吞错不影响主流程；仅在 `BRIDGE_DEBUG=true` 时 `console.debug` 提示 `log-send-failed` |
@@ -198,10 +204,14 @@ sequenceDiagram
 | `gateway.disconnect.requested` | info | 主动 disconnect | `state` | `src/connection/GatewayConnection.ts:171` |
 | `gateway.send.rejected_not_connected` | warn | 非连接态发送消息 | - | `src/connection/GatewayConnection.ts:190` |
 | `gateway.send` | debug | send 前记录消息类型与大小 | `traceId`,`runtimeTraceId`,`messageType`,`payloadBytes`,`gatewayMessageId`,`eventType`,`action`,`opencodeMessageId`,`opencodePartId` | `src/connection/GatewayConnection.ts` |
+| `「sendMessage」===>「...」` | info | `debug=true` 时输出原始出站 WebSocket 报文 | 原始 JSON 文本 | `src/connection/GatewayConnection.ts` |
 | `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
 | `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
 | `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
 | `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
+| `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
+| `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
+| `「onError」===>「...」` | info | `debug=true` 时输出 WebSocket `onerror` 原始事件摘要 | 原始错误事件摘要 | `src/connection/GatewayConnection.ts` |
 | `gateway.message.ignored_non_json` | debug | 收到非 JSON 消息被忽略 | `payloadLength`,`frameBytes` | `src/connection/GatewayConnection.ts` |
 | `gateway.state.changed` | info | runtime 监听到连接状态变化 | `state` | `src/runtime/BridgeRuntime.ts:99` |
 | `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |

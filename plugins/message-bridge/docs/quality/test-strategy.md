@@ -59,7 +59,7 @@
 | `pnpm run test:unit` | `tests/unit/*.test.mjs` | 快速验证协议解析、动作路由、错误映射等纯逻辑变更 | 同上 | 是 |
 | `pnpm run test:integration` | `tests/integration/*.test.mjs` | 验证模块协作、构建产物与 setup CLI 行为 | 同上 | 是 |
 | `pnpm run test:e2e` | `tests/e2e/*.test.mjs` 全量 | 发布前或环境回归，确认真实链路端到端行为 | 本机可用回环端口；允许子进程；已安装 `opencode` CLI | 否（环境敏感） |
-| `pnpm run test:e2e:smoke` | 3 个关键场景：`connect-register/chat-stream/permission-roundtrip` | 协议主链路最小闭环验证（推荐在协议变更后执行） | 同 `test:e2e` | 否（环境敏感） |
+| `pnpm run test:e2e:smoke` | 统一 smoke 场景入口，当前覆盖 `connect-register/chat-stream/permission-roundtrip/directory-context` 4 个场景 | 协议主链路最小闭环验证（推荐在协议变更后执行） | 同 `test:e2e` | 否（环境敏感） |
 | `pnpm run test:coverage` | `unit + integration` 覆盖率统计（默认不含 e2e） | 质量门槛检查（行覆盖率阻断） | 同 `pnpm test`；本地可写 `coverage/` 目录 | 是 |
 | `pnpm run smoke:e2e` | 启动 mock gateway + `opencode serve`，执行单场景真实栈 smoke（由 `MB_SCENARIO` 控制） | 本地快速复现协议链路问题、产生日志证据 | 安装 `opencode`、`curl`；端口可用；允许子进程 | 否（调试/诊断） |
 | `pnpm run debug:e2e` | 启动真实栈并产出调试汇总日志 | 专门用于排查 e2e 失败根因，不作为质量门禁 | 同 `smoke:e2e` | 否（调试工具） |
@@ -73,6 +73,7 @@
 **说明：**
 - 默认 CI/本地门禁建议：`pnpm run verify:core`。
 - `test:e2e`、`test:e2e:smoke`、`smoke:e2e`、`debug:e2e`、`verify:opencode-load` 都依赖环境能力，不建议并入默认 `pnpm test`。
+- `test:e2e:smoke` 的场景集合由统一 smoke 入口脚本维护；若新增关键 smoke 场景，应优先更新该脚本而不是在多个入口重复修改。
 - `test:coverage` 当前会输出 `coverage_scope=unit+integration`，用于明确统计口径。
 - `verify:env` 对端口采用“可回退即通过”策略：目标端口占用但存在可用回退端口时仅告警；仅在无可用回退端口时失败（`ENV_PORT_UNAVAILABLE`）。
 
@@ -81,6 +82,7 @@
 - [ ] 执行 `pnpm run verify:env`（确认环境能力）
 - [ ] 执行 `pnpm run verify:release`（完整发布门禁）
 - [ ] 若本次改动涉及协议消息结构、路由字段或事件映射，至少执行并通过 `pnpm run test:e2e:smoke`
+- [ ] 若本次改动涉及目录上下文或 `BRIDGE_DIRECTORY`，确认 `directory-context` smoke 场景通过
 - [ ] 保留 `logs/` 目录中的 smoke/加载验证证据，便于回溯发布问题
 
 ### 1.7 执行分层
@@ -216,6 +218,22 @@
 | INT-CFG-001 | 配置发现完整链路 | 集成测试 | P0 | §5 FR-MB-09 |
 | E2E-CFG-001 | 配置发现端到端 | E2E Smoke | P0 | §5 FR-MB-09 |
 
+### 2.9.1 FR-MB-11: `BRIDGE_DIRECTORY` 测试目标
+
+当前状态说明：
+
+- 单元、集成与 e2e 已覆盖 `BRIDGE_DIRECTORY` 的核心目录上下文能力
+- 后续新增相关 action 时，需要继续复用本节测试口径
+
+| 测试用例 ID | 用例名称 | 测试类型 | 优先级 | 关联 PRD 章节 |
+|-------------|----------|----------|--------|---------------|
+| UT-DIR-001 | `effectiveDirectory` 优先级解析 | 单元测试 | P0 | §5 FR-MB-11 |
+| UT-DIR-002 | `workspacePath` 与 `effectiveDirectory` 语义解耦 | 单元测试 | P0 | §5 FR-MB-11 |
+| UT-DIR-003 | `create_session` 仅映射追溯后的正式 payload 字段 | 单元测试 | P0 | §5 FR-MB-11 |
+| INT-DIR-001 | 相关下行 SDK 调用复用同一目录上下文 | 集成测试 | P0 | §5 FR-MB-11 |
+| E2E-DIR-001 | create + chat 在同一目录上下文下执行 | E2E Smoke | P0 | §5 FR-MB-11 |
+| E2E-DIR-002 | permission/question 路径保持目录上下文一致 | E2E Smoke | P1 | §5 FR-MB-11 |
+
 ### 2.10 Flat Protocol 上下行约束
 
 | 测试用例 ID | 用例名称 | 测试类型 | 优先级 | 关联 PRD 章节 |
@@ -232,6 +250,15 @@
 ---
 
 ## 3. 单元测试用例详情
+
+### 3.0 `BRIDGE_DIRECTORY` 覆盖说明
+
+当前测试已覆盖：
+
+- `effectiveDirectory` 优先级解析
+- `workspacePath` 与目录上下文解耦
+- `create_session.payload` 收敛为追溯后的正式字段集合
+- `create_session` 与后续 chat 共享同一目录上下文
 
 ### 3.1 连接层测试 (UT-CONN)
 

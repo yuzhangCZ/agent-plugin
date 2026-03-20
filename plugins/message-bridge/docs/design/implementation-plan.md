@@ -128,7 +128,7 @@
 
 ### Concrete Work Items
 1. 定义 compat 层输入输出接口
-2. 在 `chat`、`question_reply`、`permission_reply` 成功后接入 compat 判定，并在需要时发送 `tool_done`
+2. 在 `chat` 成功后接入 compat 判定，并在需要时发送 `tool_done`
 3. 在 `session.idle` 上游路径保留 `tool_event` 透传，再由 compat 兜底补发 `tool_done`
 4. 在 compat 内部维护“已主动完成，等待 idle 去重”的状态集合
 5. 增加 compat 专属日志，避免与主协议日志混淆
@@ -136,8 +136,8 @@
 
 ### Test Plan
 - `chat` 成功后发送 `tool_done`
-- `question_reply` 成功后发送 `tool_done`
-- `permission_reply` 成功后发送 `tool_done`
+- `question_reply` 成功不发送 `tool_done`
+- `permission_reply` 成功不发送 `tool_done`
 - `create_session` 成功不发送 `tool_done`
 - `close_session` / `abort_session` 成功不发送 `tool_done`
 - 仅收到 `session.idle` 时会兜底发送 `tool_done`
@@ -223,6 +223,30 @@ Max Concurrent: 5 (Wave 2 & 3 have 5 parallel tasks each)
 > Implementation + Test = ONE Task. Never separate.
 > EVERY task MUST have: Recommended Agent Profile + Parallelization info + QA Scenarios.
 > **A task WITHOUT QA Scenarios is INCOMPLETE. No exceptions.**
+
+- [ ] 技术债: 收敛 official OpenCode SDK 与宿主 legacy client 的适配边界
+
+  **现状**:
+  - `message-bridge` 内部 action / runtime 类型已按 official OpenCode SDK 语义建模
+  - `SdkAdapter` 仍会把这些参数统一转换为宿主当前兼容的 legacy `{ path, body, query }` 形状
+  - 该行为与历史宿主兼容逻辑一致，但不等于已经原生支持 official `@opencode-ai/sdk` client
+  - `permission_reply` / `question_reply` 仍依赖 deprecated 或 raw `_client` 能力，未完全收敛到统一 façade
+
+  **风险**:
+  - 若宿主未来直接注入 official SDK client，而不是当前 legacy-compatible client，`session.create/prompt/abort/delete` 可能因参数被错误重写而失效
+  - 当前 capability 检测将 `postSessionIdPermissionsPermissionId`、`_client.get`、`_client.post` 视为必需能力，可能错误拒绝只暴露 official 高层接口的宿主
+
+  **后续处理方向**:
+  - 显式建模 `HostLegacyClient` / `LegacyRequestShape`
+  - 在 `SdkAdapter` 中区分 official client 与 legacy client，再决定是否做参数映射
+  - 将 `permission_reply` / `question_reply` 收口到统一 façade，避免 action 直接依赖 raw client 细节
+  - 增加宿主兼容契约测试，覆盖 official / legacy 两类 client 形状
+
+  **验收标准**:
+  - bridge 能明确区分“official SDK 直连模式”与“legacy host 适配模式”
+  - 不再对 official SDK client 无条件重写 `session.*` 参数形状
+  - capability 检测与测试矩阵能覆盖两类宿主接口面
+  - 文档明确说明 bridge 内部正式语义与宿主兼容语义的边界
 
 - [x] 1. 项目脚手架 + 配置管理
 

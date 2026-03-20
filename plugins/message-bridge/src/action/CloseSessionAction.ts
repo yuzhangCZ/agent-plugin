@@ -9,6 +9,7 @@ import {
   safeExecute,
   stateToErrorCode
 } from '../types/index.js';
+import { attachDirectory } from './directory.js';
 
 /**
  * Concrete implementation of close_session action.
@@ -23,6 +24,7 @@ export class CloseSessionAction implements Action<'close_session', CloseSessionP
     const startedAt = Date.now();
     context.logger?.info('action.close_session.started', {
       toolSessionId: payload.toolSessionId,
+      effectiveDirectory: context.effectiveDirectory,
     });
     try {
       if (context.connectionState !== 'READY') {
@@ -36,9 +38,9 @@ export class CloseSessionAction implements Action<'close_session', CloseSessionP
 
       const client = context.client;
       const executionResult = await safeExecute(
-        client.session.delete({
-          path: { id: payload.toolSessionId }
-        }),
+        client.session.delete(attachDirectory({
+          sessionID: payload.toolSessionId,
+        }, context.effectiveDirectory)),
         (error) => `Close session failed: ${error instanceof Error ? error.message : String(error)}`
       );
 
