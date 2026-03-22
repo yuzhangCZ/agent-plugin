@@ -133,6 +133,27 @@ Supported upstream event types:
 
 Default allowlist is the same exact list.
 
+### 3.1 Upstream Data Model
+
+The upstream path uses three distinct models:
+
+- `RawUpstreamEvent`
+  - the original OpenCode event as received from the SDK
+  - raw field paths stay owned by the upstream extractor
+- `NormalizedUpstreamEvent`
+  - the bridge-internal normalized event
+  - contains the extracted `common` / `extra` fields plus the raw event for downstream projection
+- `GatewayProjectedEvent`
+  - the transport-safe upstream event shape sent through `tool_event.event`
+  - owns the gateway-facing transport shape, including `message.updated` projection rules
+  - current implementation lives in `src/transport/upstream/*`
+
+The current boundary rule is:
+
+- upstream extraction decides what the bridge can understand
+- transport projection decides what the gateway can send
+- runtime only orchestrates the flow between them
+
 The bridge extracts `toolSessionId` from the normalized event and then emits:
 
 ```ts
@@ -143,7 +164,7 @@ The bridge extracts `toolSessionId` from the normalized event and then emits:
 }
 ```
 
-`message.updated` is the only exception where bridge transport applies a runtime projection before send:
+`message.updated` is the only current exception where bridge transport applies an upstream projector rule before send:
 
 - keep `properties.info.id/sessionID/role/time/model`
 - keep `summary.additions/deletions/files`

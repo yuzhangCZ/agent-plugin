@@ -7,6 +7,7 @@
 | Boundary contracts are explicit | `src/contracts/*` |
 | Schema owner is centralized | `src/protocol/*` |
 | Runtime does orchestration only | `src/runtime/BridgeRuntime.ts` |
+| Upstream transport projection is explicit | `src/transport/upstream/*` |
 | Actions are execute-only | `src/action/*` |
 | Upstream allowlist is exact | `DEFAULT_EVENT_ALLOWLIST` in `contracts/upstream-events.ts` |
 | Default config is centralized | `src/config/default-config.ts` |
@@ -53,13 +54,29 @@
 | Release verification chain | `pnpm run verify:release` |
 | Release rehearsal chain | `pnpm run verify:release:dry` |
 
-## 5. PRD Alignment Addendum
+## 5. Upstream Projection Mapping
+
+| Event type | Projection layer | Behavior evidence |
+|---|---|---|
+| `message.updated` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` + `MessageUpdatedProjector.ts` | Keeps lightweight summary metadata and drops `summary.diffs[*].before/after` before websocket send |
+| `message.part.updated` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `message.part.delta` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `message.part.removed` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `session.status` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `session.idle` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `session.updated` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `session.error` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `permission.updated` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `permission.asked` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+| `question.asked` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
+
+## 6. PRD Alignment Addendum
 
 | PRD requirement | Implementation | Verification |
 |---|---|---|
-| PRD §12 `message.updated` transport pruning keeps lightweight summary fields and drops `before/after` | `src/runtime/BridgeRuntime.ts` runtime transport projection | `tests/unit/plugin-event-relay.test.mjs` |
-| PRD §12 transport pruning must not mutate the original upstream event | `src/runtime/BridgeRuntime.ts` copies projected payload before send | `tests/unit/plugin-event-relay.test.mjs` |
-| PRD §12 payload reduction must stay below the defined threshold | `src/runtime/BridgeRuntime.ts` projected `tool_event` payload | `tests/unit/plugin-event-relay.test.mjs` |
+| PRD §12 `message.updated` transport pruning keeps lightweight summary fields and drops `before/after` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` + `MessageUpdatedProjector.ts` | `tests/unit/upstream-transport-projector.test.mjs` |
+| PRD §12 transport pruning must not mutate the original upstream event | `src/transport/upstream/MessageUpdatedProjector.ts` returns a projected copy before send | `tests/unit/upstream-transport-projector.test.mjs` |
+| PRD §12 payload reduction must stay below the defined threshold | `src/runtime/BridgeRuntime.ts` forwards projected `tool_event` payload and preserves original/transport byte diagnostics | `tests/integration/protocol-message-updated-large-payload.test.mjs` |
 
 Gate classification:
 
@@ -69,7 +86,7 @@ Gate classification:
 - Environment-dependent optional gates: `test:e2e`, `test:e2e:smoke`, `verify:opencode-load`
 - Diagnostic-only tools: `smoke:e2e`, `debug:e2e`, `logs:fetch`
 
-## 6. Current Conclusions
+## 7. Current Conclusions
 
 The current implementation satisfies the main refactor goal:
 
