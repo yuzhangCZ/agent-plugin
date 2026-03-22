@@ -612,5 +612,189 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.ok(closeLog.extra.lastPayloadBytes > 0);
     assert.strictEqual(closeLog.extra.lastEventType, 'message.updated');
     assert.strictEqual(closeLog.extra.lastOpencodeMessageId, 'op-msg-last-1');
+    assert.deepStrictEqual(closeLog.extra.recentOutboundMessages, [
+      {
+        eventType: 'message.updated',
+        toolSessionId: undefined,
+        opencodeMessageId: 'op-msg-last-1',
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify({
+            type: 'tool_event',
+            sessionId: 'skill-1',
+            event: { type: 'message.updated' },
+            envelope: { messageId: 'bridge-last-1' },
+          }),
+          'utf8',
+        ),
+      },
+    ]);
+  });
+
+  test('keeps only the latest three outbound message summaries in close logs', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    for (const [index, eventType] of ['message.updated', 'session.updated', 'session.status'].entries()) {
+      conn.send(
+        {
+          type: 'tool_event',
+          event: { type: eventType },
+        },
+        {
+          traceId: `bridge-${index}`,
+          gatewayMessageId: `bridge-${index}`,
+          toolSessionId: `tool-${index}`,
+          eventType,
+          opencodeMessageId: `op-msg-${index}`,
+        },
+      );
+    }
+    conn.disconnect();
+
+    const closeLog = entries.find((entry) => entry.message === 'gateway.close');
+    assert.notStrictEqual(closeLog, undefined);
+    assert.deepStrictEqual(closeLog.extra.recentOutboundMessages, [
+      {
+        eventType: 'message.updated',
+        toolSessionId: 'tool-0',
+        opencodeMessageId: 'op-msg-0',
+        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'message.updated' } }), 'utf8'),
+      },
+      {
+        eventType: 'session.updated',
+        toolSessionId: 'tool-1',
+        opencodeMessageId: 'op-msg-1',
+        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+      },
+      {
+        eventType: 'session.status',
+        toolSessionId: 'tool-2',
+        opencodeMessageId: 'op-msg-2',
+        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+      },
+    ]);
+  });
+
+  test('warns when outbound payload exceeds the large payload threshold', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    conn.send(
+      {
+        type: 'tool_event',
+        event: { type: 'message.updated', content: 'x'.repeat(1024 * 1024) },
+      },
+      {
+        traceId: 'bridge-large',
+        gatewayMessageId: 'bridge-large',
+        toolSessionId: 'tool-large',
+        eventType: 'message.updated',
+        opencodeMessageId: 'op-msg-large',
+      },
+    );
+
+    const warnLog = entries.find((entry) => entry.message === 'gateway.send.large_payload');
+    assert.notStrictEqual(warnLog, undefined);
+    assert.strictEqual(warnLog.extra.eventType, 'message.updated');
+    assert.strictEqual(warnLog.extra.toolSessionId, 'tool-large');
+    assert.strictEqual(warnLog.extra.opencodeMessageId, 'op-msg-large');
+    assert.ok(warnLog.extra.payloadBytes >= 1024 * 1024);
+  });
+
+  test('excludes control messages from recent outbound summaries', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    conn.send(
+      {
+        type: 'tool_event',
+        event: { type: 'session.updated' },
+      },
+      {
+        gatewayMessageId: 'business-1',
+        toolSessionId: 'tool-business-1',
+        eventType: 'session.updated',
+        opencodeMessageId: 'op-msg-business-1',
+      },
+    );
+    conn.disconnect();
+
+    const closeLog = entries.find((entry) => entry.message === 'gateway.close');
+    assert.notStrictEqual(closeLog, undefined);
+    assert.deepStrictEqual(closeLog.extra.recentOutboundMessages, [
+      {
+        eventType: 'session.updated',
+        toolSessionId: 'tool-business-1',
+        opencodeMessageId: 'op-msg-business-1',
+        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+      },
+    ]);
+  });
+
+  test('clears outbound summaries before an automatic reconnect', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push(
+      { closeAfterOpenMs: 0, closeCode: 1009, closeReason: 'too-big', wasClean: false },
+      { open: true },
+    );
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnectBaseMs: 5,
+      reconnectMaxMs: 5,
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await conn.connect();
+    conn.send(
+      { type: 'tool_event', event: { type: 'message.updated' } },
+      {
+        gatewayMessageId: 'before-reconnect',
+        toolSessionId: 'tool-before',
+        eventType: 'message.updated',
+        opencodeMessageId: 'op-msg-before',
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 30));
+
+    conn.send(
+      { type: 'tool_event', event: { type: 'session.status' } },
+      {
+        gatewayMessageId: 'after-reconnect',
+        toolSessionId: 'tool-after',
+        eventType: 'session.status',
+        opencodeMessageId: 'op-msg-after',
+      },
+    );
+    conn.disconnect();
+
+    const closeLogs = entries.filter((entry) => entry.message === 'gateway.close');
+    assert.ok(closeLogs.length >= 2);
+    const finalCloseLog = closeLogs.at(-1);
+    assert.notStrictEqual(finalCloseLog, undefined);
+    assert.deepStrictEqual(finalCloseLog.extra.recentOutboundMessages, [
+      {
+        eventType: 'session.status',
+        toolSessionId: 'tool-after',
+        opencodeMessageId: 'op-msg-after',
+        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+      },
+    ]);
   });
 });

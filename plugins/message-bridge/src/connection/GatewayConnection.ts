@@ -186,6 +186,25 @@ function isGatewayRejectedCloseCode(code: number | undefined): boolean {
   return typeof code === 'number' && GATEWAY_REJECTION_CLOSE_CODES.has(code);
 }
 
+const LARGE_PAYLOAD_WARN_THRESHOLD_BYTES = 1024 * 1024;
+const RECENT_OUTBOUND_SUMMARY_LIMIT = 3;
+
+interface MessageSummary {
+  direction: 'sent' | 'received';
+  messageType?: string;
+  messageId?: string;
+  payloadBytes?: number;
+  eventType?: string;
+  opencodeMessageId?: string;
+}
+
+interface OutboundMessageSummary {
+  eventType?: string;
+  toolSessionId?: string;
+  opencodeMessageId?: string;
+  payloadBytes: number;
+}
+
 export class DefaultGatewayConnection extends EventEmitter implements GatewayConnection {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -193,14 +212,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private manuallyDisconnected = false;
   private state: ConnectionState = 'DISCONNECTED';
-  private lastMessageSummary: {
-    direction: 'sent' | 'received';
-    messageType?: string;
-    messageId?: string;
-    payloadBytes?: number;
-    eventType?: string;
-    opencodeMessageId?: string;
-  } | null = null;
+  private lastMessageSummary: MessageSummary | null = null;
+  private readonly recentOutboundSummaries: OutboundMessageSummary[] = [];
 
   constructor(private readonly options: GatewayConnectionOptions) {
     super();
@@ -222,6 +235,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       throw new Error('gateway_connection_aborted');
     }
 
+    this.lastMessageSummary = null;
+    this.recentOutboundSummaries.length = 0;
     this.setState('CONNECTING');
 
     return new Promise((resolve, reject) => {
@@ -305,6 +320,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             lastPayloadBytes: this.lastMessageSummary?.payloadBytes,
             lastEventType: this.lastMessageSummary?.eventType,
             lastOpencodeMessageId: this.lastMessageSummary?.opencodeMessageId,
+            recentOutboundMessages: this.recentOutboundSummaries.map((summary) => ({ ...summary })),
           });
           if (!opened) {
             finalizeReject(new Error('gateway_websocket_closed_before_open'));
@@ -410,6 +426,22 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       eventType: logContext?.eventType,
       opencodeMessageId: logContext?.opencodeMessageId,
     };
+    if (!isControlMessage) {
+      this.recordOutboundSummary({
+        eventType: logContext?.eventType,
+        toolSessionId: logContext?.toolSessionId,
+        opencodeMessageId: logContext?.opencodeMessageId,
+        payloadBytes,
+      });
+    }
+    if (!isControlMessage && payloadBytes >= LARGE_PAYLOAD_WARN_THRESHOLD_BYTES) {
+      this.options.logger?.warn('gateway.send.large_payload', {
+        eventType: logContext?.eventType,
+        toolSessionId: logContext?.toolSessionId,
+        opencodeMessageId: logContext?.opencodeMessageId,
+        payloadBytes,
+      });
+    }
     this.options.logger?.debug('gateway.send', {
       ...buildGatewaySendLogExtra(messageType, payloadBytes, logContext),
     });
@@ -551,6 +583,13 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       return undefined;
     }
     return typeof message.messageId === 'string' ? message.messageId : undefined;
+  }
+
+  private recordOutboundSummary(summary: OutboundMessageSummary): void {
+    this.recentOutboundSummaries.push(summary);
+    if (this.recentOutboundSummaries.length > RECENT_OUTBOUND_SUMMARY_LIMIT) {
+      this.recentOutboundSummaries.shift();
+    }
   }
 
   private handleControlMessage(message: GatewayControlMessage): void {

@@ -131,6 +131,15 @@ describe('plugin contract', () => {
     const originalBridgeAuthSk = process.env.BRIDGE_AUTH_SK;
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-it-home-'));
     const fakeWorkspace = await mkdtemp(join(tmpdir(), 'mb-it-workspace-'));
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
     process.env.HOME = fakeHome;
     process.env.BRIDGE_ENABLED = 'true';
     delete process.env.BRIDGE_AUTH_AK;
@@ -139,17 +148,24 @@ describe('plugin contract', () => {
 
     try {
       const isolatedInput = mockInput({
+        client,
         directory: fakeWorkspace,
         worktree: fakeWorkspace,
       });
-      await assert.rejects(MessageBridgePlugin(isolatedInput));
+      const degradedHooks = await MessageBridgePlugin(isolatedInput);
+      assert.strictEqual(typeof degradedHooks.event, 'function');
       assert.strictEqual(getRuntime(), null);
+      const initFailureLogs = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
+      assert.strictEqual(initFailureLogs.length, 1);
+      assert.strictEqual(typeof initFailureLogs[0].extra.errorDetail, 'string');
+      assert.strictEqual(typeof initFailureLogs[0].extra.errorType, 'string');
+      assert.strictEqual(typeof initFailureLogs[0].extra.runtimeTraceId, 'string');
 
       process.env.BRIDGE_ENABLED = 'false';
       delete process.env.BRIDGE_GATEWAY_URL;
       const hooks = await MessageBridgePlugin(isolatedInput);
       assert.strictEqual(typeof hooks.event, 'function');
-      assert.notStrictEqual(getRuntime(), undefined);
+      assert.notStrictEqual(getRuntime(), null);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -173,6 +189,40 @@ describe('plugin contract', () => {
       }
       await rm(fakeHome, { recursive: true, force: true });
       await rm(fakeWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime event failures are non-fatal and logged by plugin boundary', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    const hooks = await MessageBridgePlugin(mockInput({ client }));
+    const runtime = getRuntime();
+    assert.ok(runtime !== null);
+
+    const originalHandleEvent = runtime.handleEvent.bind(runtime);
+    runtime.handleEvent = async () => {
+      throw new Error('boom-event');
+    };
+
+    try {
+      await assert.doesNotReject(hooks.event({ event: { type: 'message.updated' } }));
+      await new Promise((r) => setTimeout(r, 10));
+      const eventFailureLogs = logs.filter((entry) => entry?.message === 'plugin.event.failed_non_fatal');
+      assert.strictEqual(eventFailureLogs.length, 1);
+      assert.strictEqual(typeof eventFailureLogs[0].extra.errorDetail, 'string');
+      assert.strictEqual(typeof eventFailureLogs[0].extra.errorType, 'string');
+      assert.strictEqual(typeof eventFailureLogs[0].extra.runtimeTraceId, 'string');
+      assert.strictEqual(eventFailureLogs[0].extra.eventType, 'message.updated');
+    } finally {
+      runtime.handleEvent = originalHandleEvent;
     }
   });
 
