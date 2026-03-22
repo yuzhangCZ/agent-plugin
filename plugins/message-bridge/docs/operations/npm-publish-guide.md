@@ -20,6 +20,7 @@
   - `README.md`
   - `LICENSE`
 - runtime `dependencies` 为空，安装时不会额外拉取间接依赖。
+- `release/` 是构建产物目录，不纳入 Git 版本管理；需要时通过 `npm run build` 重新生成。
 
 ## 2. 发布前准备
 
@@ -57,6 +58,7 @@ npm publish
 - `npm run build:dev` 产出调试包：`release/message-bridge.plugin.js` + `.map`，不压缩，便于定位问题。
 - `npm test` 用于拦截发布前回归。
 - `npm pack --dry-run` 用于确认最终 tarball 只包含预期文件。
+- `pnpm run verify:release-tracking` 会阻止将 `plugins/message-bridge/release/` 提交到仓库。
 - 首次发布 scoped 公有包时使用：
 
 ```bash
