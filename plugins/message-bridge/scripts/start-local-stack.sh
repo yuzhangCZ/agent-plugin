@@ -5,6 +5,11 @@ set -euo pipefail
 # - avoids attaching to old JVM/node processes from previous runs
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+INTEGRATION_ROOT="${INTEGRATION_ROOT:-${ROOT_DIR}/integration/opencode-cui}"
+AI_GATEWAY_DIR="${AI_GATEWAY_DIR:-${INTEGRATION_ROOT}/ai-gateway}"
+SKILL_SERVER_DIR="${SKILL_SERVER_DIR:-${INTEGRATION_ROOT}/skill-server}"
+SKILL_MINIAPP_DIR="${SKILL_MINIAPP_DIR:-${INTEGRATION_ROOT}/skill-miniapp}"
+TEST_SIMULATOR_DIR="${TEST_SIMULATOR_DIR:-${INTEGRATION_ROOT}/test-simulator}"
 LOG_DIR="${ROOT_DIR}/logs/local-stack"
 PID_DIR="${LOG_DIR}/pids"
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
@@ -34,6 +39,15 @@ require_cmd mysql
 require_cmd mvn
 require_cmd npm
 require_cmd curl
+
+require_dir() {
+  local dir="$1"
+  local name="$2"
+  if [[ ! -d "${dir}" ]]; then
+    echo "Missing required directory for ${name}: ${dir}" >&2
+    exit 1
+  fi
+}
 
 MYSQL_CMD=(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u"${DB_USER}")
 if [[ -n "${DB_PASSWORD}" ]]; then
@@ -259,13 +273,20 @@ reset_local_databases
 run_sql "CREATE DATABASE IF NOT EXISTS ${AI_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 run_sql "CREATE DATABASE IF NOT EXISTS ${SKILL_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
+require_dir "${AI_GATEWAY_DIR}" "ai-gateway"
+require_dir "${SKILL_SERVER_DIR}" "skill-server"
+require_dir "${SKILL_MINIAPP_DIR}" "skill-miniapp"
+if [[ "${START_TEST_SIMULATOR}" == "1" ]]; then
+  require_dir "${TEST_SIMULATOR_DIR}" "test-simulator"
+fi
+
 if ! table_exists "${AI_DB}" "agent_connection"; then
   echo "[db] Init ${AI_DB}.agent_connection"
-  "${MYSQL_CMD[@]}" "${AI_DB}" < "${ROOT_DIR}/ai-gateway/src/main/resources/db/migration/V1__gateway.sql"
+  "${MYSQL_CMD[@]}" "${AI_DB}" < "${AI_GATEWAY_DIR}/src/main/resources/db/migration/V1__gateway.sql"
 fi
 if ! table_exists "${AI_DB}" "ak_sk_credential"; then
   echo "[db] Init ${AI_DB}.ak_sk_credential"
-  "${MYSQL_CMD[@]}" "${AI_DB}" < "${ROOT_DIR}/ai-gateway/src/main/resources/db/migration/V2__ak_sk_credential.sql"
+  "${MYSQL_CMD[@]}" "${AI_DB}" < "${AI_GATEWAY_DIR}/src/main/resources/db/migration/V2__ak_sk_credential.sql"
 fi
 if table_exists "${AI_DB}" "agent_connection"; then
   echo "[db] Reconcile ${AI_DB}.agent_connection schema"
@@ -284,11 +305,11 @@ if table_exists "${AI_DB}" "agent_connection"; then
 fi
 if ! table_exists "${SKILL_DB}" "skill_definition"; then
   echo "[db] Init ${SKILL_DB}.skill_definition/skill_session/skill_message"
-  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${ROOT_DIR}/skill-server/src/main/resources/db/migration/V1__skill.sql"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V1__skill.sql"
 fi
 if ! table_exists "${SKILL_DB}" "skill_message_part"; then
   echo "[db] Init ${SKILL_DB}.skill_message_part (V2)"
-  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${ROOT_DIR}/skill-server/src/main/resources/db/migration/V2__message_parts.sql"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V2__message_parts.sql"
 fi
 
 if table_exists "${SKILL_DB}" "skill_session"; then
@@ -339,7 +360,7 @@ start_bg \
   "8081" \
   "${PID_DIR}/ai-gateway.pid" \
   "${LOG_DIR}/ai-gateway.log" \
-  "cd '${ROOT_DIR}/ai-gateway' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_AI_GATEWAY_DB='${AI_DB}' SPRING_DATASOURCE_USERNAME='${DB_USER}' SPRING_DATASOURCE_PASSWORD='${DB_PASSWORD}' mvn spring-boot:run"
+  "cd '${AI_GATEWAY_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_AI_GATEWAY_DB='${AI_DB}' SPRING_DATASOURCE_USERNAME='${DB_USER}' SPRING_DATASOURCE_PASSWORD='${DB_PASSWORD}' mvn spring-boot:run"
 
 echo "[3/4] Start skill-server"
 start_bg \
@@ -347,7 +368,7 @@ start_bg \
   "8082" \
   "${PID_DIR}/skill-server.pid" \
   "${LOG_DIR}/skill-server.log" \
-  "cd '${ROOT_DIR}/skill-server' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_USERNAME='${DB_USER}' MYSQL_PASSWORD='${DB_PASSWORD}' MYSQL_SKILL_DB='${SKILL_DB}' mvn spring-boot:run"
+  "cd '${SKILL_SERVER_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_USERNAME='${DB_USER}' MYSQL_PASSWORD='${DB_PASSWORD}' MYSQL_SKILL_DB='${SKILL_DB}' mvn spring-boot:run"
 
 echo "[4/4] Start skill-miniapp"
 start_bg \
@@ -355,7 +376,7 @@ start_bg \
   "${MINIAPP_PORT}" \
   "${PID_DIR}/skill-miniapp.pid" \
   "${LOG_DIR}/skill-miniapp.log" \
-  "cd '${ROOT_DIR}/skill-miniapp' && if [[ ! -d node_modules ]]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port ${MINIAPP_PORT}"
+  "cd '${SKILL_MINIAPP_DIR}' && if [[ ! -d node_modules ]]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port ${MINIAPP_PORT}"
 
 if [[ "${START_TEST_SIMULATOR}" == "1" ]]; then
   echo "[extra] Start test-simulator"
@@ -364,7 +385,7 @@ if [[ "${START_TEST_SIMULATOR}" == "1" ]]; then
     "${SIMULATOR_PORT}" \
     "${PID_DIR}/test-simulator.pid" \
     "${LOG_DIR}/test-simulator.log" \
-    "cd '${ROOT_DIR}/test-simulator' && if [[ ! -d node_modules ]]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port ${SIMULATOR_PORT}"
+    "cd '${TEST_SIMULATOR_DIR}' && if [[ ! -d node_modules ]]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port ${SIMULATOR_PORT}"
 fi
 
 post_start_self_check
