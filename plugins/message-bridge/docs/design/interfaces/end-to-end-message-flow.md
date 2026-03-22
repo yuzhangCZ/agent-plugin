@@ -842,7 +842,7 @@ type NormalizedUpstreamEvent = {
 
 | OpenCode 原始事件 | B4 关键源字段 | B3 标准上行报文 | B2 推荐消费字段 | B1 推荐 UI 字段 |
 |---|---|---|---|---|
-| `message.updated` | `properties.info.sessionID` `properties.info.id` `properties.info.role` | `tool_event { toolSessionId, event }` | `type:'message_updated'` `welinkSessionId` `toolSessionId` `messageId` `role` | `type:'message.updated'` `messageId` `role` |
+| `message.updated` | `properties.info.sessionID` `properties.info.id` `properties.info.role` | `tool_event { toolSessionId, event }`<br/>传输裁剪：保留轻量 `summary.diffs`，移除 `before/after` | `type:'message_updated'` `welinkSessionId` `toolSessionId` `messageId` `role` | `type:'message.updated'` `messageId` `role` |
 | `message.part.updated` | `properties.part.sessionID` `properties.part.messageID` `properties.part.id` `properties.part.type` | `tool_event` | `type:'message_part_updated'` `welinkSessionId` `toolSessionId` `messageId` `partId` `partType` | `type:'message.part.updated'` `messageId` `partId` `partType` |
 | `message.part.delta` | `properties.sessionID` `properties.messageID` `properties.partID` `properties.delta` | `tool_event` | `type:'message_delta'` `welinkSessionId` `toolSessionId` `messageId` `partId` `delta` | `type:'assistant.delta'` `messageId` `partId` `text` |
 | `message.part.removed` | `properties.sessionID` `properties.messageID` `properties.partID` | `tool_event` | `type:'message_part_removed'` `welinkSessionId` `toolSessionId` `messageId` `partId` | `type:'message.part.removed'` `messageId` `partId` |
@@ -872,6 +872,18 @@ type NormalizedUpstreamEvent = {
 | SDK 调用失败 | normalized action | action 捕获并映射错误 | `tool_error` |
 | `GET /question` 找不到唯一请求 | normalized `question_reply` | bridge 内部解析失败 | `tool_error` |
 | OpenCode 事件字段缺失 | raw event | `extractUpstreamEvent` 失败 | 事件丢弃，不发 `tool_event` |
+
+### 6.8 `message.updated` 传输裁剪说明
+
+`message.updated` 在 OpenCode 本地事件中可能携带完整 `summary.diffs[*].before/after`。  
+bridge 对 gateway 发送时会执行一层 transport projection：
+
+- 保留消息标识、会话标识、角色、时间、模型
+- 保留 `summary.additions/deletions/files`
+- 保留每个文件的 `file/status/additions/deletions`
+- 删除 `before/after` 正文
+
+该裁剪只作用于 bridge 出站 payload，不改变 upstream extractor 的原始事件语义。
 
 ## 7. 推荐文档阅读顺序
 

@@ -53,6 +53,14 @@
 | Release verification chain | `pnpm run verify:release` |
 | Release rehearsal chain | `pnpm run verify:release:dry` |
 
+## 5. PRD Alignment Addendum
+
+| PRD requirement | Implementation | Verification |
+|---|---|---|
+| PRD §12 `message.updated` transport pruning keeps lightweight summary fields and drops `before/after` | `src/runtime/BridgeRuntime.ts` runtime transport projection | `tests/unit/plugin-event-relay.test.mjs` |
+| PRD §12 transport pruning must not mutate the original upstream event | `src/runtime/BridgeRuntime.ts` copies projected payload before send | `tests/unit/plugin-event-relay.test.mjs` |
+| PRD §12 payload reduction must stay below the defined threshold | `src/runtime/BridgeRuntime.ts` projected `tool_event` payload | `tests/unit/plugin-event-relay.test.mjs` |
+
 Gate classification:
 
 - Mandatory by default: `verify:core`
@@ -61,7 +69,7 @@ Gate classification:
 - Environment-dependent optional gates: `test:e2e`, `test:e2e:smoke`, `verify:opencode-load`
 - Diagnostic-only tools: `smoke:e2e`, `debug:e2e`, `logs:fetch`
 
-## 5. Current Conclusions
+## 6. Current Conclusions
 
 The current implementation satisfies the main refactor goal:
 

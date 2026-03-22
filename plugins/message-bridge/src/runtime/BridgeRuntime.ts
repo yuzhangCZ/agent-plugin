@@ -266,23 +266,29 @@ export class BridgeRuntime {
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
-    this.gatewayConnection.send(
-      {
-        type: 'tool_event',
-        toolSessionId: normalized.common.toolSessionId,
-        event: normalized.raw,
-      },
-      {
-        traceId: bridgeMessageId,
-        runtimeTraceId: this.logger.getTraceId(),
-        gatewayMessageId: bridgeMessageId,
-        toolSessionId: normalized.common.toolSessionId,
-        eventType: normalized.common.eventType,
-        opencodeMessageId: eventFields.opencodeMessageId,
-        opencodePartId: eventFields.opencodePartId,
-        toolCallId: eventFields.toolCallId ?? undefined,
-      },
-    );
+    const transportEvent = this.buildTransportEvent(normalized);
+    const originalEnvelope = {
+      type: 'tool_event',
+      toolSessionId: normalized.common.toolSessionId,
+      event: normalized.raw,
+    };
+    const transportEnvelope = {
+      type: 'tool_event',
+      toolSessionId: normalized.common.toolSessionId,
+      event: transportEvent,
+    };
+    this.gatewayConnection.send(transportEnvelope, {
+      traceId: bridgeMessageId,
+      runtimeTraceId: this.logger.getTraceId(),
+      gatewayMessageId: bridgeMessageId,
+      toolSessionId: normalized.common.toolSessionId,
+      eventType: normalized.common.eventType,
+      opencodeMessageId: eventFields.opencodeMessageId,
+      opencodePartId: eventFields.opencodePartId,
+      toolCallId: eventFields.toolCallId ?? undefined,
+      originalPayloadBytes: Buffer.byteLength(JSON.stringify(originalEnvelope), 'utf8'),
+      transportPayloadBytes: Buffer.byteLength(JSON.stringify(transportEnvelope), 'utf8'),
+    });
     forwardingLogger.debug('event.forwarded');
 
     if (normalized.common.eventType === 'session.idle') {
@@ -627,6 +633,75 @@ export class BridgeRuntime {
 
   private buildEventLogFields(normalized: NormalizedUpstreamEvent): EventLogFields {
     return this.buildEventForwardingDetail(normalized);
+  }
+
+  private buildTransportEvent(normalized: NormalizedUpstreamEvent): BridgeEvent {
+    if (normalized.common.eventType !== 'message.updated') {
+      return normalized.raw;
+    }
+
+    return this.pruneMessageUpdatedEvent(normalized.raw);
+  }
+
+  private pruneMessageUpdatedEvent(raw: BridgeEvent): BridgeEvent {
+    const info = this.getMessageUpdatedInfo(raw);
+    if (!info) {
+      return raw;
+    }
+
+    const summary = this.getRecord(info.summary);
+    const prunedSummary = summary
+      ? {
+          additions: typeof summary.additions === 'number' ? summary.additions : undefined,
+          deletions: typeof summary.deletions === 'number' ? summary.deletions : undefined,
+          files: typeof summary.files === 'number' ? summary.files : undefined,
+          diffs: Array.isArray(summary.diffs)
+            ? summary.diffs
+                .map((diff) => this.pruneSummaryDiff(diff))
+                .filter((diff): diff is Record<string, unknown> => diff !== null)
+            : undefined,
+        }
+      : undefined;
+
+    return {
+      type: raw.type,
+      properties: {
+        info: {
+          id: typeof info.id === 'string' ? info.id : undefined,
+          sessionID: typeof info.sessionID === 'string' ? info.sessionID : undefined,
+          role: typeof info.role === 'string' ? info.role : undefined,
+          time: this.getRecord(info.time) ?? undefined,
+          model: this.getRecord(info.model) ?? undefined,
+          summary: prunedSummary,
+        },
+      },
+    };
+  }
+
+  private pruneSummaryDiff(diff: unknown): Record<string, unknown> | null {
+    const record = this.getRecord(diff);
+    if (!record) {
+      return null;
+    }
+
+    return {
+      file: typeof record.file === 'string' ? record.file : undefined,
+      status: typeof record.status === 'string' ? record.status : undefined,
+      additions: typeof record.additions === 'number' ? record.additions : undefined,
+      deletions: typeof record.deletions === 'number' ? record.deletions : undefined,
+    };
+  }
+
+  private getMessageUpdatedInfo(raw: BridgeEvent): Record<string, unknown> | null {
+    const properties = this.getRecord(raw.properties);
+    if (!properties) {
+      return null;
+    }
+    return this.getRecord(properties.info);
+  }
+
+  private getRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
   }
 
   private extractDownstreamLogFields(raw: unknown): DownstreamLogFields {

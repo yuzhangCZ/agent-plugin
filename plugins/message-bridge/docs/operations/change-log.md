@@ -16,6 +16,15 @@
 
 - `docs/README.md`：在“开发”入口中加入端到端消息链路说明。
 
+## 2026-03-22
+
+### Changed
+
+- `product/prd.md`：新增 `message.updated` 传输裁剪需求章节，明确保留轻量 `summary.diffs`、删除 `before/after`、并固化 payload 验收阈值。
+- `design/interfaces/protocol-contract.md`：补充 `message.updated` 的 bridge transport projection 口径，明确该裁剪仅作用于 bridge 出站 payload。
+- `design/interfaces/end-to-end-message-flow.md`：补充 `message.updated` 传输裁剪说明与字段级行为。
+- `quality/traceability-matrix.md`：新增 PRD §12 与实现/测试的追踪关系。
+
 ## 2026-03-09
 
 ### Changed
