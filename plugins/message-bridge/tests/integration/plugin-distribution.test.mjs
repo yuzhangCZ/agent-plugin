@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 const PACKAGE_NAME = '@opencode-cui/message-bridge';
 
 describe('plugin distribution artifact', () => {
-  test('builds single-file artifact with default and named exports', async () => {
+  test('builds prod artifact without sourcemap and with default and named exports', async () => {
     execFileSync('node', ['./scripts/build.mjs'], {
       cwd: process.cwd(),
       stdio: 'pipe',
@@ -18,7 +18,9 @@ describe('plugin distribution artifact', () => {
     });
 
     const artifactPath = resolve('release/message-bridge.plugin.js');
+    const sourcemapPath = resolve('release/message-bridge.plugin.js.map');
     await access(artifactPath, constants.R_OK);
+    await assert.rejects(access(sourcemapPath, constants.R_OK));
 
     const mod = await import(pathToFileURL(artifactPath).href);
 
@@ -27,7 +29,25 @@ describe('plugin distribution artifact', () => {
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
   });
 
-  test('builds package entrypoint for Node package loading', async () => {
+  test('builds dev artifact with sourcemap', async () => {
+    execFileSync('node', ['./scripts/build-plugin.mjs', '--mode=dev'], {
+      cwd: process.cwd(),
+      stdio: 'pipe',
+      env: process.env,
+    });
+
+    const artifactPath = resolve('release/message-bridge.plugin.js');
+    const sourcemapPath = resolve('release/message-bridge.plugin.js.map');
+    await access(artifactPath, constants.R_OK);
+    await access(sourcemapPath, constants.R_OK);
+
+    const mod = await import(pathToFileURL(artifactPath).href);
+    assert.strictEqual(typeof mod.default, 'function');
+    assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
+    assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+  });
+
+  test('builds package entrypoint for Node package loading (opencode npm load path)', async () => {
     execFileSync('node', ['./scripts/build.mjs'], {
       cwd: process.cwd(),
       stdio: 'pipe',

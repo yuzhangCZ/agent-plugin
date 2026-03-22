@@ -26,10 +26,8 @@ function run(cmd, args, opts = {}) {
 }
 
 async function main() {
-  await rm(path.join(ROOT_DIR, 'dist'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   await rm(path.join(ROOT_DIR, 'release'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  await run(process.execPath, ['./node_modules/typescript/bin/tsc'], { cwd: ROOT_DIR });
-  await run(process.execPath, ['./scripts/build-plugin.mjs'], { cwd: ROOT_DIR });
+  await run(process.execPath, ['./scripts/build-plugin.mjs', '--mode=prod'], { cwd: ROOT_DIR });
 }
 
 main().catch((err) => {

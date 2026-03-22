@@ -15,20 +15,16 @@ importers:
         version: 8.19.0
 
   plugins/message-bridge:
-    dependencies:
+    devDependencies:
+      '@agent-plugin/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
       '@opencode-ai/plugin':
         specifier: 1.2.15
         version: 1.2.15
       '@opencode-ai/sdk':
         specifier: 1.2.15
         version: 1.2.15
-      jsonc-parser:
-        specifier: ^3.3.1
-        version: 3.3.1
-    devDependencies:
-      '@agent-plugin/test-support':
-        specifier: workspace:*
-        version: link:../../packages/test-support
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15
@@ -41,6 +37,9 @@ importers:
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       tsx:
         specifier: ^4.19.3
         version: 4.21.0
