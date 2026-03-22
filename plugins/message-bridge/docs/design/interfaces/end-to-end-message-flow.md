@@ -73,6 +73,33 @@ flowchart LR
   J --> K["B1: UI 结果"]
 ```
 
+### 1.4 上行链路分层
+
+`message-bridge` 的上行路径不是单层“事件管控”，而是四个相互独立的边界：
+
+```mermaid
+flowchart LR
+  RAW["RawUpstreamEvent"] --> EXTRACT["Upstream Extraction"]
+  EXTRACT --> NORM["NormalizedUpstreamEvent"]
+  NORM --> POLICY["Event Policy"]
+  POLICY --> PROJECT["Transport Projection"]
+  PROJECT --> GATEWAY["Gateway Transport"]
+  GATEWAY --> TOOL["tool_event.event"]
+```
+
+职责拆分如下：
+
+| 层 | 职责 | 不负责 |
+|---|---|---|
+| `Upstream Extraction` | 读取 OpenCode 原始字段并生成标准化事件 | gateway 投影、allowlist |
+| `Event Policy` | 决定事件是否允许转发 | 字段裁剪、传输编码 |
+| `Transport Projection` | 生成 `tool_event.event` 的 gateway 传输形状 | raw 字段解析、连接管理 |
+| `Gateway Transport` | 负责 websocket 发送、重连、日志 | 业务字段裁剪 |
+
+当前 `message.updated` 的大 payload 问题就发生在 `Transport Projection` 这一层，因此 heavy summary 的裁剪规则应归属这里，而不是 extractor 或 gateway transport。
+
+当前实现把这层 projection 收敛在 `src/transport/upstream/*` 中，由默认 projector 统一调度各事件的 transport 形状。
+
 ## 2. 全局 ID 与字段归属
 
 ### 2.1 统一字段表

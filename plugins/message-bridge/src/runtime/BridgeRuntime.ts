@@ -36,7 +36,10 @@ import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
-import { buildTransportEvent } from './transportProjection.js';
+import {
+  DefaultUpstreamTransportProjector,
+  type UpstreamTransportProjector,
+} from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
 
 export interface BridgeRuntimeOptions {
@@ -73,6 +76,7 @@ export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
   private readonly stateManager = new DefaultStateManager();
   private readonly registry = new DefaultActionRegistry();
+  private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
 
   private gatewayConnection: GatewayConnection | null = null;
   private eventFilter: EventFilter | null = null;
@@ -258,7 +262,7 @@ export class BridgeRuntime {
       return;
     }
 
-    if (!this.eventFilter.isAllowed(event.type)) {
+    if (!this.eventFilter.isAllowed(normalized.common.eventType)) {
       eventLogger.warn('event.rejected_allowlist');
       return;
     }
@@ -267,16 +271,16 @@ export class BridgeRuntime {
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
-    const transportEvent = buildTransportEvent(normalized);
-    const originalEnvelope = {
-      type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
-      event: normalized.raw,
-    };
+    const transportEvent = this.upstreamTransportProjector.project(normalized);
     const transportEnvelope = {
       type: 'tool_event',
       toolSessionId: normalized.common.toolSessionId,
       event: transportEvent,
+    };
+    const originalEnvelope = {
+      type: 'tool_event',
+      toolSessionId: normalized.common.toolSessionId,
+      event: normalized.raw,
     };
     this.gatewayConnection.send(transportEnvelope, {
       traceId: bridgeMessageId,
@@ -578,6 +582,10 @@ export class BridgeRuntime {
     this.logger.error('runtime.start.failed_health', payload);
   }
 
+  private buildEventLogFields(normalized: NormalizedUpstreamEvent): EventLogFields {
+    return this.buildEventForwardingDetail(normalized);
+  }
+
   private logEventForwardingDetail(normalized: NormalizedUpstreamEvent, logger: BridgeLogger = this.logger): void {
     const detail = this.buildEventForwardingDetail(normalized);
     logger.debug('event.forwarding.detail', detail as unknown as Record<string, unknown>);
@@ -624,16 +632,12 @@ export class BridgeRuntime {
     return null;
   }
 
-  private getRole(extra: NormalizedUpstreamEvent['extra']): MessageUpdatedExtra['role'] | null {
+  private getRole(extra: NormalizedUpstreamEvent['extra']): string | null {
     return extra && extra.kind === 'message.updated' ? extra.role : null;
   }
 
-  private getStatus(extra: NormalizedUpstreamEvent['extra']): SessionStatusExtra['status'] | null {
+  private getStatus(extra: NormalizedUpstreamEvent['extra']): string | null {
     return extra && extra.kind === 'session.status' ? extra.status : null;
-  }
-
-  private buildEventLogFields(normalized: NormalizedUpstreamEvent): EventLogFields {
-    return this.buildEventForwardingDetail(normalized);
   }
 
   private extractDownstreamLogFields(raw: unknown): DownstreamLogFields {

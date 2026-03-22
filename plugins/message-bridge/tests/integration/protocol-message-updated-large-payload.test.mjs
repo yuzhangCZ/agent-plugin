@@ -136,7 +136,7 @@ after(async () => {
 });
 
 describe('protocol message.updated large payload regression', () => {
-  test('prunes oversized message.updated before websocket send', async () => {
+  test('projects oversized message.updated before websocket send', async () => {
     const harness = await createConnectedHarness();
     cleanupTasks.push(async () => {
       harness.connection.disconnect();
@@ -183,7 +183,7 @@ describe('protocol message.updated large payload regression', () => {
     );
   });
 
-  test('keeps connection ready under 1KB websocket maxPayload after pruning', async () => {
+  test('keeps connection ready under 1KB websocket maxPayload after projection', async () => {
     const harness = await createConnectedHarness({ maxPayload: 1024 });
     cleanupTasks.push(async () => {
       harness.connection.disconnect();
