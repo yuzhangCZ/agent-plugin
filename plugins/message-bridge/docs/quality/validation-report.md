@@ -77,6 +77,8 @@ Execution semantics:
 - Release rehearsal: `verify:release:dry` (same chain, no publish action)
 - Environment-dependent checks: `test:e2e`, `test:e2e:smoke`, `smoke:e2e`, `debug:e2e`, `verify:opencode-load`
 - `test:e2e:smoke` uses a single smoke-entry script to maintain the scenario set
+- `test:e2e:smoke` covers standard bridge availability and protocol activity, but does not simulate oversized `message.updated` payloads carrying full `summary.diffs[*].before/after`
+- oversized `message.updated` regression coverage is owned by the integration layer, where runtime transport projection and websocket boundary behavior are asserted together
 - Coverage scope: `unit+integration` (the coverage script prints `coverage_scope=unit+integration`)
 
 ## 5. Compatibility Conclusions

@@ -298,17 +298,58 @@
 3. 监控平台接入  
 4. 打包分发与 CI/CD 自动化  
 
-## 十二、风险与回滚
-### 12.1 风险
+## 十二、`message.updated` 传输裁剪需求（2026-03-22）
+### 12.1 背景
+`message.updated` 当前可能携带 `properties.info.summary.diffs[*].before/after` 全量文件正文。
+当变更对象是大型日志文件时，单条事件会被放大到 MB 级，导致 `message-bridge -> gateway` WebSocket 链路触发 `1009`。
+
+### 12.2 目标行为
+1. OpenCode 本地存储继续保留完整 `message.updated` 原始事件。
+2. `message-bridge` 仅在向 gateway 发送 `tool_event` 时裁剪 `message.updated` 负载。
+3. 裁剪后仍保留消息标识、角色、时间、模型和文件级轻量摘要。
+4. 其他上行事件类型不受影响。
+
+### 12.3 字段规则
+保留：
+- `properties.info.id`
+- `properties.info.sessionID`
+- `properties.info.role`
+- `properties.info.time`
+- `properties.info.model`
+- `properties.info.summary.additions`
+- `properties.info.summary.deletions`
+- `properties.info.summary.files`
+- `properties.info.summary.diffs[*].file`
+- `properties.info.summary.diffs[*].status`
+- `properties.info.summary.diffs[*].additions`
+- `properties.info.summary.diffs[*].deletions`
+
+删除：
+- `properties.info.summary.diffs[*].before`
+- `properties.info.summary.diffs[*].after`
+
+### 12.4 兼容性约束
+1. 本次变更仅影响 `message.updated` 的 bridge 出站 transport payload。
+2. 不修改 upstream extractor 的原始事件提取语义。
+3. 若下游出现对 `before/after` 的运行时依赖，需重新评审，不得静默扩展回传字段。
+
+### 12.5 验收标准
+1. 固定大 payload fixture 下，原始 `tool_event` 负载大于 `1MB`。
+2. 裁剪后 `tool_event` 负载小于 `256KB`。
+3. 裁剪后负载大小与原始负载大小之比小于 `0.2`。
+4. 复现大日志 diff 场景时，不再触发 `1009`。
+
+## 十三、风险与回滚
+### 13.1 风险
 1. 兼容层保留期过长导致复杂度上升  
 2. 网关协议演进引发插件兼容回归  
 
-### 12.2 回滚
+### 13.2 回滚
 1. 插件回退至上一稳定版本  
 2. 保持后端协议不变，仅插件回滚  
 3. 保留失败日志用于根因分析  
 
-## 十三、显式假设
+## 十四、显式假设
 1. 插件无状态，不承担业务持久化。  
 2. 幂等与一致性由服务端负责。  
 3. 首版仅网关桥接，不扩展多平台能力。  

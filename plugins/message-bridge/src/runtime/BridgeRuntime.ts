@@ -36,6 +36,7 @@ import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
+import { buildTransportEvent } from './transportProjection.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
 
 export interface BridgeRuntimeOptions {
@@ -266,23 +267,29 @@ export class BridgeRuntime {
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
-    this.gatewayConnection.send(
-      {
-        type: 'tool_event',
-        toolSessionId: normalized.common.toolSessionId,
-        event: normalized.raw,
-      },
-      {
-        traceId: bridgeMessageId,
-        runtimeTraceId: this.logger.getTraceId(),
-        gatewayMessageId: bridgeMessageId,
-        toolSessionId: normalized.common.toolSessionId,
-        eventType: normalized.common.eventType,
-        opencodeMessageId: eventFields.opencodeMessageId,
-        opencodePartId: eventFields.opencodePartId,
-        toolCallId: eventFields.toolCallId ?? undefined,
-      },
-    );
+    const transportEvent = buildTransportEvent(normalized);
+    const originalEnvelope = {
+      type: 'tool_event',
+      toolSessionId: normalized.common.toolSessionId,
+      event: normalized.raw,
+    };
+    const transportEnvelope = {
+      type: 'tool_event',
+      toolSessionId: normalized.common.toolSessionId,
+      event: transportEvent,
+    };
+    this.gatewayConnection.send(transportEnvelope, {
+      traceId: bridgeMessageId,
+      runtimeTraceId: this.logger.getTraceId(),
+      gatewayMessageId: bridgeMessageId,
+      toolSessionId: normalized.common.toolSessionId,
+      eventType: normalized.common.eventType,
+      opencodeMessageId: eventFields.opencodeMessageId,
+      opencodePartId: eventFields.opencodePartId,
+      toolCallId: eventFields.toolCallId ?? undefined,
+      originalPayloadBytes: Buffer.byteLength(JSON.stringify(originalEnvelope), 'utf8'),
+      transportPayloadBytes: Buffer.byteLength(JSON.stringify(transportEnvelope), 'utf8'),
+    });
     forwardingLogger.debug('event.forwarded');
 
     if (normalized.common.eventType === 'session.idle') {

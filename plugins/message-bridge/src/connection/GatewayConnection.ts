@@ -34,6 +34,8 @@ export interface GatewaySendLogContext {
   opencodeMessageId?: string;
   opencodePartId?: string;
   toolCallId?: string;
+  originalPayloadBytes?: number;
+  transportPayloadBytes?: number;
 }
 
 function buildGatewaySendLogExtra(messageType: string, payloadBytes: number, logContext?: GatewaySendLogContext) {

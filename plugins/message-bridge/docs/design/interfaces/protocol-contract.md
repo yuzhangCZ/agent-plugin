@@ -143,6 +143,15 @@ The bridge extracts `toolSessionId` from the normalized event and then emits:
 }
 ```
 
+`message.updated` is the only exception where bridge transport applies a runtime projection before send:
+
+- keep `properties.info.id/sessionID/role/time/model`
+- keep `summary.additions/deletions/files`
+- keep lightweight `summary.diffs[*].file/status/additions/deletions`
+- drop `summary.diffs[*].before/after`
+
+The upstream extractor still returns the full raw OpenCode event. The projection only applies to the outgoing bridge-to-gateway payload.
+
 ## 4. Transport Contract
 
 Bridge-to-gateway transport messages:
