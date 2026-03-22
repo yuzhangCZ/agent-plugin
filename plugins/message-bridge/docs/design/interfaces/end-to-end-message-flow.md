@@ -875,7 +875,7 @@ type NormalizedUpstreamEvent = {
 
 ### 6.8 `message.updated` 传输裁剪说明
 
-`message.updated` 在 OpenCode 本地事件中可能携带完整 `summary.diffs[*].before/after`。  
+`message.updated` 在 OpenCode 本地事件中可能携带完整 `summary.diffs[*].before/after`。
 bridge 对 gateway 发送时会执行一层 transport projection：
 
 - 保留消息标识、会话标识、角色、时间、模型

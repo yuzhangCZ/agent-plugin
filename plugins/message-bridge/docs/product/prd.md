@@ -300,14 +300,14 @@
 
 ## 十二、`message.updated` 传输裁剪需求（2026-03-22）
 ### 12.1 背景
-`message.updated` 当前可能携带 `properties.info.summary.diffs[*].before/after` 全量文件正文。  
+`message.updated` 当前可能携带 `properties.info.summary.diffs[*].before/after` 全量文件正文。
 当变更对象是大型日志文件时，单条事件会被放大到 MB 级，导致 `message-bridge -> gateway` WebSocket 链路触发 `1009`。
 
 ### 12.2 目标行为
-1. OpenCode 本地存储继续保留完整 `message.updated` 原始事件。  
-2. `message-bridge` 仅在向 gateway 发送 `tool_event` 时裁剪 `message.updated` 负载。  
-3. 裁剪后仍保留消息标识、角色、时间、模型和文件级轻量摘要。  
-4. 其他上行事件类型不受影响。  
+1. OpenCode 本地存储继续保留完整 `message.updated` 原始事件。
+2. `message-bridge` 仅在向 gateway 发送 `tool_event` 时裁剪 `message.updated` 负载。
+3. 裁剪后仍保留消息标识、角色、时间、模型和文件级轻量摘要。
+4. 其他上行事件类型不受影响。
 
 ### 12.3 字段规则
 保留：
@@ -329,15 +329,15 @@
 - `properties.info.summary.diffs[*].after`
 
 ### 12.4 兼容性约束
-1. 本次变更仅影响 `message.updated` 的 bridge 出站 transport payload。  
-2. 不修改 upstream extractor 的原始事件提取语义。  
-3. 若下游出现对 `before/after` 的运行时依赖，需重新评审，不得静默扩展回传字段。  
+1. 本次变更仅影响 `message.updated` 的 bridge 出站 transport payload。
+2. 不修改 upstream extractor 的原始事件提取语义。
+3. 若下游出现对 `before/after` 的运行时依赖，需重新评审，不得静默扩展回传字段。
 
 ### 12.5 验收标准
-1. 固定大 payload fixture 下，原始 `tool_event` 负载大于 `1MB`。  
-2. 裁剪后 `tool_event` 负载小于 `256KB`。  
-3. 裁剪后负载大小与原始负载大小之比小于 `0.2`。  
-4. 复现大日志 diff 场景时，不再触发 `1009`。  
+1. 固定大 payload fixture 下，原始 `tool_event` 负载大于 `1MB`。
+2. 裁剪后 `tool_event` 负载小于 `256KB`。
+3. 裁剪后负载大小与原始负载大小之比小于 `0.2`。
+4. 复现大日志 diff 场景时，不再触发 `1009`。
 
 ## 十三、风险与回滚
 ### 13.1 风险
