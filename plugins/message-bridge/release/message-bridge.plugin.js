@@ -4593,12 +4593,33 @@ async function getOrCreateRuntime(input) {
 
 // src/index.ts
 var MessageBridgePlugin = async (input) => {
-  const runtime2 = await getOrCreateRuntime(input);
-  return {
-    event: async ({ event }) => {
-      await runtime2.handleEvent(event);
-    }
-  };
+  const logger = new AppLogger(input.client, { component: "plugin" });
+  try {
+    const runtime2 = await getOrCreateRuntime(input);
+    return {
+      event: async ({ event }) => {
+        try {
+          await runtime2.handleEvent(event);
+        } catch (error) {
+          logger.error("plugin.event.failed_non_fatal", {
+            eventType: typeof event?.type === "string" ? event.type : "unknown",
+            error: getErrorMessage(error),
+            ...getErrorDetailsForLog(error)
+          });
+        }
+      }
+    };
+  } catch (error) {
+    logger.error("plugin.init.failed_non_fatal", {
+      workspacePath: input.worktree || input.directory,
+      error: getErrorMessage(error),
+      ...getErrorDetailsForLog(error)
+    });
+    return {
+      event: async () => {
+      }
+    };
+  }
 };
 var index_default = MessageBridgePlugin;
 export {

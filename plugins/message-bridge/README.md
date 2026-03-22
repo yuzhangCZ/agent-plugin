@@ -9,6 +9,21 @@
 - `runtime/`：编排、连接与传输
 - `action/`：只负责业务执行
 
+## 插件异常隔离语义
+
+`message-bridge` 在插件入口层实现了宿主保护边界：
+
+- 初始化失败时不会向 OpenCode 宿主抛出异常；插件返回降级 hooks，避免宿主启动失败
+- 事件处理失败时不会向宿主抛出异常；错误会记录为非致命日志
+- 运行时重连逻辑、状态机与退避策略保持不变，仍由 `runtime/` 与 `connection/` 负责
+
+当前约定的非致命日志事件名：
+
+- `plugin.init.failed_non_fatal`
+- `plugin.event.failed_non_fatal`
+
+日志会包含统一错误字段（例如 `errorDetail`、`errorType`、`runtimeTraceId`），用于定位问题而不影响宿主可用性。
+
 相关文档：
 
 - [架构总览](./docs/architecture/overview.md)
