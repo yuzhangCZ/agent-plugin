@@ -12,14 +12,14 @@
 
 - npm 包默认发布为可直接消费的库包。
 - 对外入口固定为：
-  - `main = dist/index.js`
-  - `types = dist/index.d.ts`
-  - `exports["."] = ./dist/index.js`
+  - `main = release/message-bridge.plugin.js`
+  - `exports["."] = ./release/message-bridge.plugin.js`
 - npm 包默认只包含：
-  - `dist/`
+  - `release/message-bridge.plugin.js`
+  - `scripts/setup-message-bridge.mjs`
   - `README.md`
   - `LICENSE`
-- `release/` 是插件分发产物，不默认进入 npm tarball。
+- runtime `dependencies` 为空，安装时不会额外拉取间接依赖。
 
 ## 2. 发布前准备
 
@@ -53,7 +53,8 @@ npm publish
 
 说明：
 
-- `npm run build` 会生成 `dist/`，并同时产出 `release/` 作为插件分发文件。
+- `npm run build` 产出生产包：仅 `release/message-bridge.plugin.js`，无 sourcemap，且压缩混淆。
+- `npm run build:dev` 产出调试包：`release/message-bridge.plugin.js` + `.map`，不压缩，便于定位问题。
 - `npm test` 用于拦截发布前回归。
 - `npm pack --dry-run` 用于确认最终 tarball 只包含预期文件。
 - 首次发布 scoped 公有包时使用：
@@ -165,9 +166,12 @@ npm pack --dry-run
 
 验收标准：
 
-- `dist/index.js` 与 `dist/index.d.ts` 存在。
-- `npm pack --dry-run` 中不出现 `src/`、`tests/`、`docs/`、`scripts/`。
-- 默认 tarball 中不出现 `release/`。
+- `release/message-bridge.plugin.js` 存在。
+- 生产构建目录中不应出现 `release/message-bridge.plugin.js.map`。
+- `npm pack --dry-run` 中不出现 `src/`、`tests/`、`docs/`（仅允许 `scripts/setup-message-bridge.mjs`）。
+- tarball 中包含 `release/message-bridge.plugin.js`。
+- tarball 中不出现 `dist/` 与任意 `.map` 文件。
+- tarball 的 `package.json` 中 `dependencies` 为空或不存在。
 
 ## 7. 常见问题
 

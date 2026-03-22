@@ -1,5 +1,5 @@
 *
-!dist/
-!dist/**
+!release/message-bridge.plugin.js
+!scripts/setup-message-bridge.mjs
 !README.md
 !LICENSE

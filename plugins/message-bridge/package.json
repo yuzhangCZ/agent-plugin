@@ -3,16 +3,14 @@
   "version": "1.0.0",
   "description": "Message Bridge Plugin — unified message interface supporting OpenCode and future AI tools",
   "packageManager": "pnpm@9.15.4",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "release/message-bridge.plugin.js",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./release/message-bridge.plugin.js"
     }
   },
   "files": [
-    "dist",
+    "release/message-bridge.plugin.js",
     "scripts/setup-message-bridge.mjs",
     "README.md",
     "LICENSE"
@@ -21,7 +19,8 @@
   "type": "module",
   "scripts": {
     "build": "node ./scripts/build.mjs",
-    "pack:check": "rm -rf .tmp/pack-check && mkdir -p .tmp/pack-check && pnpm pack --pack-destination .tmp/pack-check",
+    "build:dev": "node ./scripts/build-plugin.mjs --mode=dev",
+    "pack:check": "node ./scripts/prepare-pack-check.mjs && pnpm run build && pnpm pack --pack-destination .tmp/pack-check && node ./scripts/check-pack.mjs",
     "prepublishOnly": "pnpm run build && pnpm run verify:core",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:unit && pnpm run test:integration",
@@ -40,12 +39,11 @@
     "verify:release": "pnpm run verify:core && pnpm run verify:env && pnpm run test:e2e:smoke && pnpm run verify:opencode-load",
     "verify:release:dry": "pnpm run verify:release"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@opencode-ai/plugin": "1.2.15",
     "@opencode-ai/sdk": "1.2.15",
-    "jsonc-parser": "^3.3.1"
-  },
-  "devDependencies": {
+    "jsonc-parser": "^3.3.1",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
     "c8": "^10.1.3",
