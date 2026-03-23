@@ -103,6 +103,22 @@
 - 优先级（`P0/P1/P2`）
 - OpenClaw 插件接口一对一主依赖映射
 
+## P0 参考专题索引：微信插件安装与扫码授权需求输入（2026-03-23）
+
+参考专题：
+
+1. `./topics/mb-p0-weixin-openclaw-install-login-reference-requirements.md`
+
+需求追溯标识：
+
+- `FR-MB-OPENCLAW-P0-WEIXIN-INSTALL-LOGIN-REFERENCE`
+
+本节作为 `message-bridge-openclaw` 设计扫码安装/授权能力时的参考输入，明确：
+
+- 微信插件安装入口的外部体验
+- 微信插件扫码授权的时序与状态机
+- 登录相关 API 及其对本插件的需求启发
+
 ## TL;DR
 
 当前插件已经完成一个可运行的 OpenClaw `message-bridge` V1 适配器，并且阶段二的最小产品化交付已经落地。
