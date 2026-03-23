@@ -368,7 +368,7 @@
 | --- | --- | --- | --- |
 | 阶段一 | 先让新会话稳定回复 | 进行中（v0.6 诊断增强已落地） | timeout 原因收敛、reply timeout 调整、duplicate_connection 抑制、skill-relay 检查脚本、最小回复回归验证 |
 | 阶段二 | 补齐插件产品化能力 | 已完成（最小交付） | `configSchema`、单账号 `setup/onboarding`、`probe/status/issues`、账号启停/删除 |
-| 阶段三 | 优化 block 级流式体验 | 未开始 | 首块延迟分析、chunk 策略优化、用户侧可感知流式 |
+| 阶段三 | 优化 block 级流式体验 | 进行中（v0.7 流式收敛语义已落地） | `deliver(kind=block/final)` 收敛状态机、fallback 非流式显式化、`streamMode/finalReconciled` 观测字段 |
 | 阶段四 | 补齐 deferred actions | 进行中（fail-closed 规范化已完成） | `permission_reply`、`question_reply` 协议实现或明确后置 |
 | 阶段五 | 评估完整 channel 能力边界 | 未开始 | `pairing/security/messaging/directory/outbound` 的职责判断 |
 | 阶段六 | 交付整理 | 进行中 | `dist/`、bundle 目录、验证审计文档、skill-relay 检查脚本、安装说明、验证手册 |
@@ -436,12 +436,21 @@
 - 评估 OpenClaw reply dispatcher 是否存在更低延迟接入点
 - 优化 `blockStreamingChunk` / `blockStreamingCoalesce`
 - 明确哪些体验问题应在插件层处理，哪些必须依赖宿主 reply runtime
+- **v0.7 已完成**：
+  - `deliver(kind=final)` 只缓存并在结束时统一收敛，不直接作为增量上送
+  - 引入确定性收敛函数 `reconcileFinalText(accumulated, incomingFinal)`，覆盖 `prefix/mismatch/final-only` 场景
+  - fallback 路径显式标记为非流式（`streamMode=fallback_non_streaming`）
+  - 统一补充 `streamMode` 与 `finalReconciled` 观测字段
 
 验收标准：
 
 - 长回复场景下，用户能在合理时间看到第一段文本
 - 后续块持续上行，而不是集中在末尾一次 flush
 - 不同模型的首块延迟与 timeout 风险有明确基线记录
+- 非阻塞阈值（每次 PR 附 30 样本指标）：
+  - `p95 firstChunkLatencyMs <= 5s`
+  - `tail_flush_ratio <= 20%`
+  - `finalReconciled` 占比可解释（需附样本分析）
 
 ### 阶段四：协议能力补齐
 

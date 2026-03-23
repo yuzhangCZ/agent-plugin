@@ -325,6 +325,23 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 }
 ```
 
+当前文本流式行为（v0.7）：
+
+- `runtime_reply` 主路径：
+  - `deliver(kind=block)` 会实时上送（首块 `message.part.updated`，后续 `message.part.delta`）。
+  - `deliver(kind=final)` 只做缓存，结束时统一收敛，不直接作为增量上送。
+- `subagent_fallback` 回退路径：
+  - 显式非流式（`deliver:false`），只在完成时回填最终文本。
+
+新增观测字段（日志）：
+
+- `streamMode`
+  - `runtime_block_streaming`
+  - `fallback_non_streaming`
+- `finalReconciled`
+  - `true`：最终文本与流式累计文本不一致，完成时采用 final 覆盖
+  - `false`：最终文本与累计文本一致（或可直接前缀补齐）
+
 ## 8. 启动
 
 dev profile：
