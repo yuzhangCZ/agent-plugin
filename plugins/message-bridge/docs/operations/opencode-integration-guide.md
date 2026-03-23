@@ -1,0 +1,160 @@
+# Message-Bridge OpenCode 集成指导
+
+**Version:** 1.5  
+**Date:** 2026-03-23  
+**Status:** Active  
+**Owner:** message-bridge maintainers  
+**Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `./npm-publish-guide.md`
+
+面向通过 `@opencode-ai/sdk` 代码方式集成 OpenCode 的应用方，说明如何接入 `message-bridge` 插件。
+
+## 1. 插件接入方式
+
+在启动 OpenCode 之前，通过 `process.env.OPENCODE_CONFIG_CONTENT` 声明插件：
+
+```js
+process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+  $schema: 'https://opencode.ai/config.json',
+  plugin: ['@opencode-cui/message-bridge'],
+});
+```
+
+如果需要本地联调，也可以改为本地目录：
+
+```js
+process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+  $schema: 'https://opencode.ai/config.json',
+  plugin: ['file:///absolute/path/to/plugins/message-bridge'],
+});
+```
+
+## 2. 环境变量配置
+
+在启动 OpenCode 之前，通过 `process.env` 准备以下配置：
+
+| 配置项 | 环境变量 | 是否必须 | 说明 |
+|---|---|---|---|
+| `ak` | `BRIDGE_AUTH_AK` | 是 | 插件鉴权 AK |
+| `sk` | `BRIDGE_AUTH_SK` | 是 | 插件鉴权 SK |
+| `channel` | `BRIDGE_GATEWAY_CHANNEL` | 是 | 填写应用别名，用于标识当前接入应用 |
+| `gateway.url` | `BRIDGE_GATEWAY_URL` | 否 | 生产环境通常不需要配置；切换到 UAT 等非生产环境时再显式填写 |
+| `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文 |
+
+最小示例：
+
+```js
+process.env.BRIDGE_AUTH_AK = 'your-ak';
+process.env.BRIDGE_AUTH_SK = 'your-sk';
+process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+```
+
+UAT 示例：
+
+```js
+process.env.BRIDGE_AUTH_AK = 'your-ak';
+process.env.BRIDGE_AUTH_SK = 'your-sk';
+process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+process.env.BRIDGE_GATEWAY_URL = 'wss://gateway-uat.example.com/ws/agent';
+```
+
+## 3. `.npmrc` 要求
+
+如果使用 npm 包方式接入，必须提前准备 `.npmrc`：
+
+```ini
+@opencode-cui:registry=https://<your-private-registry>/
+registry=https://registry.npmjs.org/
+strict-ssl=false
+```
+
+说明：
+
+- `@opencode-cui:registry`：指定 `@opencode-cui` 走企业二方仓
+- `registry`：保留公共 npm 默认源
+- `strict-ssl=false`：在企业私仓证书链不完整时禁用 SSL 校验，避免启动阶段拉包失败
+
+## 4. 启动与生效限制
+
+所有插件相关配置都必须在启动 OpenCode 之前完成，包括：
+
+- `process.env.OPENCODE_CONFIG_CONTENT`
+- `BRIDGE_AUTH_AK`
+- `BRIDGE_AUTH_SK`
+- `BRIDGE_GATEWAY_CHANNEL`
+- `BRIDGE_GATEWAY_URL`（如有）
+- `BRIDGE_DIRECTORY`（如有）
+- `.npmrc`
+
+配置变更后需要重启 OpenCode 才会生效，包括：
+
+- 插件声明变更
+- bridge 环境变量变更
+- `.npmrc` 变更
+
+一句话原则：
+
+**先配置，再启动；修改后重启。**
+
+## 5. 代码示例
+
+```js
+import { createOpencode } from '@opencode-ai/sdk';
+
+process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+  $schema: 'https://opencode.ai/config.json',
+  plugin: ['@opencode-cui/message-bridge'],
+});
+
+process.env.BRIDGE_AUTH_AK = 'your-ak';
+process.env.BRIDGE_AUTH_SK = 'your-sk';
+process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+
+const { server } = await createOpencode({
+  hostname: '127.0.0.1',
+  port: 4096,
+});
+
+// 启动完成后查看 OpenCode / 插件日志，确认插件已加载
+
+server.close();
+```
+
+## 6. FAQ
+
+### 6.1 如何判断插件已加载成功
+
+启动后可通过日志确认插件加载结果。
+
+常见日志目录：
+
+- macOS：`~/.local/share/opencode/log/`
+- Windows：`%USERPROFILE%\.local\share\opencode\log`
+
+搜索 `message-bridge` 相关日志。成功时，日志中应至少出现以下事件之一：
+
+- `runtime.singleton.initialized`
+- `runtime.start.completed`
+- `gateway.ready`
+
+失败时，优先检查以下日志：
+
+- `plugin.init.failed_non_fatal`
+- `failed to load plugin`
+
+### 6.2 插件包下载失败怎么排查
+
+优先检查以下几项：
+
+- `.npmrc` 是否已配置 `@opencode-cui` 二方仓地址
+- 企业私仓是否要求禁用 SSL 校验
+- 以上配置是否都在 OpenCode 启动前完成
+
+OpenCode 的插件下载与依赖缓存目录：
+
+- macOS：`~/.cache/opencode/node_modules/`
+- Windows：`%USERPROFILE%\.cache\opencode\node_modules\`
+
+如果插件下载或安装卡住，也可以直接检查或清理缓存目录：
+
+- macOS：`~/.cache/opencode`
+- Windows：`%USERPROFILE%\.cache\opencode`
