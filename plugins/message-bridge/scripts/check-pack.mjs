@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { listTarEntries } from '../../../scripts/tar-utils.mjs';
 
 const PACK_DIR = join(process.cwd(), '.tmp', 'pack-check');
 
@@ -28,11 +30,7 @@ async function main() {
   assert.ok(tgzName, 'pack check failed: no .tgz generated');
 
   const tgzPath = join(PACK_DIR, tgzName);
-  const archiveEntries = execFileSync('tar', ['-tzf', tgzPath], {
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .filter(Boolean);
+  const archiveEntries = listTarEntries(tgzPath);
 
   assert.ok(
     archiveEntries.includes('package/release/message-bridge.plugin.js'),

@@ -294,6 +294,7 @@ export function parseReleaseLocalArgs(argv) {
     release: null,
     skipGit: false,
     skipPublish: false,
+    skipVerify: false,
     target: null,
     version: null,
   };
@@ -342,6 +343,11 @@ export function parseReleaseLocalArgs(argv) {
 
     if (arg === "--skip-git") {
       parsed.skipGit = true;
+      continue;
+    }
+
+    if (arg === "--skip-verify") {
+      parsed.skipVerify = true;
       continue;
     }
 
@@ -771,6 +777,12 @@ export function createReleasePlan(input = {}, overrides = {}) {
     warnings.push("dual releases are non-atomic; the first package may already be published if the second one fails.");
   }
 
+  if (parsed.skipVerify) {
+    warnings.push(
+      "verify steps are being skipped by user request; publish may continue without verify:release safeguards.",
+    );
+  }
+
   warnings.push("npm publish and git commit/tag are non-atomic; publish can succeed even if later git steps fail.");
 
   return {
@@ -791,7 +803,8 @@ export function createReleasePlan(input = {}, overrides = {}) {
   };
 }
 
-function formatTargetPlan(target) {
+function formatTargetPlan(target, options = {}) {
+  const verifyLabel = options.skipVerify ? "skipped (--skip-verify)" : formatCommand(target.verifyStep);
   return [
     `- ${target.id}: ${target.packageName}`,
     `  current version: ${target.currentVersion}`,
@@ -801,25 +814,29 @@ function formatTargetPlan(target) {
     `  publish root: ${target.publishRootRelative}`,
     `  tag: ${target.tagName}`,
     `  build steps: ${target.buildSteps.map((command) => formatCommand(command)).join(" ; ")}`,
-    `  verify step: ${formatCommand(target.verifyStep)}`,
+    `  verify step: ${verifyLabel}`,
   ].join("\n");
 }
 
 export function formatReleasePlan(plan) {
+  const skipVerify = Boolean(plan.parsed?.skipVerify);
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
     `mode: ${plan.targets.length > 1 ? "dual (non-atomic)" : "single-target"}`,
     `dry run: ${plan.dryRun ? "yes" : "no"}`,
     `publish: ${plan.actions.publish ? "yes" : "no"}`,
+    `verify: ${skipVerify ? "no" : "yes"}`,
     `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
     `push remote: ${plan.actions.push ? "yes" : "no"}`,
     "",
     "Targets:",
-    ...plan.targets.map((target) => formatTargetPlan(target)),
+    ...plan.targets.map((target) => formatTargetPlan(target, { skipVerify })),
     "",
     "Publish readiness contract:",
-    "- releaseReady is evaluated only after build and verify steps complete",
+    skipVerify
+      ? "- releaseReady is evaluated after build completes; verify was skipped by user request"
+      : "- releaseReady is evaluated only after build and verify steps complete",
     "- readiness output includes resolvedVersion, resolvedDistTag, resolvedPublishRoot, and executedChecks",
   ];
 
@@ -879,11 +896,12 @@ Options:
   --preid <name>                  Prerelease identifier, default: beta
   --release <stable|prerelease>   Explicit release kind
   --dry-run                       Print the release plan without mutating npm or git
-  --skip-publish                  Build and verify, but skip npm publish
+  --skip-publish                  Build and verify by default, but skip npm publish
+  --skip-verify                   Build and evaluate readiness, but skip verify:release
   --skip-git                      Publish without local commit/tag
   --push                          Push branch and new tags after local commit/tag
-  --install-deps                  Auto-install missing dependencies with pnpm install --frozen-lockfile
-  --install-deps-update-lockfile  Auto-install missing dependencies with pnpm install
+  --install-deps                  Auto-install packages for the dependency presence sanity check with pnpm install --frozen-lockfile
+  --install-deps-update-lockfile  Auto-install packages for the dependency presence sanity check with pnpm install
   --allow-dirty                   Allow running from a dirty worktree
   --help, -h                      Print this help
 
@@ -892,8 +910,12 @@ Defaults:
   - git commit and tag are local by default
   - remote push only runs with --push
   - --skip-publish cannot be combined with --push
-  - dependency checks run before any build or verify step
-  - missing dependencies fail fast unless an install flag is provided
+  - dependency presence sanity checks run before any build or verify step
+  - the presence sanity check only looks for clearly missing packages before build
+  - builds run by default; verify also runs by default unless --skip-verify is used
+  - --skip-verify only skips verify:release; it does not skip build or readiness checks
+  - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
+  - missing packages fail fast unless an install flag is provided
   - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
@@ -935,7 +957,7 @@ function collectManifestDependencyNames(manifest) {
   return [...names].sort();
 }
 
-function inspectManifestDependencies(target, fs, exec) {
+export function inspectManifestDependencies(target, fs, exec) {
   const manifest = fs.readJson(target.versionSourceAbsolute);
   const dependencyNames = collectManifestDependencyNames(manifest);
 
@@ -957,10 +979,21 @@ const missingPackages = [];
 
 for (const dependencyName of dependencyNames) {
   try {
+    await import.meta.resolve(dependencyName);
+    continue;
+  } catch {}
+
+  try {
     requireFromPackage.resolve(dependencyName);
+    continue;
   } catch {
-    missingPackages.push(dependencyName);
+    try {
+      requireFromPackage.resolve(\`\${dependencyName}/package.json\`);
+      continue;
+    } catch {}
   }
+
+  missingPackages.push(dependencyName);
 }
 
 process.stdout.write(JSON.stringify({ missingPackages }));
@@ -1002,7 +1035,7 @@ function formatMissingDependenciesMessage(failures) {
     .map((failure) => `${failure.targetId}: ${failure.missingPackages.slice(0, 5).join(", ")}`)
     .join("; ");
 
-  return `dependency check failed before build; unresolved packages: ${summary}. Run pnpm install, or rerun with --install-deps or --install-deps-update-lockfile.`;
+  return `dependency presence sanity check failed before build; unresolved packages: ${summary}. This preflight only verifies package presence before build. Prefer rerunning with --install-deps, run pnpm install --frozen-lockfile manually, or use --install-deps-update-lockfile if updating the lockfile is intentional.`;
 }
 
 function prepareDependencies(plan, ports, stdout) {
@@ -1016,27 +1049,27 @@ function prepareDependencies(plan, ports, stdout) {
 
   let failures = checkTargets();
   if (failures.length === 0) {
-    stdout.write("dependency check: passed\n");
+    stdout.write("dependency presence check: passed\n");
     return;
   }
 
-  stdout.write("dependency check: failed\n");
+  stdout.write("dependency presence check: failed\n");
   if (installMode === "none") {
     throw new Error(formatMissingDependenciesMessage(failures));
   }
 
   const installCommand =
     installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
-  stdout.write(`dependency install: ${formatCommand(installCommand)}\n`);
+  stdout.write(`dependency presence install: ${formatCommand(installCommand)}\n`);
   runCommand(ports.exec, installCommand, plan.repoRoot);
 
   failures = checkTargets();
   if (failures.length === 0) {
-    stdout.write("dependency check: passed\n");
+    stdout.write("dependency presence check: passed\n");
     return;
   }
 
-  stdout.write("dependency check: failed\n");
+  stdout.write("dependency presence check: failed\n");
   throw new Error(formatMissingDependenciesMessage(failures));
 }
 
@@ -1087,7 +1120,11 @@ function printRuntimeHeader(stdout, plan, registry, whoami) {
   stdout.write(`${formatReleasePlan(plan)}\n`);
   stdout.write("Registry Context\n");
   stdout.write(`registry: ${registry}\n`);
-  stdout.write(`npm whoami: ${whoami}\n\n`);
+  stdout.write(`npm whoami: ${whoami}\n`);
+  if (plan.parsed.skipVerify) {
+    stdout.write("verify skipped by user request (--skip-verify)\n");
+  }
+  stdout.write("\n");
 }
 
 function getCurrentBranch(exec, repoRoot) {
@@ -1228,8 +1265,12 @@ export function executeRelease(plan, overrides = {}) {
         runCommand(exec, command, plan.repoRoot);
       }
 
-      stdout.write(`Running verify for ${target.id}\n`);
-      runCommand(exec, target.verifyStep, plan.repoRoot);
+      if (plan.parsed.skipVerify) {
+        stdout.write(`Skipping verify for ${target.id} (--skip-verify)\n`);
+      } else {
+        stdout.write(`Running verify for ${target.id}\n`);
+        runCommand(exec, target.verifyStep, plan.repoRoot);
+      }
 
       const readiness = evaluatePublishReadiness(target, {
         fs,

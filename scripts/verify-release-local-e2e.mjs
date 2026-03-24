@@ -7,6 +7,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { parseTarEntriesOutput } from "./tar-utils.mjs";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "release-local-e2e-"));
@@ -320,7 +322,7 @@ async function packFromRegistry(spec, destinationDir) {
 }
 
 function tarEntries(tgzPath) {
-  return run("tar", ["-tzf", tgzPath]).stdout.split("\n").filter(Boolean);
+  return parseTarEntriesOutput(run("tar", ["-tzf", tgzPath]).stdout);
 }
 
 async function readPackedManifest(tgzPath) {

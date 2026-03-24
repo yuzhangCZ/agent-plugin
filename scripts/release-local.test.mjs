@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ import {
   executeRelease,
   formatHelp,
   formatReleasePlan,
+  inspectManifestDependencies,
   isCliEntry,
   main,
   parseReleaseLocalArgs,
@@ -16,6 +18,7 @@ import {
   releaseDescriptorSchema,
   releaseDescriptors,
 } from "./release-local.mjs";
+import { parseTarEntriesOutput } from "./tar-utils.mjs";
 
 class FakeFs {
   constructor({ manifests = {}, existingPaths = [] } = {}) {
@@ -193,6 +196,7 @@ test("parseReleaseLocalArgs accepts single-target bump release", () => {
     release: null,
     skipGit: false,
     skipPublish: false,
+    skipVerify: false,
     target: "message-bridge",
     version: null,
   });
@@ -217,6 +221,13 @@ test("parseReleaseLocalArgs rejects push plus skip-publish", () => {
     () => parseReleaseLocalArgs(["--target", "message-bridge", "--bump", "patch", "--push", "--skip-publish"]),
     /--push cannot be combined with --skip-publish/i,
   );
+});
+
+test("parseReleaseLocalArgs accepts skip-verify mode", () => {
+  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--version", "1.2.0", "--skip-verify"]);
+
+  assert.equal(parsed.skipVerify, true);
+  assert.equal(parsed.skipPublish, false);
 });
 
 test("parseReleaseLocalArgs accepts install-deps mode", () => {
@@ -277,6 +288,227 @@ test("parseSemver validates versions", () => {
   assert.throws(() => parseSemver("1.2"), /invalid semver/i);
 });
 
+test("parseTarEntriesOutput normalizes unix tar output", () => {
+  const entries = parseTarEntriesOutput(
+    [
+      "package/release/message-bridge.plugin.js",
+      "package/dist/debug.js",
+      "package/release/message-bridge.plugin.js.map",
+      "",
+    ].join("\n"),
+  );
+
+  assert(entries.includes("package/release/message-bridge.plugin.js"));
+  assert(entries.some((entry) => entry.startsWith("package/dist/")));
+  assert(entries.some((entry) => entry.endsWith(".map")));
+});
+
+test("parseTarEntriesOutput normalizes windows tar output", () => {
+  const entries = parseTarEntriesOutput(
+    [
+      "package/release/message-bridge.plugin.js\r",
+      "package/dist/debug.js\r",
+      "package/release/message-bridge.plugin.js.map\r",
+      "",
+    ].join("\r\n"),
+  );
+
+  assert(entries.includes("package/release/message-bridge.plugin.js"));
+  assert(entries.some((entry) => entry.startsWith("package/dist/")));
+  assert(entries.some((entry) => entry.endsWith(".map")));
+});
+
+test("inspectManifestDependencies ignores optional dependencies in the presence check", () => {
+  const repoRoot = path.resolve("/repo");
+  const packageRoot = path.join(repoRoot, "plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        dependencies: {
+          "jsonc-parser": "^3.3.1",
+        },
+        optionalDependencies: {
+          "optional-only": "^1.0.0",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const execCalls = [];
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+  const exec = (command, args, options = {}) => {
+    execCalls.push({ command, args: [...args], cwd: options.cwd });
+    const dependencyNames = JSON.parse(args[3]);
+    assert.deepEqual(dependencyNames, ["jsonc-parser"]);
+    return JSON.stringify({ missingPackages: [] });
+  };
+
+  const result = inspectManifestDependencies(target, fs, exec);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.missingPackages, []);
+  assert.equal(execCalls.length, 1);
+  assert.equal(execCalls[0].command, "node");
+  assert.equal(execCalls[0].cwd, packageRoot);
+});
+
+test("inspectManifestDependencies accepts package metadata fallback in the presence check", () => {
+  const packageRoot = path.resolve("plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        devDependencies: {
+          "@types/node": "^22.10.2",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+  const exec = (command, args, options = {}) => {
+    assert.equal(command, "node");
+    assert.equal(args[0], "--input-type=module");
+    assert.equal(args[1], "-e");
+    return execFileSync(process.execPath, args, {
+      cwd: options.cwd,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim();
+  };
+
+  const result = inspectManifestDependencies(target, fs, exec);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.missingPackages, []);
+});
+
+test("inspectManifestDependencies accepts workspace packages in the presence check", () => {
+  const repoRoot = path.resolve("/repo");
+  const packageRoot = path.join(repoRoot, "plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        devDependencies: {
+          "@agent-plugin/test-support": "workspace:*",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+  const exec = () => JSON.stringify({ missingPackages: [] });
+
+  const result = inspectManifestDependencies(target, fs, exec);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.missingPackages, []);
+});
+
+test("inspectManifestDependencies reports missing packages when package metadata is unreachable", () => {
+  const repoRoot = path.resolve("/repo");
+  const packageRoot = path.join(repoRoot, "plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        devDependencies: {
+          "missing-package": "^1.0.0",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+  const exec = () => JSON.stringify({ missingPackages: ["missing-package"] });
+
+  const result = inspectManifestDependencies(target, fs, exec);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missingPackages, ["missing-package"]);
+});
+
+test("inspectManifestDependencies throws when the check script outputs invalid JSON", () => {
+  const repoRoot = path.resolve("/repo");
+  const packageRoot = path.join(repoRoot, "plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        devDependencies: {
+          esbuild: "^0.25.0",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+
+  assert.throws(() => inspectManifestDependencies(target, fs, () => "not-json"), /Unexpected token|not valid JSON/i);
+});
+
+test("inspectManifestDependencies surfaces node execution failures", () => {
+  const repoRoot = path.resolve("/repo");
+  const packageRoot = path.join(repoRoot, "plugins/message-bridge");
+  const manifestPath = path.join(packageRoot, "package.json");
+  const fs = new FakeFs({
+    manifests: {
+      [manifestPath]: {
+        name: "@wecode/skill-opencode-plugin",
+        version: "1.0.0",
+        devDependencies: {
+          esbuild: "^0.25.0",
+        },
+      },
+    },
+    existingPaths: [packageRoot, manifestPath],
+  });
+  const target = {
+    id: "message-bridge",
+    packageRootAbsolute: packageRoot,
+    versionSourceAbsolute: manifestPath,
+  };
+
+  assert.throws(
+    () => inspectManifestDependencies(target, fs, () => {
+      throw new Error("node execution failed");
+    }),
+    /node execution failed/i,
+  );
+});
+
 test("createReleasePlan resolves dual releases and warns they are non-atomic", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
@@ -307,6 +539,44 @@ test("createReleasePlan resolves dual releases and warns they are non-atomic", (
   assert.equal(plan.targets[0].targetVersion, "1.0.1");
   assert.equal(plan.targets[1].targetVersion, "0.1.1");
   assert.match(formatReleasePlan(plan), /dual \(non-atomic\)/i);
+});
+
+test("formatReleasePlan shows skip-verify in dry-run output", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      skipVerify: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+
+  const rendered = formatReleasePlan(plan);
+  assert.match(rendered, /verify: no/i);
+  assert.match(rendered, /verify step: skipped \(\-\-skip-verify\)/i);
+  assert.match(rendered, /verify was skipped by user request/i);
+  assert.match(
+    rendered,
+    /verify steps are being skipped by user request; publish may continue without verify:release safeguards\./i,
+  );
 });
 
 test("createReleasePlan rejects existing tags", () => {
@@ -478,7 +748,45 @@ test("executeRelease skips publish and still stages git flow", () => {
   assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
 });
 
-test("executeRelease fails fast on missing dependencies without install flags", () => {
+test("executeRelease skips verify and still runs build readiness and publish", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
+  assert.ok(execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /publish readiness: ready/i);
+});
+
+test("executeRelease fails fast on missing packages without install flags", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -516,13 +824,17 @@ test("executeRelease fails fast on missing dependencies without install flags", 
         stdout: stdout.stream,
         inspectDependencies: () => missingDependencyResult("message-bridge", ["esbuild"]),
       }),
-    /dependency check failed before build/i,
+    /dependency presence sanity check failed before build/i,
+  );
+  assert.match(
+    stdout.toString(),
+    /dependency presence check: failed/i,
   );
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
 });
 
-test("executeRelease installs missing dependencies with frozen lockfile mode", () => {
+test("executeRelease installs missing packages with frozen lockfile mode", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -577,7 +889,7 @@ test("executeRelease installs missing dependencies with frozen lockfile mode", (
   assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
 });
 
-test("executeRelease installs missing dependencies with update-lockfile mode", () => {
+test("executeRelease installs missing packages with update-lockfile mode", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -631,7 +943,7 @@ test("executeRelease installs missing dependencies with update-lockfile mode", (
   );
 });
 
-test("executeRelease does not install when dependencies already pass", () => {
+test("executeRelease does not install when dependency presence already passes", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -672,7 +984,7 @@ test("executeRelease does not install when dependencies already pass", () => {
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
 });
 
-test("executeRelease stops if dependencies are still missing after install", () => {
+test("executeRelease stops if packages are still missing after install", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -710,7 +1022,7 @@ test("executeRelease stops if dependencies are still missing after install", () 
         stdout: stdout.stream,
         inspectDependencies: () => missingDependencyResult("message-bridge", ["esbuild"]),
       }),
-    /dependency check failed before build/i,
+    /dependency presence sanity check failed before build/i,
   );
   assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
@@ -754,6 +1066,47 @@ test("executeRelease blocks publish when readiness fails", () => {
   assert.match(stdout.toString(), /publish readiness: blocked/i);
 });
 
+test("executeRelease still blocks publish when readiness fails under skip-verify", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const missingPaths = state.paths.filter(
+    (entry) => entry !== path.join(state.bridgeRoot, "release/message-bridge.plugin.js"),
+  );
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: missingPaths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.0.0");
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /publish readiness: blocked/i);
+});
+
 test("executeRelease restores bumped version when verify fails before publish", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
@@ -790,6 +1143,45 @@ test("executeRelease restores bumped version when verify fails before publish", 
   );
   assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.0.0");
   assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
+});
+
+test("executeRelease preserves existing recovery semantics when publish fails under skip-verify", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({
+    repoRoot,
+    failCommands: [{ match: "npm publish --tag latest", message: "publish failed" }],
+  });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () => executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream }),
+    /publish failed/i,
+  );
+  assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.1.0");
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
 });
 
 test("executeRelease resolves scoped registry and publishes against that registry", () => {
@@ -894,6 +1286,42 @@ test("executeRelease surfaces dual release non-atomic recovery on second publish
   assert.match(stdout.toString(), /may already be published/i);
 });
 
+test("executeRelease skips verify for both targets in dual mode", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "dual",
+      bridgeVersion: "1.1.0",
+      openclawVersion: "0.2.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      skipVerify: true,
+      allowDirty: true,
+      version: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge-openclaw \(\-\-skip-verify\)/);
+});
+
 test("main prints help output", async () => {
   const stdout = createCapture();
   const stderr = createCapture();
@@ -906,7 +1334,11 @@ test("main prints help output", async () => {
   assert.equal(exitCode, 0);
   assert.equal(stderr.toString(), "");
   assert.match(stdout.toString(), /pnpm release:local -- --target/i);
+  assert.match(stdout.toString(), /--skip-verify/);
   assert.match(stdout.toString(), /--install-deps/);
+  assert.match(stdout.toString(), /presence sanity check/i);
+  assert.match(stdout.toString(), /pnpm install --frozen-lockfile/);
+  assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
 });
 

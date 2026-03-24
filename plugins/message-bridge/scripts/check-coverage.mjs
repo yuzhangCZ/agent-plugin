@@ -74,7 +74,11 @@ let branchesHit = 0;
 
 for (const block of lcov.split('end_of_record')) {
   const sourceFile = block.match(/^SF:(.+)$/m)?.[1];
-  if (!sourceFile?.startsWith('src/')) {
+  const normalizedSourceFile = sourceFile?.replaceAll('\\', '/');
+  if (
+    !normalizedSourceFile?.startsWith('src/') &&
+    !normalizedSourceFile?.includes('/src/')
+  ) {
     continue;
   }
 
