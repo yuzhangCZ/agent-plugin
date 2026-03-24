@@ -200,8 +200,8 @@ CLI 当前会：
 
 - 提示输入 `ak` 和 `sk`
 - 默认在用户级写入 `message-bridge.jsonc`
-- 在 OpenCode `plugin` 配置中启用 `@opencode-cui/message-bridge`
-- 为 `@opencode-cui` 写入默认 `.npmrc` scope 条目
+- 在 OpenCode `plugin` 配置中启用 `@wecode/skill-opencode-plugin`
+- 为 `@wecode` 写入默认 `.npmrc` scope 条目
 
 CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 
@@ -337,7 +337,7 @@ OpenCode 的主要安装方式是包安装：
 
 ```json
 {
-  "plugin": ["@opencode-cui/message-bridge"]
+  "plugin": ["@wecode/skill-opencode-plugin"]
 }
 ```
 

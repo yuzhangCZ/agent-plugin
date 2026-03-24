@@ -133,7 +133,7 @@ async function main() {
   }
 
   const gatewayPort = await resolvePort(requestedGatewayPort);
-  const bridgeGatewayUrl = `ws://127.0.0.1:${gatewayPort}/ws/agent`;
+  const bridgeGatewayUrl = process.env.MB_BRIDGE_GATEWAY_URL ?? `ws://127.0.0.1:${gatewayPort}/ws/agent`;
   resolvedGatewayUrl = bridgeGatewayUrl;
 
   await mkdir(logDir, { recursive: true });
@@ -164,6 +164,8 @@ async function main() {
       cwd: tmpWorkspace,
       env: {
         HOME: tmpHome,
+        USERPROFILE: tmpHome,
+        XDG_CONFIG_HOME: path.join(tmpHome, '.config'),
         OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
         BRIDGE_ENABLED: 'true',
         BRIDGE_AUTH_AK: 'verify-ak',

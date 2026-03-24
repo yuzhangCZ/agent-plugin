@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const PACKAGE_NAME = '@opencode-cui/message-bridge';
+const PACKAGE_NAME = '@wecode/skill-opencode-plugin';
 
 describe('plugin distribution artifact', () => {
   test('builds prod artifact without sourcemap and with default and named exports', async () => {
@@ -56,9 +56,9 @@ describe('plugin distribution artifact', () => {
 
     const tempDir = await mkdtemp(join(tmpdir(), 'message-bridge-package-'));
     try {
-      const packageScopeDir = join(tempDir, 'node_modules', '@opencode-cui');
+      const packageScopeDir = join(tempDir, 'node_modules', '@wecode');
       await mkdir(packageScopeDir, { recursive: true });
-      await symlink(process.cwd(), join(packageScopeDir, 'message-bridge'), process.platform === 'win32' ? 'junction' : 'dir');
+      await symlink(process.cwd(), join(packageScopeDir, 'skill-opencode-plugin'), process.platform === 'win32' ? 'junction' : 'dir');
 
       const stdout = execFileSync(
         process.execPath,

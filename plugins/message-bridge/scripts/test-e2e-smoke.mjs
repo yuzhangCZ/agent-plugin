@@ -9,17 +9,19 @@ const smokeTests = [
   'tests/e2e/directory-context.test.mjs',
 ];
 
-const result = spawnSync(
-  'node',
-  ['--import', 'tsx/esm', '--test-isolation=none', '--test', ...smokeTests],
-  {
-    stdio: 'inherit',
-    env: process.env,
-  },
-);
+for (const smokeTest of smokeTests) {
+  const result = spawnSync(
+    'node',
+    ['--import', 'tsx/esm', '--test-isolation=none', '--test', smokeTest],
+    {
+      stdio: 'inherit',
+      env: process.env,
+    },
+  );
 
-if (typeof result.status === 'number') {
-  process.exit(result.status);
+  if (typeof result.status === 'number' && result.status !== 0) {
+    process.exit(result.status);
+  }
 }
 
-process.exit(1);
+process.exit(0);
