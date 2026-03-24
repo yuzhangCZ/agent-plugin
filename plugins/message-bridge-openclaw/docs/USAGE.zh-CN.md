@@ -247,9 +247,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 {
   "agents": {
     "defaults": {
-      "model": "openai-codex/gpt-5.3-codex",
-      "blockStreamingDefault": "on",
-      "blockStreamingBreak": "text_end"
+      "model": "openai-codex/gpt-5.3-codex"
     }
   },
   "plugins": {
@@ -263,7 +261,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
   "channels": {
     "message-bridge": {
       "enabled": true,
-      "blockStreaming": true,
+      "streaming": true,
       "runTimeoutMs": 300000,
       "gateway": {
         "url": "ws://127.0.0.1:8081/ws/agent"
@@ -338,6 +336,14 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 - `streamMode`
   - `runtime_block_streaming`
   - `fallback_non_streaming`
+- `streamingEnabled`
+  - `true`: 插件启用流式主路径
+  - `false`: 插件显式关闭流式，强制走非流式回退
+- `streamingSource`
+  - `default_on` / `explicit_on` / `explicit_off`
+- `streamDefaultsInjected`
+  - `true`: 本次请求由插件注入默认流式 profile（仅缺失字段）
+  - `false`: 使用用户显式配置或流式被关闭
 - `finalReconciled`
   - `true`：最终文本与流式累计文本不一致，完成时采用 final 覆盖
   - `false`：最终文本与累计文本一致（或可直接前缀补齐）
