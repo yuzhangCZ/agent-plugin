@@ -25,6 +25,7 @@
 
 - 默认只在 `plugins/` 和 `packages/` 下做主开发
 - 非专门任务不要修改 `integration/opencode-cui` 的内容或 submodule 指针
+- 当前仓库默认向 `main` 提 PR；本仓库未使用 `canary` 作为日常开发基线
 - 根规则只覆盖全仓库通用约束，不覆盖子目录专用规范
 - 涉及 `plugins/message-bridge/docs/` 时，优先遵守该目录下的更细规则
 
