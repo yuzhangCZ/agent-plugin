@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveEffectiveReplyConfig } from "../../dist/resolveEffectiveReplyConfig.js";
+import {
+  DEFAULT_BLOCK_STREAMING_CHUNK,
+  DEFAULT_BLOCK_STREAMING_COALESCE,
+  resolveEffectiveReplyConfig,
+} from "../../dist/resolveEffectiveReplyConfig.js";
 
 test("resolveEffectiveReplyConfig injects block streaming defaults when missing", () => {
   const input = {
@@ -12,23 +16,38 @@ test("resolveEffectiveReplyConfig injects block streaming defaults when missing"
 
   const result = resolveEffectiveReplyConfig(input);
 
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "default_on");
   assert.equal(result.streamDefaultsInjected, true);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "text_end");
+  assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingChunk, DEFAULT_BLOCK_STREAMING_CHUNK);
+  assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingCoalesce, DEFAULT_BLOCK_STREAMING_COALESCE);
   assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
   assert.equal(input.channels["message-bridge"], undefined);
 });
 
-test("resolveEffectiveReplyConfig preserves explicit off and false values", () => {
+test("resolveEffectiveReplyConfig preserves explicit streaming profile values without injecting", () => {
   const input = {
     agents: {
       defaults: {
-        blockStreamingDefault: "off",
+        blockStreamingDefault: "on",
         blockStreamingBreak: "message_end",
+        blockStreamingChunk: {
+          minChars: 50,
+          maxChars: 80,
+          breakPreference: "sentence",
+        },
+        blockStreamingCoalesce: {
+          minChars: 60,
+          maxChars: 100,
+          idleMs: 90,
+        },
       },
     },
     channels: {
       "message-bridge": {
+        streaming: true,
         blockStreaming: false,
       },
     },
@@ -36,11 +55,35 @@ test("resolveEffectiveReplyConfig preserves explicit off and false values", () =
 
   const result = resolveEffectiveReplyConfig(input);
 
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "explicit_on");
   assert.equal(result.streamDefaultsInjected, false);
   assert.equal(result.effectiveConfig, input);
-  assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "off");
+  assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
   assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, false);
+});
+
+test("resolveEffectiveReplyConfig disables plugin streaming when channels.message-bridge.streaming=false", () => {
+  const input = {
+    agents: {
+      defaults: {
+        blockStreamingDefault: "on",
+      },
+    },
+    channels: {
+      "message-bridge": {
+        streaming: false,
+      },
+    },
+  };
+
+  const result = resolveEffectiveReplyConfig(input);
+
+  assert.equal(result.streamingEnabled, false);
+  assert.equal(result.streamingSource, "explicit_off");
+  assert.equal(result.streamDefaultsInjected, false);
+  assert.equal(result.effectiveConfig, input);
 });
 
 test("resolveEffectiveReplyConfig only fills missing keys and keeps existing break mode", () => {
@@ -55,9 +98,13 @@ test("resolveEffectiveReplyConfig only fills missing keys and keeps existing bre
 
   const result = resolveEffectiveReplyConfig(input);
 
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "default_on");
   assert.equal(result.streamDefaultsInjected, true);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
+  assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingChunk, DEFAULT_BLOCK_STREAMING_CHUNK);
+  assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingCoalesce, DEFAULT_BLOCK_STREAMING_COALESCE);
   assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
 });
 
@@ -71,9 +118,28 @@ test("resolveEffectiveReplyConfig reports malformed config paths and normalizes 
 
   const result = resolveEffectiveReplyConfig(input);
 
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "default_on");
   assert.equal(result.streamDefaultsInjected, true);
   assert.deepEqual(result.malformedConfigPaths, ["agents", "channels.message-bridge"]);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "text_end");
   assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+});
+
+test("resolveEffectiveReplyConfig treats malformed streaming value as default_on and reports path", () => {
+  const input = {
+    channels: {
+      "message-bridge": {
+        streaming: "invalid",
+      },
+    },
+  };
+
+  const result = resolveEffectiveReplyConfig(input);
+
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "default_on");
+  assert.equal(result.streamDefaultsInjected, true);
+  assert.deepEqual(result.malformedConfigPaths, ["channels.message-bridge.streaming"]);
 });
