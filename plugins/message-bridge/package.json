@@ -1,6 +1,6 @@
 {
   "name": "@wecode/skill-opencode-plugin",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Message Bridge Plugin — unified message interface supporting OpenCode and future AI tools",
   "packageManager": "pnpm@9.15.4",
   "main": "release/message-bridge.plugin.js",
