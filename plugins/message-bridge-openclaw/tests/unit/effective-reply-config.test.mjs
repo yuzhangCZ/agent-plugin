@@ -60,3 +60,20 @@ test("resolveEffectiveReplyConfig only fills missing keys and keeps existing bre
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
   assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
 });
+
+test("resolveEffectiveReplyConfig reports malformed config paths and normalizes shape", () => {
+  const input = {
+    agents: "invalid",
+    channels: {
+      "message-bridge": "invalid",
+    },
+  };
+
+  const result = resolveEffectiveReplyConfig(input);
+
+  assert.equal(result.streamDefaultsInjected, true);
+  assert.deepEqual(result.malformedConfigPaths, ["agents", "channels.message-bridge"]);
+  assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
+  assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "text_end");
+  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+});

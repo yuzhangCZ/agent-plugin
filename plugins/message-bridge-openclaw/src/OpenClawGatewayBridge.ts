@@ -636,7 +636,23 @@ export class OpenClawGatewayBridge {
     const executionPath = pathSelection.executionPath;
     const streamMode: StreamMode =
       executionPath === "runtime_reply" ? "runtime_block_streaming" : "fallback_non_streaming";
-    const { effectiveConfig, streamDefaultsInjected } = resolveEffectiveReplyConfig(this.options.config);
+    const { effectiveConfig, streamDefaultsInjected, malformedConfigPaths } = resolveEffectiveReplyConfig(
+      this.options.config,
+    );
+    const effectiveStreamDefaultsInjected =
+      executionPath === "runtime_reply" ? streamDefaultsInjected : false;
+    if (malformedConfigPaths.length > 0) {
+      this.options.logger.warn("bridge.chat.config_shape_corrected", {
+        toolSessionId: record.toolSessionId,
+        welinkSessionId: record.welinkSessionId,
+        sessionKey: record.sessionKey,
+        executionPath,
+        streamMode,
+        chatRequestId,
+        retryAttempt: 0,
+        malformedConfigPaths,
+      });
+    }
     this.activeToolSessions.set(record.sessionKey, {
       toolSessionId: record.toolSessionId,
       runId: null,
@@ -656,7 +672,7 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
-      streamDefaultsInjected,
+      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       reason: pathSelection.reason,
       chatRequestId,
       retryAttempt: 0,
@@ -671,7 +687,7 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
-      streamDefaultsInjected,
+      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       chatRequestId,
       retryAttempt: 0,
     });
@@ -690,7 +706,7 @@ export class OpenClawGatewayBridge {
           selectedModel,
           chatRequestId,
           retryAttempt,
-          streamDefaultsInjected,
+          effectiveStreamDefaultsInjected,
           context,
         );
         if (fallbackResult.ok) {
@@ -710,7 +726,7 @@ export class OpenClawGatewayBridge {
             configuredTimeoutMs,
             executionPath,
             streamMode,
-            streamDefaultsInjected,
+            streamDefaultsInjected: effectiveStreamDefaultsInjected,
             chatRequestId,
             retryAttempt,
           });
@@ -776,7 +792,7 @@ export class OpenClawGatewayBridge {
           streamMode: "runtime_block_streaming",
           chatRequestId,
           retryAttempt,
-          streamDefaultsInjected,
+          streamDefaultsInjected: effectiveStreamDefaultsInjected,
           provider: selection.provider,
           model: selection.model,
           thinkLevel: selection.thinkLevel ?? null,
@@ -889,7 +905,7 @@ export class OpenClawGatewayBridge {
             configuredTimeoutMs,
             executionPath,
             streamMode,
-            streamDefaultsInjected,
+            streamDefaultsInjected: effectiveStreamDefaultsInjected,
             chatRequestId,
             retryAttempt,
           });
@@ -921,7 +937,7 @@ export class OpenClawGatewayBridge {
         selectedModel,
         executionPath: "runtime_reply",
         streamMode,
-        streamDefaultsInjected,
+        streamDefaultsInjected: effectiveStreamDefaultsInjected,
         chatRequestId,
         retryAttempt,
         finalReconciled: reconciliation.finalReconciled,
@@ -957,7 +973,7 @@ export class OpenClawGatewayBridge {
       selectedModel,
       executionPath,
       streamMode,
-      streamDefaultsInjected,
+      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       chatRequestId,
       retryAttempt,
       finalReconciled: false,

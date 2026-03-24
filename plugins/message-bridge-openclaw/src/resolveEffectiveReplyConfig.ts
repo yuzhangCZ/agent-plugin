@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 interface ResolveEffectiveReplyConfigResult {
   effectiveConfig: OpenClawConfig;
   streamDefaultsInjected: boolean;
+  malformedConfigPaths: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -10,15 +11,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffectiveReplyConfigResult {
-  const root = isRecord(config) ? config : {};
-  const agents = isRecord(root.agents) ? root.agents : {};
-  const defaults = isRecord(agents.defaults) ? agents.defaults : {};
-  const channels = isRecord(root.channels) ? root.channels : {};
-  const messageBridge = isRecord(channels["message-bridge"]) ? channels["message-bridge"] : {};
+  const malformedConfigPaths: string[] = [];
+  const root: Record<string, unknown> = isRecord(config) ? config : {};
 
-  const injectBlockStreamingDefault = defaults.blockStreamingDefault === undefined;
-  const injectBlockStreamingBreak = defaults.blockStreamingBreak === undefined;
-  const injectChannelBlockStreaming = messageBridge.blockStreaming === undefined;
+  const agentsRaw = root["agents"];
+  if (agentsRaw !== undefined && !isRecord(agentsRaw)) {
+    malformedConfigPaths.push("agents");
+  }
+  const agents: Record<string, unknown> = isRecord(agentsRaw) ? agentsRaw : {};
+
+  const defaultsRaw = agents["defaults"];
+  if (defaultsRaw !== undefined && !isRecord(defaultsRaw)) {
+    malformedConfigPaths.push("agents.defaults");
+  }
+  const defaults: Record<string, unknown> = isRecord(defaultsRaw) ? defaultsRaw : {};
+
+  const channelsRaw = root["channels"];
+  if (channelsRaw !== undefined && !isRecord(channelsRaw)) {
+    malformedConfigPaths.push("channels");
+  }
+  const channels: Record<string, unknown> = isRecord(channelsRaw) ? channelsRaw : {};
+
+  const messageBridgeRaw = channels["message-bridge"];
+  if (messageBridgeRaw !== undefined && !isRecord(messageBridgeRaw)) {
+    malformedConfigPaths.push("channels.message-bridge");
+  }
+  const messageBridge: Record<string, unknown> = isRecord(messageBridgeRaw) ? messageBridgeRaw : {};
+
+  const injectBlockStreamingDefault = defaults["blockStreamingDefault"] === undefined;
+  const injectBlockStreamingBreak = defaults["blockStreamingBreak"] === undefined;
+  const injectChannelBlockStreaming = messageBridge["blockStreaming"] === undefined;
   const streamDefaultsInjected =
     injectBlockStreamingDefault || injectBlockStreamingBreak || injectChannelBlockStreaming;
 
@@ -26,6 +48,7 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     return {
       effectiveConfig: config,
       streamDefaultsInjected: false,
+      malformedConfigPaths,
     };
   }
 
@@ -51,5 +74,6 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
   return {
     effectiveConfig,
     streamDefaultsInjected: true,
+    malformedConfigPaths,
   };
 }
