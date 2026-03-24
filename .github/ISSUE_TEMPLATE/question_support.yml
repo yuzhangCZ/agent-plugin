@@ -1,0 +1,43 @@
+name: Question / support
+description: 提交问答、排障求助或暂时无法明确归类的问题
+title: "[Question] "
+labels:
+  - question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: 你想解决什么问题
+      description: 请直接描述问题本身，而不是先猜结论。
+      placeholder: 例如：为什么这个仓库默认向 main 提 PR？为什么 runtime smoke 在本地失败？
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景信息
+      description: 说明涉及的模块、命令、分支、文件或上下文。
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试的步骤
+      description: 如果已经排查过，请写出你做过什么。
+      placeholder: |
+        - 查看了 ...
+        - 运行了 ...
+        - 对比了 ...
+  - type: textarea
+    id: expected_help
+    attributes:
+      label: 希望得到的帮助
+      description: 说明你需要解释、定位、建议方案，还是明确结论。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或补充材料
+      description: 可粘贴日志、截图链接或命令输出。
+      render: shell
