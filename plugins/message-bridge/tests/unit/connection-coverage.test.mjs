@@ -106,6 +106,64 @@ function createLoggerRecorder() {
   return { logger, entries };
 }
 
+function waitForReady(conn, states, timeoutMs = 200) {
+  if (conn.getState() === 'READY') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      conn.off('stateChange', handleStateChange);
+      reject(
+        new Error(
+          `Timed out waiting for READY: state=${conn.getState()} websocketInstances=${ScriptedWebSocket.instances.length} states=${states.join(' -> ')}`,
+        ),
+      );
+    }, timeoutMs);
+
+    const handleStateChange = (state) => {
+      if (state !== 'READY') {
+        return;
+      }
+
+      clearTimeout(timeout);
+      conn.off('stateChange', handleStateChange);
+      resolve();
+    };
+
+    conn.on('stateChange', handleStateChange);
+  });
+}
+
+function waitForState(conn, states, expectedState, timeoutMs = 200) {
+  if (conn.getState() === expectedState) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      conn.off('stateChange', handleStateChange);
+      reject(
+        new Error(
+          `Timed out waiting for ${expectedState}: state=${conn.getState()} websocketInstances=${ScriptedWebSocket.instances.length} states=${states.join(' -> ')}`,
+        ),
+      );
+    }, timeoutMs);
+
+    const handleStateChange = (state) => {
+      if (state !== expectedState) {
+        return;
+      }
+
+      clearTimeout(timeout);
+      conn.off('stateChange', handleStateChange);
+      resolve();
+    };
+
+    conn.on('stateChange', handleStateChange);
+  });
+}
+
 describe('DefaultGatewayConnection coverage', () => {
   const originalWebSocket = globalThis.WebSocket;
 
@@ -341,14 +399,18 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('reconnects after opened connection closes unexpectedly', async () => {
     ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 }, { open: true });
+    const states = [];
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
       reconnectBaseMs: 5,
       reconnectMaxMs: 5,
       registerMessage: registerMessage(),
     });
+    conn.on('stateChange', (state) => states.push(state));
     await conn.connect();
-    await new Promise((r) => setTimeout(r, 30));
+    states.length = 0;
+    await waitForState(conn, states, 'DISCONNECTED');
+    await waitForReady(conn, states);
     assert.ok(ScriptedWebSocket.instances.length >= 2);
     conn.disconnect();
   });
@@ -748,6 +810,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('clears outbound summaries before an automatic reconnect', async () => {
     const { logger, entries } = createLoggerRecorder();
+    const states = [];
     ScriptedWebSocket.scripts.push(
       { closeAfterOpenMs: 0, closeCode: 1009, closeReason: 'too-big', wasClean: false },
       { open: true },
@@ -759,8 +822,10 @@ describe('DefaultGatewayConnection coverage', () => {
       registerMessage: registerMessage(),
       logger,
     });
+    conn.on('stateChange', (state) => states.push(state));
 
     await conn.connect();
+    states.length = 0;
     conn.send(
       { type: 'tool_event', event: { type: 'message.updated' } },
       {
@@ -771,7 +836,8 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     );
 
-    await new Promise((r) => setTimeout(r, 30));
+    await waitForState(conn, states, 'DISCONNECTED');
+    await waitForReady(conn, states);
 
     conn.send(
       { type: 'tool_event', event: { type: 'session.status' } },
