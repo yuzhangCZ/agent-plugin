@@ -2,7 +2,6 @@
   "name": "@wecode/skill-openclaw-plugin",
   "version": "0.1.0",
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
-  "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

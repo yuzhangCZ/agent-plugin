@@ -159,6 +159,14 @@ function createRepoState(repoRoot = "/repo") {
   };
 }
 
+function missingDependencyResult(targetId, missingPackages) {
+  return {
+    missingPackages,
+    ok: false,
+    targetId,
+  };
+}
+
 test("descriptor schema is complete for both release targets", () => {
   for (const descriptor of Object.values(releaseDescriptors)) {
     for (const field of releaseDescriptorSchema) {
@@ -176,6 +184,8 @@ test("parseReleaseLocalArgs accepts single-target bump release", () => {
     bump: "patch",
     dryRun: false,
     help: false,
+    installDeps: false,
+    installDepsUpdateLockfile: false,
     openclawVersion: null,
     positionalTarget: null,
     preid: "beta",
@@ -209,6 +219,41 @@ test("parseReleaseLocalArgs rejects push plus skip-publish", () => {
   );
 });
 
+test("parseReleaseLocalArgs accepts install-deps mode", () => {
+  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--version", "1.2.0", "--install-deps"]);
+
+  assert.equal(parsed.installDeps, true);
+  assert.equal(parsed.installDepsUpdateLockfile, false);
+});
+
+test("parseReleaseLocalArgs accepts install-deps-update-lockfile mode", () => {
+  const parsed = parseReleaseLocalArgs([
+    "--target",
+    "message-bridge",
+    "--version",
+    "1.2.0",
+    "--install-deps-update-lockfile",
+  ]);
+
+  assert.equal(parsed.installDeps, false);
+  assert.equal(parsed.installDepsUpdateLockfile, true);
+});
+
+test("parseReleaseLocalArgs rejects conflicting install modes", () => {
+  assert.throws(
+    () =>
+      parseReleaseLocalArgs([
+        "--target",
+        "message-bridge",
+        "--version",
+        "1.2.0",
+        "--install-deps",
+        "--install-deps-update-lockfile",
+      ]),
+    /cannot be used together/i,
+  );
+});
+
 test("parseReleaseLocalArgs rejects invalid dual version shape", () => {
   assert.throws(
     () => parseReleaseLocalArgs(["--target", "dual", "--version", "1.2.0"]),
@@ -233,7 +278,7 @@ test("parseSemver validates versions", () => {
 });
 
 test("createReleasePlan resolves dual releases and warns they are non-atomic", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -265,7 +310,7 @@ test("createReleasePlan resolves dual releases and warns they are non-atomic", (
 });
 
 test("createReleasePlan rejects existing tags", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -298,7 +343,7 @@ test("createReleasePlan rejects existing tags", () => {
 });
 
 test("createReleasePlan ignores generated build outputs in dirty worktree checks", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -331,7 +376,7 @@ test("createReleasePlan ignores generated build outputs in dirty worktree checks
 });
 
 test("createReleasePlan still blocks on non-generated dirty files", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -364,7 +409,7 @@ test("createReleasePlan still blocks on non-generated dirty files", () => {
 });
 
 test("evaluatePublishReadiness returns the publish readiness contract", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -394,12 +439,12 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
   assert.equal(readiness.releaseReady, true);
   assert.equal(readiness.resolvedVersion, "0.2.0");
   assert.equal(readiness.resolvedDistTag, "latest");
-  assert.equal(readiness.resolvedPublishRoot, "plugins/message-bridge-openclaw/bundle");
+  assert.equal(readiness.resolvedPublishRoot, path.join("plugins", "message-bridge-openclaw", "bundle"));
   assert.ok(readiness.executedChecks.length >= 4);
 });
 
 test("executeRelease skips publish and still stages git flow", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -433,10 +478,250 @@ test("executeRelease skips publish and still stages git flow", () => {
   assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
 });
 
-test("executeRelease blocks publish when readiness fails", () => {
-  const repoRoot = "/repo";
+test("executeRelease fails fast on missing dependencies without install flags", () => {
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
-  const missingPaths = state.paths.filter((entry) => !entry.endsWith("release/message-bridge.plugin.js"));
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: false,
+      installDepsUpdateLockfile: false,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => missingDependencyResult("message-bridge", ["esbuild"]),
+      }),
+    /dependency check failed before build/i,
+  );
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
+});
+
+test("executeRelease installs missing dependencies with frozen lockfile mode", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: true,
+      installDepsUpdateLockfile: false,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => {
+      const installAttempted = execDouble.calls.some(
+        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && entry.args.includes("--frozen-lockfile"),
+      );
+      return installAttempted ? { missingPackages: [], ok: true, targetId: "message-bridge" } : missingDependencyResult("message-bridge", ["esbuild"]);
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm" &&
+        entry.cwd === repoRoot &&
+        entry.args[0] === "install" &&
+        entry.args.includes("--frozen-lockfile"),
+    ),
+  );
+  assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
+});
+
+test("executeRelease installs missing dependencies with update-lockfile mode", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: false,
+      installDepsUpdateLockfile: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => {
+      const installAttempted = execDouble.calls.some(
+        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && !entry.args.includes("--frozen-lockfile"),
+      );
+      return installAttempted ? { missingPackages: [], ok: true, targetId: "message-bridge" } : missingDependencyResult("message-bridge", ["esbuild"]);
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm" &&
+        entry.cwd === repoRoot &&
+        entry.args.length === 1 &&
+        entry.args[0] === "install",
+    ),
+  );
+});
+
+test("executeRelease does not install when dependencies already pass", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: true,
+      installDepsUpdateLockfile: false,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
+});
+
+test("executeRelease stops if dependencies are still missing after install", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: true,
+      installDepsUpdateLockfile: false,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => missingDependencyResult("message-bridge", ["esbuild"]),
+      }),
+    /dependency check failed before build/i,
+  );
+  assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
+});
+
+test("executeRelease blocks publish when readiness fails", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const missingPaths = state.paths.filter(
+    (entry) => entry !== path.join(state.bridgeRoot, "release/message-bridge.plugin.js"),
+  );
   const fs = new FakeFs({
     manifests: state.manifests,
     existingPaths: missingPaths,
@@ -470,7 +755,7 @@ test("executeRelease blocks publish when readiness fails", () => {
 });
 
 test("executeRelease restores bumped version when verify fails before publish", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -508,7 +793,7 @@ test("executeRelease restores bumped version when verify fails before publish", 
 });
 
 test("executeRelease resolves scoped registry and publishes against that registry", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -573,7 +858,7 @@ test("executeRelease resolves scoped registry and publishes against that registr
 });
 
 test("executeRelease surfaces dual release non-atomic recovery on second publish failure", () => {
-  const repoRoot = "/repo";
+  const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
     manifests: state.manifests,
@@ -621,21 +906,26 @@ test("main prints help output", async () => {
   assert.equal(exitCode, 0);
   assert.equal(stderr.toString(), "");
   assert.match(stdout.toString(), /pnpm release:local -- --target/i);
+  assert.match(stdout.toString(), /--install-deps/);
   assert.match(formatHelp(), /remote push only runs with --push/i);
 });
 
 test("isCliEntry normalizes argv paths before comparing ESM entry files", () => {
+  if (process.platform === "win32") {
+    assert.equal(
+      isCliEntry("file:///C:/repo/scripts/release-local.mjs", "C:\\repo\\scripts\\release-local.mjs"),
+      true,
+    );
+    assert.equal(
+      isCliEntry("file:///C:/repo/scripts/release-local.mjs", ".\\scripts\\release-local.mjs", "C:\\repo"),
+      true,
+    );
+    assert.equal(
+      isCliEntry("file:///C:/repo/scripts/release-local.mjs", "D:\\repo\\scripts\\release-local.mjs"),
+      false,
+    );
+    return;
+  }
+
   assert.equal(isCliEntry("file:///repo/scripts/release-local.mjs", "/repo/scripts/release-local.mjs"), true);
-  assert.equal(
-    isCliEntry("file:///C:/repo/scripts/release-local.mjs", "C:\\repo\\scripts\\release-local.mjs"),
-    true,
-  );
-  assert.equal(
-    isCliEntry("file:///C:/repo/scripts/release-local.mjs", ".\\scripts\\release-local.mjs", "C:\\repo"),
-    true,
-  );
-  assert.equal(
-    isCliEntry("file:///C:/repo/scripts/release-local.mjs", "D:\\repo\\scripts\\release-local.mjs"),
-    false,
-  );
 });

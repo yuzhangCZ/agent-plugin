@@ -86,6 +86,18 @@ function cloneCommand(command) {
   return [...command];
 }
 
+function resolveExecutable(command) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "pnpm" || command === "npm" || command === "npx") {
+    return `${command}.cmd`;
+  }
+
+  return command;
+}
+
 function createProcessPorts(overrides = {}) {
   const fs = overrides.fs ?? {
     exists: existsSync,
@@ -93,12 +105,17 @@ function createProcessPorts(overrides = {}) {
     writeJson: writeJsonFile,
   };
 
+  const inspectDependencies =
+    overrides.inspectDependencies ?? ((target) => inspectManifestDependencies(target, fs, exec));
+
   const exec =
     overrides.exec ??
     ((command, args, options = {}) => {
-      const output = execFileSync(command, args, {
+      const resolvedCommand = resolveExecutable(command);
+      const output = execFileSync(resolvedCommand, args, {
         cwd: options.cwd,
         encoding: "utf8",
+        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand),
         stdio: options.stdio ?? "pipe",
       });
 
@@ -108,6 +125,7 @@ function createProcessPorts(overrides = {}) {
   return {
     fs,
     exec,
+    inspectDependencies,
   };
 }
 
@@ -267,6 +285,8 @@ export function parseReleaseLocalArgs(argv) {
     bump: null,
     dryRun: false,
     help: false,
+    installDeps: false,
+    installDepsUpdateLockfile: false,
     openclawVersion: null,
     positionalTarget: null,
     preid: defaultPreid,
@@ -332,6 +352,16 @@ export function parseReleaseLocalArgs(argv) {
 
     if (arg === "--allow-dirty") {
       parsed.allowDirty = true;
+      continue;
+    }
+
+    if (arg === "--install-deps") {
+      parsed.installDeps = true;
+      continue;
+    }
+
+    if (arg === "--install-deps-update-lockfile") {
+      parsed.installDepsUpdateLockfile = true;
       continue;
     }
 
@@ -445,6 +475,10 @@ export function parseReleaseLocalArgs(argv) {
 
   if (parsed.push && parsed.skipPublish) {
     throw new Error("--push cannot be combined with --skip-publish");
+  }
+
+  if (parsed.installDeps && parsed.installDepsUpdateLockfile) {
+    throw new Error("--install-deps and --install-deps-update-lockfile cannot be used together");
   }
 
   if (!validReleaseKinds.has(parsed.release ?? inferReleaseKind(parsed.version, parsed.bump, null))) {
@@ -720,14 +754,16 @@ export function createReleasePlan(input = {}, overrides = {}) {
 
   const blockers = [];
   const warnings = [];
-  const workingTreeStatus = getWorkingTreeStatus(repoRoot, exec);
-  if (!parsed.allowDirty && workingTreeStatus.trim().length > 0) {
+  const workingTreeStatus = parsed.skipGit ? "" : getWorkingTreeStatus(repoRoot, exec);
+  if (!parsed.skipGit && !parsed.allowDirty && workingTreeStatus.trim().length > 0) {
     blockers.push("working tree is not clean; rerun with --allow-dirty only if you intend to keep unrelated local changes");
   }
 
-  for (const target of targets) {
-    if (tagExists(repoRoot, exec, target.tagName)) {
-      blockers.push(`release tag already exists: ${target.tagName}`);
+  if (!parsed.skipGit) {
+    for (const target of targets) {
+      if (tagExists(repoRoot, exec, target.tagName)) {
+        blockers.push(`release tag already exists: ${target.tagName}`);
+      }
     }
   }
 
@@ -846,6 +882,8 @@ Options:
   --skip-publish                  Build and verify, but skip npm publish
   --skip-git                      Publish without local commit/tag
   --push                          Push branch and new tags after local commit/tag
+  --install-deps                  Auto-install missing dependencies with pnpm install --frozen-lockfile
+  --install-deps-update-lockfile  Auto-install missing dependencies with pnpm install
   --allow-dirty                   Allow running from a dirty worktree
   --help, -h                      Print this help
 
@@ -854,6 +892,9 @@ Defaults:
   - git commit and tag are local by default
   - remote push only runs with --push
   - --skip-publish cannot be combined with --push
+  - dependency checks run before any build or verify step
+  - missing dependencies fail fast unless an install flag is provided
+  - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
   - dual releases are non-atomic
@@ -861,6 +902,7 @@ Defaults:
 Examples:
   pnpm release:plan -- --target message-bridge --bump patch
   pnpm release:local -- --target message-bridge --version 1.2.0
+  pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta
   pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish
   pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0
@@ -873,6 +915,129 @@ function runCommand(exec, command, cwd) {
     cwd,
     stdio: "inherit",
   });
+}
+
+function collectManifestDependencyNames(manifest) {
+  const dependencyFields = ["dependencies", "devDependencies"];
+  const names = new Set();
+
+  for (const field of dependencyFields) {
+    const entries = manifest[field];
+    if (!isObject(entries)) {
+      continue;
+    }
+
+    for (const dependencyName of Object.keys(entries)) {
+      names.add(dependencyName);
+    }
+  }
+
+  return [...names].sort();
+}
+
+function inspectManifestDependencies(target, fs, exec) {
+  const manifest = fs.readJson(target.versionSourceAbsolute);
+  const dependencyNames = collectManifestDependencyNames(manifest);
+
+  if (dependencyNames.length === 0) {
+    return {
+      missingPackages: [],
+      ok: true,
+      targetId: target.id,
+    };
+  }
+
+  const checkScript = `
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const dependencyNames = JSON.parse(process.argv[1]);
+const requireFromPackage = createRequire(path.join(process.cwd(), "package.json"));
+const missingPackages = [];
+
+for (const dependencyName of dependencyNames) {
+  try {
+    requireFromPackage.resolve(dependencyName);
+  } catch {
+    missingPackages.push(dependencyName);
+  }
+}
+
+process.stdout.write(JSON.stringify({ missingPackages }));
+`.trim();
+
+  const output = exec(
+    "node",
+    ["--input-type=module", "-e", checkScript, JSON.stringify(dependencyNames)],
+    {
+      cwd: target.packageRootAbsolute,
+      stdio: "pipe",
+    },
+  );
+
+  const parsedOutput = output ? JSON.parse(output) : { missingPackages: [] };
+  const missingPackages = Array.isArray(parsedOutput.missingPackages) ? parsedOutput.missingPackages : [];
+
+  return {
+    missingPackages,
+    ok: missingPackages.length === 0,
+    targetId: target.id,
+  };
+}
+
+function getDependencyInstallMode(parsed) {
+  if (parsed.installDepsUpdateLockfile) {
+    return "update-lockfile";
+  }
+
+  if (parsed.installDeps) {
+    return "frozen-lockfile";
+  }
+
+  return "none";
+}
+
+function formatMissingDependenciesMessage(failures) {
+  const summary = failures
+    .map((failure) => `${failure.targetId}: ${failure.missingPackages.slice(0, 5).join(", ")}`)
+    .join("; ");
+
+  return `dependency check failed before build; unresolved packages: ${summary}. Run pnpm install, or rerun with --install-deps or --install-deps-update-lockfile.`;
+}
+
+function prepareDependencies(plan, ports, stdout) {
+  const installMode = getDependencyInstallMode(plan.parsed);
+  const inspectDependencies = ports.inspectDependencies ?? ((target) => inspectManifestDependencies(target, ports.fs, ports.exec));
+
+  const checkTargets = () =>
+    plan.targets
+      .map((target) => inspectDependencies(target))
+      .filter((result) => !result.ok);
+
+  let failures = checkTargets();
+  if (failures.length === 0) {
+    stdout.write("dependency check: passed\n");
+    return;
+  }
+
+  stdout.write("dependency check: failed\n");
+  if (installMode === "none") {
+    throw new Error(formatMissingDependenciesMessage(failures));
+  }
+
+  const installCommand =
+    installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
+  stdout.write(`dependency install: ${formatCommand(installCommand)}\n`);
+  runCommand(ports.exec, installCommand, plan.repoRoot);
+
+  failures = checkTargets();
+  if (failures.length === 0) {
+    stdout.write("dependency check: passed\n");
+    return;
+  }
+
+  stdout.write("dependency check: failed\n");
+  throw new Error(formatMissingDependenciesMessage(failures));
 }
 
 function readRegistry(exec, repoRoot) {
@@ -1015,7 +1180,7 @@ function normalizeWindowsCwd(cwd) {
 }
 
 export function executeRelease(plan, overrides = {}) {
-  const { fs, exec } = createProcessPorts(overrides);
+  const { fs, exec, inspectDependencies } = createProcessPorts(overrides);
   const stdout = overrides.stdout ?? process.stdout;
 
   if (plan.blockers.length > 0) {
@@ -1033,6 +1198,8 @@ export function executeRelease(plan, overrides = {}) {
       publishedTargets: [],
     };
   }
+
+  prepareDependencies(plan, { exec, fs, inspectDependencies }, stdout);
 
   const publishRegistries = plan.actions.publish
     ? Object.fromEntries(

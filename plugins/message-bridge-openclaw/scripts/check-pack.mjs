@@ -4,15 +4,36 @@ import { mkdtemp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import process from "node:process";
 
 const rootDir = process.cwd();
 const bundleDir = join(rootDir, "bundle");
 const packDir = join(rootDir, ".tmp", "pack-check");
 
+function resolveExecutable(command) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "npm") {
+    return "npm.cmd";
+  }
+
+  return command;
+}
+
+function run(command, args, options = {}) {
+  const executable = resolveExecutable(command);
+  return execFileSync(executable, args, {
+    ...options,
+    shell: process.platform === "win32" && /\.cmd$/i.test(executable),
+  });
+}
+
 async function readPackedManifest(tgzPath) {
   const extractedDir = await mkdtemp(join(tmpdir(), "openclaw-pack-"));
   try {
-    execFileSync("tar", ["-xzf", tgzPath, "-C", extractedDir], {
+    run("tar", ["-xzf", tgzPath, "-C", extractedDir], {
       stdio: "pipe",
     });
 
@@ -26,7 +47,7 @@ async function main() {
   await rm(packDir, { recursive: true, force: true });
   await mkdir(packDir, { recursive: true });
 
-  execFileSync("npm", ["pack", "--pack-destination", packDir], {
+  run("npm", ["pack", "--pack-destination", packDir], {
     cwd: bundleDir,
     stdio: "pipe",
   });
@@ -35,10 +56,11 @@ async function main() {
   assert.ok(tgzName, "pack check failed: no .tgz generated from bundle/");
 
   const tgzPath = join(packDir, tgzName);
-  const archiveEntries = execFileSync("tar", ["-tzf", tgzPath], {
+  const archiveEntries = run("tar", ["-tzf", tgzPath], {
     encoding: "utf8",
   })
-    .split("\n")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
     .filter(Boolean);
 
   for (const entry of [
@@ -66,6 +88,7 @@ async function main() {
   const manifest = await readPackedManifest(tgzPath);
   assert.equal(manifest.name, "@wecode/skill-openclaw-plugin", "pack check failed: unexpected package name");
   assert.equal(manifest.main, "index.js", "pack check failed: main must point to bundle root");
+  assert.notEqual(manifest.private, true, "pack check failed: published manifest must not be private");
 
   console.log("Pack check passed: bundle-only artifact, no docs, no dist, no sourcemap.");
 }
