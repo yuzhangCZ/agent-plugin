@@ -9,6 +9,7 @@ import {
   executeRelease,
   formatHelp,
   formatReleasePlan,
+  isCliEntry,
   main,
   parseReleaseLocalArgs,
   parseSemver,
@@ -621,4 +622,20 @@ test("main prints help output", async () => {
   assert.equal(stderr.toString(), "");
   assert.match(stdout.toString(), /pnpm release:local -- --target/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
+});
+
+test("isCliEntry normalizes argv paths before comparing ESM entry files", () => {
+  assert.equal(isCliEntry("file:///repo/scripts/release-local.mjs", "/repo/scripts/release-local.mjs"), true);
+  assert.equal(
+    isCliEntry("file:///C:/repo/scripts/release-local.mjs", "C:\\repo\\scripts\\release-local.mjs"),
+    true,
+  );
+  assert.equal(
+    isCliEntry("file:///C:/repo/scripts/release-local.mjs", ".\\scripts\\release-local.mjs", "C:\\repo"),
+    true,
+  );
+  assert.equal(
+    isCliEntry("file:///C:/repo/scripts/release-local.mjs", "D:\\repo\\scripts\\release-local.mjs"),
+    false,
+  );
 });

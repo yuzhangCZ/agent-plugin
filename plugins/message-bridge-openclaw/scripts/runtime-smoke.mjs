@@ -72,6 +72,56 @@ function readCommandVersion(cmd, args = ["--version"]) {
   return result.stdout.trim() || result.stderr.trim() || "unknown";
 }
 
+export function createIsolatedHomeEnv(homeDir, extraEnv = {}) {
+  return {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    XDG_CONFIG_HOME: path.join(homeDir, ".config"),
+    ...extraEnv,
+  };
+}
+
+function normalizeCliEntryPath(candidatePath) {
+  const slashNormalized = candidatePath.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(slashNormalized)) {
+    return slashNormalized.toLowerCase();
+  }
+
+  if (/^\/[A-Za-z]:\//.test(slashNormalized)) {
+    return slashNormalized.slice(1).toLowerCase();
+  }
+
+  return path.resolve(candidatePath).replace(/\\/g, "/");
+}
+
+export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
+  if (!argvEntry) {
+    return false;
+  }
+
+  const importMetaPath = normalizeCliEntryPath(fileURLToPath(importMetaUrl));
+  const argvPath = normalizeCliArgvEntry(argvEntry, isWindowsNormalizedPath(importMetaPath), cwd);
+  return importMetaPath === argvPath;
+}
+
+function normalizeCliArgvEntry(argvEntry, windowsPath, cwd = process.cwd()) {
+  const resolvedEntry = windowsPath ? path.win32.resolve(normalizeWindowsCwd(cwd), argvEntry) : path.resolve(argvEntry);
+  return normalizeCliEntryPath(resolvedEntry);
+}
+
+function normalizeWindowsCwd(cwd) {
+  if (/^[A-Za-z]:[\\/]/.test(cwd)) {
+    return cwd;
+  }
+
+  return cwd.replace(/\//g, "\\");
+}
+
+function isWindowsNormalizedPath(candidatePath) {
+  return /^[a-z]:\//.test(candidatePath);
+}
+
 function createFailure(failureCategory, message, failureCode = failureCategory) {
   const error = new Error(message);
   error.failureCategory = failureCategory;
@@ -280,7 +330,7 @@ async function main() {
   await mockGateway.start();
   await run(openclawCmd, ["--dev", "plugins", "install", bundleDir], {
     cwd: rootDir,
-    env: { HOME: tmpHome },
+    env: createIsolatedHomeEnv(tmpHome),
     stdio: "ignore",
   });
   await run(
@@ -300,7 +350,7 @@ async function main() {
     ],
     {
       cwd: rootDir,
-      env: { HOME: tmpHome },
+      env: createIsolatedHomeEnv(tmpHome),
       stdio: "ignore",
     },
   );
@@ -311,7 +361,7 @@ async function main() {
     gatewayLog,
     {
       cwd: tmpWorkspace,
-      env: { HOME: tmpHome },
+      env: createIsolatedHomeEnv(tmpHome),
     },
   );
 
@@ -523,21 +573,23 @@ async function main() {
   console.log(`gateway_log=${gatewayLog}`);
 }
 
-withTimeout(() => main(), timeoutMs, "runtime-smoke", "TIMEOUT", "TIMEOUT")
-  .catch(async (error) => {
-    const failureCategory =
-      error && typeof error === "object" && "failureCategory" in error ? error.failureCategory : "MESSAGE_FLOW_FAILED";
-    const failureCode =
-      error && typeof error === "object" && "failureCode" in error ? error.failureCode : failureCategory;
-    const failureMessage = error instanceof Error ? error.message : String(error);
-    await writeSummary({
-      failureCategory,
-      failureCode,
-      failureMessage,
-    }).catch(() => {});
-    console.error(`failure_category=${failureCategory}`);
-    console.error(`failure_code=${failureCode}`);
-    console.error(failureMessage);
-    process.exit(1);
-  })
-  .finally(cleanup);
+if (isCliEntry(import.meta.url, process.argv[1])) {
+  withTimeout(() => main(), timeoutMs, "runtime-smoke", "TIMEOUT", "TIMEOUT")
+    .catch(async (error) => {
+      const failureCategory =
+        error && typeof error === "object" && "failureCategory" in error ? error.failureCategory : "MESSAGE_FLOW_FAILED";
+      const failureCode =
+        error && typeof error === "object" && "failureCode" in error ? error.failureCode : failureCategory;
+      const failureMessage = error instanceof Error ? error.message : String(error);
+      await writeSummary({
+        failureCategory,
+        failureCode,
+        failureMessage,
+      }).catch(() => {});
+      console.error(`failure_category=${failureCategory}`);
+      console.error(`failure_code=${failureCode}`);
+      console.error(failureMessage);
+      process.exit(1);
+    })
+    .finally(cleanup);
+}
