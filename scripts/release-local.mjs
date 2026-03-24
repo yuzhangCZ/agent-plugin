@@ -964,6 +964,56 @@ function maybeInjectFailure(target, stage) {
   throw new Error(`injected failure for ${target.id} at ${stage}`);
 }
 
+export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
+  if (!argvEntry) {
+    return false;
+  }
+
+  const importMetaPath = normalizeCliEntryPathFromUrl(importMetaUrl);
+  const argvPath = normalizeCliArgvEntry(argvEntry, importMetaPath.kind, cwd);
+  return importMetaPath.kind === argvPath.kind && importMetaPath.value === argvPath.value;
+}
+
+function normalizeCliEntryPathFromUrl(importMetaUrl) {
+  const url = new URL(importMetaUrl);
+  if (/^\/[A-Za-z]:\//.test(url.pathname)) {
+    return {
+      kind: "win32",
+      value: path.win32.normalize(url.pathname.slice(1)).toLowerCase(),
+    };
+  }
+
+  return {
+    kind: "posix",
+    value: path.resolve(fileURLToPath(importMetaUrl)),
+  };
+}
+
+function normalizeCliArgvEntry(argvEntry, kindHint, cwd = process.cwd()) {
+  const resolvedEntry =
+    kindHint === "win32" ? path.win32.resolve(normalizeWindowsCwd(cwd), argvEntry) : path.resolve(argvEntry);
+
+  if (kindHint === "win32" || /^[A-Za-z]:[\\/]/.test(resolvedEntry)) {
+    return {
+      kind: "win32",
+      value: path.win32.normalize(resolvedEntry).toLowerCase(),
+    };
+  }
+
+  return {
+    kind: "posix",
+    value: resolvedEntry,
+  };
+}
+
+function normalizeWindowsCwd(cwd) {
+  if (/^[A-Za-z]:[\\/]/.test(cwd)) {
+    return cwd;
+  }
+
+  return cwd.replace(/\//g, "\\");
+}
+
 export function executeRelease(plan, overrides = {}) {
   const { fs, exec } = createProcessPorts(overrides);
   const stdout = overrides.stdout ?? process.stdout;
@@ -1114,7 +1164,7 @@ export async function main(argv = process.argv.slice(2), options = {}) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCliEntry(import.meta.url, process.argv[1])) {
   const exitCode = await main();
   process.exit(exitCode);
 }
