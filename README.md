@@ -22,6 +22,7 @@ Monorepo for `message-bridge` and `message-bridge-openclaw`.
 - `pnpm verify:workspace`
 - `pnpm verify:integration:fixture`
 - `pnpm run test:openclaw:runtime`
+- `pnpm run verify:release-local:e2e`
 
 ## CI
 
@@ -35,3 +36,12 @@ The heavier OpenClaw runtime smoke remains a manual or dedicated-environment gat
 A dedicated manual workflow is available at `.github/workflows/integration-smoke.yml`.
 
 That workflow expects a self-hosted runner labeled `integration-smoke`.
+
+## Release
+
+- `@wecode/skill-opencode-plugin`: push tag `release/message-bridge/vX.Y.Z`
+- `@wecode/skill-openclaw-plugin`: push tag `release/message-bridge-openclaw/vX.Y.Z`
+- package version is sourced from each plugin `package.json`; the repo root version is not used for release
+- local release CLI guide: [docs/operations/local-release-cli.md](./docs/operations/local-release-cli.md)
+- local release dry-run: `pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|dual> ...`
+- local release execution: `pnpm release:local -- --target <message-bridge|message-bridge-openclaw|dual> ...`

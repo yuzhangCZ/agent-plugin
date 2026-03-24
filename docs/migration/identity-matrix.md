@@ -1,13 +1,13 @@
 # Migration Identity Matrix
 
-Migration phase rule: move repository location only. Do not change user-facing identity.
+Migration phase rule: keep runtime/plugin identity stable while allowing private-registry npm package renames.
 
 ## message-bridge
 
 | Identity | Current Value | Migration Phase |
 | --- | --- | --- |
 | Directory | `plugins/message-bridge` | unchanged |
-| npm package | `@opencode-cui/message-bridge` | unchanged |
+| npm package | `@wecode/skill-opencode-plugin` | private registry package name |
 | External protocol behavior | current implementation | unchanged |
 | Config and install semantics | current implementation | unchanged |
 
@@ -16,7 +16,7 @@ Migration phase rule: move repository location only. Do not change user-facing i
 | Identity | Current Value | Migration Phase |
 | --- | --- | --- |
 | Directory | `plugins/message-bridge-openclaw` | unchanged |
-| `package.json.name` | `message-bridge` | unchanged |
+| npm package | `@wecode/skill-openclaw-plugin` | private registry package name |
 | OpenClaw channel/plugin id | `message-bridge` | unchanged |
 | Install directory | `~/.openclaw[-dev]/extensions/message-bridge` | unchanged |
 | Config key | `channels.message-bridge` | unchanged |
@@ -24,7 +24,7 @@ Migration phase rule: move repository location only. Do not change user-facing i
 
 ## Additional Constraints
 
-- Do not rename packages during migration.
+- Runtime plugin identity remains unchanged even if npm package names change.
 - Do not change config keys during migration.
 - Do not change install paths during migration.
 - Do not combine migration with shared package extraction.

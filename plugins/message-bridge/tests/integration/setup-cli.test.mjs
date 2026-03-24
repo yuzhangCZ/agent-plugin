@@ -61,8 +61,8 @@ describe('setup cli', () => {
 
       assert.ok(bridge.includes('"ak": "ak-test"'));
       assert.ok(bridge.includes('"sk": "sk-test"'));
-      assert.ok(opencode.includes('"plugin": ["@opencode-cui/message-bridge"]'));
-      assert.ok(npmrc.includes('@opencode-cui:registry='));
+      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
+      assert.ok(npmrc.includes('@wecode:registry='));
       assert.ok(result.stdout.includes('- AK: ak-test'));
       assert.ok(result.stdout.includes('- SK: sk-test'));
       assert.ok(result.stdout.includes('下次启动 OpenCode 时会自动安装并加载 npm 插件。'));
@@ -80,7 +80,7 @@ describe('setup cli', () => {
       );
       await writeFile(
         join(configRoot, 'opencode.jsonc'),
-        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": ["@opencode-cui/message-bridge"]\n}\n',
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": ["@wecode/skill-opencode-plugin"]\n}\n',
         'utf8',
       );
 
@@ -98,7 +98,7 @@ describe('setup cli', () => {
       assert.ok(bridge.includes('"url": "wss://gateway.example.com/ws/agent"'));
       assert.ok(bridge.includes('"ak": "old-ak"'));
       assert.ok(bridge.includes('"sk": "new-sk"'));
-      assert.strictEqual(opencode.match(/@opencode-cui\/message-bridge/g)?.length, 1);
+      assert.strictEqual(opencode.match(/@wecode\/skill-opencode-plugin/g)?.length, 1);
     });
   });
 
@@ -160,8 +160,8 @@ describe('setup cli', () => {
 
       assert.ok(bridge.includes('"ak": "ak-project"'));
       assert.ok(bridge.includes('"sk": "sk-project"'));
-      assert.ok(opencode.includes('"plugin": ["@opencode-cui/message-bridge"]'));
-      assert.ok(npmrc.includes('@opencode-cui:registry='));
+      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
+      assert.ok(npmrc.includes('@wecode:registry='));
     });
   });
 
@@ -205,8 +205,8 @@ describe('setup cli', () => {
 
       assert.ok(bridge.includes('"ak": "ak-stdin"'));
       assert.ok(bridge.includes('"sk": "sk-stdin"'));
-      assert.ok(opencode.includes('"plugin": ["@opencode-cui/message-bridge"]'));
-      assert.ok(npmrc.includes('@opencode-cui:registry='));
+      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
+      assert.ok(npmrc.includes('@wecode:registry='));
       assert.ok(result.stdout.includes('请输入 AK（必填）'));
       assert.ok(result.stdout.includes('请输入 SK（必填）'));
       assert.ok(result.stdout.includes('确认写入以上配置 [y/N]'));
@@ -256,8 +256,8 @@ describe('setup cli', () => {
       const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
 
       assert.ok(bridge.includes('"ak": "ak-win"'));
-      assert.ok(opencode.includes('"plugin": ["@opencode-cui/message-bridge"]'));
-      assert.ok(npmrc.includes('@opencode-cui:registry='));
+      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
+      assert.ok(npmrc.includes('@wecode:registry='));
     });
   });
 
@@ -277,7 +277,7 @@ describe('setup cli', () => {
       assert.strictEqual(result.status, 0);
 
       const npmrc = await readFile(customNpmrc, 'utf8');
-      assert.ok(npmrc.includes('@opencode-cui:registry='));
+      assert.ok(npmrc.includes('@wecode:registry='));
       assert.strictEqual(
         await readFile(join(home, '.npmrc'), 'utf8').then(() => true).catch(() => false),
         false,

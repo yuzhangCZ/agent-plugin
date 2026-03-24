@@ -6,7 +6,10 @@
 **Owner:** message-bridge maintainers
 **Related:** `../../package.json`, `../../README.md`, `./release-checklist.md`
 
-`@opencode-cui/message-bridge` 的标准发布手册，覆盖稳定版、beta 版以及私仓切换。
+> Local release CLI docs: [../../../../docs/operations/local-release-cli.md](../../../../docs/operations/local-release-cli.md)
+> Maintainer default: use `pnpm release:local -- --target message-bridge ...` or `pnpm release:plan -- --target message-bridge ...` instead of hand-running the individual publish commands below.
+
+`@wecode/skill-opencode-plugin` 的标准发布手册，覆盖稳定版、beta 版以及私仓切换。
 
 ## 1. 发布定位
 
@@ -30,6 +33,11 @@
 2. `package.json` 中的版本号已经更新到目标版本。
 3. 工作区没有误提交的调试改动。
 4. 本地依赖已安装完成。
+
+CI/CD tag 约定：
+
+- `release/message-bridge/v<version>`
+- tag 中的 `<version>` 必须与 `package.json.version` 完全一致
 
 常用检查命令：
 
@@ -87,13 +95,13 @@ npm publish --tag beta
 安装 beta 的方式：
 
 ```bash
-npm install @opencode-cui/message-bridge@beta
+npm install @wecode/skill-opencode-plugin@beta
 ```
 
 或安装显式版本：
 
 ```bash
-npm install @opencode-cui/message-bridge@1.0.1-beta.1
+npm install @wecode/skill-opencode-plugin@1.0.1-beta.1
 ```
 
 约束：
@@ -104,14 +112,14 @@ npm install @opencode-cui/message-bridge@1.0.1-beta.1
 
 ## 5. 私仓切换
 
-私仓发布保持同包名 `@opencode-cui/message-bridge`，通过 registry 配置切换目标仓库，不修改包名，也不在 `package.json` 写死 `publishConfig.registry`。
+私仓发布保持同包名 `@wecode/skill-opencode-plugin`，通过 registry 配置切换目标仓库，不修改包名，也不在 `package.json` 写死 `publishConfig.registry`。
 
 ### 5.1 本地切换到私仓
 
 可以在用户级或项目级 `.npmrc` 中增加 scope 定向：
 
 ```ini
-@opencode-cui:registry=https://your-private-registry.example.com/
+@wecode:registry=https://your-private-registry.example.com/
 //your-private-registry.example.com/:_authToken=${NPM_TOKEN}
 ```
 
@@ -122,7 +130,7 @@ npm config get registry
 npm whoami --registry https://your-private-registry.example.com/
 ```
 
-如果你的私仓只对 `@opencode-cui` scope 生效，实际发布会走 scope 定向 registry，而不是默认 registry。
+如果你的私仓只对 `@wecode` scope 生效，实际发布会走 scope 定向 registry，而不是默认 registry。
 
 ### 5.2 在 CI 中发布到私仓
 
@@ -149,7 +157,7 @@ npm publish
 回切时需要移除或覆盖私仓配置，避免误发：
 
 ```bash
-npm config delete @opencode-cui:registry
+npm config delete @wecode:registry
 npm config set registry https://registry.npmjs.org/
 npm whoami --registry https://registry.npmjs.org/
 ```
@@ -197,5 +205,5 @@ npm pack --dry-run
 ### 7.4 误发到错误 registry
 
 - 先用 `npm config get registry` 检查默认 registry。
-- 如果用了 scope 定向，再检查 `.npmrc` 中是否存在 `@opencode-cui:registry=...`。
+- 如果用了 scope 定向，再检查 `.npmrc` 中是否存在 `@wecode:registry=...`。
 - 发布前执行一次 `npm whoami --registry <target-url>`。

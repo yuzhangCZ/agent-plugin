@@ -78,7 +78,7 @@ async function main() {
 
   const opencodePort = await resolvePort(requestedOpencodePort);
   const gatewayPort = await resolvePort(requestedGatewayPort);
-  const bridgeGatewayUrl = env.BRIDGE_GATEWAY_URL ?? `ws://${opencodeHost}:${gatewayPort}/ws/agent`;
+  const bridgeGatewayUrl = env.MB_BRIDGE_GATEWAY_URL ?? `ws://${opencodeHost}:${gatewayPort}/ws/agent`;
 
   if (!skipBuild) {
     console.log('[0/6] Building plugin...');
@@ -106,6 +106,8 @@ async function main() {
     {
       env: {
         HOME: tmpHome,
+        USERPROFILE: tmpHome,
+        XDG_CONFIG_HOME: path.join(tmpHome, '.config'),
         OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
         BRIDGE_AUTH_AK: bridgeAuthAk,
         BRIDGE_AUTH_SK: bridgeAuthSk,

@@ -1,0 +1,97 @@
+name: Release Message Bridge OpenClaw
+
+on:
+  push:
+    tags:
+      - 'release/message-bridge-openclaw/v*'
+
+concurrency:
+  group: release-message-bridge-openclaw-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      dist_tag: ${{ steps.meta.outputs.dist_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        run: node ./scripts/assert-release-version.mjs plugins/message-bridge-openclaw "${{ github.ref_name }}"
+
+      - name: Resolve npm dist-tag
+        id: meta
+        run: echo "dist_tag=$(node ./scripts/npm-dist-tag.mjs plugins/message-bridge-openclaw)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package core gate
+        run: pnpm --dir plugins/message-bridge-openclaw run verify:core
+
+      - name: Pack release tarball
+        run: pnpm --dir plugins/message-bridge-openclaw run pack:bundle
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: message-bridge-openclaw-tgz
+          path: plugins/message-bridge-openclaw/.tmp/release-pack/*.tgz
+
+  publish:
+    name: Publish Package
+    needs: prepare
+    runs-on:
+      - self-hosted
+      - integration-smoke
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: ${{ vars.NPM_REGISTRY_URL }}
+          scope: '@wecode'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        run: node ./scripts/assert-release-version.mjs plugins/message-bridge-openclaw "${{ github.ref_name }}"
+
+      - name: Verify release gate
+        run: pnpm --dir plugins/message-bridge-openclaw run verify:release
+
+      - name: Publish package
+        run: npm publish --tag "${{ needs.prepare.outputs.dist_tag }}"
+        working-directory: plugins/message-bridge-openclaw/bundle
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

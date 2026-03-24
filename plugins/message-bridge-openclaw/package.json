@@ -1,7 +1,8 @@
 {
-  "name": "message-bridge",
+  "name": "@wecode/skill-openclaw-plugin",
   "version": "0.1.0",
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
+  "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,14 +16,17 @@
   "scripts": {
     "build": "tsc",
     "build:bundle": "node scripts/build-bundle.mjs",
-    "install:bundle:dev": "node -e \"const {execSync}=require('node:child_process'); const isWin=process.platform==='win32'; const cmd=isWin ? 'powershell -ExecutionPolicy Bypass -File scripts/install-bundle-dev.ps1' : 'sh scripts/install-bundle-dev.sh'; execSync('npm run build:bundle', {stdio:'inherit'}); execSync(cmd, {stdio:'inherit'});\"",
+    "install:bundle:dev": "node -e \"const {execSync}=require('node:child_process'); const isWin=process.platform==='win32'; const cmd=isWin ? 'powershell -ExecutionPolicy Bypass -File scripts/install-bundle-dev.ps1' : 'sh scripts/install-bundle-dev.sh'; execSync('pnpm run build:bundle', {stdio:'inherit'}); execSync(cmd, {stdio:'inherit'});\"",
+    "pack:bundle": "pnpm run build:bundle && node scripts/pack-bundle.mjs",
+    "pack:check": "pnpm run build:bundle && node scripts/check-pack.mjs",
     "validate:skill-relay": "node scripts/skill-relay-live-check.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "npm run build && node --test tests/unit/**/*.test.mjs",
-    "test:integration": "npm run build && node --test tests/integration/**/*.test.mjs",
-    "test:runtime": "npm run build:bundle && node ./scripts/runtime-smoke.mjs",
-    "verify:release": "npm run build && npm run test && npm run build:bundle && npm run test:runtime"
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "pnpm run build && node --test tests/unit/**/*.test.mjs",
+    "test:integration": "pnpm run build && node --test tests/integration/**/*.test.mjs",
+    "test:runtime": "pnpm run build:bundle && node ./scripts/runtime-smoke.mjs",
+    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check",
+    "verify:release": "pnpm run verify:core && pnpm run test:runtime"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.11"

@@ -38,6 +38,7 @@ const buildLockDir = path.join(pluginDir, '.tmp', 'e2e-build.lock');
 const timeoutMs = Number(env.MB_E2E_TIMEOUT_MS ?? '300000');
 
 let tmpHome = '';
+let tmpWorkspace = '';
 let gatewayProc;
 let opencodeProc;
 let effectiveBridgeDirectory = '';
@@ -78,6 +79,7 @@ async function cleanup() {
     proc.kill();
   }
   await rm(tmpHome, { recursive: true, force: true }).catch(() => {});
+  await rm(tmpWorkspace, { recursive: true, force: true }).catch(() => {});
 }
 
 process.on('SIGINT', async () => {
@@ -149,7 +151,7 @@ async function startStack() {
 
   const opencodePort = await resolvePort(requestedOpencodePort);
   const gatewayPort = await resolvePort(requestedGatewayPort);
-  const bridgeGatewayUrl = env.BRIDGE_GATEWAY_URL ?? `ws://${opencodeHost}:${gatewayPort}/ws/agent`;
+  const bridgeGatewayUrl = env.MB_BRIDGE_GATEWAY_URL ?? `ws://${opencodeHost}:${gatewayPort}/ws/agent`;
 
   if (!skipBuild) {
     console.log('[0/5] Building plugin...');
@@ -159,10 +161,12 @@ async function startStack() {
   }
 
   tmpHome = await createTempDir('mb-smoke-home-');
+  tmpWorkspace = await createTempDir('mb-smoke-workspace-');
   effectiveBridgeDirectory = env.BRIDGE_DIRECTORY ?? path.join(tmpHome, 'bridge-root');
   await mkdir(logDir, { recursive: true });
   await mkdir(path.join(tmpHome, '.config', 'opencode'), { recursive: true });
   await mkdir(effectiveBridgeDirectory, { recursive: true });
+  await writeFile(path.join(tmpWorkspace, 'README.md'), '# message-bridge e2e smoke workspace\n', 'utf8');
   await writeJson(path.join(tmpHome, '.config', 'opencode', 'opencode.json'), {
     plugin: [`file://${pluginDir}`],
   });
@@ -179,8 +183,11 @@ async function startStack() {
     ['serve', '--hostname', opencodeHost, '--port', opencodePort, '--print-logs', '--log-level', logLevel],
     opencodeLog,
     {
+      cwd: tmpWorkspace,
       env: {
         HOME: tmpHome,
+        USERPROFILE: tmpHome,
+        XDG_CONFIG_HOME: path.join(tmpHome, '.config'),
         OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
         BRIDGE_ENABLED: 'true',
         BRIDGE_AUTH_AK: bridgeAuthAk,
@@ -321,6 +328,20 @@ async function collectEvidence(failureCategory = 'NONE', failureCode = 'NONE', f
   return { opencodeLogText, gatewayLogText };
 }
 
+async function waitForScenarioEvidence(maxWaitMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    const { opencodeLogText, gatewayLogText } = await collectEvidence();
+    if (assertScenario(scenario, opencodeLogText, gatewayLogText, effectiveBridgeDirectory)) {
+      return { opencodeLogText, gatewayLogText };
+    }
+    await sleep(250);
+  }
+
+  return collectEvidence();
+}
+
 async function main() {
   const { opencodePort } = await withTimeout(
     () => startStack(),
@@ -341,7 +362,6 @@ async function main() {
       'E2E_TIMEOUT',
     );
     sessionId = result.sessionId;
-    await sleep(5000);
   } else {
     const result = await withTimeout(
       () => triggerChatFlow(opencodePort),
@@ -351,12 +371,21 @@ async function main() {
       'E2E_TIMEOUT',
     );
     sessionId = result.sessionId;
-    console.log('[3/5] Waiting for protocol activity...');
-    await sleep(scenario === 'chat-stream' ? 2000 : scenario === 'permission-roundtrip' ? 8000 : 1200);
   }
 
-  console.log('[4/5] Collecting evidence...');
-  const { opencodeLogText, gatewayLogText } = await collectEvidence();
+  console.log('[4/5] Waiting for protocol evidence...');
+  const evidenceWaitMs =
+    scenario === 'permission-roundtrip' ? 15_000 :
+    scenario === 'directory-context' ? 15_000 :
+    scenario === 'chat-stream' ? 8_000 :
+    8_000;
+  const { opencodeLogText, gatewayLogText } = await withTimeout(
+    () => waitForScenarioEvidence(evidenceWaitMs),
+    evidenceWaitMs + 2_000,
+    'scenarioEvidence',
+    'E2E_SCENARIO_FAILED',
+    'E2E_TIMEOUT',
+  );
 
   console.log('[5/5] Asserting scenario...');
   const pass = assertScenario(scenario, opencodeLogText, gatewayLogText, effectiveBridgeDirectory);

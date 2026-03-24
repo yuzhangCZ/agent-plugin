@@ -30,8 +30,15 @@ async function main() {
     name: sourcePackageJson.name,
     version: sourcePackageJson.version,
     description: sourcePackageJson.description,
+    license: "MIT",
     type: sourcePackageJson.type,
     main: "index.js",
+    exports: {
+      ".": {
+        default: "./index.js",
+      },
+    },
+    files: ["index.js", "package.json", "openclaw.plugin.json", "README.md"],
     peerDependencies: sourcePackageJson.peerDependencies,
     peerDependenciesMeta: sourcePackageJson.peerDependenciesMeta,
     openclaw: {

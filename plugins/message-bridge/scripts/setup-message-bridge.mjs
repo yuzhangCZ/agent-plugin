@@ -8,8 +8,8 @@ import { mkdtemp, readFile, rename, rm, writeFile, mkdir } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { platform } from 'node:process';
 
-const PLUGIN_NAME = '@opencode-cui/message-bridge';
-const NPM_SCOPE_REGISTRY_LINE = '@opencode-cui:registry=';
+const PLUGIN_NAME = '@wecode/skill-opencode-plugin';
+const NPM_SCOPE_REGISTRY_LINE = '@wecode:registry=';
 const NPM_SCOPE_REGISTRY_HINT = '; TODO: fill private registry url';
 
 function writeLine(message) {
