@@ -24,6 +24,7 @@ import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
 import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
 import { normalizeDownstreamMessage } from "./protocol/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
+import { resolveEffectiveReplyConfig } from "./resolveEffectiveReplyConfig.js";
 import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
@@ -635,6 +636,7 @@ export class OpenClawGatewayBridge {
     const executionPath = pathSelection.executionPath;
     const streamMode: StreamMode =
       executionPath === "runtime_reply" ? "runtime_block_streaming" : "fallback_non_streaming";
+    const { effectiveConfig, streamDefaultsInjected } = resolveEffectiveReplyConfig(this.options.config);
     this.activeToolSessions.set(record.sessionKey, {
       toolSessionId: record.toolSessionId,
       runId: null,
@@ -654,6 +656,7 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
+      streamDefaultsInjected,
       reason: pathSelection.reason,
       chatRequestId,
       retryAttempt: 0,
@@ -668,6 +671,7 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
+      streamDefaultsInjected,
       chatRequestId,
       retryAttempt: 0,
     });
@@ -686,6 +690,7 @@ export class OpenClawGatewayBridge {
           selectedModel,
           chatRequestId,
           retryAttempt,
+          streamDefaultsInjected,
           context,
         );
         if (fallbackResult.ok) {
@@ -705,6 +710,7 @@ export class OpenClawGatewayBridge {
             configuredTimeoutMs,
             executionPath,
             streamMode,
+            streamDefaultsInjected,
             chatRequestId,
             retryAttempt,
           });
@@ -714,7 +720,7 @@ export class OpenClawGatewayBridge {
       }
 
       const route = this.runtime.channel.routing.resolveAgentRoute({
-        cfg: this.options.config,
+        cfg: effectiveConfig,
         channel: "message-bridge",
         accountId: this.options.account.accountId,
         peer: {
@@ -722,7 +728,7 @@ export class OpenClawGatewayBridge {
           id: record.welinkSessionId || record.toolSessionId,
         },
       });
-      const envelopeOptions = this.runtime.channel.reply.resolveEnvelopeFormatOptions(this.options.config);
+      const envelopeOptions = this.runtime.channel.reply.resolveEnvelopeFormatOptions(effectiveConfig);
       const body = this.runtime.channel.reply.formatAgentEnvelope({
         channel: "message-bridge",
         from: `ai-gateway:${record.welinkSessionId || record.toolSessionId}`,
@@ -752,7 +758,7 @@ export class OpenClawGatewayBridge {
         CommandAuthorized: false,
       });
       const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-        cfg: this.options.config,
+        cfg: effectiveConfig,
         agentId: route.agentId,
         channel: "message-bridge",
         accountId: this.options.account.accountId,
@@ -770,6 +776,7 @@ export class OpenClawGatewayBridge {
           streamMode: "runtime_block_streaming",
           chatRequestId,
           retryAttempt,
+          streamDefaultsInjected,
           provider: selection.provider,
           model: selection.model,
           thinkLevel: selection.thinkLevel ?? null,
@@ -852,7 +859,7 @@ export class OpenClawGatewayBridge {
       try {
         await this.runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
           ctx: ctxPayload,
-          cfg: this.options.config,
+          cfg: effectiveConfig,
           dispatcherOptions: {
             ...prefixOptions,
             deliver,
@@ -882,6 +889,7 @@ export class OpenClawGatewayBridge {
             configuredTimeoutMs,
             executionPath,
             streamMode,
+            streamDefaultsInjected,
             chatRequestId,
             retryAttempt,
           });
@@ -913,6 +921,7 @@ export class OpenClawGatewayBridge {
         selectedModel,
         executionPath: "runtime_reply",
         streamMode,
+        streamDefaultsInjected,
         chatRequestId,
         retryAttempt,
         finalReconciled: reconciliation.finalReconciled,
@@ -948,6 +957,7 @@ export class OpenClawGatewayBridge {
       selectedModel,
       executionPath,
       streamMode,
+      streamDefaultsInjected,
       chatRequestId,
       retryAttempt,
       finalReconciled: false,
@@ -975,6 +985,7 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState,
     chatRequestId: string,
     retryAttempt: RetryAttempt,
+    streamDefaultsInjected: boolean,
     context: UpstreamSendContext,
   ): Promise<{ ok: true } | { ok: false; errorMessage: string; extra?: Record<string, unknown> }> {
     const assistantStream = createAssistantStreamState(record.sessionKey);
@@ -1032,6 +1043,7 @@ export class OpenClawGatewayBridge {
         selectedModel,
         executionPath: "subagent_fallback",
         streamMode: "fallback_non_streaming",
+        streamDefaultsInjected,
         chatRequestId,
         retryAttempt,
         finalReconciled: false,
@@ -1472,6 +1484,7 @@ export class OpenClawGatewayBridge {
     configuredTimeoutMs: number;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
+    streamDefaultsInjected: boolean;
     chatRequestId: string;
     retryAttempt: RetryAttempt;
   }): void {
@@ -1486,6 +1499,7 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
+      streamDefaultsInjected: params.streamDefaultsInjected,
       chatRequestId: params.chatRequestId,
       retryAttempt: params.retryAttempt,
     });
@@ -1518,6 +1532,7 @@ export class OpenClawGatewayBridge {
     configuredTimeoutMs: number;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
+    streamDefaultsInjected: boolean;
     reason: ChatExecutionPathReason;
     chatRequestId: string;
     retryAttempt: RetryAttempt;
@@ -1530,6 +1545,7 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
+      streamDefaultsInjected: params.streamDefaultsInjected,
       reason: params.reason,
       chatRequestId: params.chatRequestId,
       retryAttempt: params.retryAttempt,
@@ -1545,6 +1561,7 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
+    streamDefaultsInjected: boolean;
     chatRequestId: string;
     retryAttempt: RetryAttempt;
     finalReconciled: boolean;
@@ -1569,6 +1586,7 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
+    streamDefaultsInjected: boolean;
     chatRequestId: string;
     retryAttempt: RetryAttempt;
     finalReconciled: boolean;
@@ -1596,6 +1614,7 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
+    streamDefaultsInjected: boolean;
     chatRequestId: string;
     retryAttempt: RetryAttempt;
     finalReconciled: boolean;
@@ -1607,6 +1626,7 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
+      streamDefaultsInjected: params.streamDefaultsInjected,
       chatRequestId: params.chatRequestId,
       retryAttempt: params.retryAttempt,
       finalReconciled: params.finalReconciled,
