@@ -1118,6 +1118,106 @@ function resolveRegisterMetadata(logger, deps = {}) {
   };
 }
 
+// src/runtime/ConnectionCoordinator.ts
+var coordination = /* @__PURE__ */ new Map();
+function createDefaultState() {
+  return {
+    runtimePhase: "idle",
+    runtimeStartedAt: null,
+    probePhase: "idle",
+    probeStartedAt: null,
+    probeAbortController: null,
+    runtimeSnapshot: null,
+    logger: null
+  };
+}
+function getMutableState(accountId) {
+  let current = coordination.get(accountId);
+  if (!current) {
+    current = createDefaultState();
+    coordination.set(accountId, current);
+  }
+  return current;
+}
+function maybeCleanup(accountId, state) {
+  if (state.runtimePhase === "idle" && state.probePhase === "idle" && state.runtimeSnapshot === null && state.logger === null) {
+    coordination.delete(accountId);
+  }
+}
+function getConnectionCoord(accountId) {
+  return { ...getMutableState(accountId) };
+}
+function getRuntimeSnapshot(accountId) {
+  return getMutableState(accountId).runtimeSnapshot ?? void 0;
+}
+function getAccountLogger(accountId) {
+  return getMutableState(accountId).logger ?? void 0;
+}
+function markRuntimePhase(accountId, phase, now = Date.now) {
+  const state = getMutableState(accountId);
+  state.runtimePhase = phase;
+  state.runtimeStartedAt = phase === "connecting" ? now() : state.runtimeStartedAt;
+  if (phase === "idle") {
+    state.runtimeStartedAt = null;
+  }
+  maybeCleanup(accountId, state);
+  return { ...state };
+}
+function beginProbeConnect(accountId, now = Date.now) {
+  const state = getMutableState(accountId);
+  const abortController = new AbortController();
+  state.probePhase = "connecting";
+  state.probeStartedAt = now();
+  state.probeAbortController = abortController;
+  return {
+    state: { ...state },
+    abortController
+  };
+}
+function finishProbeConnect(accountId, abortController) {
+  const state = getMutableState(accountId);
+  if (!abortController || state.probeAbortController === abortController) {
+    state.probePhase = "idle";
+    state.probeStartedAt = null;
+    state.probeAbortController = null;
+  }
+  maybeCleanup(accountId, state);
+  return { ...state };
+}
+function cancelProbeForRuntimeStart(accountId, logger) {
+  const state = getMutableState(accountId);
+  if (state.probePhase !== "connecting" || !state.probeAbortController) {
+    maybeCleanup(accountId, state);
+    return false;
+  }
+  logger?.info("probe.connect.cancelled_for_runtime", {
+    accountId,
+    reason: "runtime_start_preempted_probe"
+  });
+  state.probeAbortController.abort(new Error("probe_cancelled_for_runtime_start"));
+  return true;
+}
+function updateRuntimeSnapshot(accountId, snapshot) {
+  const state = getMutableState(accountId);
+  state.runtimeSnapshot = { ...snapshot };
+  maybeCleanup(accountId, state);
+  return { ...state };
+}
+function setAccountLogger(accountId, logger) {
+  const state = getMutableState(accountId);
+  state.logger = logger;
+  maybeCleanup(accountId, state);
+  return { ...state };
+}
+function resetRuntimeCoord(accountId) {
+  const state = getMutableState(accountId);
+  state.runtimePhase = "idle";
+  state.runtimeStartedAt = null;
+  state.runtimeSnapshot = null;
+  maybeCleanup(accountId, state);
+  return { ...state };
+}
+
 // src/session/SessionRegistry.ts
 var SessionRegistry = class {
   constructor(sessionPrefix) {
@@ -1365,6 +1465,7 @@ var OpenClawGatewayBridge = class {
       accountId: options.account.accountId,
       running: false,
       connected: false,
+      runtimePhase: "idle",
       lastStartAt: null,
       lastStopAt: null,
       lastError: null,
@@ -1380,21 +1481,31 @@ var OpenClawGatewayBridge = class {
       this.options.logger.info("gateway.state.changed", { state });
       this.status.connected = state === "CONNECTED" || state === "READY";
       if (state === "READY") {
+        this.status.runtimePhase = "ready";
+        markRuntimePhase(this.options.account.accountId, "ready");
+      } else if (state === "CONNECTING" || state === "CONNECTED") {
+        this.status.runtimePhase = "connecting";
+        markRuntimePhase(this.options.account.accountId, "connecting");
+      } else if (state === "DISCONNECTED") {
+        this.status.runtimePhase = this.running ? "connecting" : "idle";
+        markRuntimePhase(this.options.account.accountId, this.running ? "connecting" : "idle");
+      }
+      if (state === "READY") {
         this.status.lastReadyAt = now;
       }
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("inbound", () => {
       this.status.lastInboundAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("outbound", () => {
       this.status.lastOutboundAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("heartbeat", () => {
       this.status.lastHeartbeatAt = Date.now();
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
     this.connection.on("message", (message) => {
       this.handleDownstreamMessage(message).catch((error) => {
@@ -1405,7 +1516,7 @@ var OpenClawGatewayBridge = class {
     });
     this.connection.on("error", (error) => {
       this.status.lastError = error.message;
-      this.options.setStatus({ ...this.status });
+      this.publishStatus();
     });
   }
   sessionRegistry;
@@ -1419,6 +1530,10 @@ var OpenClawGatewayBridge = class {
   running = false;
   status;
   unsubscribeAgentEvents = null;
+  publishStatus() {
+    updateRuntimeSnapshot(this.options.account.accountId, { ...this.status });
+    this.options.setStatus({ ...this.status });
+  }
   async start() {
     this.options.logger.info("runtime.start.requested", {
       accountId: this.options.account.accountId
@@ -1431,8 +1546,10 @@ var OpenClawGatewayBridge = class {
     }
     this.running = true;
     this.status.running = true;
+    this.status.runtimePhase = "connecting";
     this.status.lastStartAt = Date.now();
-    this.options.setStatus({ ...this.status });
+    markRuntimePhase(this.options.account.accountId, "connecting");
+    this.publishStatus();
     if (!this.unsubscribeAgentEvents && this.runtime.events?.onAgentEvent) {
       this.unsubscribeAgentEvents = this.runtime.events.onAgentEvent((evt) => {
         this.handleRuntimeAgentEvent(evt);
@@ -1457,6 +1574,8 @@ var OpenClawGatewayBridge = class {
       return;
     }
     this.running = false;
+    this.status.runtimePhase = "stopping";
+    markRuntimePhase(this.options.account.accountId, "stopping");
     this.connection.disconnect();
     this.unsubscribeAgentEvents?.();
     this.unsubscribeAgentEvents = null;
@@ -1464,8 +1583,10 @@ var OpenClawGatewayBridge = class {
     this.activeRunToSessionKey.clear();
     this.status.running = false;
     this.status.connected = false;
+    this.status.runtimePhase = "idle";
     this.status.lastStopAt = Date.now();
-    this.options.setStatus({ ...this.status });
+    markRuntimePhase(this.options.account.accountId, "idle");
+    this.publishStatus();
     this.options.logger.info("runtime.stop.completed", {
       accountId: this.options.account.accountId
     });
@@ -1504,7 +1625,7 @@ var OpenClawGatewayBridge = class {
       this.options.logger.info("runtime.status_query.received", fields);
       const message = {
         type: "status_response",
-        opencodeOnline: this.running
+        opencodeOnline: this.running && this.connection.isConnected()
       };
       this.connection.send(message, {
         gatewayMessageId: fields.gatewayMessageId,
@@ -1585,7 +1706,8 @@ var OpenClawGatewayBridge = class {
     const chatRequestId = randomUUID2();
     const configuredTimeoutMs = this.options.account.runTimeoutMs;
     const selectedModel = createSelectedModelState();
-    const executionPath = this.runtime.channel?.routing && this.runtime.channel?.reply ? "runtime_reply" : "subagent_fallback";
+    const pathSelection = this.resolveChatExecutionPath();
+    const executionPath = pathSelection.executionPath;
     this.activeToolSessions.set(record.sessionKey, {
       toolSessionId: record.toolSessionId,
       runId: null,
@@ -1598,6 +1720,16 @@ var OpenClawGatewayBridge = class {
       toolSessionId: record.toolSessionId,
       event: buildBusyEvent(record.sessionKey)
     }, context);
+    this.logChatPathSelected({
+      toolSessionId: record.toolSessionId,
+      welinkSessionId: record.welinkSessionId,
+      sessionKey: record.sessionKey,
+      configuredTimeoutMs,
+      executionPath,
+      reason: pathSelection.reason,
+      chatRequestId,
+      retryAttempt: 0
+    });
     this.logChatStarted({
       toolSessionId: record.toolSessionId,
       welinkSessionId: record.welinkSessionId,
@@ -1953,36 +2085,7 @@ var OpenClawGatewayBridge = class {
     const isTimeout = lowered.includes("timed out") || lowered.includes("timeout");
     return assistantStream.firstChunkAt === null && isTimeout;
   }
-  async createHostSession(requestedSessionId) {
-    const sessionRuntime = this.runtime.channel?.session;
-    if (!sessionRuntime?.createSession) {
-      throw new Error("openclaw_runtime_missing_session_creator");
-    }
-    const created = await sessionRuntime.createSession({ sessionId: requestedSessionId });
-    const sessionId = created.sessionId?.trim();
-    if (!sessionId) {
-      throw new Error("create_session returned without sessionId");
-    }
-    return { sessionId };
-  }
-  async deleteHostSession(record, mode) {
-    const sessionRuntime = this.runtime.channel?.session;
-    if (mode === "abort" && sessionRuntime?.abortSession) {
-      await sessionRuntime.abortSession({
-        sessionId: record.toolSessionId,
-        sessionKey: record.sessionKey,
-        deleteTranscript: true
-      });
-      return;
-    }
-    if (sessionRuntime?.deleteSession) {
-      await sessionRuntime.deleteSession({
-        sessionId: record.toolSessionId,
-        sessionKey: record.sessionKey,
-        deleteTranscript: true
-      });
-      return;
-    }
+  async deleteHostSession(record) {
     const subagent = this.getSubagentRuntime();
     if (subagent?.deleteSession) {
       await subagent.deleteSession({
@@ -1993,33 +2096,23 @@ var OpenClawGatewayBridge = class {
     throw new Error("openclaw_runtime_missing_session_deleter");
   }
   async handleCreateSession(message, context) {
-    try {
-      const created = await this.createHostSession(message.payload.sessionId);
-      const record = this.sessionRegistry.ensure(created.sessionId, message.welinkSessionId);
-      const response = {
-        type: "session_created",
-        welinkSessionId: message.welinkSessionId,
-        toolSessionId: record.toolSessionId,
-        session: {
-          sessionId: created.sessionId
-        }
-      };
-      this.connection.send(response, {
-        ...context,
-        toolSessionId: record.toolSessionId,
-        welinkSessionId: message.welinkSessionId
-      });
-      return true;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.sendToolError({
-        type: "tool_error",
-        toolSessionId: message.payload.sessionId,
-        welinkSessionId: message.welinkSessionId,
-        error: errorMessage
-      }, context);
-      return false;
-    }
+    const requestedSessionId = message.payload.sessionId?.trim();
+    const toolSessionId = requestedSessionId && requestedSessionId.length > 0 ? requestedSessionId : randomUUID2();
+    const record = this.sessionRegistry.ensure(toolSessionId, message.welinkSessionId);
+    const response = {
+      type: "session_created",
+      welinkSessionId: message.welinkSessionId,
+      toolSessionId: record.toolSessionId,
+      session: {
+        sessionId: record.toolSessionId
+      }
+    };
+    this.connection.send(response, {
+      ...context,
+      toolSessionId: record.toolSessionId,
+      welinkSessionId: message.welinkSessionId
+    });
+    return true;
   }
   async handleCloseSession(message, context) {
     const record = this.sessionRegistry.get(message.payload.toolSessionId);
@@ -2035,7 +2128,7 @@ var OpenClawGatewayBridge = class {
     }
     this.markSessionTerminated(record);
     try {
-      await this.deleteHostSession(record, "close");
+      await this.deleteHostSession(record);
       this.clearActiveToolSession(record.sessionKey);
       this.sessionRegistry.delete(message.payload.toolSessionId);
       return true;
@@ -2065,9 +2158,7 @@ var OpenClawGatewayBridge = class {
     }
     this.markSessionTerminated(record);
     try {
-      await this.deleteHostSession(record, "abort");
       this.clearActiveToolSession(record.sessionKey);
-      this.sessionRegistry.delete(message.payload.toolSessionId);
       this.sendToolDone({
         type: "tool_done",
         toolSessionId: message.payload.toolSessionId,
@@ -2328,6 +2419,33 @@ var OpenClawGatewayBridge = class {
       retryAttempt: params.retryAttempt
     });
   }
+  resolveChatExecutionPath() {
+    const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
+    const hasReplyRuntime = !!this.runtime.channel?.reply;
+    if (hasRouteResolver && hasReplyRuntime) {
+      return {
+        executionPath: "runtime_reply",
+        reason: "runtime_reply_available"
+      };
+    }
+    return {
+      executionPath: "subagent_fallback",
+      reason: hasRouteResolver ? "missing_reply_runtime" : "missing_route_resolver"
+    };
+  }
+  logChatPathSelected(params) {
+    this.options.logger.info("bridge.chat.path_selected", {
+      toolSessionId: params.toolSessionId,
+      welinkSessionId: params.welinkSessionId,
+      sessionKey: params.sessionKey,
+      configuredTimeoutMs: params.configuredTimeoutMs,
+      runTimeoutMs: params.configuredTimeoutMs,
+      executionPath: params.executionPath,
+      reason: params.reason,
+      chatRequestId: params.chatRequestId,
+      retryAttempt: params.retryAttempt
+    });
+  }
   logChatCompleted(params) {
     this.options.logger.info("bridge.chat.completed", {
       ...this.buildChatDiagnostics(params),
@@ -2500,6 +2618,7 @@ import {
   createDefaultChannelRuntimeState
 } from "openclaw/plugin-sdk";
 var HEARTBEAT_GRACE_MS = 5e3;
+var PROBE_RUNTIME_WAIT_CAP_MS = 1e3;
 var silentLogger = {
   info() {
   },
@@ -2554,8 +2673,21 @@ function isRuntimeHealthyForDuplicateConnection(snapshot, nowAt) {
   }
   return nowAt - snapshot.lastHeartbeatAt <= heartbeatThresholdMs;
 }
-function createProbeConnection(account) {
-  const registerMetadata = resolveRegisterMetadata(silentLogger);
+function isRuntimeHealthy(runtime, heartbeatIntervalMs, nowAt) {
+  if (!runtime || runtime.connected !== true || typeof runtime.lastReadyAt !== "number") {
+    return false;
+  }
+  if (typeof runtime.lastHeartbeatAt !== "number") {
+    return true;
+  }
+  const heartbeatThresholdMs = heartbeatIntervalMs > 0 ? heartbeatIntervalMs * 2 + HEARTBEAT_GRACE_MS : 0;
+  if (heartbeatThresholdMs <= 0) {
+    return true;
+  }
+  return nowAt - runtime.lastHeartbeatAt <= heartbeatThresholdMs;
+}
+function createProbeConnection(account, logger) {
+  const registerMetadata = resolveRegisterMetadata(logger);
   return new DefaultGatewayConnection({
     url: account.gateway.url,
     reconnectBaseMs: account.gateway.reconnect.baseMs,
@@ -2572,12 +2704,13 @@ function createProbeConnection(account) {
       toolType: registerMetadata.toolType,
       toolVersion: registerMetadata.toolVersion
     },
-    logger: silentLogger
+    logger
   });
 }
 function createDefaultMessageBridgeRuntimeState() {
   return createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID, {
     connected: false,
+    runtimePhase: "idle",
     lastReadyAt: null,
     lastInboundAt: null,
     lastOutboundAt: null,
@@ -2588,8 +2721,98 @@ function createDefaultMessageBridgeRuntimeState() {
 }
 async function probeMessageBridgeAccount(params, deps = {}) {
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const startedAt = now();
-  const connection = deps.connectionFactory?.(params.account) ?? createProbeConnection(params.account);
+  const logger = params.logger ?? silentLogger;
+  const runtime = params.runtime;
+  const accountId = params.account.accountId;
+  const gatewayUrl = params.account.gateway.url;
+  const runtimeCoord = getConnectionCoord(accountId);
+  logger.info("probe.requested", {
+    accountId,
+    gatewayUrl,
+    timeoutMs: params.timeoutMs,
+    runtimePhase: runtimeCoord.runtimePhase,
+    runtimeConnected: runtime?.connected ?? false,
+    lastReadyAt: runtime?.lastReadyAt ?? null,
+    lastHeartbeatAt: runtime?.lastHeartbeatAt ?? null
+  });
+  if (runtimeCoord.runtimePhase === "ready") {
+    const result = {
+      ok: true,
+      state: "ready",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_coord_ready"
+    };
+    logger.info("probe.short_circuit.runtime_ready", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason
+    });
+    return result;
+  }
+  if (runtimeCoord.runtimePhase === "connecting") {
+    const waitMs = Math.min(params.timeoutMs, PROBE_RUNTIME_WAIT_CAP_MS);
+    logger.info("probe.wait_runtime.started", {
+      accountId,
+      gatewayUrl,
+      waitMs
+    });
+    await sleep(waitMs);
+    const afterWaitCoord = getConnectionCoord(accountId);
+    logger.info("probe.wait_runtime.completed", {
+      accountId,
+      gatewayUrl,
+      waitMs,
+      runtimePhase: afterWaitCoord.runtimePhase
+    });
+    if (afterWaitCoord.runtimePhase === "ready") {
+      const result2 = {
+        ok: true,
+        state: "ready",
+        latencyMs: elapsedMs(startedAt, now),
+        reason: "runtime_connected_after_wait"
+      };
+      logger.info("probe.short_circuit.runtime_ready", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result2.latencyMs,
+        reason: result2.reason
+      });
+      return result2;
+    }
+    const result = {
+      ok: false,
+      state: "connecting",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_connecting_probe_skipped"
+    };
+    logger.warn("probe.short_circuit.runtime_connecting", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason
+    });
+    return result;
+  }
+  if (isRuntimeHealthy(runtime, params.account.gateway.heartbeatIntervalMs, startedAt)) {
+    const result = {
+      ok: true,
+      state: "ready",
+      latencyMs: elapsedMs(startedAt, now),
+      reason: "runtime_snapshot_healthy"
+    };
+    logger.info("probe.short_circuit.runtime_ready", {
+      accountId,
+      gatewayUrl,
+      latencyMs: result.latencyMs,
+      reason: result.reason
+    });
+    return result;
+  }
+  const { abortController } = beginProbeConnect(accountId, now);
+  const connection = deps.connectionFactory?.(params.account) ?? createProbeConnection(params.account, logger);
   return await new Promise((resolve) => {
     let settled = false;
     const finish = (result) => {
@@ -2598,55 +2821,118 @@ async function probeMessageBridgeAccount(params, deps = {}) {
       }
       settled = true;
       clearTimeout(timer);
+      abortController.signal.removeEventListener("abort", onAbort);
+      finishProbeConnect(accountId, abortController);
       try {
         connection.disconnect();
       } catch {
       }
       resolve(result);
     };
+    const onAbort = () => {
+      const result = {
+        ok: false,
+        state: "cancelled",
+        latencyMs: elapsedMs(startedAt, now),
+        reason: "probe_cancelled_for_runtime_start"
+      };
+      logger.info("probe.connect.cancelled_for_runtime", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason
+      });
+      finish(result);
+    };
+    abortController.signal.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => {
-      finish({
+      const result = {
         ok: false,
         state: "timeout",
         latencyMs: elapsedMs(startedAt, now),
         reason: "probe timed out before READY"
+      };
+      logger.warn("probe.connect.timeout", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason
       });
+      finish(result);
     }, params.timeoutMs);
+    logger.info("probe.connect.started", {
+      accountId,
+      gatewayUrl,
+      timeoutMs: params.timeoutMs,
+      runtimePhase: getConnectionCoord(accountId).runtimePhase
+    });
     connection.on("stateChange", (state) => {
       if (state === "READY") {
-        finish({
+        const result = {
           ok: true,
           state: "ready",
-          latencyMs: elapsedMs(startedAt, now)
+          latencyMs: elapsedMs(startedAt, now),
+          reason: "probe_connected"
+        };
+        logger.info("probe.connect.ready", {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason
         });
+        finish(result);
         return;
       }
       if (state === "DISCONNECTED") {
-        finish({
+        const result = {
           ok: false,
           state: "connect_error",
           latencyMs: elapsedMs(startedAt, now),
           reason: "probe disconnected before READY"
+        };
+        logger.warn("probe.connect.error", {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason
         });
+        finish(result);
       }
     });
     connection.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
-      finish({
+      const result = {
         ok: false,
         state: isRejectedProbeError(message) ? "rejected" : "connect_error",
         latencyMs: elapsedMs(startedAt, now),
         reason: message
-      });
+      };
+      logger[result.state === "rejected" ? "warn" : "error"](
+        result.state === "rejected" ? "probe.connect.rejected" : "probe.connect.error",
+        {
+          accountId,
+          gatewayUrl,
+          latencyMs: result.latencyMs,
+          reason: result.reason
+        }
+      );
+      finish(result);
     });
     connection.connect().catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
-      finish({
+      const result = {
         ok: false,
         state: "connect_error",
         latencyMs: elapsedMs(startedAt, now),
         reason: message
+      };
+      logger.error("probe.connect.error", {
+        accountId,
+        gatewayUrl,
+        latencyMs: result.latencyMs,
+        reason: result.reason
       });
+      finish(result);
     });
   });
 }
@@ -2780,6 +3066,12 @@ function collectMessageBridgeStatusIssues(accounts, now = Date.now) {
           })
         );
       }
+    }
+    if (probe && probe.state === "connecting") {
+      continue;
+    }
+    if (probe && probe.state === "cancelled" && probeReason === "probe_cancelled_for_runtime_start") {
+      continue;
     }
     if (probe && probe.state === "connect_error") {
       const reason = typeof probe.reason === "string" && probe.reason.trim() ? `\uFF1A${probe.reason.trim()}` : "";
@@ -2953,7 +3245,12 @@ var messageBridgePlugin = {
   status: {
     defaultRuntime: createDefaultMessageBridgeRuntimeState(),
     buildChannelSummary: ({ snapshot }) => buildMessageBridgeChannelSummary(snapshot),
-    probeAccount: async ({ account, timeoutMs }) => await probeMessageBridgeAccount({ account, timeoutMs }),
+    probeAccount: async ({ account, timeoutMs }) => await probeMessageBridgeAccount({
+      account,
+      timeoutMs,
+      runtime: getRuntimeSnapshot(account.accountId),
+      logger: getAccountLogger(account.accountId) ?? console
+    }),
     buildAccountSnapshot: ({ account, cfg, runtime, probe }) => buildMessageBridgeAccountSnapshot({
       account,
       cfg,
@@ -2965,16 +3262,20 @@ var messageBridgePlugin = {
   gateway: {
     startAccount: async (ctx) => {
       const account = resolveAccount(ctx.cfg, ctx.accountId);
+      const logger = ctx.log ?? console;
+      setAccountLogger(account.accountId, logger);
+      markRuntimePhase(account.accountId, "connecting");
+      cancelProbeForRuntimeStart(account.accountId, logger);
       const bridge = new OpenClawGatewayBridge({
         account,
         config: ctx.cfg,
         runtime: getPluginRuntime(),
-        logger: ctx.log ?? console,
+        logger,
         setStatus: (status) => ctx.setStatus(status)
       });
       activeBridges.set(account.accountId, bridge);
-      await bridge.start();
       try {
+        await bridge.start();
         await new Promise((resolve) => {
           if (ctx.abortSignal.aborted) {
             resolve();
@@ -2984,7 +3285,12 @@ var messageBridgePlugin = {
         });
       } finally {
         activeBridges.delete(account.accountId);
-        await bridge.stop();
+        try {
+          await bridge.stop();
+        } finally {
+          resetRuntimeCoord(account.accountId);
+          setAccountLogger(account.accountId, null);
+        }
       }
     },
     stopAccount: async (ctx) => {

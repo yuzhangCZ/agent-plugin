@@ -1,9 +1,21 @@
 {
-  "name": "message-bridge",
+  "name": "@wecode/skill-openclaw-plugin",
   "version": "0.1.0",
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
+  "license": "MIT",
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "package.json",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
   "peerDependencies": {
     "openclaw": ">=2026.3.11"
   },

@@ -10,58 +10,36 @@ This package is the OpenClaw-side adapter. It keeps the gateway protocol
 unchanged and translates OpenClaw channel runtime events into the gateway
 message contract.
 
-Chinese usage guide:
+文档导航（联调优先）:
 
+- `docs/README.md`（文档总导航）
+- `docs/01-protocol-contract.zh-CN.md`（协议契约，action 级映射）
+- `docs/02-openclaw-interface-surface.zh-CN.md`（OpenClaw 接口面）
+- `docs/03-runtime-behavior.zh-CN.md`（状态机、映射、重试与失败语义）
+- `docs/04-compat-and-known-diffs.zh-CN.md`（兼容性与已知差异）
+- `docs/05-ops-and-configuration.zh-CN.md`（安装、配置、观测、排障）
+
+归档与扩展参考:
+
+- `docs/topics/*`（历史专题归档，不作为当前行为定义）
+- `docs/protocol-sequence.md`（历史时序视图）
+- `docs/protocol-compat-matrix.zh-CN.md`（历史兼容矩阵视图）
 - `docs/USAGE.zh-CN.md`
-- `docs/LOGGING-MATRIX.zh-CN.md`（日志事件矩阵）
-- `docs/CONFIGURATION.zh-CN.md`（配置字段、配置位置、优先级）
-- `docs/protocol-compat-matrix.zh-CN.md`（与 message-bridge 协议语义对照）
-
-Configuration reference:
-
+- `docs/LOGGING-MATRIX.zh-CN.md`
+- `docs/CONFIGURATION.zh-CN.md`
 - `docs/CONFIGURATION.md`
-
-Validation manual:
-
 - `docs/VALIDATION.zh-CN.md`
-
-Implementation plan:
-
 - `docs/implementation-plan.md`
-
-Protocol conversion sequences:
-
-- `docs/protocol-sequence.md`
-
-P0 首块稳定性专题（需求 + 方案）:
-
-- `docs/topics/mb-p0-first-chunk-stability.md`
-- `docs/topics/mb-p0-first-chunk-stability-solution.md`
-
-P0 阶段四 permission_reply 专题（需求 + 方案）:
-
-- `docs/topics/mb-p0-permission-bridge-requirements.md`
-- `docs/topics/mb-p0-permission-bridge-solution.md`
-  - 阶段四文档已冻结：`permissionId` 透传、插件不承担唯一性保障、实现进行中
-  - FR: `FR-MB-OPENCLAW-P0-PERMISSION-BRIDGE`
-  - 目标：`permission_reply` 映射 OpenClaw `exec approvals`
-  - 范围外：`question_reply` 继续 fail-closed
-
-P0 参考专题（feishu-openclaw 能力需求清单）:
-
-- `docs/topics/mb-p0-feishu-openclaw-reference-requirements.md`
-  - FR: `FR-MB-OPENCLAW-P0-FEISHU-REFERENCE`
-  - 内容：需求描述 + 优先级 + OpenClaw 插件接口一对一主依赖映射
 
 ## 安装方式
 
-当前仓库已验证的安装方式都属于本地扩展安装：
+当前仓库已验证的安装方式包括本地扩展安装与私有 npm 分发：
 
 - 目录复制安装（推荐）：复制 `dist/`、`package.json`、`openclaw.plugin.json` 到 `~/.openclaw/extensions/message-bridge` 或 `~/.openclaw-dev/extensions/message-bridge`
 - 符号链接安装（开发联调）：把插件根目录链接到 profile 的 `extensions/message-bridge`
-- bundle 安装（推荐交付）：执行 `npm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/message-bridge`
+- bundle 安装（推荐交付）：执行 `pnpm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/message-bridge`
 
-`openclaw plugins install` 是 OpenClaw 的通用安装入口，但本仓库当前没有已验证的已发布分发流程；安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
+CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
 关键约束：
 
@@ -117,16 +95,16 @@ The plugin assumes the active OpenClaw profile already has:
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm install
-npm run build
-npm run build:bundle
-npm run install:bundle:dev
-npm test
+pnpm install
+pnpm run build
+pnpm run build:bundle
+pnpm run install:bundle:dev
+pnpm test
 ```
 
-Successful build should produce `dist/` and a green `npm test`.
-`npm run build:bundle` produces a ready-to-install bundle directory at `bundle/`.
-`npm run install:bundle:dev` builds the bundle and installs it into the OpenClaw `--dev` profile.
+Successful build should produce `dist/` and a green `pnpm test`.
+`pnpm run build:bundle` produces a ready-to-install bundle directory at `bundle/`.
+`pnpm run install:bundle:dev` builds the bundle and installs it into the OpenClaw `--dev` profile.
 
 ## Install into OpenClaw dev environment
 
