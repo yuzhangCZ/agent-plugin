@@ -47,6 +47,7 @@ const messageBridgeConfigSchema: ChannelConfigSchema = {
     properties: {
       enabled: { type: "boolean" },
       debug: { type: "boolean" },
+      streaming: { type: "boolean" },
       name: { type: "string", minLength: 1 },
       gateway: {
         type: "object",

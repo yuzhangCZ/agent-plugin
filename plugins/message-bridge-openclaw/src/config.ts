@@ -19,6 +19,7 @@ const NON_DEFAULT_ACCOUNT_ERROR_PREFIX = "message_bridge_single_account_only";
 export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
   enabled: true,
   debug: false,
+  streaming: true,
   gateway: {
     url: "ws://localhost:8081/ws/agent",
     heartbeatIntervalMs: 30_000,
@@ -304,7 +305,7 @@ export function deleteMessageBridgeAccount(params: {
     cfg: params.cfg,
     sectionKey: CHANNEL_ID,
     accountId: params.accountId,
-    clearBaseFields: ["enabled", "name", "gateway", "auth", "agentIdPrefix", "runTimeoutMs"],
+    clearBaseFields: ["enabled", "streaming", "name", "gateway", "auth", "agentIdPrefix", "runTimeoutMs"],
   });
 }
 
