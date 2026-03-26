@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+if [ "$branch" = "main" ]; then
+  echo "[pre-commit] 禁止在 main 分支直接提交，请切换到功能分支后再提交。" >&2
+  exit 1
+fi
+
+exit 0
