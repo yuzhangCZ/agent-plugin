@@ -3307,7 +3307,7 @@ var messageBridgePlugin = {
 
 // src/index.ts
 var plugin = {
-  id: "message-bridge",
+  id: "skill-openclaw-plugin",
   name: "Message Bridge",
   description: "Bridge ai-gateway sessions into OpenClaw",
   configSchema: emptyPluginConfigSchema(),

@@ -41,10 +41,7 @@ export const releaseDescriptors = Object.freeze({
     packageRoot: "plugins/message-bridge-openclaw",
     versionSource: "package.json",
     publishRoot: "bundle",
-    buildSteps: Object.freeze([
-      ["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"],
-      ["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build:bundle"],
-    ]),
+    buildSteps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"]]),
     verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "verify:release"]),
     tagPrefix: "release/message-bridge-openclaw/v",
     distTagSource: "version",

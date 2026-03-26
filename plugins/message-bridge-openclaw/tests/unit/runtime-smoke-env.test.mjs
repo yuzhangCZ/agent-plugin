@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 
-import { createIsolatedHomeEnv, isCliEntry } from "../../scripts/runtime-smoke.mjs";
+import { createIsolatedHomeEnv, isCliEntry } from "../../scripts/openclaw-test-shared.mjs";
 
 test("createIsolatedHomeEnv pins home and config variables for child processes", () => {
   const homeDir = "/tmp/openclaw-home";

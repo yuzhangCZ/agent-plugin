@@ -3,7 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUNDLE_DIR="$ROOT_DIR/bundle"
-TARGET_DIR="${HOME}/.openclaw-dev/extensions/message-bridge"
+TARGET_DIR="${HOME}/.openclaw-dev/extensions/skill-openclaw-plugin"
 
 require_file() {
   if [ ! -f "$1" ]; then
@@ -42,7 +42,7 @@ if [ -f "$BUNDLE_DIR/README.md" ]; then
   cp "$BUNDLE_DIR/README.md" "$TARGET_DIR/README.md"
 fi
 
-echo "Installed message-bridge bundle to:"
+echo "Installed skill-openclaw-plugin bundle to:"
 echo "  $TARGET_DIR"
 echo "Installed files:"
 ls -1 "$TARGET_DIR" | sed 's/^/  - /'

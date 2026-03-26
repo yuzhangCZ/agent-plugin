@@ -10,7 +10,7 @@ const plugin: {
   configSchema: ReturnType<typeof emptyPluginConfigSchema>;
   register: (api: OpenClawPluginApi) => void;
 } = {
-  id: "message-bridge",
+  id: "skill-openclaw-plugin",
   name: "Message Bridge",
   description: "Bridge ai-gateway sessions into OpenClaw",
   configSchema: emptyPluginConfigSchema(),
