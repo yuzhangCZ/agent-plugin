@@ -27,25 +27,22 @@
 
 ## 1. 当前支持的安装方式
 
-- 目录复制安装（推荐）
-  - 把 `dist/`、`package.json`、`openclaw.plugin.json` 复制到 OpenClaw profile 的 `extensions/message-bridge/`
-- 符号链接安装（开发联调）
-  - 把插件根目录链接到 `extensions/message-bridge/`
-  - 每次修改代码后重新执行 `npm run build`
 - bundle 安装（推荐交付）
-  - 执行 `npm run install:bundle:dev`
+  - 执行 `pnpm run install:bundle:dev`
   - 自动生成完整的 `bundle/` 安装目录
-  - 自动安装到 `~/.openclaw-dev/extensions/message-bridge`
+  - 自动安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
   - 不需要手动修改任何文件
+- 手动复制 bundle
+  - 把 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md` 复制到 OpenClaw profile 的 `extensions/skill-openclaw-plugin/`
 - `openclaw plugins install`
   - 这是 OpenClaw 的通用安装入口
   - 但本仓库当前没有已验证的 npm 发布安装流，本文不把它作为主路径
 
 推荐顺序：
 
-1. 本地部署或交付验证：目录复制安装
-2. 本地开发联调：符号链接安装
-3. 需要最小手工安装步骤的交付：bundle 安装
+1. 本地部署或交付验证：bundle 安装
+2. 手动交付或排障：手动复制 bundle
+3. 私有 npm 安装：通过 OpenClaw npm 安装流
 
 ## 2. 前置条件
 
@@ -78,116 +75,83 @@ macOS / Linux：
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm install
-npm run build
-npm test
+pnpm install
+pnpm run build
+pnpm test
 ```
 
 Windows PowerShell：
 
 ```powershell
 cd C:\path\to\agent-plugin\plugins\message-bridge-openclaw
-npm install
-npm run build
-npm test
-```
-
-如果你需要可直接复制安装的 bundle，再额外执行：
-
-```bash
-npm run build:bundle
+pnpm install
+pnpm run build
+pnpm test
 ```
 
 如果你希望直接安装到 OpenClaw `--dev` 插件目录，执行：
 
 ```bash
-npm run install:bundle:dev
+pnpm run install:bundle:dev
 ```
 
-## 4. 目录复制安装（推荐）
+## 4. 手动复制 bundle
 
 ### 4.1 目标目录
 
-- 默认 profile：`~/.openclaw/extensions/message-bridge`
-- dev profile：`~/.openclaw-dev/extensions/message-bridge`
+- 默认 profile：`~/.openclaw/extensions/skill-openclaw-plugin`
+- dev profile：`~/.openclaw-dev/extensions/skill-openclaw-plugin`
 
 ### 4.2 macOS / Linux
 
 ```bash
-export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/message-bridge
+export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/skill-openclaw-plugin
 mkdir -p "$OPENCLAW_EXT_DIR"
-rsync -a --delete ./dist/ "$OPENCLAW_EXT_DIR/dist/"
-cp ./package.json "$OPENCLAW_EXT_DIR/package.json"
-cp ./openclaw.plugin.json "$OPENCLAW_EXT_DIR/openclaw.plugin.json"
+cp ./bundle/index.js "$OPENCLAW_EXT_DIR/index.js"
+cp ./bundle/package.json "$OPENCLAW_EXT_DIR/package.json"
+cp ./bundle/openclaw.plugin.json "$OPENCLAW_EXT_DIR/openclaw.plugin.json"
+cp ./bundle/README.md "$OPENCLAW_EXT_DIR/README.md"
 ```
 
 ### 4.3 Windows PowerShell
 
 ```powershell
-$target = "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge"
+$target = "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-robocopy .\dist "$target\dist" /MIR
-Copy-Item .\package.json "$target\package.json" -Force
-Copy-Item .\openclaw.plugin.json "$target\openclaw.plugin.json" -Force
+Copy-Item .\bundle\index.js "$target\index.js" -Force
+Copy-Item .\bundle\package.json "$target\package.json" -Force
+Copy-Item .\bundle\openclaw.plugin.json "$target\openclaw.plugin.json" -Force
+Copy-Item .\bundle\README.md "$target\README.md" -Force
 ```
 
 安装后的目标目录建议只保留：
 
-- `dist/`
+- `index.js`
 - `package.json`
 - `openclaw.plugin.json`
+- `README.md`
 
 不要保留：
 
 - `node_modules/`
 - `node_modules/openclaw`
 
-## 5. 符号链接安装（开发联调）
+## 5. bundle 安装
 
-这一方式适合频繁改代码、频繁重启网关的场景。插件目录直接指向仓库工作区，不用每次手动拷贝文件。
-
-### 5.1 macOS / Linux
-
-```bash
-ln -sfn <repo-root>/plugins/message-bridge-openclaw \
-  ~/.openclaw-dev/extensions/message-bridge
-
-npm run build
-```
-
-### 5.2 Windows PowerShell
-
-```powershell
-New-Item `
-  -ItemType SymbolicLink `
-  -Path "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge" `
-  -Target "C:\path\to\agent-plugin\plugins\message-bridge-openclaw"
-
-npm run build
-```
-
-说明：
-
-- Windows 创建符号链接通常需要管理员权限或启用 Developer Mode
-- 如果不方便创建符号链接，继续使用“目录复制安装”即可
-- 如果使用符号链接，确保插件根目录下没有会干扰宿主版本解析的 `node_modules/openclaw`
-
-## 6. bundle 安装
-
-这一方式适合“减少手工配置并直接复制安装”。推荐命令是 `npm run install:bundle:dev`。
+这一方式适合“减少手工配置并直接复制安装”。推荐命令是 `pnpm run install:bundle:dev`。
 
 ### 6.1 执行 bundle
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run install:bundle:dev
+pnpm run install:bundle:dev
 ```
 
 该命令会：
 
-- 执行 `npm run build:bundle`
+- 执行 `pnpm run build`
 - 检查 `bundle/` 中的安装产物
-- 安装到 `~/.openclaw-dev/extensions/message-bridge`
+- 安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
 - 打印已安装文件列表
 - 打印下一步启动命令
 
@@ -220,7 +184,7 @@ npm run install:bundle:dev
 macOS / Linux：
 
 ```bash
-export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/message-bridge
+export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/skill-openclaw-plugin
 mkdir -p "$OPENCLAW_EXT_DIR"
 cp ./bundle/index.js "$OPENCLAW_EXT_DIR/index.js"
 cp ./bundle/package.json "$OPENCLAW_EXT_DIR/package.json"
@@ -231,7 +195,7 @@ cp ./bundle/README.md "$OPENCLAW_EXT_DIR/README.md"
 Windows PowerShell：
 
 ```powershell
-$target = "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge"
+$target = "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item .\bundle\index.js "$target\index.js" -Force
 Copy-Item .\bundle\package.json "$target\package.json" -Force
@@ -252,13 +216,13 @@ Bundle 安装目录不需要再修改 `package.json`。生成的 `bundle/package
 macOS / Linux：
 
 ```bash
-find ~/.openclaw-dev/extensions/message-bridge -maxdepth 2 -type d | grep node_modules
+find ~/.openclaw-dev/extensions/skill-openclaw-plugin -maxdepth 2 -type d | grep node_modules
 ```
 
 Windows PowerShell：
 
 ```powershell
-Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge" -Depth 2 -Directory |
+Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" -Depth 2 -Directory |
   Where-Object { $_.FullName -match 'node_modules' }
 ```
 
@@ -289,9 +253,9 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\message-bridge" -Depth 
     }
   },
   "plugins": {
-    "allow": ["message-bridge"],
+    "allow": ["skill-openclaw-plugin"],
     "entries": {
-      "message-bridge": {
+      "skill-openclaw-plugin": {
         "enabled": true
       }
     }

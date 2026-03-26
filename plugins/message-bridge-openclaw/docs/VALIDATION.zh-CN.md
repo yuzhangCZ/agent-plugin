@@ -58,21 +58,21 @@
 - OpenClaw 可执行命令可用
 - `ai-gateway`、Redis、MariaDB 已启动
 - 插件已构建并安装到 OpenClaw profile
-- `~/.openclaw-dev/openclaw.json` 或 `~/.openclaw/openclaw.json` 中已允许加载 `message-bridge`
+- `~/.openclaw-dev/openclaw.json` 或 `~/.openclaw/openclaw.json` 中已允许加载 `skill-openclaw-plugin`
 - 已准备可用的 `gateway.url`、`auth.ak`、`auth.sk`
 - 如果要做 live 验证，`gateway.mode` 必须显式配置成 `local`
 
 如果你还没完成安装和基础配置，先按 `docs/USAGE.zh-CN.md` 执行：
 
 - 构建
-- 安装到 `extensions/message-bridge`
+- 安装到 `extensions/skill-openclaw-plugin`
 - 修改 `openclaw.json`
 - 启动 `openclaw --dev gateway run --allow-unconfigured --verbose`
 
 本文默认使用 dev profile：
 
 - OpenClaw profile：`~/.openclaw-dev`
-- 插件目录：`~/.openclaw-dev/extensions/message-bridge`
+- 插件目录：`~/.openclaw-dev/extensions/skill-openclaw-plugin`
 - 配置文件：`~/.openclaw-dev/openclaw.json`
 
 除非特别说明，下面所有 `openclaw` 命令都默认带 `--dev`。
@@ -100,15 +100,15 @@ openclaw --dev doctor
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm test
+pnpm test
 ```
 
 ### 只跑阶段一相关测试
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run build
-node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridge-chat.test.mjs
+pnpm run test:unit
+pnpm run test:integration
 ```
 
 覆盖点：
@@ -129,19 +129,15 @@ node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridg
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run build
-node --test tests/unit/config-status.test.mjs
+pnpm run verify:openclaw:load
 ```
 
 覆盖点：
 
-- `configSchema`
-- 单账号 `default` 语义
-- `setup` / `onboarding`
-- `probe` 四条分支
-- `status/issues`
-- `setAccountEnabled` / `deleteAccount`
-- legacy `accounts` 与错误输入的回退行为
+- 插件 id / manifest id / package name 一致性
+- `plugins info` / `channels list` / `channels status`
+- `setup` 对 `--use-env`、非法 URL、legacy `accounts` 的拒绝路径
+- 有效 `channels add` 写回与宿主加载前置校验
 
 ## 4. 阶段一验证手册
 
@@ -151,15 +147,16 @@ node --test tests/unit/config-status.test.mjs
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run build
-node --test tests/unit/downstream-normalization.test.mjs tests/integration/bridge-chat.test.mjs
+pnpm run test:unit
+pnpm run test:integration
+pnpm run test:runtime
 ```
 
 通过标准：
 
 - 所有测试通过
-- 没有 `tool_done`/`tool_error` 相关断言失败
-- 没有 `bridge status` 时间戳相关断言失败
+- 宿主冒烟中的 `register`、`status_query`、`chat` 通过
+- unsupported action 保持 fail-closed
 
 ### 4.2 手工验证
 
@@ -281,18 +278,15 @@ redis-cli publish agent:test-ak-openclaw-001 '{"type":"invoke","action":"questio
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run build
-node --test tests/unit/config-status.test.mjs
+pnpm run verify:openclaw:load
 ```
 
 重点观察这些断言是否通过：
 
-- `message bridge config schema accepts single-account config`
-- `message bridge listAccountIds is fixed to default and rejects non-default account ids`
-- `probeMessageBridgeAccount covers ready, rejected, connect_error, disconnect-before-ready and timeout`
-- `collectMessageBridgeStatusIssues reports config, auth and runtime problems`
-- `message bridge onboarding retries invalid input until the default account is configured`
-- `message bridge onboarding skips legacy accounts config instead of reporting success`
+- `plugins info skill-openclaw-plugin --json` 返回的插件 id 与 channelIds 正确
+- `channels status` 在未配置时显示 `not configured`
+- `channels add --use-env`、非法 URL、legacy `accounts` 均被明确拒绝
+- 有效 `channels add` 后 `channels list/status` 与宿主加载检查通过
 
 ### 5.2 手工验证
 
@@ -487,7 +481,7 @@ openclaw --dev channels remove --channel message-bridge --delete
 关于“仅改显示名时不应重新启用已禁用账号”：
 
 - 这个场景已由自动化测试覆盖
-- 推荐以 `tests/unit/config-status.test.mjs` 为准
+- 推荐以 `pnpm run verify:openclaw:load` 为准
 - 如果要手工复现，需先构造 disabled 配置，再走交互式 `channels add` 的 `Add display names for these accounts?` 分支
 
 关于 `abort_session`：

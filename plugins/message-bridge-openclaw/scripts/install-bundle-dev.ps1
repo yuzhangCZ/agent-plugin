@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BundleDir = Join-Path $RootDir "bundle"
-$TargetDir = Join-Path $env:USERPROFILE ".openclaw-dev\extensions\message-bridge"
+$TargetDir = Join-Path $env:USERPROFILE ".openclaw-dev\extensions\skill-openclaw-plugin"
 
 function Require-File {
   param([string]$Path)
@@ -47,7 +47,7 @@ if (Test-Path -LiteralPath $ReadmePath -PathType Leaf) {
   Copy-Item $ReadmePath (Join-Path $TargetDir "README.md") -Force
 }
 
-Write-Host "Installed message-bridge bundle to:"
+Write-Host "Installed skill-openclaw-plugin bundle to:"
 Write-Host "  $TargetDir"
 Write-Host "Installed files:"
 Get-ChildItem -LiteralPath $TargetDir | Select-Object -ExpandProperty Name | ForEach-Object {

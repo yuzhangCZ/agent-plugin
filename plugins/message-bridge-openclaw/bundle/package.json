@@ -36,8 +36,10 @@
       "blurb": "Bridge ai-gateway sessions into OpenClaw."
     },
     "install": {
-      "localPath": "extensions/message-bridge",
-      "defaultChoice": "local"
+      "npmSpec": "@wecode/skill-openclaw-plugin",
+      "localPath": "extensions/skill-openclaw-plugin",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.11"
     }
   }
 }
