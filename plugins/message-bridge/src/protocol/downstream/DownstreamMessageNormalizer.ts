@@ -121,6 +121,24 @@ function requireNonEmptyString(
   return ok(value);
 }
 
+function normalizeOptionalString(
+  value: unknown,
+  stage: DownstreamNormalizationStage,
+  field: string,
+  messageType?: string,
+  action?: string,
+  welinkSessionId?: string,
+): NormalizeResult<string | undefined> {
+  if (value === undefined) {
+    return ok(undefined);
+  }
+  if (typeof value !== 'string') {
+    return invalidFieldType(stage, field, 'a string', messageType, action, welinkSessionId);
+  }
+  const trimmed = value.trim();
+  return ok(trimmed || undefined);
+}
+
 function buildEventPreview(raw: unknown): Record<string, unknown> {
   if (!isRecord(raw)) {
     return { kind: typeof raw };
@@ -156,9 +174,12 @@ export function normalizeChatPayload(payload: unknown, welinkSessionId?: string)
   if (!toolSessionId.ok) return toolSessionId;
   const text = requireNonEmptyString(payload.text, 'payload', 'payload.text', 'invoke', 'chat', welinkSessionId);
   if (!text.ok) return text;
+  const assiantId = normalizeOptionalString(payload.assiantId, 'payload', 'payload.assiantId', 'invoke', 'chat', welinkSessionId);
+  if (!assiantId.ok) return assiantId;
   return ok({
     toolSessionId: toolSessionId.value,
     text: text.value,
+    ...(assiantId.value ? { assiantId: assiantId.value } : {}),
   });
 }
 
@@ -173,8 +194,13 @@ export function normalizeCreateSessionPayload(payload: unknown, welinkSessionId?
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title
     : undefined;
+  const assiantId = normalizeOptionalString(payload.assiantId, 'payload', 'payload.assiantId', 'invoke', 'create_session', welinkSessionId);
+  if (!assiantId.ok) return assiantId;
 
-  return ok(title ? { title } : {});
+  return ok({
+    ...(title ? { title } : {}),
+    ...(assiantId.value ? { assiantId: assiantId.value } : {}),
+  });
 }
 
 export function normalizeCloseSessionPayload(payload: unknown, welinkSessionId?: string): NormalizeResult<CloseSessionPayload> {

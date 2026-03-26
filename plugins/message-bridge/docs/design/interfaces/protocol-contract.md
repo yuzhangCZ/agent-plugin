@@ -50,10 +50,12 @@ Payloads:
 type ChatPayload = {
   toolSessionId: string;
   text: string;
+  assiantId?: string;
 };
 
 type CreateSessionPayload = {
   title?: string;
+  assiantId?: string;
 };
 
 type CloseSessionPayload = {
@@ -84,6 +86,10 @@ Notes:
 - `close_session` calls `session.delete()`
 - `abort_session` also calls `session.abort()`
 - `question_reply` resolves a pending question through the raw question API chain
+- `assiantId` is optional on `chat` and `create_session`
+- when `BRIDGE_CHANNEL === 'assiant'`, `create_session` may resolve a directory by `assiantId` before falling back to `effectiveDirectory`
+- `chat` forwards `assiantId` to the SDK `session.prompt(...).agent` field when present
+- `assiantId` accepts only string; `null` is treated as invalid payload
 
 ### 2.1.1 `create_session.payload` Decision Narrowing
 

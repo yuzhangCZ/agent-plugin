@@ -9,13 +9,15 @@ import {
   safeExecute,
   stateToErrorCode
 } from '../types/index.js';
-import { attachDirectory } from './directory.js';
+import type { ChatUseCase } from '../usecase/ChatUseCase.js';
 
 /**
  * Concrete implementation of chat action for sending messages to OpenCode
  */
 export class ChatAction implements Action<'chat', ChatPayload, void> {
   name: 'chat' = 'chat';
+
+  constructor(private readonly chatUseCase?: ChatUseCase) {}
 
   private formatUnknownError(error: unknown): string {
     if (error instanceof Error) {
@@ -50,13 +52,14 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
     client: OpencodeClient,
     toolSessionId: string,
     text: string,
-    effectiveDirectory?: string,
+    agent?: string,
   ): Promise<{ success: true; data: unknown } | { success: false; error: string }> {
     const executionResult = await safeExecute(
-      client.session.prompt(attachDirectory({
+      client.session.prompt({
         sessionID: toolSessionId,
         parts: [{ type: 'text', text }],
-      }, effectiveDirectory)),
+        ...(agent ? { agent } : {}),
+      }),
       (error) => this.formatUnknownError(error),
     );
 
@@ -80,7 +83,6 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
     context.logger?.info('action.chat.started', {
       toolSessionId: payload.toolSessionId,
       messageLength: payload.text.length,
-      effectiveDirectory: context.effectiveDirectory,
     });
     if (context.connectionState !== 'READY') {
       context.logger?.warn('action.chat.rejected_state', { state: context.connectionState });
@@ -94,7 +96,30 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
     const client = context.client;
 
     try {
-      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, context.effectiveDirectory);
+      if (this.chatUseCase) {
+        const useCaseResult = await this.chatUseCase.execute({
+          payload,
+        });
+
+        if (useCaseResult.success) {
+          return {
+            success: true,
+          };
+        }
+
+        context.logger?.error('action.chat.failed', {
+          error: useCaseResult.errorMessage,
+          errorCode: useCaseResult.errorCode,
+          latencyMs: Date.now() - startedAt,
+        });
+        return {
+          success: false,
+          errorCode: useCaseResult.errorCode ?? 'SDK_UNREACHABLE',
+          errorMessage: useCaseResult.errorMessage ?? 'Failed to send message',
+        };
+      }
+
+      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, payload.assiantId);
 
       if (executionResult.success) {
         return {

@@ -33,6 +33,7 @@ export interface OpencodeSessionClient {
   prompt(options: {
     sessionID: string;
     directory?: string;
+    agent?: string;
     parts?: Array<{ type: 'text'; text: string }>;
   }): Promise<unknown>;
 }

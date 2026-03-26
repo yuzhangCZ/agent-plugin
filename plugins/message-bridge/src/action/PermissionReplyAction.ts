@@ -9,7 +9,6 @@ import {
   safeExecute,
   stateToErrorCode
 } from '../types/index.js';
-import { attachDirectory } from './directory.js';
 
 /**
  * Concrete implementation of permission_reply action.
@@ -27,7 +26,6 @@ export class PermissionReplyAction implements Action<'permission_reply', Permiss
       permissionId: payload.permissionId,
       toolSessionId: payload.toolSessionId,
       response: payload.response,
-      effectiveDirectory: context.effectiveDirectory,
     });
 
     try {
@@ -41,11 +39,11 @@ export class PermissionReplyAction implements Action<'permission_reply', Permiss
       }
 
       const executionResult = await safeExecute(
-        context.client.postSessionIdPermissionsPermissionId(attachDirectory({
+        context.client.postSessionIdPermissionsPermissionId({
           sessionID: payload.toolSessionId,
           permissionID: payload.permissionId,
           response: payload.response,
-        }, context.effectiveDirectory)),
+        }),
         (error) => `Permission reply failed: ${error instanceof Error ? error.message : String(error)}`
       );
 

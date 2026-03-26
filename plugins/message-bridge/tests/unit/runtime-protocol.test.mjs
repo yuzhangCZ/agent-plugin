@@ -924,7 +924,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((sent).length, 0);
   });
 
-  test('reuses effectiveDirectory across create_session and chat while keeping workspacePath for config lookup', async () => {
+  test('uses effectiveDirectory only in create_session while keeping workspacePath for config lookup', async () => {
     const createCalls = [];
     const promptCalls = [];
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
@@ -983,9 +983,6 @@ describe('runtime protocol strictness', () => {
         },
         body: {
           parts: [{ type: 'text', text: 'hello from bridge directory' }],
-        },
-        query: {
-          directory: '/env/bridge-root',
         },
       },
     ]);

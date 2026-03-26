@@ -20,7 +20,7 @@ raw event/message
   -> contracts
   -> protocol
   -> runtime
-  -> action / transport
+  -> usecase / action / transport
 ```
 
 ## 2. Layers
@@ -58,10 +58,19 @@ Owns orchestration only:
 - connection management
 - action routing
 - gateway send
+- assembly of use cases and adapters
 
 `runtime` must not parse raw upstream or downstream payloads.
 
-### 2.4 `action`
+### 2.4 `usecase`
+
+Owns business rules and decision-making:
+
+- directory resolution for special channels
+- `chat` agent forwarding
+- create-session orchestration before SDK calls
+
+### 2.5 `action`
 
 Owns execute-only business logic:
 
@@ -95,6 +104,8 @@ Current exact allowlist:
 - `permission.updated`
 - `permission.asked`
 - `question.asked`
+
+Runtime now additionally resolves `assiantId`-based create-session directories only when `BRIDGE_CHANNEL === 'assiant'`, then falls back to `effectiveDirectory` and finally omits the directory field.
 
 ## 4. Downstream Flow
 

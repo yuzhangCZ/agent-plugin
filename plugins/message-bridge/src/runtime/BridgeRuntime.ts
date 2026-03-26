@@ -15,6 +15,7 @@ import { AbortSessionAction } from '../action/AbortSessionAction.js';
 import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
+import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
 import { loadConfig } from '../config/index.js';
 import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
 import { DefaultGatewayConnection, GatewayConnection } from '../connection/GatewayConnection.js';
@@ -30,6 +31,7 @@ import {
 import {
   normalizeDownstreamMessage,
 } from '../protocol/downstream/index.js';
+import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
@@ -77,6 +79,12 @@ export class BridgeRuntime {
   private readonly stateManager = new DefaultStateManager();
   private readonly registry = new DefaultActionRegistry();
   private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
+  private readonly bridgeChannelPort: EnvBridgeChannelAdapter;
+  private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
+  private readonly sessionGatewayPort: OpencodeSessionGatewayAdapter;
+  private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
+  private readonly createSessionUseCase: CreateSessionUseCase;
+  private readonly chatUseCase: ChatUseCase;
 
   private gatewayConnection: GatewayConnection | null = null;
   private eventFilter: EventFilter | null = null;
@@ -97,6 +105,21 @@ export class BridgeRuntime {
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
     this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
     this.sdkClient = createSdkAdapter(options.client);
+    this.bridgeChannelPort = new EnvBridgeChannelAdapter();
+    this.assiantDirectoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
+      process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE?.trim(),
+      () => this.logger,
+    );
+    this.sessionGatewayPort = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
+    this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
+      this.bridgeChannelPort,
+      this.assiantDirectoryMappingPort,
+    );
+    this.createSessionUseCase = new CreateSessionUseCase(
+      this.resolveCreateSessionDirectoryUseCase,
+      this.sessionGatewayPort,
+    );
+    this.chatUseCase = new ChatUseCase(this.sessionGatewayPort);
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -317,8 +340,8 @@ export class BridgeRuntime {
 
   private registerActions(): void {
     const actions = [
-      new ChatAction(),
-      new CreateSessionAction(),
+      new ChatAction(this.chatUseCase),
+      new CreateSessionAction(this.createSessionUseCase),
       new CloseSessionAction(),
       new PermissionReplyAction(),
       new StatusQueryAction(),
