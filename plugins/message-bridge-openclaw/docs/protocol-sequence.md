@@ -176,6 +176,9 @@ sequenceDiagram
   ORR-->>MB: dispatcher deliver(kind=block, payload.text next chunk)
   MB->>AG: tool_event(message.part.delta)
 
+  ORR-->>MB: dispatcher deliver(kind=final, payload.text)
+  MB->>MB: reconcileFinalText(accumulated, final)
+
   ORR-->>MB: reply completes
   MB->>AG: tool_event(message.part.updated type=text text=finalText)
   MB->>AG: tool_event(session.idle)
@@ -189,11 +192,13 @@ sequenceDiagram
 ### Conversion Rules
 
 - Input source
-  - assistant text blocks from dispatcher `deliver(..., { kind: "block" | "final" })`
+  - assistant text blocks from dispatcher `deliver(..., { kind: "block" })`
+  - assistant final candidate from dispatcher `deliver(..., { kind: "final" })`
   - tool output blocks from dispatcher `deliver(..., { kind: "tool" })`
   - tool lifecycle from global `runtime.events.onAgentEvent(...)`
 - Internal state changes
   - assistant path uses one stable `messageId` and one stable text `partId`
+  - `kind=final` is cached and reconciled on completion; it is not emitted as immediate delta
   - tool path maintains `toolCallId -> ToolPartState`
   - active per-session state is stored under `activeToolSessions[sessionKey]`
   - final completion removes active session state
@@ -253,7 +258,8 @@ Current state transitions:
 | inbound user text | `handleChat()` | `tool_event(session.status)` |
 | assistant first text block | `sendAssistantStreamChunk()` | `tool_event(message.updated)` + `tool_event(message.part.updated)` |
 | assistant later text block | `sendAssistantStreamChunk()` | `tool_event(message.part.delta)` |
-| assistant final text | `sendAssistantFinalResponse()` | `tool_event(message.part.updated)` |
+| assistant final candidate | dispatcher `deliver(kind=final)` | cached only (no immediate upstream delta) |
+| assistant final text | `reconcileFinalText()` + `sendAssistantFinalResponse()` | `tool_event(message.part.updated)` |
 | tool start/update | `handleRuntimeAgentEvent()` | `tool_event(message.part.updated type=tool status=running)` |
 | tool completed/error | `handleRuntimeAgentEvent()` | `tool_event(message.part.updated type=tool status=completed/error)` |
 | tool output text | dispatcher `deliver(kind=tool)` | `tool_event(message.part.updated type=tool state.output=...)` |

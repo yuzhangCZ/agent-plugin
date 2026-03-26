@@ -1,0 +1,72 @@
+name: Bug report
+description: 报告一个可复现的问题、缺陷或异常行为
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请尽量提供可复现信息，便于后续定位和验证。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题现象
+      description: 用 1-3 句话说明具体出了什么问题。
+      placeholder: 例如：OpenClaw 插件在连接 gateway 后立即断开，日志里只显示通用超时错误。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序写出可复现该问题的步骤。
+      placeholder: |
+        1. 执行 ...
+        2. 打开 ...
+        3. 观察 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      placeholder: 期望应该发生什么。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      placeholder: 实际发生了什么，包括报错、异常输出或错误状态。
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 影响范围
+      options:
+        - label: "`plugins/message-bridge`"
+        - label: "`plugins/message-bridge-openclaw`"
+        - label: "`packages/test-support`"
+        - label: "`integration/opencode-cui`"
+        - label: "`.github` / workflow"
+        - label: "文档 / 协作流程"
+  - type: input
+    id: env
+    attributes:
+      label: 环境信息
+      description: 可填写系统、Node、pnpm、OpenClaw/OpenCode 版本等。
+      placeholder: 例如：macOS 15, Node 24, pnpm 9.15.4, OpenClaw 2026.3.11
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志、截图或补充上下文
+      description: 请粘贴关键日志、报错、截图链接或其他定位线索。
+      render: shell
+  - type: textarea
+    id: regression
+    attributes:
+      label: 回归与影响判断
+      description: 这是新问题、历史问题，还是某次改动后的回归？
+      placeholder: 例如：在 release-local CLI 合入后开始出现。

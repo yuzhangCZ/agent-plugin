@@ -18,6 +18,7 @@ export interface MessageBridgeAuthConfig {
 export interface MessageBridgeAccountConfig {
   enabled: boolean;
   debug: boolean;
+  streaming?: boolean;
   name?: string;
   gateway: MessageBridgeGatewayConfig;
   auth: MessageBridgeAuthConfig;

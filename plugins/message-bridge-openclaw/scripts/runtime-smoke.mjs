@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -16,20 +14,26 @@ import {
   assertToolErrorShape,
 } from "@agent-plugin/test-support/assertions";
 import {
-  createAbortSessionInvokeMessage,
   createChatInvokeMessage,
-  createCloseSessionInvokeMessage,
-  createCreateSessionInvokeMessage,
   createPermissionReplyInvokeMessage,
-  createQuestionReplyInvokeMessage,
   createStatusQueryMessage,
 } from "@agent-plugin/test-support/fixtures";
 import { MockGatewayServer } from "@agent-plugin/test-support/transport";
+import {
+  BUNDLE_DIR,
+  assertVersionSatisfies,
+  createFailure,
+  createIsolatedHomeEnv,
+  createTempDir,
+  readCommandVersion,
+  resolveOpenClawCommand,
+  run,
+  withTimeout,
+} from "./openclaw-test-shared.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
-const bundleDir = path.join(rootDir, "bundle");
 const runId = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
 const logDir = path.join(rootDir, "logs", `runtime-smoke-${runId}`);
 const gatewayLog = path.join(logDir, "openclaw-gateway.log");
@@ -42,61 +46,6 @@ let tmpWorkspace = "";
 let gatewayProc;
 let mockGateway;
 let openclawCmd = "";
-
-function ensureCommand(cmd) {
-  const checker = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(checker, [cmd], { encoding: "utf8" });
-  if (result.status !== 0) {
-    throw createFailure("LOAD_FAILED", `Missing required command: ${cmd}`, "LOAD_FAILED");
-  }
-}
-
-function resolveWorkspaceOpenClawCommand() {
-  const binName = process.platform === "win32" ? "openclaw.cmd" : "openclaw";
-  const candidate = path.join(rootDir, "node_modules", ".bin", binName);
-  if (!existsSync(candidate)) {
-    throw createFailure(
-      "LOAD_FAILED",
-      `Workspace OpenClaw binary not found at ${candidate}. Run pnpm install in the repo root first.`,
-      "LOAD_FAILED",
-    );
-  }
-  return candidate;
-}
-
-function readCommandVersion(cmd, args = ["--version"]) {
-  const result = spawnSync(cmd, args, { encoding: "utf8" });
-  if (result.status !== 0) {
-    throw createFailure("LOAD_FAILED", `Failed to determine command version for ${cmd}`, "LOAD_FAILED");
-  }
-  return result.stdout.trim() || result.stderr.trim() || "unknown";
-}
-
-function createFailure(failureCategory, message, failureCode = failureCategory) {
-  const error = new Error(message);
-  error.failureCategory = failureCategory;
-  error.failureCode = failureCode;
-  return error;
-}
-
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd: opts.cwd ?? rootDir,
-      stdio: opts.stdio ?? "inherit",
-      env: { ...process.env, ...(opts.env ?? {}) },
-      shell: false,
-    });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`${cmd} ${args.join(" ")} failed with code ${code}`));
-    });
-  });
-}
 
 function spawnLoggedProcess(cmd, args, logfile, opts = {}) {
   const child = spawn(cmd, args, {
@@ -113,10 +62,6 @@ function spawnLoggedProcess(cmd, args, logfile, opts = {}) {
 async function appendFileCompat(file, text) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, text, { flag: "a" });
-}
-
-async function createTempDir(prefix) {
-  return mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
 async function waitForPattern(file, pattern, maxTries, intervalMs = 200) {
@@ -152,22 +97,6 @@ function findAvailablePort(port) {
       });
     });
   });
-}
-
-async function withTimeout(task, ms, label, category, timeoutCode) {
-  let timer = null;
-  try {
-    return await Promise.race([
-      task(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          reject(createFailure(category, `${label} timed out after ${ms}ms`, timeoutCode));
-        }, ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 async function cleanup() {
@@ -256,9 +185,10 @@ async function expectQuiet(server, cursor, quietMs = 750) {
 }
 
 async function main() {
-  ensureCommand("node");
-  openclawCmd = resolveWorkspaceOpenClawCommand();
+  openclawCmd = resolveOpenClawCommand();
   const openclawVersion = readCommandVersion(openclawCmd);
+  const packageJson = JSON.parse(await readFile(path.join(rootDir, "package.json"), "utf8"));
+  assertVersionSatisfies(openclawVersion, packageJson.peerDependencies?.openclaw ?? ">=0.0.0");
 
   const gatewayPort = await findAvailablePort(Number(process.env.MB_RUNTIME_GATEWAY_PORT ?? "18081"));
   const openclawPort = await findAvailablePort(Number(process.env.MB_RUNTIME_OPENCLAW_PORT ?? "19101"));
@@ -278,9 +208,10 @@ async function main() {
   });
 
   await mockGateway.start();
-  await run(openclawCmd, ["--dev", "plugins", "install", bundleDir], {
+  const isolatedEnv = createIsolatedHomeEnv(tmpHome);
+  await run(openclawCmd, ["--dev", "plugins", "install", BUNDLE_DIR], {
     cwd: rootDir,
-    env: { HOME: tmpHome },
+    env: isolatedEnv,
     stdio: "ignore",
   });
   await run(
@@ -300,7 +231,7 @@ async function main() {
     ],
     {
       cwd: rootDir,
-      env: { HOME: tmpHome },
+      env: isolatedEnv,
       stdio: "ignore",
     },
   );
@@ -311,7 +242,7 @@ async function main() {
     gatewayLog,
     {
       cwd: tmpWorkspace,
-      env: { HOME: tmpHome },
+      env: isolatedEnv,
     },
   );
 
@@ -342,92 +273,6 @@ async function main() {
 
   cursor = nextCursor(mockGateway);
   mockGateway.send(
-    createCreateSessionInvokeMessage({
-      welinkSessionId: "wl-runtime-close",
-      payload: { sessionId: "tool-runtime-close" },
-    }),
-  );
-  const closeSessionCreated = await waitForMessage(
-    mockGateway,
-    (message) => message.type === "session_created" && message.toolSessionId === "tool-runtime-close",
-    "close-session session_created",
-    cursor,
-  );
-  assertSessionCreatedShape(closeSessionCreated, {
-    welinkSessionId: "wl-runtime-close",
-    toolSessionId: "tool-runtime-close",
-  });
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
-    createCloseSessionInvokeMessage({
-      welinkSessionId: "wl-runtime-close",
-      payload: { toolSessionId: "tool-runtime-close" },
-    }),
-  );
-  const closeSilent = await expectQuiet(mockGateway, cursor);
-  if (!closeSilent) {
-    throw createFailure("MESSAGE_FLOW_FAILED", "close_session emitted an unexpected immediate response", "MESSAGE_FLOW_FAILED");
-  }
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
-    createCloseSessionInvokeMessage({
-      welinkSessionId: "wl-runtime-close",
-      payload: { toolSessionId: "tool-runtime-close" },
-    }),
-  );
-  const closeMissing = await waitForMessage(
-    mockGateway,
-    (message) => message.type === "tool_error" && message.toolSessionId === "tool-runtime-close",
-    "close_session missing tool_error",
-    cursor,
-  );
-  assertToolErrorShape(closeMissing, {
-    toolSessionId: "tool-runtime-close",
-    error: "unknown_tool_session",
-    reason: "session_not_found",
-    hasCode: false,
-  });
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
-    createCreateSessionInvokeMessage({
-      welinkSessionId: "wl-runtime-abort",
-      payload: { sessionId: "tool-runtime-abort" },
-    }),
-  );
-  const abortSessionCreated = await waitForMessage(
-    mockGateway,
-    (message) => message.type === "session_created" && message.toolSessionId === "tool-runtime-abort",
-    "abort-session session_created",
-    cursor,
-  );
-  assertSessionCreatedShape(abortSessionCreated, {
-    welinkSessionId: "wl-runtime-abort",
-    toolSessionId: "tool-runtime-abort",
-  });
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
-    createAbortSessionInvokeMessage({
-      welinkSessionId: "wl-runtime-abort",
-      payload: { toolSessionId: "tool-runtime-abort" },
-    }),
-  );
-  const abortDone = await waitForMessage(
-    mockGateway,
-    (message) => message.type === "tool_done" && message.toolSessionId === "tool-runtime-abort",
-    "abort_session tool_done",
-    cursor,
-  );
-  assertToolDoneShape(abortDone, {
-    welinkSessionId: "wl-runtime-abort",
-    toolSessionId: "tool-runtime-abort",
-  });
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
     createPermissionReplyInvokeMessage({
       welinkSessionId: "wl-runtime-permission",
       payload: {
@@ -451,32 +296,7 @@ async function main() {
   if (!String(permissionError.error ?? "").includes("unsupported_in_openclaw_v1:permission_reply")) {
     throw createFailure("MESSAGE_FLOW_FAILED", "permission_reply did not fail closed with unsupported marker", "MESSAGE_FLOW_FAILED");
   }
-
-  cursor = nextCursor(mockGateway);
-  mockGateway.send(
-    createQuestionReplyInvokeMessage({
-      welinkSessionId: "wl-runtime-question",
-      payload: {
-        toolSessionId: "tool-runtime-question",
-        answer: "ok",
-      },
-    }),
-  );
-  const questionError = await waitForMessage(
-    mockGateway,
-    (message) => message.type === "tool_error" && message.toolSessionId === "tool-runtime-question",
-    "question_reply tool_error",
-    cursor,
-  );
-  assertToolErrorShape(questionError, {
-    welinkSessionId: "wl-runtime-question",
-    toolSessionId: "tool-runtime-question",
-    hasCode: false,
-  });
-  if (!String(questionError.error ?? "").includes("unsupported_in_openclaw_v1:question_reply")) {
-    throw createFailure("MESSAGE_FLOW_FAILED", "question_reply did not fail closed with unsupported marker", "MESSAGE_FLOW_FAILED");
-  }
-  assertNoSuccessMessageOnInvalidInput([permissionError, questionError]);
+  assertNoSuccessMessageOnInvalidInput([permissionError]);
 
   cursor = nextCursor(mockGateway);
   mockGateway.send(

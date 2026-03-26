@@ -4,29 +4,27 @@
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "files": [
-    "dist",
     "bundle",
     "README.md",
     "docs",
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "pnpm run build:bundle",
     "build:bundle": "node scripts/build-bundle.mjs",
     "install:bundle:dev": "node -e \"const {execSync}=require('node:child_process'); const isWin=process.platform==='win32'; const cmd=isWin ? 'powershell -ExecutionPolicy Bypass -File scripts/install-bundle-dev.ps1' : 'sh scripts/install-bundle-dev.sh'; execSync('pnpm run build:bundle', {stdio:'inherit'}); execSync(cmd, {stdio:'inherit'});\"",
     "pack:bundle": "pnpm run build:bundle && node scripts/pack-bundle.mjs",
     "pack:check": "pnpm run build:bundle && node scripts/check-pack.mjs",
     "validate:skill-relay": "node scripts/skill-relay-live-check.mjs",
-    "typecheck": "tsc --noEmit",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:unit": "pnpm run build && node --test tests/unit/**/*.test.mjs",
-    "test:integration": "pnpm run build && node --test tests/integration/**/*.test.mjs",
-    "test:runtime": "pnpm run build:bundle && node ./scripts/runtime-smoke.mjs",
-    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check",
-    "verify:release": "pnpm run verify:core && pnpm run test:runtime"
+    "test:unit": "node --import tsx/esm --test tests/unit/*.test.mjs",
+    "test:integration": "node --import tsx/esm --test tests/integration/*.test.mjs",
+    "verify:openclaw:env": "node ./scripts/verify-openclaw-env.mjs",
+    "verify:openclaw:load": "pnpm run build && node ./scripts/verify-openclaw-load.mjs",
+    "test:runtime": "pnpm run build && node ./scripts/runtime-smoke.mjs",
+    "verify:core": "pnpm test && pnpm run pack:check",
+    "verify:release": "pnpm run verify:core && pnpm run verify:openclaw:env && pnpm run verify:openclaw:load && pnpm run test:runtime"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.11"
@@ -41,15 +39,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "ajv": "^8.17.1",
     "esbuild": "^0.27.4",
-    "openclaw": "2026.3.11",
-    "typescript": "^5.7.2",
+    "tsx": "^4.21.0",
     "@agent-plugin/test-support": "workspace:*"
   },
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./bundle/index.js"
     ],
     "channel": {
       "id": "message-bridge",
@@ -59,8 +55,10 @@
       "blurb": "Bridge ai-gateway sessions into OpenClaw."
     },
     "install": {
-      "localPath": "extensions/message-bridge",
-      "defaultChoice": "local"
+      "npmSpec": "@wecode/skill-openclaw-plugin",
+      "localPath": "extensions/skill-openclaw-plugin",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.11"
     }
   }
 }

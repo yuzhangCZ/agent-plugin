@@ -99,16 +99,12 @@ export function finishProbeConnect(accountId: string, abortController?: AbortCon
   return { ...state };
 }
 
-export function cancelProbeForRuntimeStart(accountId: string, logger?: BridgeLogger): boolean {
+export function cancelProbeForRuntimeStart(accountId: string): boolean {
   const state = getMutableState(accountId);
   if (state.probePhase !== "connecting" || !state.probeAbortController) {
     maybeCleanup(accountId, state);
     return false;
   }
-  logger?.info("probe.connect.cancelled_for_runtime", {
-    accountId,
-    reason: "runtime_start_preempted_probe",
-  });
   state.probeAbortController.abort(new Error("probe_cancelled_for_runtime_start"));
   return true;
 }

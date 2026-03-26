@@ -47,6 +47,7 @@ const messageBridgeConfigSchema: ChannelConfigSchema = {
     properties: {
       enabled: { type: "boolean" },
       debug: { type: "boolean" },
+      streaming: { type: "boolean" },
       name: { type: "string", minLength: 1 },
       gateway: {
         type: "object",
@@ -179,7 +180,7 @@ export const messageBridgePlugin: ChannelPlugin<MessageBridgeResolvedAccount> = 
       const logger = ctx.log ?? console;
       setAccountLogger(account.accountId, logger);
       markRuntimePhase(account.accountId, "connecting");
-      cancelProbeForRuntimeStart(account.accountId, logger);
+      cancelProbeForRuntimeStart(account.accountId);
       const bridge = new OpenClawGatewayBridge({
         account,
         config: ctx.cfg,

@@ -19,16 +19,23 @@ async function withTempDirs(fn) {
 }
 
 function runSetup({ cwd, home, input, scope = 'user' }) {
+  const spawnEnv = createDefaultUserEnv(home);
+
   return spawnSync('node', [scriptPath, '--scope', scope], {
     cwd,
-    env: {
-      ...process.env,
-      HOME: home,
-      XDG_CONFIG_HOME: join(home, '.config'),
-    },
+    env: spawnEnv,
     input,
     encoding: 'utf8',
   });
+}
+
+function createDefaultUserEnv(home) {
+  return {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
+  };
 }
 
 function runSetupWithEnv({ cwd, env: extraEnv, input, scope = 'user' }) {
@@ -41,6 +48,15 @@ function runSetupWithEnv({ cwd, env: extraEnv, input, scope = 'user' }) {
     input,
     encoding: 'utf8',
   });
+}
+
+function extractNpmrcPathFromOutput(stdout) {
+  const line = stdout
+    .split(/\r?\n/)
+    .find((entry) => entry.includes('npm scope') && entry.includes(':'));
+
+  assert.notStrictEqual(line, undefined, 'setup output should include the resolved npmrc path');
+  return line.slice(line.indexOf(':') + 1).trim();
 }
 
 describe('setup cli', () => {
@@ -57,7 +73,7 @@ describe('setup cli', () => {
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
-      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+      const npmrc = await readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8');
 
       assert.ok(bridge.includes('"ak": "ak-test"'));
       assert.ok(bridge.includes('"sk": "sk-test"'));
@@ -181,7 +197,7 @@ describe('setup cli', () => {
         await Promise.all([
           readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8').then(() => true).catch(() => false),
           readFile(join(configRoot, 'opencode.jsonc'), 'utf8').then(() => true).catch(() => false),
-          readFile(join(home, '.npmrc'), 'utf8').then(() => true).catch(() => false),
+          readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8').then(() => true).catch(() => false),
         ]),
         [false, false, false],
       );
@@ -201,7 +217,7 @@ describe('setup cli', () => {
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
-      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+      const npmrc = await readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8');
 
       assert.ok(bridge.includes('"ak": "ak-stdin"'));
       assert.ok(bridge.includes('"sk": "sk-stdin"'));
@@ -276,7 +292,9 @@ describe('setup cli', () => {
 
       assert.strictEqual(result.status, 0);
 
+      const resolvedNpmrcPath = extractNpmrcPathFromOutput(result.stdout);
       const npmrc = await readFile(customNpmrc, 'utf8');
+      assert.strictEqual(resolvedNpmrcPath, customNpmrc);
       assert.ok(npmrc.includes('@wecode:registry='));
       assert.strictEqual(
         await readFile(join(home, '.npmrc'), 'utf8').then(() => true).catch(() => false),

@@ -25,6 +25,7 @@
 
 - 默认只在 `plugins/` 和 `packages/` 下做主开发
 - 非专门任务不要修改 `integration/opencode-cui` 的内容或 submodule 指针
+- 当前仓库默认向 `main` 提 PR；本仓库未使用 `canary` 作为日常开发基线
 - 根规则只覆盖全仓库通用约束，不覆盖子目录专用规范
 - 涉及 `plugins/message-bridge/docs/` 时，优先遵守该目录下的更细规则
 
@@ -40,13 +41,8 @@
 - `plugins/message-bridge/docs/` 由该目录下的 `AGENTS.md` 统一治理
 - 根文件只写仓库级通用规则，不复制子目录文档规范
 - 详细背景继续放在各自 `README.md` 或子目录文档中
-
-## PR 入口规则
-
-- 目标分支默认使用 `main`（当前仓库可见发布/CI主干）
-- 创建 PR 前必须先完成一次“规范预检”，并在提交信息中体现验证结果
-- 优先使用 `.github/PULL_REQUEST_TEMPLATE.md` 组织 PR 描述
-- 若通用流程与仓库实际冲突（如不存在目标分支、缺少模板、规则不明确），必须先确认，不得静默 fallback
+- 提 PR 时使用 `.github/PULL_REQUEST_TEMPLATE.md`
+- 提 Issue 时使用 `.github/ISSUE_TEMPLATE/` 下对应表单
 - PR 详细流程、字段要求、检查项统一维护在 `docs/operations/pull-request-process.md`
 
 ## 语言规则

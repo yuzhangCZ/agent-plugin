@@ -9,7 +9,7 @@ const rootDir = path.resolve(__dirname, "..");
 const bundleDir = path.join(rootDir, "bundle");
 const sourcePackageJsonPath = path.join(rootDir, "package.json");
 const sourcePluginManifestPath = path.join(rootDir, "openclaw.plugin.json");
-const sourceReadmePath = path.join(rootDir, "README.md");
+const sourceReadmePath = path.join(rootDir, "README.bundle.md");
 
 async function main() {
   await rm(bundleDir, { recursive: true, force: true });

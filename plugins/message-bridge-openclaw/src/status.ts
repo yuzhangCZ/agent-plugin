@@ -344,6 +344,9 @@ export async function probeMessageBridgeAccount(
     });
 
     connection.on("stateChange", (state) => {
+      if (settled) {
+        return;
+      }
       if (state === "READY") {
         const result = {
           ok: true,
@@ -379,6 +382,9 @@ export async function probeMessageBridgeAccount(
     });
 
     connection.on("error", (error) => {
+      if (settled) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const result = {
         ok: false,
@@ -399,6 +405,9 @@ export async function probeMessageBridgeAccount(
     });
 
     connection.connect().catch((error) => {
+      if (settled) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const result = {
         ok: false,

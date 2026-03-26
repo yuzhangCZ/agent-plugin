@@ -1,34 +1,34 @@
-# Local Release CLI
+# 本地发布 CLI
 
-This repository provides a single local release CLI for both workspace packages:
+本仓库为两个工作区包提供统一的本地发布 CLI：
 
 - `@wecode/skill-opencode-plugin`
 - `@wecode/skill-openclaw-plugin`
 
-The CLI is intended for maintainers who need to build, verify, publish, and create local release git metadata from a developer machine without using the GitHub release workflows.
+这个 CLI 面向维护者，适用于在开发机上完成构建、校验、发布，以及生成本地 release git 元数据，而不依赖 GitHub release workflow。
 
-## Entry Points
+## 入口
 
 ```bash
 pnpm release:local -- --target <message-bridge|message-bridge-openclaw|dual> ...
 pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|dual> ...
 ```
 
-- `release:local` executes the full flow.
-- `release:plan` is the same CLI with `--dry-run` enabled by default.
-- `verify:release-local:e2e` runs an isolated fake-registry end-to-end validation harness.
+- `release:local` 执行完整发布流程。
+- `release:plan` 等价于默认开启 `--dry-run` 的同一套 CLI。
+- `verify:release-local:e2e` 用于运行隔离的假私仓端到端验证。
 
-## Before You Run It
+## 运行前检查
 
-Make sure all of the following are true:
+在执行前，确认以下条件成立：
 
-- dependencies are installed with `pnpm install --frozen-lockfile`
-- the target npm registry is configured in `.npmrc` or via environment variables
-- `npm whoami` succeeds for the target registry
-- the release version you want is known before you start
-- you understand that publish and git are non-atomic
+- 已执行 `pnpm install --frozen-lockfile`
+- 目标 npm registry 已通过 `.npmrc` 或环境变量配置完成
+- `npm whoami` 在目标 registry 上能成功返回
+- 目标版本号已经明确
+- 已理解 `npm publish` 和 git 操作不是原子事务
 
-Recommended checks:
+推荐先执行：
 
 ```bash
 pnpm install --frozen-lockfile
@@ -36,58 +36,58 @@ npm config get registry
 npm whoami
 ```
 
-If you publish through a scoped private registry such as `@wecode:registry=...`, the CLI resolves that scoped registry and authenticates against it instead of blindly trusting the default registry.
+如果你使用的是类似 `@wecode:registry=...` 的 scope 私仓配置，CLI 会优先解析该 scope 对应的真实 registry，并对这个 registry 做认证检查，而不是只看默认 registry。
 
-## Current Package Differences
+## 当前两个包的发布差异
 
-The CLI uses one interface, but the two packages still publish differently:
+CLI 对外接口统一，但两个包当前的发布根目录不同：
 
-- `message-bridge` publishes from `plugins/message-bridge`
-- `message-bridge-openclaw` publishes from `plugins/message-bridge-openclaw/bundle`
+- `message-bridge` 从 `plugins/message-bridge` 发布
+- `message-bridge-openclaw` 从 `plugins/message-bridge-openclaw/bundle` 发布
 
-That difference is intentional for now. The follow-up refactor issue is tracked in [openclaw-root-publish-refactor-issue.md](./openclaw-root-publish-refactor-issue.md).
+这是当前仓库状态下的有意设计。后续统一为源码根发包的重构问题记录在 [openclaw-root-publish-refactor-issue.md](./openclaw-root-publish-refactor-issue.md)。
 
-## Required Version Input
+## 版本输入要求
 
-Single-target releases require exactly one of:
+单包发布必须二选一：
 
 ```bash
 --version <semver>
 --bump <patch|minor|major|prerelease>
 ```
 
-Dual releases require either:
+双包发布必须满足以下两种形式之一：
 
 ```bash
 --bump <patch|minor|major|prerelease>
 ```
 
-or:
+或：
 
 ```bash
 --bridge-version <semver> --openclaw-version <semver>
 ```
 
-## Flags
+## 参数说明
 
-### Target Selection
+### 目标选择
 
 - `--target message-bridge`
 - `--target message-bridge-openclaw`
 - `--target dual`
 
-### Version Selection
+### 版本选择
 
 - `--version <semver>`
 - `--bridge-version <semver>`
 - `--openclaw-version <semver>`
 - `--bump patch|minor|major|prerelease`
 - `--preid <alpha|beta|rc>`  
-  Default: `beta`
+  默认值：`beta`
 - `--release stable|prerelease`  
-  Optional explicit release kind check
+  可选，用于显式校验 release 类型
 
-### Execution Control
+### 执行控制
 
 - `--dry-run`
 - `--skip-publish`
@@ -95,92 +95,92 @@ or:
 - `--push`
 - `--allow-dirty`
 
-Invalid combination:
+非法组合：
 
 - `--skip-publish --push`
 
-## Default Behavior
+## 默认行为
 
-Unless you override it:
+在不额外覆盖参数时：
 
-- `npm publish` runs
-- git commit and git tag are created locally
-- remote push does not run
-- only explicit `--push` sends the branch and new tags to `origin`
-- `--skip-publish` cannot be combined with `--push`
+- 会执行 `npm publish`
+- 会创建本地 git commit 和 git tag
+- 不会推送远程
+- 只有显式传 `--push` 才会把当前分支和新 tag 推到 `origin`
+- `--skip-publish` 不能和 `--push` 一起使用
 
-This is the default safety model:
+默认安全模型如下：
 
-1. publish to npm
-2. create local commit/tag
-3. optionally push remote refs
+1. 发布到 npm
+2. 创建本地 commit 和 tag
+3. 如有需要，再显式推送远程
 
-If publish succeeds but later git steps fail, do not republish the same version.
+如果 `npm publish` 成功而后续 git 步骤失败，不要重复发布同一个版本。
 
-## Stable Release Examples
+## 正式发布示例
 
-Release `message-bridge` by bumping a patch version:
+给 `message-bridge` 做一次 patch 版本发布：
 
 ```bash
 pnpm release:local -- --target message-bridge --bump patch
 ```
 
-Release `message-bridge-openclaw` with an explicit version and keep the result local:
+给 `message-bridge-openclaw` 发布一个显式版本，并且只保留本地结果：
 
 ```bash
 pnpm release:local -- --target message-bridge-openclaw --version 0.2.0
 ```
 
-Preview a stable release without changing npm or git:
+仅预览一次正式发布计划，不改 npm，也不改 git：
 
 ```bash
 pnpm release:plan -- --target message-bridge --version 1.2.0
 ```
 
-## Prerelease Examples
+## 预发布示例
 
-Create the next beta for `message-bridge`:
+给 `message-bridge` 生成下一个 beta 版本：
 
 ```bash
 pnpm release:local -- --target message-bridge --bump prerelease --preid beta
 ```
 
-Release an explicit RC for `message-bridge-openclaw`:
+给 `message-bridge-openclaw` 发布一个显式 RC 版本：
 
 ```bash
 pnpm release:local -- --target message-bridge-openclaw --version 0.2.0-rc.1 --release prerelease --preid rc
 ```
 
-## Dual Release Examples
+## 双包发布示例
 
-Bump both packages with the same release type:
+两个包按同一种 bump 规则一起发版：
 
 ```bash
 pnpm release:local -- --target dual --bump patch
 ```
 
-Release both packages with explicit versions:
+两个包分别指定版本一起发布：
 
 ```bash
 pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0
 ```
 
-Dual mode is not atomic. If the first publish succeeds and the second fails, the first package may already be live in the registry.
+`dual` 模式不是原子事务。如果第一个包发布成功、第二个包失败，第一个版本可能已经进入 registry。
 
-## Build, Verify, and Publish Flow
+## 构建、校验与发布流程
 
-For each target, the CLI does the following:
+对每个 target，CLI 会依次执行：
 
-1. resolve the target version and release dist-tag
-2. rewrite the target package version
-3. run target-specific build steps
-4. run the target-specific `verify:release` command
-5. evaluate the publish readiness contract
-6. publish if readiness is `true` and `--skip-publish` is not set
-7. create local commit/tag if `--skip-git` is not set
-8. push branch and tags only if `--push` is set
+1. 解析目标版本和 dist-tag
+2. 改写目标包版本
+3. 执行 target 对应的构建步骤
+4. 执行 target 对应的 `verify:release`
+5. 评估 publish readiness contract
+6. 当 readiness 为 `true` 且未指定 `--skip-publish` 时执行发布
+7. 当未指定 `--skip-git` 时创建本地 commit 和 tag
+8. 当显式指定 `--push` 时推送分支和 tag
 
-Publish readiness is the last gate before the irreversible `npm publish` step. The CLI prints:
+publish readiness 是进入不可逆 `npm publish` 之前的最后一道门禁。CLI 会输出：
 
 - `releaseReady`
 - `resolvedVersion`
@@ -188,65 +188,74 @@ Publish readiness is the last gate before the irreversible `npm publish` step. T
 - `resolvedPublishRoot`
 - `executedChecks`
 
-## Failure Cases and Recovery
+## 常见失败场景与恢复
 
-### Dirty Worktree
+### 工作区不干净
 
-The CLI rejects a dirty worktree by default.
+默认情况下，CLI 会拒绝在脏工作区里执行。
 
-Use `--allow-dirty` only when you intentionally need to keep unrelated local changes out of the release commit.
+只有在你明确知道要保留哪些本地改动、并且不希望它们进入 release commit 时，才使用 `--allow-dirty`。
 
-### Tag Already Exists
+### Tag 已存在
 
-If the target release tag already exists locally, the CLI stops before any build or publish step.
+如果目标 release tag 在本地已经存在，CLI 会在任何构建或发布动作前直接停止。
 
-### Registry or Auth Failure
+### Registry 或认证失败
 
-If `npm config get registry` or `npm whoami` is wrong, the CLI fails before publish.
+如果 `npm config get registry` 或 `npm whoami` 指向错误目标，CLI 会在发布前失败。
 
-### Publish Succeeds but Git Does Not
+### 发布成功但 Git 失败
 
-This is the most important recovery case.
+这是最重要的恢复场景：
 
-- the package may already be published
-- the local commit and tag may be missing or incomplete
-- do not republish the same version
-- inspect the registry first, then repair git state manually
+- 包可能已经成功发布
+- 本地 commit 和 tag 可能缺失或不完整
+- 不要重复发布相同版本
+- 先确认 registry 状态，再手动修复 git 状态
 
-### Dual Release Partial Success
+### 双包发布部分成功
 
-If the first package publishes and the second one fails:
+如果第一个包已发布、第二个包失败：
 
-- treat the first package version as already consumed
-- do not rerun the same first version blindly
-- repair or complete git state after you confirm what the registry contains
+- 视第一个包的版本已经被占用
+- 不要盲目重跑相同版本
+- 先确认 registry 中实际内容，再决定补 git 或补第二个包
 
-## End-to-End Validation Harness
+## 脚本跨平台约定
 
-Use the dedicated harness when you need to validate the full local release flow without touching the real private registry:
+维护发布或 smoke 脚本时，遵循以下约定：
+
+- 需要隔离临时 home 目录的脚本，必须同时设置 `HOME`、`USERPROFILE`、`XDG_CONFIG_HOME`
+- 不要只覆写 `HOME`，否则 Windows 或继承了 `XDG_CONFIG_HOME` 的环境中可能读到宿主配置
+- 需要同时支持“直接执行”和“被 import”的 ESM 脚本，必须先用 `fileURLToPath(import.meta.url)` 转成本地路径，再与 `path.resolve(process.argv[1])` 比较
+- 不要直接把 `import.meta.url` 和手工拼接的 `file://...` 字符串做比较
+
+## 端到端验证 Harness
+
+如果你要在不触碰真实私仓的前提下验证完整本地发布流程，使用：
 
 ```bash
 pnpm verify:release-local:e2e
 ```
 
-Default behavior:
+默认行为：
 
-- copies the current workspace into a temporary isolated directory
-- initializes a temporary git repository and a local bare remote
-- starts a temporary fake npm registry
-- publishes both packages for real into that fake registry
-- verifies prerelease dist-tags, dual release behavior, failure recovery, and `--push`
+- 把当前工作区复制到临时隔离目录
+- 初始化临时 git 仓库和本地 bare remote
+- 启动临时假 npm registry
+- 对两个包执行真实 `npm publish`
+- 验证 prerelease dist-tag、dual 发布行为、失败恢复、以及 `--push`
 
-Optional environment variables:
+可选环境变量：
 
 - `RELEASE_E2E_REGISTRY_URL`
 - `RELEASE_E2E_NPM_TOKEN`
 - `RELEASE_E2E_REMOTE_PATH`
 - `RELEASE_E2E_KEEP_TMP=1`
 
-If `RELEASE_E2E_REGISTRY_URL` is omitted, the harness starts its own temporary Verdaccio instance.
+如果没有传 `RELEASE_E2E_REGISTRY_URL`，harness 会自行启动临时 Verdaccio。
 
-## Related Docs
+## 相关文档
 
 - [README.md](../../README.md)
 - [plugins/message-bridge/docs/operations/npm-publish-guide.md](../../plugins/message-bridge/docs/operations/npm-publish-guide.md)

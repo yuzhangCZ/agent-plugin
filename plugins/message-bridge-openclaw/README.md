@@ -35,15 +35,15 @@ message contract.
 
 当前仓库已验证的安装方式包括本地扩展安装与私有 npm 分发：
 
-- 目录复制安装（推荐）：复制 `dist/`、`package.json`、`openclaw.plugin.json` 到 `~/.openclaw/extensions/message-bridge` 或 `~/.openclaw-dev/extensions/message-bridge`
-- 符号链接安装（开发联调）：把插件根目录链接到 profile 的 `extensions/message-bridge`
-- bundle 安装（推荐交付）：执行 `pnpm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/message-bridge`
+- bundle 安装（推荐交付）：执行 `pnpm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
+- 手动复制 bundle：复制 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md`
+- 私有 npm 分发：通过 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
 关键约束：
 
-- 不要把 `node_modules/` 复制到 `extensions/message-bridge`
+- 不要把 `node_modules/` 复制到 `extensions/skill-openclaw-plugin`
 - 插件运行时必须使用宿主 OpenClaw 提供的 `plugin-sdk`
 - 如果插件目录里出现 `node_modules/openclaw`，可能会和宿主 `openclaw --version` 解析到的版本冲突
 
@@ -97,13 +97,13 @@ The plugin assumes the active OpenClaw profile already has:
 cd <repo-root>/plugins/message-bridge-openclaw
 pnpm install
 pnpm run build
-pnpm run build:bundle
-pnpm run install:bundle:dev
 pnpm test
+pnpm run pack:check
 ```
 
-Successful build should produce `dist/` and a green `pnpm test`.
-`pnpm run build:bundle` produces a ready-to-install bundle directory at `bundle/`.
+Successful build should produce a ready-to-install bundle directory at `bundle/`.
+`pnpm run build` and `pnpm run build:bundle` are equivalent bundle-only builds.
+`bundle/` is generated at build time and is not tracked in git.
 `pnpm run install:bundle:dev` builds the bundle and installs it into the OpenClaw `--dev` profile.
 
 ## Install into OpenClaw dev environment
@@ -112,17 +112,18 @@ This guide uses the OpenClaw `--dev` environment.
 
 The current dev plugin location is:
 
-`~/.openclaw-dev/extensions/message-bridge`
+`~/.openclaw-dev/extensions/skill-openclaw-plugin`
 
 Sync the plugin contents into that directory:
 
 ```bash
-export OPENCLAW_EXT_DIR="${HOME}/.openclaw-dev/extensions/message-bridge"
+export OPENCLAW_EXT_DIR="${HOME}/.openclaw-dev/extensions/skill-openclaw-plugin"
 rm -rf "$OPENCLAW_EXT_DIR"
 mkdir -p "$OPENCLAW_EXT_DIR"
-cp -R <repo-root>/plugins/message-bridge-openclaw/dist "$OPENCLAW_EXT_DIR/"
-cp <repo-root>/plugins/message-bridge-openclaw/package.json "$OPENCLAW_EXT_DIR/"
-cp <repo-root>/plugins/message-bridge-openclaw/openclaw.plugin.json "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/bundle/index.js "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/bundle/package.json "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/bundle/openclaw.plugin.json "$OPENCLAW_EXT_DIR/"
+cp <repo-root>/plugins/message-bridge-openclaw/bundle/README.md "$OPENCLAW_EXT_DIR/"
 ```
 
 安装目录中不要包含：
@@ -132,10 +133,10 @@ cp <repo-root>/plugins/message-bridge-openclaw/openclaw.plugin.json "$OPENCLAW_E
 
 推荐安装后的目录只包含：
 
-- `dist/`
+- `index.js`
 - `package.json`
 - `openclaw.plugin.json`
-- 文档文件可选
+- `README.md`
 
 ## OpenClaw dev config
 
@@ -151,9 +152,9 @@ Update the dev config file `~/.openclaw-dev/openclaw.json` with:
     }
   },
   "plugins": {
-    "allow": ["message-bridge"],
+    "allow": ["skill-openclaw-plugin"],
     "entries": {
-      "message-bridge": {
+      "skill-openclaw-plugin": {
         "enabled": true
       }
     }
@@ -161,7 +162,7 @@ Update the dev config file `~/.openclaw-dev/openclaw.json` with:
   "channels": {
     "message-bridge": {
       "enabled": true,
-      "blockStreaming": true,
+      "streaming": true,
       "gateway": {
         "url": "ws://127.0.0.1:8081/ws/agent"
       },
@@ -194,11 +195,11 @@ The following register metadata fields are runtime-derived and not user-configur
 - `toolVersion` comes from the plugin package version at runtime
 - `macAddress` comes from the first usable local network interface, or `""` when unavailable
 
-To enable progressive text delivery, also set:
+Progressive text delivery is enabled by default. Optional controls:
 
-- `agents.defaults.blockStreamingDefault = "on"`
-- `agents.defaults.blockStreamingBreak = "text_end"`
-- `channels.message-bridge.blockStreaming = true`
+- `channels.message-bridge.streaming = false` to force non-streaming delivery mode
+- `channels.message-bridge.blockStreaming` is removed and no longer supported
+- `agents.defaults.blockStreamingChunk` / `agents.defaults.blockStreamingCoalesce` for chunking cadence overrides
 
 ## Start OpenClaw dev gateway
 
@@ -218,19 +219,19 @@ Run:
 
 ```bash
 cd <repo-root>/plugins/message-bridge-openclaw
-npm run install:bundle:dev
+pnpm run install:bundle:dev
 ```
 
 This command will:
 
-- run `npm run build:bundle`
-- install the generated bundle into `~/.openclaw-dev/extensions/message-bridge`
+- run `pnpm run build`
+- install the generated bundle into `~/.openclaw-dev/extensions/skill-openclaw-plugin`
 - print the installed files
 - print the next gateway start command
 
 If you need manual install instead, copy the generated `bundle/` directory contents into:
 
-- `~/.openclaw-dev/extensions/message-bridge`
+- `~/.openclaw-dev/extensions/skill-openclaw-plugin`
 
 The generated bundle directory already contains:
 
@@ -250,10 +251,10 @@ No manual `package.json` edits are required.
 优先检查插件目录里是否存在私有 OpenClaw runtime：
 
 ```bash
-find ~/.openclaw-dev/extensions/message-bridge -maxdepth 2 -type d | grep node_modules
+find ~/.openclaw-dev/extensions/skill-openclaw-plugin -maxdepth 2 -type d | grep node_modules
 ```
 
-如果存在 `~/.openclaw-dev/extensions/message-bridge/node_modules/openclaw`，先删除整个 `node_modules/`，再按本文档重新安装最小文件集。
+如果存在 `~/.openclaw-dev/extensions/skill-openclaw-plugin/node_modules/openclaw`，先删除整个 `node_modules/`，再按本文档重新安装最小文件集。
 
 这类错误通常不是 OpenClaw 配置字段错误，而是：
 

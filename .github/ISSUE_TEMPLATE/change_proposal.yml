@@ -1,0 +1,71 @@
+name: Change proposal
+description: 提交功能提议、重构建议或流程改进需求
+title: "[Proposal] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这个表单只用于“需要改什么”的提议，不用于纯文档任务或问答支持。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与问题
+      description: 说明当前痛点、上下文或机会点。
+      placeholder: 当前做法有什么问题，为什么现在值得做这件事？
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标
+      description: 说明你希望最终达到什么效果。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 写出你建议的实现方向、约束或替代方案。
+      placeholder: 例如：新增根级脚本 / 调整某个插件边界 / 优化 workflow 路径
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Out of scope / 非目标
+      description: 明确说明这次提议不打算解决什么，避免实现阶段范围蔓延。
+      placeholder: |
+        - 不改协议字段
+        - 不调整发布流程
+        - 不改 integration fixture
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 预估影响范围
+      options:
+        - label: "`plugins/message-bridge`"
+        - label: "`plugins/message-bridge-openclaw`"
+        - label: "`packages/test-support`"
+        - label: "`integration/opencode-cui`"
+        - label: "`.github` / workflow"
+        - label: "发布流程"
+        - label: "文档需要同步"
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 说明什么情况下可以认为这项提议完成。
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险与依赖
+      description: 说明已知风险、依赖项或阻塞因素。

@@ -41,10 +41,7 @@ export const releaseDescriptors = Object.freeze({
     packageRoot: "plugins/message-bridge-openclaw",
     versionSource: "package.json",
     publishRoot: "bundle",
-    buildSteps: Object.freeze([
-      ["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"],
-      ["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build:bundle"],
-    ]),
+    buildSteps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"]]),
     verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "verify:release"]),
     tagPrefix: "release/message-bridge-openclaw/v",
     distTagSource: "version",
@@ -86,6 +83,18 @@ function cloneCommand(command) {
   return [...command];
 }
 
+function resolveExecutable(command) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "pnpm" || command === "npm" || command === "npx") {
+    return `${command}.cmd`;
+  }
+
+  return command;
+}
+
 function createProcessPorts(overrides = {}) {
   const fs = overrides.fs ?? {
     exists: existsSync,
@@ -93,12 +102,17 @@ function createProcessPorts(overrides = {}) {
     writeJson: writeJsonFile,
   };
 
+  const inspectDependencies =
+    overrides.inspectDependencies ?? ((target) => inspectManifestDependencies(target, fs, exec));
+
   const exec =
     overrides.exec ??
     ((command, args, options = {}) => {
-      const output = execFileSync(command, args, {
+      const resolvedCommand = resolveExecutable(command);
+      const output = execFileSync(resolvedCommand, args, {
         cwd: options.cwd,
         encoding: "utf8",
+        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand),
         stdio: options.stdio ?? "pipe",
       });
 
@@ -108,6 +122,7 @@ function createProcessPorts(overrides = {}) {
   return {
     fs,
     exec,
+    inspectDependencies,
   };
 }
 
@@ -267,6 +282,8 @@ export function parseReleaseLocalArgs(argv) {
     bump: null,
     dryRun: false,
     help: false,
+    installDeps: false,
+    installDepsUpdateLockfile: false,
     openclawVersion: null,
     positionalTarget: null,
     preid: defaultPreid,
@@ -274,6 +291,7 @@ export function parseReleaseLocalArgs(argv) {
     release: null,
     skipGit: false,
     skipPublish: false,
+    skipVerify: false,
     target: null,
     version: null,
   };
@@ -325,6 +343,11 @@ export function parseReleaseLocalArgs(argv) {
       continue;
     }
 
+    if (arg === "--skip-verify") {
+      parsed.skipVerify = true;
+      continue;
+    }
+
     if (arg === "--push") {
       parsed.push = true;
       continue;
@@ -332,6 +355,16 @@ export function parseReleaseLocalArgs(argv) {
 
     if (arg === "--allow-dirty") {
       parsed.allowDirty = true;
+      continue;
+    }
+
+    if (arg === "--install-deps") {
+      parsed.installDeps = true;
+      continue;
+    }
+
+    if (arg === "--install-deps-update-lockfile") {
+      parsed.installDepsUpdateLockfile = true;
       continue;
     }
 
@@ -445,6 +478,10 @@ export function parseReleaseLocalArgs(argv) {
 
   if (parsed.push && parsed.skipPublish) {
     throw new Error("--push cannot be combined with --skip-publish");
+  }
+
+  if (parsed.installDeps && parsed.installDepsUpdateLockfile) {
+    throw new Error("--install-deps and --install-deps-update-lockfile cannot be used together");
   }
 
   if (!validReleaseKinds.has(parsed.release ?? inferReleaseKind(parsed.version, parsed.bump, null))) {
@@ -720,19 +757,27 @@ export function createReleasePlan(input = {}, overrides = {}) {
 
   const blockers = [];
   const warnings = [];
-  const workingTreeStatus = getWorkingTreeStatus(repoRoot, exec);
-  if (!parsed.allowDirty && workingTreeStatus.trim().length > 0) {
+  const workingTreeStatus = parsed.skipGit ? "" : getWorkingTreeStatus(repoRoot, exec);
+  if (!parsed.skipGit && !parsed.allowDirty && workingTreeStatus.trim().length > 0) {
     blockers.push("working tree is not clean; rerun with --allow-dirty only if you intend to keep unrelated local changes");
   }
 
-  for (const target of targets) {
-    if (tagExists(repoRoot, exec, target.tagName)) {
-      blockers.push(`release tag already exists: ${target.tagName}`);
+  if (!parsed.skipGit) {
+    for (const target of targets) {
+      if (tagExists(repoRoot, exec, target.tagName)) {
+        blockers.push(`release tag already exists: ${target.tagName}`);
+      }
     }
   }
 
   if (targets.length > 1) {
     warnings.push("dual releases are non-atomic; the first package may already be published if the second one fails.");
+  }
+
+  if (parsed.skipVerify) {
+    warnings.push(
+      "verify steps are being skipped by user request; publish may continue without verify:release safeguards.",
+    );
   }
 
   warnings.push("npm publish and git commit/tag are non-atomic; publish can succeed even if later git steps fail.");
@@ -755,7 +800,8 @@ export function createReleasePlan(input = {}, overrides = {}) {
   };
 }
 
-function formatTargetPlan(target) {
+function formatTargetPlan(target, options = {}) {
+  const verifyLabel = options.skipVerify ? "skipped (--skip-verify)" : formatCommand(target.verifyStep);
   return [
     `- ${target.id}: ${target.packageName}`,
     `  current version: ${target.currentVersion}`,
@@ -765,25 +811,29 @@ function formatTargetPlan(target) {
     `  publish root: ${target.publishRootRelative}`,
     `  tag: ${target.tagName}`,
     `  build steps: ${target.buildSteps.map((command) => formatCommand(command)).join(" ; ")}`,
-    `  verify step: ${formatCommand(target.verifyStep)}`,
+    `  verify step: ${verifyLabel}`,
   ].join("\n");
 }
 
 export function formatReleasePlan(plan) {
+  const skipVerify = Boolean(plan.parsed?.skipVerify);
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
     `mode: ${plan.targets.length > 1 ? "dual (non-atomic)" : "single-target"}`,
     `dry run: ${plan.dryRun ? "yes" : "no"}`,
     `publish: ${plan.actions.publish ? "yes" : "no"}`,
+    `verify: ${skipVerify ? "no" : "yes"}`,
     `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
     `push remote: ${plan.actions.push ? "yes" : "no"}`,
     "",
     "Targets:",
-    ...plan.targets.map((target) => formatTargetPlan(target)),
+    ...plan.targets.map((target) => formatTargetPlan(target, { skipVerify })),
     "",
     "Publish readiness contract:",
-    "- releaseReady is evaluated only after build and verify steps complete",
+    skipVerify
+      ? "- releaseReady is evaluated after build completes; verify was skipped by user request"
+      : "- releaseReady is evaluated only after build and verify steps complete",
     "- readiness output includes resolvedVersion, resolvedDistTag, resolvedPublishRoot, and executedChecks",
   ];
 
@@ -843,9 +893,12 @@ Options:
   --preid <name>                  Prerelease identifier, default: beta
   --release <stable|prerelease>   Explicit release kind
   --dry-run                       Print the release plan without mutating npm or git
-  --skip-publish                  Build and verify, but skip npm publish
+  --skip-publish                  Build and verify by default, but skip npm publish
+  --skip-verify                   Build and evaluate readiness, but skip verify:release
   --skip-git                      Publish without local commit/tag
   --push                          Push branch and new tags after local commit/tag
+  --install-deps                  Auto-install packages for the dependency presence sanity check with pnpm install --frozen-lockfile
+  --install-deps-update-lockfile  Auto-install packages for the dependency presence sanity check with pnpm install
   --allow-dirty                   Allow running from a dirty worktree
   --help, -h                      Print this help
 
@@ -854,6 +907,13 @@ Defaults:
   - git commit and tag are local by default
   - remote push only runs with --push
   - --skip-publish cannot be combined with --push
+  - dependency presence sanity checks run before any build or verify step
+  - the presence sanity check only looks for clearly missing packages before build
+  - builds run by default; verify also runs by default unless --skip-verify is used
+  - --skip-verify only skips verify:release; it does not skip build or readiness checks
+  - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
+  - missing packages fail fast unless an install flag is provided
+  - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
   - dual releases are non-atomic
@@ -861,6 +921,7 @@ Defaults:
 Examples:
   pnpm release:plan -- --target message-bridge --bump patch
   pnpm release:local -- --target message-bridge --version 1.2.0
+  pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta
   pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish
   pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0
@@ -873,6 +934,140 @@ function runCommand(exec, command, cwd) {
     cwd,
     stdio: "inherit",
   });
+}
+
+function collectManifestDependencyNames(manifest) {
+  const dependencyFields = ["dependencies", "devDependencies"];
+  const names = new Set();
+
+  for (const field of dependencyFields) {
+    const entries = manifest[field];
+    if (!isObject(entries)) {
+      continue;
+    }
+
+    for (const dependencyName of Object.keys(entries)) {
+      names.add(dependencyName);
+    }
+  }
+
+  return [...names].sort();
+}
+
+export function inspectManifestDependencies(target, fs, exec) {
+  const manifest = fs.readJson(target.versionSourceAbsolute);
+  const dependencyNames = collectManifestDependencyNames(manifest);
+
+  if (dependencyNames.length === 0) {
+    return {
+      missingPackages: [],
+      ok: true,
+      targetId: target.id,
+    };
+  }
+
+  const checkScript = `
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const dependencyNames = JSON.parse(process.argv[1]);
+const requireFromPackage = createRequire(path.join(process.cwd(), "package.json"));
+const missingPackages = [];
+
+for (const dependencyName of dependencyNames) {
+  try {
+    await import.meta.resolve(dependencyName);
+    continue;
+  } catch {}
+
+  try {
+    requireFromPackage.resolve(dependencyName);
+    continue;
+  } catch {
+    try {
+      requireFromPackage.resolve(\`\${dependencyName}/package.json\`);
+      continue;
+    } catch {}
+  }
+
+  missingPackages.push(dependencyName);
+}
+
+process.stdout.write(JSON.stringify({ missingPackages }));
+`.trim();
+
+  const output = exec(
+    "node",
+    ["--input-type=module", "-e", checkScript, JSON.stringify(dependencyNames)],
+    {
+      cwd: target.packageRootAbsolute,
+      stdio: "pipe",
+    },
+  );
+
+  const parsedOutput = output ? JSON.parse(output) : { missingPackages: [] };
+  const missingPackages = Array.isArray(parsedOutput.missingPackages) ? parsedOutput.missingPackages : [];
+
+  return {
+    missingPackages,
+    ok: missingPackages.length === 0,
+    targetId: target.id,
+  };
+}
+
+function getDependencyInstallMode(parsed) {
+  if (parsed.installDepsUpdateLockfile) {
+    return "update-lockfile";
+  }
+
+  if (parsed.installDeps) {
+    return "frozen-lockfile";
+  }
+
+  return "none";
+}
+
+function formatMissingDependenciesMessage(failures) {
+  const summary = failures
+    .map((failure) => `${failure.targetId}: ${failure.missingPackages.slice(0, 5).join(", ")}`)
+    .join("; ");
+
+  return `dependency presence sanity check failed before build; unresolved packages: ${summary}. This preflight only verifies package presence before build. Prefer rerunning with --install-deps, run pnpm install --frozen-lockfile manually, or use --install-deps-update-lockfile if updating the lockfile is intentional.`;
+}
+
+function prepareDependencies(plan, ports, stdout) {
+  const installMode = getDependencyInstallMode(plan.parsed);
+  const inspectDependencies = ports.inspectDependencies ?? ((target) => inspectManifestDependencies(target, ports.fs, ports.exec));
+
+  const checkTargets = () =>
+    plan.targets
+      .map((target) => inspectDependencies(target))
+      .filter((result) => !result.ok);
+
+  let failures = checkTargets();
+  if (failures.length === 0) {
+    stdout.write("dependency presence check: passed\n");
+    return;
+  }
+
+  stdout.write("dependency presence check: failed\n");
+  if (installMode === "none") {
+    throw new Error(formatMissingDependenciesMessage(failures));
+  }
+
+  const installCommand =
+    installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
+  stdout.write(`dependency presence install: ${formatCommand(installCommand)}\n`);
+  runCommand(ports.exec, installCommand, plan.repoRoot);
+
+  failures = checkTargets();
+  if (failures.length === 0) {
+    stdout.write("dependency presence check: passed\n");
+    return;
+  }
+
+  stdout.write("dependency presence check: failed\n");
+  throw new Error(formatMissingDependenciesMessage(failures));
 }
 
 function readRegistry(exec, repoRoot) {
@@ -922,7 +1117,11 @@ function printRuntimeHeader(stdout, plan, registry, whoami) {
   stdout.write(`${formatReleasePlan(plan)}\n`);
   stdout.write("Registry Context\n");
   stdout.write(`registry: ${registry}\n`);
-  stdout.write(`npm whoami: ${whoami}\n\n`);
+  stdout.write(`npm whoami: ${whoami}\n`);
+  if (plan.parsed.skipVerify) {
+    stdout.write("verify skipped by user request (--skip-verify)\n");
+  }
+  stdout.write("\n");
 }
 
 function getCurrentBranch(exec, repoRoot) {
@@ -964,8 +1163,58 @@ function maybeInjectFailure(target, stage) {
   throw new Error(`injected failure for ${target.id} at ${stage}`);
 }
 
+export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
+  if (!argvEntry) {
+    return false;
+  }
+
+  const importMetaPath = normalizeCliEntryPathFromUrl(importMetaUrl);
+  const argvPath = normalizeCliArgvEntry(argvEntry, importMetaPath.kind, cwd);
+  return importMetaPath.kind === argvPath.kind && importMetaPath.value === argvPath.value;
+}
+
+function normalizeCliEntryPathFromUrl(importMetaUrl) {
+  const url = new URL(importMetaUrl);
+  if (/^\/[A-Za-z]:\//.test(url.pathname)) {
+    return {
+      kind: "win32",
+      value: path.win32.normalize(url.pathname.slice(1)).toLowerCase(),
+    };
+  }
+
+  return {
+    kind: "posix",
+    value: path.resolve(fileURLToPath(importMetaUrl)),
+  };
+}
+
+function normalizeCliArgvEntry(argvEntry, kindHint, cwd = process.cwd()) {
+  const resolvedEntry =
+    kindHint === "win32" ? path.win32.resolve(normalizeWindowsCwd(cwd), argvEntry) : path.resolve(argvEntry);
+
+  if (kindHint === "win32" || /^[A-Za-z]:[\\/]/.test(resolvedEntry)) {
+    return {
+      kind: "win32",
+      value: path.win32.normalize(resolvedEntry).toLowerCase(),
+    };
+  }
+
+  return {
+    kind: "posix",
+    value: resolvedEntry,
+  };
+}
+
+function normalizeWindowsCwd(cwd) {
+  if (/^[A-Za-z]:[\\/]/.test(cwd)) {
+    return cwd;
+  }
+
+  return cwd.replace(/\//g, "\\");
+}
+
 export function executeRelease(plan, overrides = {}) {
-  const { fs, exec } = createProcessPorts(overrides);
+  const { fs, exec, inspectDependencies } = createProcessPorts(overrides);
   const stdout = overrides.stdout ?? process.stdout;
 
   if (plan.blockers.length > 0) {
@@ -983,6 +1232,8 @@ export function executeRelease(plan, overrides = {}) {
       publishedTargets: [],
     };
   }
+
+  prepareDependencies(plan, { exec, fs, inspectDependencies }, stdout);
 
   const publishRegistries = plan.actions.publish
     ? Object.fromEntries(
@@ -1011,8 +1262,12 @@ export function executeRelease(plan, overrides = {}) {
         runCommand(exec, command, plan.repoRoot);
       }
 
-      stdout.write(`Running verify for ${target.id}\n`);
-      runCommand(exec, target.verifyStep, plan.repoRoot);
+      if (plan.parsed.skipVerify) {
+        stdout.write(`Skipping verify for ${target.id} (--skip-verify)\n`);
+      } else {
+        stdout.write(`Running verify for ${target.id}\n`);
+        runCommand(exec, target.verifyStep, plan.repoRoot);
+      }
 
       const readiness = evaluatePublishReadiness(target, {
         fs,
@@ -1114,7 +1369,7 @@ export async function main(argv = process.argv.slice(2), options = {}) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCliEntry(import.meta.url, process.argv[1])) {
   const exitCode = await main();
   process.exit(exitCode);
 }

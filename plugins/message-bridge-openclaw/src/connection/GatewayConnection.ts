@@ -416,6 +416,9 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
   }
 
   private setState(state: ConnectionState): void {
+    if (this.state === state) {
+      return;
+    }
     this.state = state;
     this.emit("stateChange", state);
   }

@@ -1,0 +1,59 @@
+name: Documentation task
+description: 提交 README、docs、模板或协作规则相关文档任务
+title: "[Docs] "
+labels:
+  - documentation
+body:
+  - type: textarea
+    id: source_of_truth
+    attributes:
+      label: 源码 / 文档真源引用
+      description: 请列出相关代码路径、现有文档入口或上层规则文件，说明这份文档应以什么为准。
+      placeholder: |
+        例如：
+        - plugins/message-bridge/src/...
+        - plugins/message-bridge/docs/AGENTS.md
+        - README.md
+    validations:
+      required: true
+  - type: textarea
+    id: target
+    attributes:
+      label: 文档位置
+      description: 说明涉及哪个目录、文件或文档入口。
+      placeholder: 例如：README.md、plugins/message-bridge/docs/、.github/
+    validations:
+      required: true
+  - type: input
+    id: audience
+    attributes:
+      label: 目标读者
+      description: 说明文档主要给谁看。
+      placeholder: 例如：仓库维护者、插件开发者、联调人员、外部贡献者
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: 当前缺失或问题
+      description: 说明现有文档哪里不清楚、缺失或过时。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 希望补充的内容
+      description: 说明需要新增、修订或删除什么信息。
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 完成标准
+      description: 说明什么情况下这项文档任务算完成。
+      placeholder: |
+        - 文档入口可找到
+        - 命令与当前仓库一致
+        - 与更深层 AGENTS.md 不冲突
+    validations:
+      required: true
