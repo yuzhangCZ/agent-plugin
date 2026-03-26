@@ -37,6 +37,10 @@ async function main() {
     'pack check failed: release/message-bridge.plugin.js missing in tarball',
   );
   assert.ok(
+    !archiveEntries.includes('package/scripts/setup-message-bridge.mjs'),
+    'pack check failed: tarball must not include scripts/setup-message-bridge.mjs',
+  );
+  assert.ok(
     !archiveEntries.some((entry) => entry.startsWith('package/dist/')),
     'pack check failed: tarball must not include dist/',
   );

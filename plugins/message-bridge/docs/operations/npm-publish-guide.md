@@ -19,7 +19,6 @@
   - `exports["."] = ./release/message-bridge.plugin.js`
 - npm 包默认只包含：
   - `release/message-bridge.plugin.js`
-  - `scripts/setup-message-bridge.mjs`
   - `README.md`
   - `LICENSE`
 - runtime `dependencies` 为空，安装时不会额外拉取间接依赖。
@@ -178,7 +177,7 @@ npm pack --dry-run
 
 - `release/message-bridge.plugin.js` 存在。
 - 生产构建目录中不应出现 `release/message-bridge.plugin.js.map`。
-- `npm pack --dry-run` 中不出现 `src/`、`tests/`、`docs/`（仅允许 `scripts/setup-message-bridge.mjs`）。
+- `npm pack --dry-run` 中不出现 `src/`、`tests/`、`docs/`。
 - tarball 中包含 `release/message-bridge.plugin.js`。
 - tarball 中不出现 `dist/` 与任意 `.map` 文件。
 - tarball 的 `package.json` 中 `dependencies` 为空或不存在。

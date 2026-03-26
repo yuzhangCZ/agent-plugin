@@ -188,7 +188,7 @@ bridge 到 gateway 的上行消息当前包括：
 
 ## 配置
 
-交互式安装/配置 CLI：
+交互式安装/配置 CLI（仓库内维护脚本，不随 npm 包发布）：
 
 - `node ./scripts/setup-message-bridge.mjs`
 
