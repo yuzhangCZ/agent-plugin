@@ -1,34 +1,34 @@
-## Summary
+## 变更摘要
 
 <!-- 说明本次变更做了什么、为什么做 -->
 
-## Scope
+## 影响范围
 
-- Affected areas:
-- In scope:
-- Out of scope:
+- 受影响模块：
+- 本次范围（In Scope）：
+- 非本次范围（Out of Scope）：
 
-## Validation
+## 验证结果
 
 - [ ] `pnpm test`
 - [ ] `pnpm verify:workspace`
-- [ ] Other (please specify):
+- [ ] 其他（请补充）：
 
-Execution details:
+执行明细：
 
 ```text
-Paste key command outputs or concise results here.
+在此粘贴关键命令输出或简要结果。
 ```
 
-## Risk & Rollback
+## 风险与回滚
 
-- Risk level:
-- Main risks:
-- Rollback plan:
+- 风险等级：
+- 主要风险：
+- 回滚方案：
 
-## Checklist
+## 提交检查项
 
-- [ ] Base branch is correct (default `main`)
-- [ ] No unrelated files included
-- [ ] User-facing/docs impact has been evaluated
-- [ ] Conflicts with repo conventions have been resolved before merge
+- [ ] 目标分支正确（默认 `main`）
+- [ ] 未包含无关文件
+- [ ] 已评估用户可见影响与文档影响
+- [ ] 与仓库规范冲突的问题已在合并前处理
