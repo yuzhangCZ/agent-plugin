@@ -81,13 +81,13 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
   const injectBlockStreamingBreak = defaults["blockStreamingBreak"] === undefined;
   const injectBlockStreamingChunk = defaults["blockStreamingChunk"] === undefined;
   const injectBlockStreamingCoalesce = defaults["blockStreamingCoalesce"] === undefined;
-  const injectChannelBlockStreaming = messageBridge["blockStreaming"] === undefined;
+  const normalizeChannelBlockStreaming = messageBridge["blockStreaming"] !== true;
   const streamDefaultsInjected =
     injectBlockStreamingDefault ||
     injectBlockStreamingBreak ||
     injectBlockStreamingChunk ||
     injectBlockStreamingCoalesce ||
-    injectChannelBlockStreaming;
+    normalizeChannelBlockStreaming;
 
   if (!streamDefaultsInjected) {
     return {
@@ -115,7 +115,7 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
       ...channels,
       "message-bridge": {
         ...messageBridge,
-        ...(injectChannelBlockStreaming ? { blockStreaming: true } : {}),
+        ...(normalizeChannelBlockStreaming ? { blockStreaming: true } : {}),
       },
     },
   } as OpenClawConfig;

@@ -25,6 +25,12 @@ import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
 import { normalizeDownstreamMessage } from "./protocol/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
 import { resolveEffectiveReplyConfig, type StreamingSource } from "./resolveEffectiveReplyConfig.js";
+import {
+  resolveStreamingExecutionPlan,
+  type ChatExecutionPath,
+  type ChatExecutionPathReason,
+  type StreamMode,
+} from "./resolveStreamingExecutionPlan.js";
 import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
@@ -214,14 +220,7 @@ interface ToolAgentEvent {
   data?: unknown;
 }
 
-type ChatExecutionPath = "runtime_reply" | "subagent_fallback";
 type RetryAttempt = 0 | 1;
-type StreamMode = "runtime_block_streaming" | "fallback_non_streaming";
-type ChatExecutionPathReason =
-  | "runtime_reply_available"
-  | "plugin_streaming_disabled"
-  | "missing_route_resolver"
-  | "missing_reply_runtime";
 
 interface SelectedModelState {
   provider: string | null;
@@ -642,12 +641,17 @@ export class OpenClawGatewayBridge {
     } = resolveEffectiveReplyConfig(
       this.options.config,
     );
-    const pathSelection = this.resolveChatExecutionPath(streamingEnabled);
+    const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
+    const hasReplyRuntime = !!this.runtime.channel?.reply;
+    const pathSelection = this.resolveChatExecutionPath({
+      streamingEnabled,
+      hasRouteResolver,
+      hasReplyRuntime,
+    });
     const executionPath = pathSelection.executionPath;
-    const streamMode: StreamMode =
-      executionPath === "runtime_reply" ? "runtime_block_streaming" : "fallback_non_streaming";
+    const streamMode = pathSelection.streamMode;
     const effectiveStreamDefaultsInjected =
-      executionPath === "runtime_reply" ? streamDefaultsInjected : false;
+      streamMode === "runtime_block_streaming" ? streamDefaultsInjected : false;
     if (malformedConfigPaths.length > 0) {
       this.options.logger.warn("bridge.chat.config_shape_corrected", {
         toolSessionId: record.toolSessionId,
@@ -810,7 +814,7 @@ export class OpenClawGatewayBridge {
           configuredTimeoutMs,
           runTimeoutMs: configuredTimeoutMs,
           executionPath: "runtime_reply",
-          streamMode: "runtime_block_streaming",
+          streamMode,
           chatRequestId,
           retryAttempt,
           streamDefaultsInjected: effectiveStreamDefaultsInjected,
@@ -861,6 +865,11 @@ export class OpenClawGatewayBridge {
         }
 
         if (info.kind !== "block" || payloadText.length === 0) {
+          return;
+        }
+
+        if (!streamingEnabled) {
+          assistantStream.accumulatedText += payloadText;
           return;
         }
 
@@ -1558,31 +1567,16 @@ export class OpenClawGatewayBridge {
     });
   }
 
-  private resolveChatExecutionPath(streamingEnabled: boolean): {
+  private resolveChatExecutionPath(params: {
+    streamingEnabled: boolean;
+    hasRouteResolver: boolean;
+    hasReplyRuntime: boolean;
+  }): {
     executionPath: ChatExecutionPath;
+    streamMode: StreamMode;
     reason: ChatExecutionPathReason;
   } {
-    if (!streamingEnabled) {
-      return {
-        executionPath: "subagent_fallback",
-        reason: "plugin_streaming_disabled",
-      };
-    }
-
-    const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
-    const hasReplyRuntime = !!this.runtime.channel?.reply;
-
-    if (hasRouteResolver && hasReplyRuntime) {
-      return {
-        executionPath: "runtime_reply",
-        reason: "runtime_reply_available",
-      };
-    }
-
-    return {
-      executionPath: "subagent_fallback",
-      reason: hasRouteResolver ? "missing_reply_runtime" : "missing_route_resolver",
-    };
+    return resolveStreamingExecutionPlan(params);
   }
 
   private logChatPathSelected(params: {

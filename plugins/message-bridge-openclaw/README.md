@@ -197,7 +197,7 @@ The following register metadata fields are runtime-derived and not user-configur
 
 Progressive text delivery is enabled by default. Optional controls:
 
-- `channels.message-bridge.streaming = false` to force non-streaming fallback
+- `channels.message-bridge.streaming = false` to force non-streaming delivery mode
 - `agents.defaults.blockStreamingChunk` / `agents.defaults.blockStreamingCoalesce` for chunking cadence overrides
 
 ## Start OpenClaw dev gateway

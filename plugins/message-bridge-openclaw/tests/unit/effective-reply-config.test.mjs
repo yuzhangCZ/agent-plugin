@@ -48,7 +48,7 @@ test("resolveEffectiveReplyConfig preserves explicit streaming profile values wi
     channels: {
       "message-bridge": {
         streaming: true,
-        blockStreaming: false,
+        blockStreaming: true,
       },
     },
   };
@@ -61,7 +61,26 @@ test("resolveEffectiveReplyConfig preserves explicit streaming profile values wi
   assert.equal(result.effectiveConfig, input);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, false);
+  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+});
+
+test("resolveEffectiveReplyConfig ignores legacy channel blockStreaming=false and enforces plugin streaming policy", () => {
+  const input = {
+    channels: {
+      "message-bridge": {
+        streaming: true,
+        blockStreaming: false,
+      },
+    },
+  };
+
+  const result = resolveEffectiveReplyConfig(input);
+
+  assert.equal(result.streamingEnabled, true);
+  assert.equal(result.streamingSource, "explicit_on");
+  assert.equal(result.streamDefaultsInjected, true);
+  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+  assert.deepEqual(result.malformedConfigPaths, []);
 });
 
 test("resolveEffectiveReplyConfig disables plugin streaming when channels.message-bridge.streaming=false", () => {
