@@ -11,12 +11,15 @@ import {
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { attachDirectory } from './directory.js';
+import type { CreateSessionUseCase } from '../usecase/CreateSessionUseCase.js';
 
 /**
  * Concrete implementation of create_session action for creating OpenCode sessions
  */
 export class CreateSessionAction implements Action<'create_session', CreateSessionPayload, CreateSessionResultData> {
   name: 'create_session' = 'create_session';
+
+  constructor(private readonly createSessionUseCase?: CreateSessionUseCase) {}
 
   /**
    * Execute create session action
@@ -36,6 +39,27 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
           errorCode: stateToErrorCode(context.connectionState),
           errorMessage: `Agent not ready. Current state: ${context.connectionState}`
         };
+      }
+
+      if (this.createSessionUseCase) {
+        const useCaseResult = await this.createSessionUseCase.execute({
+          payload,
+          effectiveDirectory: context.effectiveDirectory,
+        });
+
+        if (useCaseResult.success) {
+          return useCaseResult;
+        }
+
+        context.logger?.error('action.create_session.failed', {
+          requestedTitle: payload.title,
+          effectiveDirectory: context.effectiveDirectory,
+          payloadKeys: Object.keys(payload ?? {}),
+          error: useCaseResult.errorMessage,
+          errorCode: useCaseResult.errorCode,
+          latencyMs: Date.now() - startedAt,
+        });
+        return useCaseResult;
       }
 
       const executionResult = await safeExecute(

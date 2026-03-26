@@ -18,6 +18,9 @@ src/
     downstream/
   runtime/
   action/
+  usecase/
+  port/
+  adapter/
   connection/
   config/
   error/
@@ -97,6 +100,47 @@ src/
 
 - 如果代码负责 SDK 调用或业务动作执行，放这里
 
+### `usecase/`
+
+业务编排层。
+
+放置内容：
+
+- create session / chat 的业务决策
+- 特殊 channel 的目录解析
+
+判断标准：
+
+- 如果代码只表达“要做什么”，并组合多个端口完成业务规则，放这里
+
+### `port/`
+
+抽象契约层。
+
+放置内容：
+
+- 目录映射查询接口
+- 通道判断接口
+- Session 网关接口
+
+判断标准：
+
+- 如果代码定义能力边界，不关心文件系统 / SDK 细节，放这里
+
+### `adapter/`
+
+基础设施适配层。
+
+放置内容：
+
+- env adapter
+- JSON 映射文件 adapter
+- SDK session adapter
+
+判断标准：
+
+- 如果代码直接接触环境变量、文件系统或 SDK，实现 Port 时，放这里
+
 ### `connection/`
 
 基础设施连接层。
@@ -157,6 +201,8 @@ protocol
 runtime
   -> action
   -> connection
+  -> usecase
+  -> adapter
 ```
 
 禁止的依赖方向：

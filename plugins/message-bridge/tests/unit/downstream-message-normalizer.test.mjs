@@ -65,6 +65,49 @@ describe('downstream message normalizer', () => {
     });
   });
 
+  test('normalizes optional assiantId for chat and create_session payloads', () => {
+    const { logger } = createLogger();
+    const chatResult = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-assiant-chat',
+        action: 'chat',
+        payload: {
+          toolSessionId: 'tool-assiant-chat',
+          text: 'hello',
+          assiantId: ' persona-a ',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(chatResult.ok, true);
+    assert.deepStrictEqual(chatResult.value.payload, {
+      toolSessionId: 'tool-assiant-chat',
+      text: 'hello',
+      assiantId: 'persona-a',
+    });
+
+    const createResult = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-assiant-create',
+        action: 'create_session',
+        payload: {
+          title: 'assiant session',
+          assiantId: ' persona-b ',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(createResult.ok, true);
+    assert.deepStrictEqual(createResult.value.payload, {
+      title: 'assiant session',
+      assiantId: 'persona-b',
+    });
+  });
+
   test('normalizes invoke/permission_reply payload', () => {
     const { logger } = createLogger();
     const result = normalizeDownstreamMessage(
@@ -154,6 +197,47 @@ describe('downstream message normalizer', () => {
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.error.code, 'invalid_field_type');
     assert.strictEqual(result.error.field, 'payload.response');
+  });
+
+  test('rejects non-string assiantId payload values', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-assiant-invalid',
+        action: 'chat',
+        payload: {
+          toolSessionId: 'tool-invalid',
+          text: 'hello',
+          assiantId: 123,
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error.code, 'invalid_field_type');
+    assert.strictEqual(result.error.field, 'payload.assiantId');
+  });
+
+  test('rejects null assiantId payload values', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-assiant-null',
+        action: 'create_session',
+        payload: {
+          title: 'nullable',
+          assiantId: null,
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error.code, 'invalid_field_type');
+    assert.strictEqual(result.error.field, 'payload.assiantId');
   });
 
   test('rejects invoke/status_query compatibility shape', () => {
