@@ -4,7 +4,6 @@ import type { ActionResult } from '../types/action-runtime.js';
 
 export interface ChatUseCaseInput {
   payload: ChatPayload;
-  effectiveDirectory?: string;
 }
 
 export class ChatUseCase {
@@ -14,9 +13,7 @@ export class ChatUseCase {
     return this.sessionGatewayPort.promptSession({
       sessionId: input.payload.toolSessionId,
       text: input.payload.text,
-      directory: input.effectiveDirectory,
       agent: input.payload.assiantId,
     });
   }
 }
-

@@ -9,8 +9,6 @@ export interface SessionGatewayPort {
   promptSession(parameters: {
     sessionId: string;
     text: string;
-    directory?: string;
     agent?: string;
   }): Promise<ActionResult<void>>;
 }
-

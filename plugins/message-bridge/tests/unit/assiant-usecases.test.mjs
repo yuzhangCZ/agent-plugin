@@ -103,7 +103,7 @@ describe('assiant use cases', () => {
     ]);
   });
 
-  test('chat use case forwards assiantId as agent and keeps effectiveDirectory', async () => {
+  test('chat use case forwards assiantId as agent without directory', async () => {
     const calls = [];
     const chatUseCase = new ChatUseCase({
       createSession: async () => ({ success: true, data: { sessionId: 'ignored', session: {} } }),
@@ -119,7 +119,6 @@ describe('assiant use cases', () => {
         text: 'hello',
         assiantId: 'persona-7',
       },
-      effectiveDirectory: '/bridge/root',
     });
 
     assert.strictEqual(result.success, true);
@@ -127,10 +126,8 @@ describe('assiant use cases', () => {
       {
         sessionId: 'tool-chat-1',
         text: 'hello',
-        directory: '/bridge/root',
         agent: 'persona-7',
       },
     ]);
   });
 });
-

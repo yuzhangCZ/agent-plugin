@@ -45,6 +45,60 @@ describe('ChatAction coverage', () => {
     });
   });
 
+  test('ignores effectiveDirectory when sending prompt', async () => {
+    const action = new ChatAction();
+    const calls = [];
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        prompt: async (options) => {
+          calls.push(options);
+          return { data: { ok: true } };
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute({ toolSessionId: 's-2', text: 'hello' }, readyContext(client, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], {
+      sessionID: 's-2',
+      parts: [{ type: 'text', text: 'hello' }],
+    });
+  });
+
+  test('forwards assiantId as agent in fallback prompt path', async () => {
+    const action = new ChatAction();
+    const calls = [];
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        prompt: async (options) => {
+          calls.push(options);
+          return { data: { ok: true } };
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute(
+      { toolSessionId: 's-3', text: 'hello agent', assiantId: 'persona-1' },
+      readyContext(client, {
+        effectiveDirectory: '/tmp/bridge-dir',
+      }),
+    );
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], {
+      sessionID: 's-3',
+      parts: [{ type: 'text', text: 'hello agent' }],
+      agent: 'persona-1',
+    });
+  });
+
   test('execute handles sdk error object', async () => {
     const action = new ChatAction();
     const client = {
@@ -184,6 +238,29 @@ describe('CloseSessionAction coverage', () => {
     assert.strictEqual(ok.data.closed, true);
     assert.deepStrictEqual(calls[0], { sessionID: 's1' });
   });
+
+  test('ignores effectiveDirectory for close_session', async () => {
+    const action = new CloseSessionAction();
+    const calls = [];
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async () => ({ data: { aborted: true } }),
+        delete: async (options) => {
+          calls.push(options);
+          return { data: { deleted: true } };
+        },
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute({ toolSessionId: 's2' }, readyContext(client, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], { sessionID: 's2' });
+  });
 });
 
 describe('PermissionReplyAction coverage', () => {
@@ -212,6 +289,36 @@ describe('PermissionReplyAction coverage', () => {
       sessionID: 's-tool',
       permissionID: 'p1',
       response: 'once',
+    });
+  });
+
+  test('ignores effectiveDirectory for permission_reply', async () => {
+    const calls = [];
+    const action = new PermissionReplyAction();
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async (opts) => {
+        calls.push(opts);
+        return { data: { ok: true } };
+      },
+    };
+
+    const result = await action.execute(
+      { permissionId: 'p2', toolSessionId: 's-tool-2', response: 'reject' },
+      readyContext(client, {
+        effectiveDirectory: '/tmp/bridge-dir',
+      }),
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], {
+      sessionID: 's-tool-2',
+      permissionID: 'p2',
+      response: 'reject',
     });
   });
 });
@@ -319,6 +426,28 @@ describe('AbortSessionAction coverage', () => {
     assert.deepStrictEqual(result.data, { sessionId: 'abort-1', aborted: true });
     assert.deepStrictEqual(calls[0], { sessionID: 'abort-1' });
   });
+
+  test('ignores effectiveDirectory for abort_session', async () => {
+    const action = new AbortSessionAction();
+    const calls = [];
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async (options) => {
+          calls.push(options);
+          return { data: { aborted: true } };
+        },
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute({ toolSessionId: 'abort-2' }, readyContext(client, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls[0], { sessionID: 'abort-2' });
+  });
 });
 
 describe('QuestionReplyAction coverage', () => {
@@ -365,6 +494,54 @@ describe('QuestionReplyAction coverage', () => {
       url: '/question/{requestID}/reply',
       path: { requestID: 'req-1' },
       body: { answers: [['ship it']] },
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  test('ignores effectiveDirectory for question list/reply requests', async () => {
+    const action = new QuestionReplyAction();
+    const getCalls = [];
+    const postCalls = [];
+    const client = {
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        prompt: async () => ({}),
+      },
+      _client: {
+        get: async (options) => {
+          getCalls.push(options);
+          return {
+            data: [
+              {
+                id: 'req-2',
+                sessionID: 'tool-10',
+                tool: { callID: 'call-2' },
+              },
+            ],
+          };
+        },
+        post: async (options) => {
+          postCalls.push(options);
+          return { data: { ok: true } };
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute(
+      { toolSessionId: 'tool-10', toolCallId: 'call-2', answer: 'done' },
+      readyContext(client, {
+        effectiveDirectory: '/tmp/bridge-dir',
+      }),
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(getCalls[0], { url: '/question' });
+    assert.deepStrictEqual(postCalls[0], {
+      url: '/question/{requestID}/reply',
+      path: { requestID: 'req-2' },
+      body: { answers: [['done']] },
       headers: { 'Content-Type': 'application/json' },
     });
   });

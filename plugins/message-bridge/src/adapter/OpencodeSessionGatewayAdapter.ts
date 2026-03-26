@@ -76,7 +76,6 @@ export class OpencodeSessionGatewayAdapter implements SessionGatewayPort {
   async promptSession(parameters: {
     sessionId: string;
     text: string;
-    directory?: string;
     agent?: string;
   }): Promise<ActionResult<void>> {
     const client = this.requireClient();
@@ -84,7 +83,6 @@ export class OpencodeSessionGatewayAdapter implements SessionGatewayPort {
       client.session.prompt({
         sessionID: parameters.sessionId,
         parts: [{ type: 'text', text: parameters.text }],
-        ...(parameters.directory ? { directory: parameters.directory } : {}),
         ...(parameters.agent ? { agent: parameters.agent } : {}),
       }),
       (error) => getErrorMessage(error),
