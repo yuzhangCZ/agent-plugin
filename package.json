@@ -2,7 +2,16 @@
   "name": "agent-plugin",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@9.15.4",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=9.15.0",
+      "onFail": "error"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "build": "pnpm run build:bridge && pnpm run build:openclaw",
     "build:bridge": "pnpm --dir plugins/message-bridge run build",
