@@ -325,6 +325,8 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 }
 ```
 
+说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。
+
 当前文本流式行为（v0.7）：
 
 - `runtime_reply` 主路径：
@@ -340,7 +342,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
   - `fallback_non_streaming`
 - `streamingEnabled`
   - `true`: 插件启用流式主路径
-  - `false`: 插件显式关闭流式，强制走非流式回退
+  - `false`: 插件显式关闭流式，强制走非流式输出模式
 - `streamingSource`
   - `default_on` / `explicit_on` / `explicit_off`
 - `streamDefaultsInjected`

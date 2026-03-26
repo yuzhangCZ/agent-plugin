@@ -23,7 +23,7 @@ test("resolveEffectiveReplyConfig injects block streaming defaults when missing"
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "text_end");
   assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingChunk, DEFAULT_BLOCK_STREAMING_CHUNK);
   assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingCoalesce, DEFAULT_BLOCK_STREAMING_COALESCE);
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+  assert.equal(Object.hasOwn(result.effectiveConfig.channels["message-bridge"], "blockStreaming"), false);
   assert.equal(input.channels["message-bridge"], undefined);
 });
 
@@ -48,7 +48,6 @@ test("resolveEffectiveReplyConfig preserves explicit streaming profile values wi
     channels: {
       "message-bridge": {
         streaming: true,
-        blockStreaming: true,
       },
     },
   };
@@ -61,26 +60,7 @@ test("resolveEffectiveReplyConfig preserves explicit streaming profile values wi
   assert.equal(result.effectiveConfig, input);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
-});
-
-test("resolveEffectiveReplyConfig ignores legacy channel blockStreaming=false and enforces plugin streaming policy", () => {
-  const input = {
-    channels: {
-      "message-bridge": {
-        streaming: true,
-        blockStreaming: false,
-      },
-    },
-  };
-
-  const result = resolveEffectiveReplyConfig(input);
-
-  assert.equal(result.streamingEnabled, true);
-  assert.equal(result.streamingSource, "explicit_on");
-  assert.equal(result.streamDefaultsInjected, true);
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
-  assert.deepEqual(result.malformedConfigPaths, []);
+  assert.equal(result.effectiveConfig.channels["message-bridge"].streaming, true);
 });
 
 test("resolveEffectiveReplyConfig disables plugin streaming when channels.message-bridge.streaming=false", () => {
@@ -124,7 +104,7 @@ test("resolveEffectiveReplyConfig only fills missing keys and keeps existing bre
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "message_end");
   assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingChunk, DEFAULT_BLOCK_STREAMING_CHUNK);
   assert.deepEqual(result.effectiveConfig.agents.defaults.blockStreamingCoalesce, DEFAULT_BLOCK_STREAMING_COALESCE);
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+  assert.equal(Object.hasOwn(result.effectiveConfig.channels["message-bridge"], "blockStreaming"), false);
 });
 
 test("resolveEffectiveReplyConfig reports malformed config paths and normalizes shape", () => {
@@ -143,7 +123,7 @@ test("resolveEffectiveReplyConfig reports malformed config paths and normalizes 
   assert.deepEqual(result.malformedConfigPaths, ["agents", "channels.message-bridge"]);
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingDefault, "on");
   assert.equal(result.effectiveConfig.agents.defaults.blockStreamingBreak, "text_end");
-  assert.equal(result.effectiveConfig.channels["message-bridge"].blockStreaming, true);
+  assert.equal(Object.hasOwn(result.effectiveConfig.channels["message-bridge"], "blockStreaming"), false);
 });
 
 test("resolveEffectiveReplyConfig treats malformed streaming value as default_on and reports path", () => {
