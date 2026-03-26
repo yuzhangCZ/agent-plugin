@@ -150,6 +150,34 @@ test("gateway.close logs reconnectPlanned=false on manual disconnect", async (t)
   t.diagnostic("manual disconnect close logging validated");
 });
 
+test("disconnect emits DISCONNECTED state change only once", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  let conn = null;
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    conn = createConnection(logs);
+    const states = [];
+    conn.on("stateChange", (state) => {
+      states.push(state);
+    });
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+    await connecting;
+    ws.emitMessage({ type: "register_ok" });
+    await Promise.resolve();
+    conn.disconnect();
+
+    assert.equal(states.filter((state) => state === "DISCONNECTED").length, 1);
+  } finally {
+    conn?.disconnect();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("gateway.close logs reconnectPlanned=true on unexpected close", async (t) => {
   const originalWebSocket = globalThis.WebSocket;
   const timers = installFakeTimeouts();

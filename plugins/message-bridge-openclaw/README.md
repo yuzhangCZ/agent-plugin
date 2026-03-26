@@ -103,6 +103,7 @@ pnpm run pack:check
 
 Successful build should produce a ready-to-install bundle directory at `bundle/`.
 `pnpm run build` and `pnpm run build:bundle` are equivalent bundle-only builds.
+`bundle/` is generated at build time and is not tracked in git.
 `pnpm run install:bundle:dev` builds the bundle and installs it into the OpenClaw `--dev` profile.
 
 ## Install into OpenClaw dev environment
@@ -161,7 +162,7 @@ Update the dev config file `~/.openclaw-dev/openclaw.json` with:
   "channels": {
     "message-bridge": {
       "enabled": true,
-      "blockStreaming": true,
+      "streaming": true,
       "gateway": {
         "url": "ws://127.0.0.1:8081/ws/agent"
       },
@@ -194,11 +195,11 @@ The following register metadata fields are runtime-derived and not user-configur
 - `toolVersion` comes from the plugin package version at runtime
 - `macAddress` comes from the first usable local network interface, or `""` when unavailable
 
-To enable progressive text delivery, also set:
+Progressive text delivery is enabled by default. Optional controls:
 
-- `agents.defaults.blockStreamingDefault = "on"`
-- `agents.defaults.blockStreamingBreak = "text_end"`
-- `channels.message-bridge.blockStreaming = true`
+- `channels.message-bridge.streaming = false` to force non-streaming delivery mode
+- `channels.message-bridge.blockStreaming` is removed and no longer supported
+- `agents.defaults.blockStreamingChunk` / `agents.defaults.blockStreamingCoalesce` for chunking cadence overrides
 
 ## Start OpenClaw dev gateway
 

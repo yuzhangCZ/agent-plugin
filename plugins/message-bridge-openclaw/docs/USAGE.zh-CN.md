@@ -162,6 +162,8 @@ pnpm run install:bundle:dev
 - `bundle/openclaw.plugin.json`
 - `bundle/README.md`
 
+注意：`bundle/` 是构建生成目录，不纳入 git 跟踪；每次发布/安装前按需执行 `pnpm run build:bundle`。
+
 说明：
 
 - `openclaw` / `openclaw/*` 被保留为 external
@@ -247,9 +249,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 {
   "agents": {
     "defaults": {
-      "model": "openai-codex/gpt-5.3-codex",
-      "blockStreamingDefault": "on",
-      "blockStreamingBreak": "text_end"
+      "model": "openai-codex/gpt-5.3-codex"
     }
   },
   "plugins": {
@@ -263,7 +263,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
   "channels": {
     "message-bridge": {
       "enabled": true,
-      "blockStreaming": true,
+      "streaming": true,
       "runTimeoutMs": 300000,
       "gateway": {
         "url": "ws://127.0.0.1:8081/ws/agent"
@@ -324,6 +324,33 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
   }
 }
 ```
+
+说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。
+
+当前文本流式行为（v0.7）：
+
+- `runtime_reply` 主路径：
+  - `deliver(kind=block)` 会实时上送（首块 `message.part.updated`，后续 `message.part.delta`）。
+  - `deliver(kind=final)` 只做缓存，结束时统一收敛，不直接作为增量上送。
+- `subagent_fallback` 回退路径：
+  - 显式非流式（`deliver:false`），只在完成时回填最终文本。
+
+新增观测字段（日志）：
+
+- `streamMode`
+  - `runtime_block_streaming`
+  - `fallback_non_streaming`
+- `streamingEnabled`
+  - `true`: 插件启用流式主路径
+  - `false`: 插件显式关闭流式，强制走非流式输出模式
+- `streamingSource`
+  - `default_on` / `explicit_on` / `explicit_off`
+- `streamDefaultsInjected`
+  - `true`: 本次请求由插件注入默认流式 profile（仅缺失字段）
+  - `false`: 使用用户显式配置或流式被关闭
+- `finalReconciled`
+  - `true`：最终文本与流式累计文本不一致，完成时采用 final 覆盖
+  - `false`：最终文本与累计文本一致（或可直接前缀补齐）
 
 ## 8. 启动
 
