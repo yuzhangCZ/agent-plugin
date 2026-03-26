@@ -4,7 +4,7 @@ import {
   DEFAULT_BLOCK_STREAMING_CHUNK,
   DEFAULT_BLOCK_STREAMING_COALESCE,
   resolveEffectiveReplyConfig,
-} from "../../dist/resolveEffectiveReplyConfig.js";
+} from "../../src/resolveEffectiveReplyConfig.ts";
 
 test("resolveEffectiveReplyConfig injects block streaming defaults when missing", () => {
   const input = {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileFinalText } from "../../dist/reconcileFinalText.js";
+import { reconcileFinalText } from "../../src/reconcileFinalText.ts";
 
 test("reconcileFinalText keeps accumulated text when final payload is empty", () => {
   const result = reconcileFinalText("hello from block", "");

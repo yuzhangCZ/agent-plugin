@@ -162,6 +162,8 @@ pnpm run install:bundle:dev
 - `bundle/openclaw.plugin.json`
 - `bundle/README.md`
 
+注意：`bundle/` 是构建生成目录，不纳入 git 跟踪；每次发布/安装前按需执行 `pnpm run build:bundle`。
+
 说明：
 
 - `openclaw` / `openclaw/*` 被保留为 external

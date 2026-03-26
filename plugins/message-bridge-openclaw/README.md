@@ -103,6 +103,7 @@ pnpm run pack:check
 
 Successful build should produce a ready-to-install bundle directory at `bundle/`.
 `pnpm run build` and `pnpm run build:bundle` are equivalent bundle-only builds.
+`bundle/` is generated at build time and is not tracked in git.
 `pnpm run install:bundle:dev` builds the bundle and installs it into the OpenClaw `--dev` profile.
 
 ## Install into OpenClaw dev environment
