@@ -136,7 +136,7 @@
 | `BRIDGE_SDK_TIMEOUT_MS` | `sdk.timeoutMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
 | `BRIDGE_CHANNEL` | 运行时特殊通道判断 | 当值为 `assiant` 时启用按 `assiantId` 解析目录的特殊逻辑 |
-| `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assiantId>": "<directory>" }`；运行期更新文件后后续请求可见 |
+| `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assiantId>": { "directory": "<path>" } }`；根 key 表示 `assiantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
 
 环境变量示例：
 

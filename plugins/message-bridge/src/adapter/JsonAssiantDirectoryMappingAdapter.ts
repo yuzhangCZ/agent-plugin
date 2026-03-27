@@ -3,8 +3,8 @@ import type { AssiantDirectoryMappingPort } from '../port/AssiantDirectoryMappin
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function normalizeString(value: unknown): string | undefined {
@@ -13,6 +13,16 @@ function normalizeString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function getEntryType(value: unknown): string {
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  if (value === null) {
+    return 'null';
+  }
+  return typeof value;
 }
 
 export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappingPort {
@@ -40,23 +50,61 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
     try {
       const content = await fs.readFile(this.filePath, 'utf8');
       const parsed = JSON.parse(content);
-      if (!isRecord(parsed)) {
+      if (!isPlainRecord(parsed)) {
         this.loggerProvider()?.warn('assiant.directory_map.invalid_shape', {
           filePath: this.filePath,
           reason: 'root_not_object',
+          rootType: getEntryType(parsed),
         });
         return new Map();
       }
 
       const mapping = new Map<string, string>();
-      for (const [assiantId, directory] of Object.entries(parsed)) {
+      for (const [assiantId, entry] of Object.entries(parsed)) {
         const normalizedAssiantId = normalizeString(assiantId);
-        const normalizedDirectory = normalizeString(directory);
-        if (!normalizedAssiantId || !normalizedDirectory) {
+        if (!normalizedAssiantId) {
           this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
             filePath: this.filePath,
             assiantId,
-            hasDirectory: typeof directory === 'string',
+            entryType: getEntryType(entry),
+            isLegacyFlatString: false,
+            hasValidAssiantId: false,
+          });
+          continue;
+        }
+
+        if (typeof entry === 'string') {
+          this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
+            filePath: this.filePath,
+            assiantId,
+            entryType: 'string',
+            isLegacyFlatString: true,
+            hasValidAssiantId: true,
+          });
+          continue;
+        }
+
+        if (!isPlainRecord(entry)) {
+          this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
+            filePath: this.filePath,
+            assiantId,
+            entryType: getEntryType(entry),
+            isLegacyFlatString: false,
+            hasValidAssiantId: true,
+          });
+          continue;
+        }
+
+        const normalizedDirectory = normalizeString(entry.directory);
+        if (!normalizedDirectory) {
+          this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
+            filePath: this.filePath,
+            assiantId,
+            entryType: 'object',
+            isLegacyFlatString: false,
+            hasValidAssiantId: true,
+            hasDirectory: 'directory' in entry,
+            directoryType: typeof entry.directory,
           });
           continue;
         }

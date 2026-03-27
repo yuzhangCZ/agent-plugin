@@ -303,7 +303,9 @@ describe('protocol directory-context integration', () => {
     await writeFile(
       mapFile,
       JSON.stringify({
-        'persona-1': '/tenant/persona-1',
+        'persona-1': {
+          directory: '/tenant/persona-1',
+        },
       }),
       'utf8',
     );
@@ -405,7 +407,9 @@ describe('protocol directory-context integration', () => {
     await writeFile(
       mapFile,
       JSON.stringify({
-        'persona-1': '/tenant/persona-1',
+        'persona-1': {
+          directory: '/tenant/persona-1',
+        },
       }),
       'utf8',
     );
@@ -607,13 +611,7 @@ describe('protocol directory-context integration', () => {
   test('assiant channel falls back to effectiveDirectory when map misses and reflects runtime map updates', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-hot-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
-    await writeFile(
-      mapFile,
-      JSON.stringify({
-        'persona-1': '/tenant/persona-1',
-      }),
-      'utf8',
-    );
+    await writeFile(mapFile, JSON.stringify({ 'persona-1': '/tenant/persona-1' }), 'utf8');
 
     const previousChannel = process.env.BRIDGE_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -622,10 +620,17 @@ describe('protocol directory-context integration', () => {
 
     try {
       const createCalls = [];
+      const logCalls = [];
       const runtime = new BridgeRuntime({
         workspacePath: '/workspace/current',
         hostDirectory: '/workspace/current',
         client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              logCalls.push(options);
+              return true;
+            },
+          },
           session: {
             create: async (options) => {
               createCalls.push(options);
@@ -654,8 +659,12 @@ describe('protocol directory-context integration', () => {
       await writeFile(
         mapFile,
         JSON.stringify({
-          'persona-1': '/tenant/persona-1',
-          'persona-2': '/tenant/persona-2',
+          'persona-1': {
+            directory: '/tenant/persona-1',
+          },
+          'persona-2': {
+            directory: '/tenant/persona-2',
+          },
         }),
         'utf8',
       );
@@ -688,6 +697,13 @@ describe('protocol directory-context integration', () => {
           },
         },
       ]);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const invalidEntryWarnings = logCalls.filter((call) => call.body?.message === 'assiant.directory_map.invalid_entry');
+      assert.strictEqual(invalidEntryWarnings.length, 1);
+      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.assiantId, 'persona-1');
+      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.entryType, 'string');
+      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.isLegacyFlatString, true);
     } finally {
       if (previousChannel === undefined) {
         delete process.env.BRIDGE_CHANNEL;
