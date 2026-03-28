@@ -13,7 +13,7 @@ export class ChatUseCase {
     return this.sessionGatewayPort.promptSession({
       sessionId: input.payload.toolSessionId,
       text: input.payload.text,
-      agent: input.payload.assiantId,
+      agent: input.payload.assistantId,
     });
   }
 }

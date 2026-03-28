@@ -1,97 +1,99 @@
-# message-bridge Architecture Overview
+# message-bridge 架构总览
 
-**Version:** 2.1  
-**Date:** 2026-03-10  
+**Version:** 2.2
+**Date:** 2026-03-28
 **Status:** Active
+**Owner:** message-bridge maintainers
+**Related:** `../product/prd.md`, `../design/interfaces/protocol-contract.md`, `../design/interfaces/config-contract.md`
 
-## 1. Goals
+## 1. 目标
 
-The current implementation is organized around four constraints:
+当前实现围绕以下四个约束组织：
 
-1. preserve external protocol behavior
-2. keep boundary contracts explicit
-3. confine raw protocol parsing to protocol boundary layers
-4. keep runtime orchestration separate from business execution
+1. 保持对外协议行为稳定
+2. 明确边界契约归属
+3. 将原始协议字段读取限制在协议边界层
+4. 将运行时编排与业务执行分离
 
-The resulting flow is:
+整体流转如下：
 
 ```text
-raw event/message
+原始事件/报文
   -> contracts
   -> protocol
   -> runtime
   -> usecase / action / transport
 ```
 
-## 2. Layers
+## 2. 分层
 
 ### 2.1 `contracts`
 
-Defines external boundary shapes:
+定义对外边界形状：
 
 - `contracts/upstream-events.ts`
 - `contracts/downstream-messages.ts`
 - `contracts/transport-messages.ts`
 
-This layer answers what the bridge exchanges with OpenCode and the gateway.
+该层回答 bridge 与 OpenCode、gateway 之间交换什么数据。
 
 ### 2.2 `protocol`
 
-Owns schema normalization and extraction.
+负责 schema 归一化与提取。
 
 - `protocol/upstream`
-  - validates supported upstream events
-  - extracts `toolSessionId`
-  - emits `event.extraction_failed` on failure
+  - 校验支持的上行事件
+  - 提取 `toolSessionId`
+  - 失败时记录 `event.extraction_failed`
 - `protocol/downstream`
-  - normalizes gateway messages into typed commands
-  - emits `downstream.normalization_failed` on failure
+  - 将 gateway 下行报文归一化为强类型命令
+  - 失败时记录 `downstream.normalization_failed`
 
-This layer is the only place allowed to read raw protocol fields.
+只有该层允许读取原始协议字段。
 
 ### 2.3 `runtime`
 
-Owns orchestration only:
+只负责编排：
 
-- lifecycle
-- config load
-- connection management
-- action routing
-- gateway send
-- assembly of use cases and adapters
+- 生命周期
+- 配置加载
+- 连接管理
+- action 路由
+- gateway 发送
+- usecase 与 adapter 装配
 
-`runtime` must not parse raw upstream or downstream payloads.
+`runtime` 不解析原始上下行 payload。
 
 ### 2.4 `usecase`
 
-Owns business rules and decision-making:
+负责业务规则与决策：
 
-- directory resolution for special channels
-- `chat` agent forwarding
-- create-session orchestration before SDK calls
+- 特殊通道下的目录解析
+- `chat` 的 agent 透传
+- SDK 调用前的 create-session 编排
 
 ### 2.5 `action`
 
-Owns execute-only business logic:
+负责仅执行型业务逻辑：
 
-- state gating
-- SDK calls
-- result mapping
-- error mapping
+- 状态门控
+- SDK 调用
+- 结果映射
+- 错误映射
 
-Actions do not normalize payloads anymore.
+`action` 不再负责 payload 归一化。
 
-## 3. Upstream Flow
+## 3. 上行流
 
 ```text
-OpenCode event
+OpenCode 事件
   -> EventFilter
   -> extractUpstreamEvent()
   -> runtime.handleEvent()
   -> gateway.send({ type: 'tool_event', toolSessionId, event })
 ```
 
-Current exact allowlist:
+当前精确白名单：
 
 - `message.updated`
 - `message.part.updated`
@@ -105,25 +107,23 @@ Current exact allowlist:
 - `permission.asked`
 - `question.asked`
 
-Runtime now additionally resolves `assiantId`-based create-session directories only when `BRIDGE_CHANNEL === 'assiant'`, then falls back to `effectiveDirectory` and finally omits the directory field.
-
-## 4. Downstream Flow
+## 4. 下行流
 
 ```text
-gateway message
+gateway 下行消息
   -> normalizeDownstreamMessage()
   -> runtime.handleDownstreamMessage()
   -> actionRouter.route()
   -> action.execute()
-  -> runtime sends transport response
+  -> runtime 发送传输层响应
 ```
 
-Supported downstream message types:
+支持的下行消息类型：
 
 - `invoke`
 - `status_query`
 
-Supported `invoke.action` values:
+支持的 `invoke.action`：
 
 - `chat`
 - `create_session`
@@ -132,9 +132,16 @@ Supported `invoke.action` values:
 - `abort_session`
 - `question_reply`
 
-## 5. Transport Behavior
+当前与目录解析相关的结论：
 
-Bridge-to-gateway transport message types:
+- 仅当 `BRIDGE_CHANNEL === 'assiant'` 且下行 payload 提供 `assistantId` 时，运行时才会按映射文件解析 `create_session` 目录
+- 若目录映射未命中，则继续回退到 `effectiveDirectory`
+- 若 `effectiveDirectory` 也不存在，则省略目录字段
+- 旧字段 `assiantId` 已废弃；当前会被视为未知字段并静默忽略，不会触发 agent 透传或目录映射
+
+## 5. 传输层行为
+
+bridge 发往 gateway 的消息类型：
 
 - `register`
 - `heartbeat`
@@ -144,13 +151,13 @@ Bridge-to-gateway transport message types:
 - `session_created`
 - `status_response`
 
-Protocol notes:
+协议说明：
 
-- `tool_event` remains `{ type: 'tool_event', toolSessionId, event }`
-- response messages no longer carry `sessionId` or `envelope`
-- `session.idle` continues to be forwarded as `tool_event`
-- `tool_done` is restored as a compat-layer completion projection for UI consumers
-- no wildcard upstream allowlist defaults
+- `tool_event` 仍保持 `{ type: 'tool_event', toolSessionId, event }`
+- 响应消息不再携带 `sessionId` 或 `envelope`
+- `session.idle` 继续作为 `tool_event` 向上游转发
+- `tool_done` 作为兼容层完成态投影保留给 UI 消费者
+- 上行白名单默认值不支持通配符
 
 ## 6. 配置与日志
 
@@ -175,13 +182,13 @@ Protocol notes:
 - `event.extraction_failed`
 - `downstream.normalization_failed`
 
-## 7. Current Conclusions
+## 7. 当前结论
 
-Current code satisfies these architectural conclusions:
+当前代码满足以下架构结论：
 
-- boundary contracts are centralized in `contracts/`
-- schema ownership is centralized in `protocol/`
-- `runtime` has been reduced to orchestration
-- `action` mainline execution no longer owns payload schema
+- 边界契约集中在 `contracts/`
+- schema 所有权集中在 `protocol/`
+- `runtime` 已收缩为编排层
+- `action` 主执行链路不再拥有 payload schema
 
-Compatibility shims remain in a few legacy entrypoints to avoid breaking existing imports, but new development should follow the `contracts -> protocol -> runtime -> action` path.
+少量兼容层仍保留在旧入口，以避免打断已有导入；新开发应遵循 `contracts -> protocol -> runtime -> action` 路径。

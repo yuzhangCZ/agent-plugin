@@ -2,7 +2,7 @@ import type { AssiantDirectoryMappingPort } from '../port/AssiantDirectoryMappin
 import type { BridgeChannelPort } from '../port/BridgeChannelPort.js';
 
 export interface ResolveCreateSessionDirectoryInput {
-  assiantId?: string;
+  assistantId?: string;
   effectiveDirectory?: string;
 }
 
@@ -18,8 +18,8 @@ export class ResolveCreateSessionDirectoryUseCase {
   ) {}
 
   async execute(input: ResolveCreateSessionDirectoryInput): Promise<ResolvedCreateSessionDirectory> {
-    if (this.bridgeChannelPort.isAssiantChannel() && input.assiantId) {
-      const mappedDirectory = await this.directoryMappingPort.resolveDirectory(input.assiantId);
+    if (this.bridgeChannelPort.isAssiantChannel() && input.assistantId) {
+      const mappedDirectory = await this.directoryMappingPort.resolveDirectory(input.assistantId);
       if (mappedDirectory) {
         return {
           directory: mappedDirectory,
@@ -40,4 +40,3 @@ export class ResolveCreateSessionDirectoryUseCase {
     };
   }
 }
-

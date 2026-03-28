@@ -1,5 +1,11 @@
 # 配置契约
 
+**Version:** 2.2
+**Date:** 2026-03-28
+**Status:** Active
+**Owner:** message-bridge maintainers
+**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`
+
 本文档以当前代码实现为准，描述 `message-bridge` 已支持的配置项、环境变量、默认值、校验规则与兼容约束。
 
 ## 1. 配置来源与优先级
@@ -135,8 +141,8 @@
 | `BRIDGE_AUTH_SK` | `auth.sk` | 支持 `${VAR_NAME}` 替换 |
 | `BRIDGE_SDK_TIMEOUT_MS` | `sdk.timeoutMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
-| `BRIDGE_CHANNEL` | 运行时特殊通道判断 | 当值为 `assiant` 时启用按 `assiantId` 解析目录的特殊逻辑 |
-| `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assiantId>": { "directory": "<path>" } }`；根 key 表示 `assiantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
+| `BRIDGE_CHANNEL` | 运行时特殊通道判断 | 当值为 `assiant` 时启用按下行协议字段 `assistantId` 解析目录的特殊逻辑 |
+| `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
 
 环境变量示例：
 
@@ -153,6 +159,12 @@ BRIDGE_EVENTS_ALLOWLIST=message.updated,session.status
 BRIDGE_CHANNEL=assiant
 BRIDGE_ASSIANT_DIRECTORY_MAP_FILE=/path/to/assiant-directory-map.json
 ```
+
+补充说明：
+
+- 环境变量名 `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` 与通道名 `assiant` 保留历史拼写
+- 下行协议公开字段已经统一为 `assistantId`
+- 旧协议字段 `assiantId` 已废弃，当前会被静默忽略，不再触发目录映射或 `agent` 透传
 
 ## 7. 兼容与废弃约束
 

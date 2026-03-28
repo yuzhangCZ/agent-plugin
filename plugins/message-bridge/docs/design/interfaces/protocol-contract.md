@@ -1,25 +1,31 @@
-# Protocol Contract
+# 协议契约
 
-## 1. Boundary Layers
+**Version:** 2.2
+**Date:** 2026-03-28
+**Status:** Active
+**Owner:** message-bridge maintainers
+**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`
 
-The current protocol contract is split into:
+## 1. 边界层
+
+当前协议契约拆分为：
 
 - `contracts/upstream-events.ts`
 - `contracts/downstream-messages.ts`
 - `contracts/transport-messages.ts`
 
-The `protocol/` layer normalizes raw messages against these contracts.
+`protocol/` 层基于这些契约对原始消息做归一化。
 
-## 2. Downstream Contract
+## 2. 下行契约
 
-Supported downstream message types:
+支持的下行消息类型：
 
 - `invoke`
 - `status_query`
 
 ### 2.1 `invoke`
 
-Shape:
+基本形状：
 
 ```ts
 {
@@ -30,12 +36,12 @@ Shape:
 }
 ```
 
-Action-specific constraint:
+action 约束：
 
-- `create_session` requires a non-empty top-level `welinkSessionId`
-- other `invoke` actions may omit `welinkSessionId`
+- `create_session` 要求顶层 `welinkSessionId` 为非空字符串
+- 其他 `invoke` action 可以省略 `welinkSessionId`
 
-Supported `action` values:
+支持的 `action`：
 
 - `chat`
 - `create_session`
@@ -44,18 +50,18 @@ Supported `action` values:
 - `abort_session`
 - `question_reply`
 
-Payloads:
+payload 形状：
 
 ```ts
 type ChatPayload = {
   toolSessionId: string;
   text: string;
-  assiantId?: string;
+  assistantId?: string;
 };
 
 type CreateSessionPayload = {
   title?: string;
-  assiantId?: string;
+  assistantId?: string;
 };
 
 type CloseSessionPayload = {
@@ -79,41 +85,42 @@ type QuestionReplyPayload = {
 };
 ```
 
-`create_session` also requires a non-empty top-level `welinkSessionId`; if it is missing, runtime returns `tool_error` and does not call the SDK create path.
+`create_session` 仍要求顶层 `welinkSessionId` 非空；若缺失，运行时会返回 `tool_error`，且不会调用 SDK 的 create 路径。
 
-Notes:
+补充说明：
 
-- `close_session` calls `session.delete()`
-- `abort_session` also calls `session.abort()`
-- `question_reply` resolves a pending question through the raw question API chain
-- `assiantId` is optional on `chat` and `create_session`
-- when `BRIDGE_CHANNEL === 'assiant'`, `create_session` may resolve a directory by `assiantId` before falling back to `effectiveDirectory`
-- `chat` forwards `assiantId` to the SDK `session.prompt(...).agent` field when present
-- `assiantId` accepts only string; `null` is treated as invalid payload
+- `close_session` 调用 `session.delete()`
+- `abort_session` 调用 `session.abort()`
+- `question_reply` 通过原始 question API 链路完成待答复问题
+- `assistantId` 在 `chat` 和 `create_session` 中均为可选字段
+- 当 `BRIDGE_CHANNEL === 'assiant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
+- `chat` 在存在 `assistantId` 时，会把它透传到 SDK 的 `session.prompt(...).agent`
+- `assistantId` 仅接受字符串；`null` 视为无效 payload
+- 旧字段 `assiantId` 已废弃；当前会被当作未知字段静默忽略，不会触发 `agent` 透传，也不会触发目录映射
 
-### 2.1.1 `create_session.payload` Decision Narrowing
+### 2.1.1 `create_session.payload` 收敛结论
 
-This repository is intentionally distinguishing between:
+仓库当前明确区分：
 
-- historical implementation residue
-- formal protocol contract
+- 历史实现残留
+- 正式协议契约
 
-Formal decision:
+正式结论：
 
-- the formal `create_session.payload` contract is `title?: string`
-- this decision is derived from the traced upstream business chain:
+- `create_session.payload` 的正式契约为 `title?: string`
+- 该结论来自已追踪的上游业务链路：
   - UI `CreateSessionParams`
   - skill-server `buildCreateSessionPayload(title)`
-  - gateway `invoke.create_session` examples
+  - gateway `invoke.create_session` 示例
 
-Implementation note:
+实现说明：
 
-- bridge types and normalization now align to `title?: string`
-- any broader residual references should be treated as historical, not current protocol
+- bridge 类型定义与归一化逻辑已经与 `title?: string` 对齐
+- 其余更宽的历史引用都应视为历史残留，而不是当前协议
 
 ### 2.2 `status_query`
 
-Standalone shape:
+独立形状：
 
 ```ts
 {
@@ -121,9 +128,9 @@ Standalone shape:
 }
 ```
 
-## 3. Upstream Event Contract
+## 3. 上行事件契约
 
-Supported upstream event types:
+支持的上行事件类型：
 
 - `message.updated`
 - `message.part.updated`
@@ -137,30 +144,30 @@ Supported upstream event types:
 - `permission.asked`
 - `question.asked`
 
-Default allowlist is the same exact list.
+默认 allowlist 与上述列表完全一致。
 
-### 3.1 Upstream Data Model
+### 3.1 上行数据模型
 
-The upstream path uses three distinct models:
+上行链路使用三层模型：
 
 - `RawUpstreamEvent`
-  - the original OpenCode event as received from the SDK
-  - raw field paths stay owned by the upstream extractor
+  - SDK 接收到的原始 OpenCode 事件
+  - 原始字段路径归 upstream extractor 所有
 - `NormalizedUpstreamEvent`
-  - the bridge-internal normalized event
-  - contains the extracted `common` / `extra` fields plus the raw event for downstream projection
+  - bridge 内部归一化后的事件
+  - 包含提取出的 `common` / `extra` 字段，以及后续投影所需的原始事件
 - `GatewayProjectedEvent`
-  - the transport-safe upstream event shape sent through `tool_event.event`
-  - owns the gateway-facing transport shape, including `message.updated` projection rules
-  - current implementation lives in `src/transport/upstream/*`
+  - 发送到 `tool_event.event` 的传输安全形状
+  - 负责 gateway 面向的传输层投影规则，包括 `message.updated` 的裁剪规则
+  - 当前实现位于 `src/transport/upstream/*`
 
-The current boundary rule is:
+当前边界规则为：
 
-- upstream extraction decides what the bridge can understand
-- transport projection decides what the gateway can send
-- runtime only orchestrates the flow between them
+- upstream extraction 决定 bridge 能理解什么
+- transport projection 决定 gateway 能发送什么
+- runtime 只负责在两者之间编排
 
-The bridge extracts `toolSessionId` from the normalized event and then emits:
+bridge 会从归一化事件中提取 `toolSessionId`，然后发出：
 
 ```ts
 {
@@ -170,18 +177,18 @@ The bridge extracts `toolSessionId` from the normalized event and then emits:
 }
 ```
 
-`message.updated` is the only current exception where bridge transport applies an upstream projector rule before send:
+`message.updated` 是当前唯一会在发送前应用上行投影规则的事件：
 
-- keep `properties.info.id/sessionID/role/time/model`
-- keep `summary.additions/deletions/files`
-- keep lightweight `summary.diffs[*].file/status/additions/deletions`
-- drop `summary.diffs[*].before/after`
+- 保留 `properties.info.id/sessionID/role/time/model`
+- 保留 `summary.additions/deletions/files`
+- 保留轻量级 `summary.diffs[*].file/status/additions/deletions`
+- 丢弃 `summary.diffs[*].before/after`
 
-The upstream extractor still returns the full raw OpenCode event. The projection only applies to the outgoing bridge-to-gateway payload.
+upstream extractor 仍返回完整原始 OpenCode 事件；裁剪仅作用于发往 gateway 的 payload。
 
-## 4. Transport Contract
+## 4. 传输层契约
 
-Bridge-to-gateway transport messages:
+bridge 发往 gateway 的传输消息：
 
 ```ts
 type UpstreamMessage =
@@ -193,7 +200,7 @@ type UpstreamMessage =
   | StatusResponseMessage;
 ```
 
-Key shapes:
+关键形状：
 
 ```ts
 type ToolErrorMessage = {
@@ -216,23 +223,23 @@ type StatusResponseMessage = {
 };
 ```
 
-Completion behavior:
+完成态行为：
 
-- `chat` success may emit a compat `tool_done`
-- `session.idle` continues to be forwarded upstream as `tool_event`
-- when no compat completion has been emitted for the same execution, `session.idle` may trigger a fallback `tool_done`
-- `create_session`, `close_session`, `abort_session`, `permission_reply`, and `question_reply` do not emit proactive `tool_done` in the current implementation
+- `chat` 成功时可能发送兼容层 `tool_done`
+- `session.idle` 继续作为 `tool_event` 向上游转发
+- 如果同一次执行尚未发送兼容完成态，`session.idle` 可能触发回退 `tool_done`
+- 当前实现中，`create_session`、`close_session`、`abort_session`、`permission_reply`、`question_reply` 不会主动发送 `tool_done`
 
-## 5. Failure Semantics
+## 5. 失败语义
 
-Protocol parsing is fail-closed.
+协议解析采用 fail-closed。
 
-Upstream normalization failure:
+上行归一化失败：
 
-- log event: `event.extraction_failed`
-- event is dropped
+- 记录日志事件：`event.extraction_failed`
+- 丢弃该事件
 
-Downstream normalization failure:
+下行归一化失败：
 
-- log event: `downstream.normalization_failed`
-- bridge returns existing `tool_error` semantics
+- 记录日志事件：`downstream.normalization_failed`
+- bridge 按现有 `tool_error` 语义返回错误

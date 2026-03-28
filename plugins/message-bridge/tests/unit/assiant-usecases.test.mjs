@@ -22,7 +22,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-a',
+      assistantId: 'tenant-a',
       effectiveDirectory: '/fallback',
     });
 
@@ -49,7 +49,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-b',
+      assistantId: 'tenant-b',
       effectiveDirectory: '/fallback',
     });
 
@@ -89,7 +89,7 @@ describe('assiant use cases', () => {
     const result = await createSessionUseCase.execute({
       payload: {
         title: 'tenant session',
-        assiantId: 'tenant-c',
+        assistantId: 'tenant-c',
       },
       effectiveDirectory: '/fallback',
     });
@@ -103,7 +103,7 @@ describe('assiant use cases', () => {
     ]);
   });
 
-  test('chat use case forwards assiantId as agent without directory', async () => {
+  test('chat use case forwards assistantId as agent without directory', async () => {
     const calls = [];
     const chatUseCase = new ChatUseCase({
       createSession: async () => ({ success: true, data: { sessionId: 'ignored', session: {} } }),
@@ -117,7 +117,7 @@ describe('assiant use cases', () => {
       payload: {
         toolSessionId: 'tool-chat-1',
         text: 'hello',
-        assiantId: 'persona-7',
+        assistantId: 'persona-7',
       },
     });
 

@@ -297,7 +297,7 @@ describe('protocol directory-context integration', () => {
     ]);
   });
 
-  test('assiant channel resolves mapped directory and forwards assiantId as agent without chat directory', async () => {
+  test('assiant channel resolves mapped directory and forwards assistantId as agent without chat directory', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
     await writeFile(
@@ -348,7 +348,7 @@ describe('protocol directory-context integration', () => {
         action: 'create_session',
         payload: {
           title: 'Assiant session',
-          assiantId: 'persona-1',
+          assistantId: 'persona-1',
         },
       });
       await runtime.handleDownstreamMessage({
@@ -358,7 +358,7 @@ describe('protocol directory-context integration', () => {
         payload: {
           toolSessionId: 'dir-assiant-1',
           text: 'hello assiant',
-          assiantId: 'persona-1',
+          assistantId: 'persona-1',
         },
       });
 
@@ -387,6 +387,104 @@ describe('protocol directory-context integration', () => {
       assert.strictEqual(sent[0].toolSessionId, 'dir-assiant-1');
       assert.strictEqual(sent[1].type, 'tool_done');
       assert.strictEqual(sent[1].toolSessionId, 'dir-assiant-1');
+    } finally {
+      if (previousChannel === undefined) {
+        delete process.env.BRIDGE_CHANNEL;
+      } else {
+        process.env.BRIDGE_CHANNEL = previousChannel;
+      }
+      if (previousMapFile === undefined) {
+        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+      } else {
+        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+      }
+    }
+  });
+
+  test('assiant channel ignores legacy assiantId and falls back to existing defaults', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-legacy-field-'));
+    const mapFile = join(workspace, 'assiant-directory-map.json');
+    await writeFile(
+      mapFile,
+      JSON.stringify({
+        'persona-1': {
+          directory: '/tenant/persona-1',
+        },
+      }),
+      'utf8',
+    );
+
+    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    process.env.BRIDGE_CHANNEL = 'assiant';
+    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+
+    try {
+      const createCalls = [];
+      const promptCalls = [];
+      const runtime = new BridgeRuntime({
+        workspacePath: '/workspace/current',
+        hostDirectory: '/workspace/current',
+        client: createRuntimeClient({
+          session: {
+            create: async (options) => {
+              createCalls.push(options);
+              return { data: { id: 'dir-assiant-legacy-1' } };
+            },
+            prompt: async (options) => {
+              promptCalls.push(options);
+              return { data: { ok: true } };
+            },
+          },
+        }),
+      });
+
+      runtime.effectiveDirectory = '/bridge/directory';
+      runtime.gatewayConnection = {
+        send: () => {},
+      };
+      runtime.stateManager.setState('READY');
+
+      await runtime.handleDownstreamMessage({
+        type: 'invoke',
+        welinkSessionId: 'wl-assiant-legacy-create',
+        action: 'create_session',
+        payload: {
+          title: 'Legacy assiant session',
+          assiantId: 'persona-1',
+        },
+      });
+      await runtime.handleDownstreamMessage({
+        type: 'invoke',
+        welinkSessionId: 'wl-assiant-legacy-chat',
+        action: 'chat',
+        payload: {
+          toolSessionId: 'dir-assiant-legacy-1',
+          text: 'hello legacy assiant',
+          assiantId: 'persona-1',
+        },
+      });
+
+      assert.deepStrictEqual(createCalls, [
+        {
+          body: {
+            title: 'Legacy assiant session',
+          },
+          query: {
+            directory: '/bridge/directory',
+          },
+        },
+      ]);
+      assert.deepStrictEqual(promptCalls, [
+        {
+          path: {
+            id: 'dir-assiant-legacy-1',
+          },
+          body: {
+            parts: [{ type: 'text', text: 'hello legacy assiant' }],
+          },
+        },
+      ]);
     } finally {
       if (previousChannel === undefined) {
         delete process.env.BRIDGE_CHANNEL;
@@ -489,7 +587,7 @@ describe('protocol directory-context integration', () => {
         action: 'create_session',
         payload: {
           title: 'Assiant chain session',
-          assiantId: 'persona-1',
+          assistantId: 'persona-1',
         },
       });
       await runtime.handleDownstreamMessage({
@@ -499,7 +597,7 @@ describe('protocol directory-context integration', () => {
         payload: {
           toolSessionId: 'dir-assiant-chain-1',
           text: 'hello assiant chain',
-          assiantId: 'persona-1',
+          assistantId: 'persona-1',
         },
       });
       await runtime.handleDownstreamMessage({
@@ -652,7 +750,7 @@ describe('protocol directory-context integration', () => {
         action: 'create_session',
         payload: {
           title: 'Assiant miss session',
-          assiantId: 'persona-2',
+          assistantId: 'persona-2',
         },
       });
 
@@ -675,7 +773,7 @@ describe('protocol directory-context integration', () => {
         action: 'create_session',
         payload: {
           title: 'Assiant hit session',
-          assiantId: 'persona-2',
+          assistantId: 'persona-2',
         },
       });
 
