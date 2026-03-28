@@ -150,6 +150,7 @@ export class BridgeRuntime {
     try {
       this.logger.info('runtime.config.loading', { workspacePath: this.workspacePath });
       config = await this.resolveConfig();
+      this.bridgeChannelPort.setChannel(config.gateway.channel);
       effectiveDebug = !!config.debug;
       this.logger = new AppLogger(
         this.rawClient,
@@ -452,6 +453,14 @@ export class BridgeRuntime {
       },
       traceId,
     );
+
+    if (!this.stateManager.isReady()) {
+      invokeLogger.warn('runtime.invoke.ignored_not_ready', {
+        state: this.stateManager.getState(),
+      });
+      return;
+    }
+
     invokeLogger.info('runtime.invoke.received');
 
     if (message.action === 'create_session') {

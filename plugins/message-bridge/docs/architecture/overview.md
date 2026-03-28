@@ -134,7 +134,7 @@ gateway 下行消息
 
 当前与目录解析相关的结论：
 
-- 仅当 `BRIDGE_CHANNEL === 'uniassistant'` 且下行 payload 提供 `assistantId` 时，运行时才会按映射文件解析 `create_session` 目录
+- 仅当最终解析后的 `gateway.channel === 'uniassistant'` 且下行 payload 提供 `assistantId` 时，运行时才会按映射文件解析 `create_session` 目录
 - 若目录映射未命中，则继续回退到 `effectiveDirectory`
 - 若 `effectiveDirectory` 也不存在，则省略目录字段
 - 旧字段 `assiantId` 已废弃；当前会被视为未知字段并静默忽略，不会触发 agent 透传或目录映射
