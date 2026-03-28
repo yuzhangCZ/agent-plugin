@@ -38,7 +38,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-a',
+      assistantId: 'tenant-a',
       effectiveDirectory: '/fallback',
       mappingConfigured: true,
     });
@@ -69,7 +69,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-b',
+      assistantId: 'tenant-b',
       effectiveDirectory: '/fallback',
       mappingConfigured: true,
     });
@@ -98,7 +98,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-unconfigured',
+      assistantId: 'tenant-unconfigured',
       effectiveDirectory: '/fallback',
       mappingConfigured: false,
     });
@@ -113,7 +113,7 @@ describe('assiant use cases', () => {
         {
           reason: 'mapping_file_unconfigured',
           channel: 'uniassistant',
-          assiantId: 'tenant-unconfigured',
+          assistantId: 'tenant-unconfigured',
           mappingConfigured: false,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
@@ -122,7 +122,7 @@ describe('assiant use cases', () => {
     );
   });
 
-  test('warns when assiantId is missing for uniassistant mapping flow', async () => {
+  test('warns when assistantId is missing for uniassistant mapping flow', async () => {
     const { calls, logger } = createLoggerRecorder();
     const useCase = new ResolveCreateSessionDirectoryUseCase(
       {
@@ -131,7 +131,7 @@ describe('assiant use cases', () => {
       },
       {
         resolveDirectory: async () => {
-          throw new Error('should not resolve when assiantId is missing');
+          throw new Error('should not resolve when assistantId is missing');
         },
       },
       logger,
@@ -152,7 +152,7 @@ describe('assiant use cases', () => {
         {
           reason: 'missing_assiant_id',
           channel: 'uniassistant',
-          assiantId: undefined,
+          assistantId: undefined,
           mappingConfigured: true,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
@@ -161,7 +161,7 @@ describe('assiant use cases', () => {
     );
   });
 
-  test('warns when assiantId exists but no valid mapped directory is resolved', async () => {
+  test('warns when assistantId exists but no valid mapped directory is resolved', async () => {
     const { calls, logger } = createLoggerRecorder();
     const useCase = new ResolveCreateSessionDirectoryUseCase(
       {
@@ -175,7 +175,7 @@ describe('assiant use cases', () => {
     );
 
     const result = await useCase.execute({
-      assiantId: 'tenant-miss',
+      assistantId: 'tenant-miss',
       effectiveDirectory: '/fallback',
       mappingConfigured: true,
     });
@@ -190,7 +190,7 @@ describe('assiant use cases', () => {
         {
           reason: 'directory_unresolved',
           channel: 'uniassistant',
-          assiantId: 'tenant-miss',
+          assistantId: 'tenant-miss',
           mappingConfigured: true,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
@@ -228,7 +228,7 @@ describe('assiant use cases', () => {
     const result = await createSessionUseCase.execute({
       payload: {
         title: 'tenant session',
-        assiantId: 'tenant-c',
+        assistantId: 'tenant-c',
       },
       effectiveDirectory: '/fallback',
     });
@@ -242,7 +242,7 @@ describe('assiant use cases', () => {
     ]);
   });
 
-  test('chat use case forwards assiantId as agent without directory', async () => {
+  test('chat use case forwards assistantId as agent without directory', async () => {
     const calls = [];
     const chatUseCase = new ChatUseCase({
       createSession: async () => ({ success: true, data: { sessionId: 'ignored', session: {} } }),
@@ -256,7 +256,7 @@ describe('assiant use cases', () => {
       payload: {
         toolSessionId: 'tool-chat-1',
         text: 'hello',
-        assiantId: 'persona-7',
+        assistantId: 'persona-7',
       },
     });
 

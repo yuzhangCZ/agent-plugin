@@ -17,7 +17,7 @@ export class CreateSessionUseCase {
 
   async execute(input: CreateSessionUseCaseInput): Promise<ActionResult<CreateSessionResultData>> {
     const resolvedDirectory = await this.resolveCreateSessionDirectoryUseCase.execute({
-      assiantId: input.payload.assiantId,
+      assistantId: input.payload.assistantId,
       effectiveDirectory: input.effectiveDirectory,
       mappingConfigured: input.mappingConfigured,
     });

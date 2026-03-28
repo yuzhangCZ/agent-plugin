@@ -50,13 +50,17 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
     if (!this.isConfigured()) {
       return new Map();
     }
+    const filePath = this.filePath;
+    if (!filePath) {
+      return new Map();
+    }
 
     try {
-      const content = await fs.readFile(this.filePath, 'utf8');
+      const content = await fs.readFile(filePath, 'utf8');
       const parsed = JSON.parse(content);
       if (!isPlainRecord(parsed)) {
         this.loggerProvider()?.warn('assiant.directory_map.invalid_shape', {
-          filePath: this.filePath,
+          filePath,
           reason: 'root_not_object',
           rootType: getEntryType(parsed),
         });
@@ -68,7 +72,7 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
         const normalizedAssiantId = normalizeString(assiantId);
         if (!normalizedAssiantId) {
           this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
-            filePath: this.filePath,
+            filePath,
             assiantId,
             entryType: getEntryType(entry),
             isLegacyFlatString: false,
@@ -79,7 +83,7 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
 
         if (typeof entry === 'string') {
           this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
-            filePath: this.filePath,
+            filePath,
             assiantId,
             entryType: 'string',
             isLegacyFlatString: true,
@@ -90,7 +94,7 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
 
         if (!isPlainRecord(entry)) {
           this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
-            filePath: this.filePath,
+            filePath,
             assiantId,
             entryType: getEntryType(entry),
             isLegacyFlatString: false,
@@ -102,7 +106,7 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
         const normalizedDirectory = normalizeString(entry.directory);
         if (!normalizedDirectory) {
           this.loggerProvider()?.warn('assiant.directory_map.invalid_entry', {
-            filePath: this.filePath,
+            filePath,
             assiantId,
             entryType: 'object',
             isLegacyFlatString: false,
@@ -116,13 +120,13 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
       }
 
       this.loggerProvider()?.info('assiant.directory_map.loaded', {
-        filePath: this.filePath,
+        filePath,
         entryCount: mapping.size,
       });
       return mapping;
     } catch (error) {
       this.loggerProvider()?.warn('assiant.directory_map.load_failed', {
-        filePath: this.filePath,
+        filePath,
         error: getErrorMessage(error),
         ...getErrorDetailsForLog(error),
       });

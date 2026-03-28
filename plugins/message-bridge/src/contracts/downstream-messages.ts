@@ -17,12 +17,12 @@ export type ActionName = typeof ACTION_NAMES[number];
 export interface ChatPayload {
   toolSessionId: string;
   text: string;
-  assiantId?: string;
+  assistantId?: string;
 }
 
 export interface CreateSessionPayload {
   title?: string;
-  assiantId?: string;
+  assistantId?: string;
 }
 
 export interface CloseSessionPayload {

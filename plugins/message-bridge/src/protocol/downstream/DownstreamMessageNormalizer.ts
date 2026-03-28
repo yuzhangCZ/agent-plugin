@@ -174,12 +174,19 @@ export function normalizeChatPayload(payload: unknown, welinkSessionId?: string)
   if (!toolSessionId.ok) return toolSessionId;
   const text = requireNonEmptyString(payload.text, 'payload', 'payload.text', 'invoke', 'chat', welinkSessionId);
   if (!text.ok) return text;
-  const assiantId = normalizeOptionalString(payload.assiantId, 'payload', 'payload.assiantId', 'invoke', 'chat', welinkSessionId);
-  if (!assiantId.ok) return assiantId;
+  const assistantId = normalizeOptionalString(
+    payload.assistantId,
+    'payload',
+    'payload.assistantId',
+    'invoke',
+    'chat',
+    welinkSessionId,
+  );
+  if (!assistantId.ok) return assistantId;
   return ok({
     toolSessionId: toolSessionId.value,
     text: text.value,
-    ...(assiantId.value ? { assiantId: assiantId.value } : {}),
+    ...(assistantId.value ? { assistantId: assistantId.value } : {}),
   });
 }
 
@@ -194,12 +201,19 @@ export function normalizeCreateSessionPayload(payload: unknown, welinkSessionId?
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title
     : undefined;
-  const assiantId = normalizeOptionalString(payload.assiantId, 'payload', 'payload.assiantId', 'invoke', 'create_session', welinkSessionId);
-  if (!assiantId.ok) return assiantId;
+  const assistantId = normalizeOptionalString(
+    payload.assistantId,
+    'payload',
+    'payload.assistantId',
+    'invoke',
+    'create_session',
+    welinkSessionId,
+  );
+  if (!assistantId.ok) return assistantId;
 
   return ok({
     ...(title ? { title } : {}),
-    ...(assiantId.value ? { assiantId: assiantId.value } : {}),
+    ...(assistantId.value ? { assistantId: assistantId.value } : {}),
   });
 }
 

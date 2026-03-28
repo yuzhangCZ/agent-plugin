@@ -3,7 +3,7 @@ import type { BridgeChannelPort } from '../port/BridgeChannelPort.js';
 import type { BridgeLogger } from '../types/logger.js';
 
 export interface ResolveCreateSessionDirectoryInput {
-  assiantId?: string;
+  assistantId?: string;
   effectiveDirectory?: string;
   mappingConfigured?: boolean;
 }
@@ -32,12 +32,12 @@ export class ResolveCreateSessionDirectoryUseCase {
         return this.resolveFallback(input);
       }
 
-      if (!input.assiantId) {
+      if (!input.assistantId) {
         this.warnUnresolved('missing_assiant_id', input);
         return this.resolveFallback(input);
       }
 
-      const mappedDirectory = await this.directoryMappingPort.resolveDirectory(input.assiantId);
+      const mappedDirectory = await this.directoryMappingPort.resolveDirectory(input.assistantId);
       if (mappedDirectory) {
         return {
           directory: mappedDirectory,
@@ -69,7 +69,7 @@ export class ResolveCreateSessionDirectoryUseCase {
     this.logger?.warn('assiant.directory_map.unresolved', {
       reason,
       channel: this.bridgeChannelPort.getChannel(),
-      assiantId: input.assiantId,
+      assistantId: input.assistantId,
       mappingConfigured: Boolean(input.mappingConfigured),
       hasEffectiveDirectory: Boolean(input.effectiveDirectory),
       fallbackSource: fallback.source,

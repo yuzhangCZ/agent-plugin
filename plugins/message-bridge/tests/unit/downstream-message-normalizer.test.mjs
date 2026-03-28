@@ -65,17 +65,17 @@ describe('downstream message normalizer', () => {
     });
   });
 
-  test('normalizes optional assiantId for chat and create_session payloads', () => {
+  test('normalizes optional assistantId for chat and create_session payloads', () => {
     const { logger } = createLogger();
     const chatResult = normalizeDownstreamMessage(
       {
         type: 'invoke',
-        welinkSessionId: 'skill-assiant-chat',
+        welinkSessionId: 'skill-assistant-chat',
         action: 'chat',
         payload: {
-          toolSessionId: 'tool-assiant-chat',
+          toolSessionId: 'tool-assistant-chat',
           text: 'hello',
-          assiantId: ' persona-a ',
+          assistantId: ' persona-a ',
         },
       },
       logger,
@@ -83,19 +83,19 @@ describe('downstream message normalizer', () => {
 
     assert.strictEqual(chatResult.ok, true);
     assert.deepStrictEqual(chatResult.value.payload, {
-      toolSessionId: 'tool-assiant-chat',
+      toolSessionId: 'tool-assistant-chat',
       text: 'hello',
-      assiantId: 'persona-a',
+      assistantId: 'persona-a',
     });
 
     const createResult = normalizeDownstreamMessage(
       {
         type: 'invoke',
-        welinkSessionId: 'skill-assiant-create',
+        welinkSessionId: 'skill-assistant-create',
         action: 'create_session',
         payload: {
-          title: 'assiant session',
-          assiantId: ' persona-b ',
+          title: 'assistant session',
+          assistantId: ' persona-b ',
         },
       },
       logger,
@@ -103,8 +103,49 @@ describe('downstream message normalizer', () => {
 
     assert.strictEqual(createResult.ok, true);
     assert.deepStrictEqual(createResult.value.payload, {
-      title: 'assiant session',
-      assiantId: 'persona-b',
+      title: 'assistant session',
+      assistantId: 'persona-b',
+    });
+  });
+
+  test('ignores legacy assiantId payload values without failing normalization', () => {
+    const { logger } = createLogger();
+    const chatResult = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-legacy-chat',
+        action: 'chat',
+        payload: {
+          toolSessionId: 'tool-legacy-chat',
+          text: 'hello',
+          assiantId: 'persona-a',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(chatResult.ok, true);
+    assert.deepStrictEqual(chatResult.value.payload, {
+      toolSessionId: 'tool-legacy-chat',
+      text: 'hello',
+    });
+
+    const createResult = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        welinkSessionId: 'skill-legacy-create',
+        action: 'create_session',
+        payload: {
+          title: 'legacy session',
+          assiantId: 'persona-b',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(createResult.ok, true);
+    assert.deepStrictEqual(createResult.value.payload, {
+      title: 'legacy session',
     });
   });
 
@@ -199,17 +240,17 @@ describe('downstream message normalizer', () => {
     assert.strictEqual(result.error.field, 'payload.response');
   });
 
-  test('rejects non-string assiantId payload values', () => {
+  test('rejects non-string assistantId payload values', () => {
     const { logger } = createLogger();
     const result = normalizeDownstreamMessage(
       {
         type: 'invoke',
-        welinkSessionId: 'skill-assiant-invalid',
+        welinkSessionId: 'skill-assistant-invalid',
         action: 'chat',
         payload: {
           toolSessionId: 'tool-invalid',
           text: 'hello',
-          assiantId: 123,
+          assistantId: 123,
         },
       },
       logger,
@@ -217,19 +258,19 @@ describe('downstream message normalizer', () => {
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.error.code, 'invalid_field_type');
-    assert.strictEqual(result.error.field, 'payload.assiantId');
+    assert.strictEqual(result.error.field, 'payload.assistantId');
   });
 
-  test('rejects null assiantId payload values', () => {
+  test('rejects null assistantId payload values', () => {
     const { logger } = createLogger();
     const result = normalizeDownstreamMessage(
       {
         type: 'invoke',
-        welinkSessionId: 'skill-assiant-null',
+        welinkSessionId: 'skill-assistant-null',
         action: 'create_session',
         payload: {
           title: 'nullable',
-          assiantId: null,
+          assistantId: null,
         },
       },
       logger,
@@ -237,7 +278,7 @@ describe('downstream message normalizer', () => {
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.error.code, 'invalid_field_type');
-    assert.strictEqual(result.error.field, 'payload.assiantId');
+    assert.strictEqual(result.error.field, 'payload.assistantId');
   });
 
   test('rejects invoke/status_query compatibility shape', () => {

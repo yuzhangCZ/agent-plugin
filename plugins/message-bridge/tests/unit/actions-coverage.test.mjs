@@ -70,7 +70,7 @@ describe('ChatAction coverage', () => {
     });
   });
 
-  test('forwards assiantId as agent in fallback prompt path', async () => {
+  test('forwards assistantId as agent in fallback prompt path', async () => {
     const action = new ChatAction();
     const calls = [];
     const client = {
@@ -86,7 +86,7 @@ describe('ChatAction coverage', () => {
     };
 
     const result = await action.execute(
-      { toolSessionId: 's-3', text: 'hello agent', assiantId: 'persona-1' },
+      { toolSessionId: 's-3', text: 'hello agent', assistantId: 'persona-1' },
       readyContext(client, {
         effectiveDirectory: '/tmp/bridge-dir',
       }),

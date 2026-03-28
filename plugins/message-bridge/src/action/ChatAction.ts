@@ -119,7 +119,7 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
         };
       }
 
-      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, payload.assiantId);
+      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, payload.assistantId);
 
       if (executionResult.success) {
         return {
