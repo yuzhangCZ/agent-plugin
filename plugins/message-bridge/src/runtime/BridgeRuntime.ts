@@ -115,6 +115,7 @@ export class BridgeRuntime {
     this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
       this.bridgeChannelPort,
       this.assiantDirectoryMappingPort,
+      this.logger,
     );
     this.createSessionUseCase = new CreateSessionUseCase(
       this.resolveCreateSessionDirectoryUseCase,
@@ -570,6 +571,7 @@ export class BridgeRuntime {
       agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
       welinkSessionId,
       effectiveDirectory: this.effectiveDirectory,
+      assiantDirectoryMappingConfigured: this.assiantDirectoryMappingPort.isConfigured(),
       logger: logger.child({
         component: 'action',
         agentId: this.stateManager.getAgentId() ?? 'unknown-agent',

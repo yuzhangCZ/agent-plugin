@@ -33,6 +33,15 @@ async function withTempMapFile(content, run) {
 }
 
 describe('JsonAssiantDirectoryMappingAdapter', () => {
+  test('reports whether a mapping file is configured', async () => {
+    const { logger } = createLoggerRecorder();
+    const configuredAdapter = new JsonAssiantDirectoryMappingAdapter('/tmp/assiant-directory-map.json', () => logger);
+    const unconfiguredAdapter = new JsonAssiantDirectoryMappingAdapter(undefined, () => logger);
+
+    assert.strictEqual(configuredAdapter.isConfigured(), true);
+    assert.strictEqual(unconfiguredAdapter.isConfigured(), false);
+  });
+
   test('resolves nested directory mapping', async () => {
     await withTempMapFile(
       JSON.stringify({

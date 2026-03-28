@@ -45,6 +45,7 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         const useCaseResult = await this.createSessionUseCase.execute({
           payload,
           effectiveDirectory: context.effectiveDirectory,
+          mappingConfigured: context.assiantDirectoryMappingConfigured,
         });
 
         if (useCaseResult.success) {
