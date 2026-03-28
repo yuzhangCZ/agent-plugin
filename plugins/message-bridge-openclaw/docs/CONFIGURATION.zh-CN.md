@@ -23,6 +23,8 @@
 
 - `GatewayUrl` / `gatewayUrl`（非标准别名，忽略）
 - 注册元数据字段：`toolType`、`toolVersion`、`deviceName`、`macAddress`
+- 运行时默认 `toolType` 为 `openx`
+- 已知 `toolType` 列表为 `["openx"]`；注入未知值时只记录 `runtime.register.tool_type.unknown` 警告日志，不阻断启动
 
 ## 2. 可以在什么地方配置
 

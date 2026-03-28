@@ -242,7 +242,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 | `enabled` | `true` |
 | `config_version` | `1` |
 | `gateway.url` | `ws://localhost:8081/ws/agent` |
-| `gateway.channel` | `opencode` |
+| `gateway.channel` | `openx` |
 | `gateway.heartbeatIntervalMs` | `30000` |
 | `gateway.reconnect.baseMs` | `1000` |
 | `gateway.reconnect.maxMs` | `30000` |
@@ -253,6 +253,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 | `events.allowlist` | `DEFAULT_EVENT_ALLOWLIST` |
 
 `gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `toolType` 字段。
+当前内置已知值集合为 `openx`、`uniassistant`、`codeagent`；如果配置了其他值，运行时会记录 `config.gateway.channel.unknown` 警告日志，但不会阻断连接。
 
 ## 日志
 

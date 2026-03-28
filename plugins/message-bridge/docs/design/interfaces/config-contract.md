@@ -30,7 +30,7 @@
 | `enabled` | `true` | 是否启用 bridge |
 | `config_version` | `1` | 配置版本 |
 | `gateway.url` | `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
-| `gateway.channel` | `opencode` | 配置侧字段名；注册报文中映射到 `toolType` |
+| `gateway.channel` | `openx` | 配置侧字段名；注册报文中映射到 `toolType` |
 | `gateway.heartbeatIntervalMs` | `30000` | 心跳间隔，单位毫秒 |
 | `gateway.reconnect.baseMs` | `1000` | 重连基础退避，单位毫秒 |
 | `gateway.reconnect.maxMs` | `30000` | 重连最大退避，单位毫秒 |
@@ -70,7 +70,7 @@
   "config_version": 1,
   "gateway": {
     "url": "ws://localhost:8081/ws/agent",
-    "channel": "opencode",
+    "channel": "openx",
     "heartbeatIntervalMs": 30000,
     "reconnect": {
       "baseMs": 1000,
@@ -105,7 +105,7 @@
 | `debug` | `boolean` | 否 | `false` | 调试日志开关；开启后额外以 `info` 级输出可读的原始 WebSocket 上下行报文 |
 | `config_version` | `number` | 否 | `1` | 当前只支持 `1` |
 | `gateway.url` | `string` | 否 | `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
-| `gateway.channel` | `string` | 否 | `opencode` | 注册消息中的 `toolType` 来源 |
+| `gateway.channel` | `string` | 否 | `openx` | 注册消息中的 `toolType` 来源；内置已知值为 `openx`、`uniassistant`、`codeagent` |
 | `gateway.heartbeatIntervalMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.baseMs` | `number` | 否 | `1000` | 正整数 |
 | `gateway.reconnect.maxMs` | `number` | 否 | `30000` | 正整数 |
@@ -145,7 +145,7 @@ BRIDGE_ENABLED=true
 BRIDGE_AUTH_AK=your-access-key
 BRIDGE_AUTH_SK=your-secret-key
 BRIDGE_GATEWAY_URL=ws://gateway.example.com/ws/agent
-BRIDGE_GATEWAY_CHANNEL=opencode
+BRIDGE_GATEWAY_CHANNEL=openx
 BRIDGE_GATEWAY_RECONNECT_BASE_MS=1000
 BRIDGE_GATEWAY_RECONNECT_MAX_MS=30000
 BRIDGE_SDK_TIMEOUT_MS=10000

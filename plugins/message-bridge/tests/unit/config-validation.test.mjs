@@ -19,7 +19,7 @@ const createValidConfig = (overrides = {}) => ({
   enabled: true,
   gateway: {
     url: 'ws://localhost:8081/ws/agent',
-    channel: 'opencode',
+    channel: 'openx',
     heartbeatIntervalMs: 30000,
     reconnect: {
       baseMs: 1000,
@@ -495,7 +495,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('normalizes default channel to opencode', async () => {
+  test('normalizes default channel to openx', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-defaults-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     process.env.HOME = fakeHome;
@@ -512,7 +512,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
             maxMs: 30000,
             exponential: true,
           },
-          channel: 'opencode',
+          channel: 'openx',
         },
       })),
       'utf8',
@@ -520,7 +520,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
 
     try {
       const config = await loadConfig(workspace);
-      assert.strictEqual(config.gateway.channel, 'opencode');
+      assert.strictEqual(config.gateway.channel, 'openx');
     } finally {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
@@ -756,7 +756,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
 
     try {
       const config = await loadConfig(workspace);
-      assert.strictEqual(config.gateway.channel, 'opencode');
+      assert.strictEqual(config.gateway.channel, 'openx');
     } finally {
       if (originalToolType === undefined) {
         delete process.env.BRIDGE_GATEWAY_TOOL_TYPE;
@@ -806,6 +806,55 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         delete process.env.BRIDGE_GATEWAY_TOOL_VERSION;
       } else {
         process.env.BRIDGE_GATEWAY_TOOL_VERSION = originalToolVersion;
+      }
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('logs warning when gateway.channel is unknown but keeps value', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-unknown-channel-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const originalChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'legacy-tool-type';
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(createValidConfig()),
+      'utf8',
+    );
+
+    const calls = [];
+    const logger = new AppLogger(
+      {
+        app: {
+          log: async (options) => {
+            calls.push(options);
+          },
+        },
+      },
+      { component: 'test' },
+      undefined,
+      undefined,
+      true,
+    );
+
+    try {
+      const config = await loadConfig(workspace, logger);
+      assert.strictEqual(config.gateway.channel, 'legacy-tool-type');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const warnLog = calls.find((entry) => entry.body.message === 'config.gateway.channel.unknown');
+      assert.ok(warnLog);
+      assert.strictEqual(warnLog.body.extra.toolType, 'legacy-tool-type');
+      assert.deepStrictEqual(warnLog.body.extra.knownToolTypes, ['openx', 'uniassistant', 'codeagent']);
+      assert.strictEqual(warnLog.body.extra.source, 'env');
+    } finally {
+      if (originalChannel === undefined) {
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
+      } else {
+        process.env.BRIDGE_GATEWAY_CHANNEL = originalChannel;
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });

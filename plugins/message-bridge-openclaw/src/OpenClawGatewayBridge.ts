@@ -31,7 +31,7 @@ import {
   type ChatExecutionPathReason,
   type StreamMode,
 } from "./resolveStreamingExecutionPlan.js";
-import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
+import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 
@@ -364,6 +364,7 @@ export class OpenClawGatewayBridge {
   constructor(private readonly options: OpenClawGatewayBridgeOptions) {
     this.runtime = options.runtime;
     this.registerMetadata = options.registerMetadata ?? resolveRegisterMetadata(options.logger);
+    warnUnknownToolType(options.logger, this.registerMetadata.toolType, options.account.accountId);
     this.sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
     this.connection =
       options.connectionFactory?.(options.account, options.logger) ??

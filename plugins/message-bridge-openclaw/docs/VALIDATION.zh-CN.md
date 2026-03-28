@@ -181,7 +181,7 @@ openclaw --dev gateway run --allow-unconfigured --verbose
 预期结果：
 
 - 出现 agent 注册成功日志
-- 日志中能看到 `toolType=openclaw`
+- 日志中能看到 `toolType=openx`
 - 能持续看到 heartbeat
 
 #### 步骤 3：验证 `status_query`

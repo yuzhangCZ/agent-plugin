@@ -37,6 +37,7 @@ import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from '.
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
+import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
 import {
   DefaultUpstreamTransportProjector,
@@ -189,6 +190,9 @@ export class BridgeRuntime {
     const agentId = this.stateManager.generateAndBindAgentId();
     this.eventFilter = new EventFilter(config.events.allowlist);
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
+    warnUnknownToolType(this.logger, 'runtime.register.tool_type.unknown', config.gateway.channel, {
+      workspacePath: this.workspacePath,
+    });
 
     const auth = new DefaultAkSkAuth(config.auth.ak, config.auth.sk);
     const authPayloadProvider = () => auth.generateAuthPayload();

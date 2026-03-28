@@ -23,7 +23,7 @@ import type {
   MessageBridgeResolvedAccount,
   MessageBridgeStatusSnapshot,
 } from "./types.js";
-import { resolveRegisterMetadata, type RegisterMetadata } from "./runtime/RegisterMetadata.js";
+import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
 import {
   beginProbeConnect,
   finishProbeConnect,
@@ -138,6 +138,7 @@ function isRuntimeHealthy(
 
 function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayConnection {
   const registerMetadata = resolveRegisterMetadata(logger);
+  warnUnknownToolType(logger, registerMetadata.toolType, account.accountId);
   return new DefaultGatewayConnection({
     url: account.gateway.url,
     reconnectBaseMs: account.gateway.reconnect.baseMs,

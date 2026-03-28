@@ -190,10 +190,13 @@ Interactive `setup` / `onboarding` only writes:
 
 The following register metadata fields are runtime-derived and not user-configurable:
 
-- `toolType` is fixed to `openclaw`
+- `toolType` defaults to `openx`
 - `deviceName` comes from `os.hostname()`
 - `toolVersion` comes from the plugin package version at runtime
 - `macAddress` comes from the first usable local network interface, or `""` when unavailable
+
+Known `toolType` values in this plugin: `openx`.  
+When a non-`openx` value is injected, runtime logs `runtime.register.tool_type.unknown` and continues.
 
 Progressive text delivery is enabled by default. Optional controls:
 
@@ -272,7 +275,7 @@ Check the gateway log:
 Expected result:
 
 - registration for `test-ak-openclaw-001`
-- `toolType=openclaw`
+- `toolType=openx`
 - periodic heartbeat logs
 
 ## Verify control path
