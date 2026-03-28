@@ -26,6 +26,7 @@
 - 同一目录下若 `.jsonc` 与 `.json` 同时存在，优先读取 `.jsonc`
 - 项目级配置会从 `workspacePath` 或 `process.cwd()` 开始，沿父目录向上查找，直到文件系统根目录
 - 配置文件支持 JSONC，包括注释与尾逗号
+- `auth.ak` / `auth.sk` 在环境变量层采用成对（原子）解析策略，且会受 `BRIDGE_GATEWAY_CHANNEL` 是否显式设置影响（见第 6.1 节）
 
 ## 2. 默认值
 
@@ -137,11 +138,21 @@
 | `BRIDGE_GATEWAY_HEARTBEAT_INTERVAL_MS` | `gateway.heartbeatIntervalMs` | 优先于兼容别名 |
 | `BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS` | `gateway.heartbeatIntervalMs` | 兼容别名；仅在前者不存在时生效 |
 | `BRIDGE_GATEWAY_PING_INTERVAL_MS` | `gateway.ping.intervalMs` | 当前仅配置层存在，未见运行时消费 |
-| `BRIDGE_AUTH_AK` | `auth.ak` | 支持 `${VAR_NAME}` 替换 |
-| `BRIDGE_AUTH_SK` | `auth.sk` | 支持 `${VAR_NAME}` 替换 |
+| `BRIDGE_AUTH_AK` | `auth.ak` | 支持 `${VAR_NAME}` 替换；是否生效受第 6.1 节规则约束 |
+| `BRIDGE_AUTH_SK` | `auth.sk` | 支持 `${VAR_NAME}` 替换；是否生效受第 6.1 节规则约束 |
 | `BRIDGE_SDK_TIMEOUT_MS` | `sdk.timeoutMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
 | `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
+
+### 6.1 `auth.ak` / `auth.sk` 解析规则（与 `BRIDGE_GATEWAY_CHANNEL` 关联）
+
+`auth.ak` 与 `auth.sk` 按“成对凭证”处理，不支持半覆盖混用来源。
+
+| 条件 | `auth.ak/sk` 来源策略 | 结果 |
+|---|---|---|
+| `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空） | 仅读取 `BRIDGE_AUTH_AK` + `BRIDGE_AUTH_SK` | 任一缺失会注入空串，随后按现有校验失败（`MISSING_REQUIRED`） |
+| `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白，且环境变量同时提供 `AK+SK` | 使用环境变量整体覆盖本地配置 | 最终取环境变量成对值 |
+| `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白，且环境变量未同时提供 `AK+SK` | 不注入环境变量凭证 | 完整回退到本地配置中的 `auth.ak/sk`（成对回退） |
 
 环境变量示例：
 

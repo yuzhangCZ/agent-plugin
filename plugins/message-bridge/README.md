@@ -242,6 +242,11 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 3. 用户级配置：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
 4. 内置默认值
 
+`auth.ak` / `auth.sk` 额外规则：
+
+1. 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`auth.ak/sk` 仅从 `BRIDGE_AUTH_AK/SK` 读取（不再回退本地配置）。
+2. 当 `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白时，只有同时提供 `BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 才会覆盖本地；否则完整回退本地 `auth.ak/sk`（不做半覆盖）。
+
 默认值定义见：
 
 - [default-config.ts](./src/config/default-config.ts)

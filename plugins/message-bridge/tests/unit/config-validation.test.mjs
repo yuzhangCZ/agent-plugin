@@ -679,8 +679,12 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-channel-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+    const originalAuthSk = process.env.BRIDGE_AUTH_SK;
     process.env.HOME = fakeHome;
     process.env.BRIDGE_GATEWAY_CHANNEL = '  miniapp  ';
+    process.env.BRIDGE_AUTH_AK = 'env-ak';
+    process.env.BRIDGE_AUTH_SK = 'env-sk';
 
     await mkdir(join(workspace, '.opencode'), { recursive: true });
     await writeFile(
@@ -697,6 +701,16 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
         process.env.BRIDGE_GATEWAY_CHANNEL = originalChannel;
+      }
+      if (originalAuthAk === undefined) {
+        delete process.env.BRIDGE_AUTH_AK;
+      } else {
+        process.env.BRIDGE_AUTH_AK = originalAuthAk;
+      }
+      if (originalAuthSk === undefined) {
+        delete process.env.BRIDGE_AUTH_SK;
+      } else {
+        process.env.BRIDGE_AUTH_SK = originalAuthSk;
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
@@ -818,6 +832,456 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }
+  });
+
+  describe('auth credential source policy by BRIDGE_GATEWAY_CHANNEL', () => {
+    test('requires env auth when BRIDGE_GATEWAY_CHANNEL is set and does not fallback to local auth', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-channel-strict-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
+      delete process.env.BRIDGE_CHANNEL;
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        await assert.rejects(
+          loadConfig(workspace),
+          (err) =>
+            err instanceof ConfigValidationAggregateError &&
+            err.errors.some((e) => e.path === 'auth.ak' && e.code === 'MISSING_REQUIRED') &&
+            err.errors.some((e) => e.path === 'auth.sk' && e.code === 'MISSING_REQUIRED'),
+        );
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('uses env auth when BRIDGE_GATEWAY_CHANNEL is set even if local auth exists', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-channel-priority-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      process.env.BRIDGE_GATEWAY_CHANNEL = 'codeagent';
+      delete process.env.BRIDGE_CHANNEL;
+      process.env.BRIDGE_AUTH_AK = 'env-ak';
+      process.env.BRIDGE_AUTH_SK = 'env-sk';
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'env-ak');
+        assert.strictEqual(config.auth.sk, 'env-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('requires env auth when BRIDGE_GATEWAY_CHANNEL is set to openx explicitly', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-channel-openx-strict-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      process.env.BRIDGE_GATEWAY_CHANNEL = 'openx';
+      delete process.env.BRIDGE_CHANNEL;
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        await assert.rejects(
+          loadConfig(workspace),
+          (err) =>
+            err instanceof ConfigValidationAggregateError &&
+            err.errors.some((e) => e.path === 'auth.ak' && e.code === 'MISSING_REQUIRED') &&
+            err.errors.some((e) => e.path === 'auth.sk' && e.code === 'MISSING_REQUIRED'),
+        );
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('uses env auth when BRIDGE_GATEWAY_CHANNEL is unset and env has both AK/SK', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-unset-both-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      delete process.env.BRIDGE_GATEWAY_CHANNEL;
+      delete process.env.BRIDGE_CHANNEL;
+      process.env.BRIDGE_AUTH_AK = 'env-both-ak';
+      process.env.BRIDGE_AUTH_SK = 'env-both-sk';
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'env-both-ak');
+        assert.strictEqual(config.auth.sk, 'env-both-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('falls back to local auth when BRIDGE_GATEWAY_CHANNEL is unset and env auth is missing', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-unset-fallback-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      delete process.env.BRIDGE_GATEWAY_CHANNEL;
+      delete process.env.BRIDGE_CHANNEL;
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-fallback-ak',
+            sk: 'local-fallback-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'local-fallback-ak');
+        assert.strictEqual(config.auth.sk, 'local-fallback-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('falls back to local auth atomically when BRIDGE_GATEWAY_CHANNEL is unset and env has only one field', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-unset-atomic-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      delete process.env.BRIDGE_GATEWAY_CHANNEL;
+      delete process.env.BRIDGE_CHANNEL;
+      process.env.BRIDGE_AUTH_AK = 'env-only-ak';
+      delete process.env.BRIDGE_AUTH_SK;
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-atomic-ak',
+            sk: 'local-atomic-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'local-atomic-ak');
+        assert.strictEqual(config.auth.sk, 'local-atomic-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('treats blank BRIDGE_GATEWAY_CHANNEL as unset for auth source policy', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-blank-gateway-channel-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      process.env.BRIDGE_GATEWAY_CHANNEL = '   ';
+      delete process.env.BRIDGE_CHANNEL;
+      process.env.BRIDGE_AUTH_AK = 'env-blank-ak';
+      process.env.BRIDGE_AUTH_SK = 'env-blank-sk';
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'env-blank-ak');
+        assert.strictEqual(config.auth.sk, 'env-blank-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    test('ignores BRIDGE_CHANNEL for auth policy when BRIDGE_GATEWAY_CHANNEL is unset', async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-auth-ignore-legacy-channel-'));
+      const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+      const originalGatewayChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+      const originalBridgeChannel = process.env.BRIDGE_CHANNEL;
+      const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+      const originalAuthSk = process.env.BRIDGE_AUTH_SK;
+      process.env.HOME = fakeHome;
+      delete process.env.BRIDGE_GATEWAY_CHANNEL;
+      process.env.BRIDGE_CHANNEL = 'uniassistant';
+      process.env.BRIDGE_AUTH_AK = 'env-only-ak';
+      delete process.env.BRIDGE_AUTH_SK;
+
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.json'),
+        JSON.stringify(createValidConfig({
+          auth: {
+            ak: 'local-ak',
+            sk: 'local-sk',
+          },
+        })),
+        'utf8',
+      );
+
+      try {
+        const config = await loadConfig(workspace);
+        assert.strictEqual(config.auth.ak, 'local-ak');
+        assert.strictEqual(config.auth.sk, 'local-sk');
+      } finally {
+        if (originalGatewayChannel === undefined) {
+          delete process.env.BRIDGE_GATEWAY_CHANNEL;
+        } else {
+          process.env.BRIDGE_GATEWAY_CHANNEL = originalGatewayChannel;
+        }
+        if (originalBridgeChannel === undefined) {
+          delete process.env.BRIDGE_CHANNEL;
+        } else {
+          process.env.BRIDGE_CHANNEL = originalBridgeChannel;
+        }
+        if (originalAuthAk === undefined) {
+          delete process.env.BRIDGE_AUTH_AK;
+        } else {
+          process.env.BRIDGE_AUTH_AK = originalAuthAk;
+        }
+        if (originalAuthSk === undefined) {
+          delete process.env.BRIDGE_AUTH_SK;
+        } else {
+          process.env.BRIDGE_AUTH_SK = originalAuthSk;
+        }
+        await rm(workspace, { recursive: true, force: true });
+        await rm(fakeHome, { recursive: true, force: true });
+      }
+    });
   });
 
   test('ignores BRIDGE_AK and BRIDGE_SK aliases', async () => {
@@ -996,8 +1460,12 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-unknown-channel-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+    const originalAuthSk = process.env.BRIDGE_AUTH_SK;
     process.env.HOME = fakeHome;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'legacy-tool-type';
+    process.env.BRIDGE_AUTH_AK = 'env-ak';
+    process.env.BRIDGE_AUTH_SK = 'env-sk';
 
     await mkdir(join(workspace, '.opencode'), { recursive: true });
     await writeFile(
@@ -1035,6 +1503,16 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
         process.env.BRIDGE_GATEWAY_CHANNEL = originalChannel;
+      }
+      if (originalAuthAk === undefined) {
+        delete process.env.BRIDGE_AUTH_AK;
+      } else {
+        process.env.BRIDGE_AUTH_AK = originalAuthAk;
+      }
+      if (originalAuthSk === undefined) {
+        delete process.env.BRIDGE_AUTH_SK;
+      } else {
+        process.env.BRIDGE_AUTH_SK = originalAuthSk;
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
