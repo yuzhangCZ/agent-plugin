@@ -60,7 +60,7 @@ function createConnection(logs, options = {}) {
       deviceName: "dev",
       macAddress: "",
       os: "darwin",
-      toolType: "openclaw",
+      toolType: "openx",
       toolVersion: "1.0.0",
     },
     logger: {

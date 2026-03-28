@@ -25,6 +25,8 @@ Not supported as user config:
 
 - `GatewayUrl` / `gatewayUrl` (non-standard aliases, ignored)
 - register metadata fields like `toolType`, `toolVersion`, `deviceName`, `macAddress`
+- runtime default `toolType` is `openx`
+- known `toolType` list is `["openx"]`; unknown values only emit `runtime.register.tool_type.unknown` warning and do not block startup
 
 ## Where to configure
 

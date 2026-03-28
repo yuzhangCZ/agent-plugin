@@ -4,6 +4,7 @@ import { promises } from 'fs';
 import type { BridgeConfig } from '../types/index.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import { DEFAULT_EVENT_ALLOWLIST } from '../contracts/upstream-events.js';
+import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
@@ -22,6 +23,7 @@ export class ConfigResolver {
   async resolveConfig(workspacePath?: string): Promise<BridgeConfig> {
     let config: Partial<BridgeConfig> = this.mergeConfig({}, DEFAULT_BRIDGE_CONFIG);
     const sources: string[] = ['default'];
+    let channelSource: 'default' | 'user' | 'project' | 'env' = 'default';
     const workspaceRoot = workspacePath ?? process.cwd();
     this.logger?.info('config.resolve.started', { workspacePath: workspaceRoot });
 
@@ -34,6 +36,9 @@ export class ConfigResolver {
       if (userConfig) {
         config = this.mergeConfig(config, userConfig);
         sources.push(`user:${userConfigPath}`);
+        if (this.hasConfiguredGatewayChannel(userConfig)) {
+          channelSource = 'user';
+        }
         this.logger?.info('config.source.loaded', {
           source: 'user',
           path: userConfigPath,
@@ -47,6 +52,9 @@ export class ConfigResolver {
       if (projectConfig) {
         config = this.mergeConfig(config, projectConfig);
         sources.push(`project:${projectConfigPath}`);
+        if (this.hasConfiguredGatewayChannel(projectConfig)) {
+          channelSource = 'project';
+        }
         this.logger?.info('config.source.loaded', {
           source: 'project',
           path: projectConfigPath,
@@ -58,6 +66,9 @@ export class ConfigResolver {
     if (Object.keys(envConfig).length > 0) {
       config = this.mergeConfig(config, envConfig);
       sources.push('env');
+      if (this.hasConfiguredGatewayChannel(envConfig)) {
+        channelSource = 'env';
+      }
       this.logger?.info('config.source.loaded', {
         source: 'env',
         overrideCount: Object.keys(envConfig).length,
@@ -65,6 +76,9 @@ export class ConfigResolver {
     }
 
     const normalized = this.normalizeConfig(config as BridgeConfig);
+    warnUnknownToolType(this.logger, 'config.gateway.channel.unknown', normalized.gateway.channel, {
+      source: channelSource,
+    });
     this.logger?.info('config.resolve.completed', {
       workspacePath: workspaceRoot,
       sources,
@@ -203,6 +217,11 @@ export class ConfigResolver {
     return envConfig;
   }
 
+  private hasConfiguredGatewayChannel(config: Partial<BridgeConfig> | undefined | null): boolean {
+    const channel = config?.gateway?.channel;
+    return typeof channel === 'string' && channel.trim().length > 0;
+  }
+
   private substituteEnvVars(value: string): string {
     return value.replace(/\$\{([^}]+)\}/g, (match, varName) => process.env[varName] || match);
   }
@@ -226,7 +245,7 @@ export class ConfigResolver {
     }
 
     if (!normalized.gateway.channel) {
-      normalized.gateway.channel = 'opencode';
+      normalized.gateway.channel = 'openx';
     } else {
       normalized.gateway.channel = normalized.gateway.channel.trim();
     }

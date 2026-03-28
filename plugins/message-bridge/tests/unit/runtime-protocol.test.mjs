@@ -54,7 +54,7 @@ function createResolvedConfig(overrides = {}) {
     debug: false,
     gateway: {
       url: 'ws://localhost:8081/ws/agent',
-      channel: 'opencode',
+      channel: 'openx',
       heartbeatIntervalMs: 30000,
       reconnect: {
         baseMs: 1000,
@@ -96,7 +96,7 @@ async function writeEnabledConfig(workspace) {
       enabled: true,
       gateway: {
         url: 'ws://localhost:8081/ws/agent',
-        channel: 'opencode',
+        channel: 'openx',
         heartbeatIntervalMs: 30000,
         reconnect: {
           baseMs: 1000,
@@ -1004,7 +1004,7 @@ describe('runtime protocol strictness', () => {
           url: 'ws://localhost:8081/ws/agent',
           deviceName: 'dev',
           macAddress: '11:22:33:44:55:66',
-          channel: 'opencode',
+          channel: 'openx',
           toolVersion: '1.2.3',
           heartbeatIntervalMs: 30000,
           reconnect: {
@@ -1081,7 +1081,7 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(ws.sent[0].deviceName, hostname());
       assert.strictEqual(ws.sent[0].macAddress, '11:22:33:44:55:66');
       assert.strictEqual(typeof ws.sent[0].os, 'string');
-      assert.strictEqual(ws.sent[0].toolType, 'opencode');
+      assert.strictEqual(ws.sent[0].toolType, 'openx');
       assert.strictEqual(ws.sent[0].toolVersion, '9.9.9');
 
       runtime.stop();
@@ -1090,6 +1090,45 @@ describe('runtime protocol strictness', () => {
       globalThis.WebSocket = originalWebSocket;
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start logs unknown toolType before register and keeps register payload', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+    const logs = [];
+
+    const resolvedConfig = createResolvedConfig();
+    resolvedConfig.gateway.channel = 'legacy-tool-type';
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(resolvedConfig, {
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              logs.push(options);
+              return true;
+            },
+          },
+        }),
+      });
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const ws = RegisterCaptureWebSocket.instances[0];
+      assert.strictEqual(ws.sent[0].type, 'register');
+      assert.strictEqual(ws.sent[0].toolType, 'legacy-tool-type');
+
+      const unknownLog = logs.find((entry) => entry?.body?.message === 'runtime.register.tool_type.unknown');
+      assert.ok(unknownLog);
+      assert.strictEqual(unknownLog.body.extra.toolType, 'legacy-tool-type');
+      assert.deepStrictEqual(unknownLog.body.extra.knownToolTypes, ['openx', 'uniassistant', 'codeagent']);
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
     }
   });
 
@@ -1106,7 +1145,7 @@ describe('runtime protocol strictness', () => {
         enabled: true,
         gateway: {
           url: 'ws://localhost:8081/ws/agent',
-          channel: 'opencode',
+          channel: 'openx',
           heartbeatIntervalMs: 30000,
           reconnect: {
             baseMs: 1000,

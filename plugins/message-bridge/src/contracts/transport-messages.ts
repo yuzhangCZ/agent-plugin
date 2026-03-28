@@ -25,6 +25,18 @@ export const TOOL_ERROR_REASONS = [
 
 export type ToolErrorReason = typeof TOOL_ERROR_REASONS[number];
 
+export const KNOWN_TOOL_TYPES = [
+  'openx',
+  'uniassistant',
+  'codeagent',
+] as const;
+
+export type KnownToolType = typeof KNOWN_TOOL_TYPES[number];
+
+export function isKnownToolType(value: string): value is KnownToolType {
+  return KNOWN_TOOL_TYPES.includes(value as KnownToolType);
+}
+
 export interface RegisterMessage {
   type: 'register';
   deviceName: string;

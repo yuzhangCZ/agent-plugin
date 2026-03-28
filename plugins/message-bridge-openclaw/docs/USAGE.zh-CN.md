@@ -292,10 +292,12 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 
 以下注册元数据不允许用户配置，统一由运行时采集：
 
-- `toolType` 固定为 `openclaw`
+- `toolType` 默认值为 `openx`
 - `deviceName` 来自 `os.hostname()`
 - `toolVersion` 来自插件运行时包版本
 - `macAddress` 来自首个可用本地网卡，取不到时为空串 `""`
+
+当前插件内置已知 `toolType` 仅 `openx`。若注入其他值，会记录 `runtime.register.tool_type.unknown` 警告日志，但不会阻断连接。
 
 当前阶段默认 `runTimeoutMs` 已提高到 `300000`，它当前同时作用于两条执行链：
 
@@ -379,7 +381,7 @@ openclaw gateway run --allow-unconfigured --verbose
 查看 `ai-gateway` 日志，确认：
 
 - agent 注册成功
-- `toolType=openclaw`
+- `toolType=openx`
 - 心跳持续正常
 
 当前本机日志路径：

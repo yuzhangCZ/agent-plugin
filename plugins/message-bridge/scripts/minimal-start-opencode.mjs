@@ -9,7 +9,7 @@ const config = {
   ak: 'your-ak',
   sk: 'your-sk',
   gatewayUrl: 'wss://gateway.your-company.com/ws/agent',
-  channel: 'opencode',
+  channel: 'openx',
   pluginName: '@wecode/skill-opencode-plugin',
   npmScope: '@wecode',
   npmRegistry: 'https://npm.your-company.com',
