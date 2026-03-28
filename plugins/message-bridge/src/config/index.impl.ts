@@ -2,6 +2,7 @@ import type { BridgeConfig, ConfigValidationError } from '../types/index.js';
 import { AppLogger, type BridgeLogger } from '../runtime/AppLogger.js';
 import { ConfigResolver } from './ConfigResolver.js';
 import { ConfigValidator } from './ConfigValidator.js';
+import { buildConsumedEnvSnapshot } from './env-snapshot.js';
 
 /**
  * Configuration validation error that aggregates multiple validation errors
@@ -58,6 +59,10 @@ export async function loadConfig(workspacePath?: string, logger?: BridgeLogger):
   const configLogger = logger?.child({ component: 'config' }) ?? createConsoleBackedLogger();
   const resolver = new ConfigResolver(configLogger);
   const config = await resolver.resolveConfig(workspacePath);
+
+  if (config.debug) {
+    configLogger.info('config.env.snapshot', buildConsumedEnvSnapshot(process.env));
+  }
 
   const errors = validateConfig(config);
   if (errors.length > 0) {

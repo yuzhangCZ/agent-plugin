@@ -16,7 +16,8 @@ import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
-import { loadConfig } from '../config/index.js';
+import { ConfigResolver, loadConfig } from '../config/index.js';
+import type { BridgeConfig } from '../types/index.js';
 import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
 import { DefaultGatewayConnection, GatewayConnection } from '../connection/GatewayConnection.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
@@ -98,6 +99,8 @@ export class BridgeRuntime {
   private effectiveDirectory?: string;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
+  private bridgeChannelReady = false;
+  private bridgeChannelLoading: Promise<void> | null = null;
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -150,6 +153,8 @@ export class BridgeRuntime {
     try {
       this.logger.info('runtime.config.loading', { workspacePath: this.workspacePath });
       config = await this.resolveConfig();
+      this.bridgeChannelPort.setChannel(config.gateway.channel);
+      this.bridgeChannelReady = true;
       effectiveDebug = !!config.debug;
       this.logger = new AppLogger(
         this.rawClient,
@@ -455,6 +460,7 @@ export class BridgeRuntime {
     invokeLogger.info('runtime.invoke.received');
 
     if (message.action === 'create_session') {
+      await this.ensureBridgeChannelConfigured();
       if (!welinkSessionId) {
         invokeLogger.warn('runtime.create_session.missing_welink_session_id');
       }
@@ -578,6 +584,29 @@ export class BridgeRuntime {
         welinkSessionId,
       }),
     };
+  }
+
+  private async ensureBridgeChannelConfigured(): Promise<void> {
+    if (this.bridgeChannelReady) {
+      return;
+    }
+
+    if (this.bridgeChannelLoading) {
+      await this.bridgeChannelLoading;
+      return;
+    }
+
+    this.bridgeChannelLoading = new ConfigResolver(this.logger.child({ component: 'config' }))
+      .resolveConfig(this.workspacePath)
+      .then((config: BridgeConfig) => {
+        this.bridgeChannelPort.setChannel(config.gateway.channel);
+        this.bridgeChannelReady = true;
+      })
+      .finally(() => {
+        this.bridgeChannelLoading = null;
+      });
+
+    await this.bridgeChannelLoading;
   }
 
   private async validateStartupPrerequisites() {

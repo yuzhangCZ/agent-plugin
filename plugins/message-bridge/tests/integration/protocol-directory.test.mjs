@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -300,6 +300,7 @@ describe('protocol directory-context integration', () => {
   test('uniassistant channel resolves mapped directory and forwards assiantId as agent without chat directory', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
+    const configDir = join(workspace, '.opencode');
     await writeFile(
       mapFile,
       JSON.stringify({
@@ -309,18 +310,47 @@ describe('protocol directory-context integration', () => {
       }),
       'utf8',
     );
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, 'message-bridge.json'),
+      JSON.stringify({
+        config_version: 1,
+        enabled: true,
+        gateway: {
+          url: 'ws://localhost:8081/ws/agent',
+          channel: 'uniassistant',
+          heartbeatIntervalMs: 30000,
+          reconnect: {
+            baseMs: 1000,
+            maxMs: 30000,
+            exponential: true,
+          },
+        },
+        sdk: {
+          timeoutMs: 10000,
+        },
+        auth: {
+          ak: 'test-ak',
+          sk: 'test-sk',
+        },
+        events: {
+          allowlist: ['message.updated'],
+        },
+      }),
+      'utf8',
+    );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    delete process.env.BRIDGE_GATEWAY_CHANNEL;
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
       const promptCalls = [];
       const runtime = new BridgeRuntime({
-        workspacePath: '/workspace/current',
-        hostDirectory: '/workspace/current',
+        workspacePath: workspace,
+        hostDirectory: workspace,
         client: createRuntimeClient({
           session: {
             create: async (options) => {
@@ -389,9 +419,9 @@ describe('protocol directory-context integration', () => {
       assert.strictEqual(sent[1].toolSessionId, 'dir-assiant-1');
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -414,9 +444,9 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -596,9 +626,9 @@ describe('protocol directory-context integration', () => {
       ]);
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -613,9 +643,9 @@ describe('protocol directory-context integration', () => {
     const mapFile = join(workspace, 'assiant-directory-map.json');
     await writeFile(mapFile, JSON.stringify({ 'persona-1': '/tenant/persona-1' }), 'utf8');
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -714,9 +744,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.isLegacyFlatString, true);
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -739,9 +769,9 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -802,9 +832,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -815,9 +845,9 @@ describe('protocol directory-context integration', () => {
   });
 
   test('uniassistant channel warns when mapping file is not configured', async () => {
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
 
     try {
@@ -880,9 +910,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
