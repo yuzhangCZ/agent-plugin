@@ -31,6 +31,10 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
     private readonly loggerProvider: () => BridgeLogger | undefined = () => undefined,
   ) {}
 
+  isConfigured(): boolean {
+    return Boolean(this.filePath);
+  }
+
   async resolveDirectory(assiantId: string): Promise<string | undefined> {
     // Intentionally load on every lookup so runtime updates to the mapping file
     // are visible immediately without restarting the plugin process.
@@ -43,7 +47,7 @@ export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappi
   }
 
   private async readMap(): Promise<Map<string, string>> {
-    if (!this.filePath) {
+    if (!this.isConfigured()) {
       return new Map();
     }
 
