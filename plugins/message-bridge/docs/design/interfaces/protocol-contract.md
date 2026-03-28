@@ -93,7 +93,7 @@ type QuestionReplyPayload = {
 - `abort_session` 调用 `session.abort()`
 - `question_reply` 通过原始 question API 链路完成待答复问题
 - `assistantId` 在 `chat` 和 `create_session` 中均为可选字段
-- 当 `BRIDGE_CHANNEL === 'assiant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
+- 当 `BRIDGE_CHANNEL === 'uniassistant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
 - `chat` 在存在 `assistantId` 时，会把它透传到 SDK 的 `session.prompt(...).agent`
 - `assistantId` 仅接受字符串；`null` 视为无效 payload
 - 旧字段 `assiantId` 已废弃；当前会被当作未知字段静默忽略，不会触发 `agent` 透传，也不会触发目录映射

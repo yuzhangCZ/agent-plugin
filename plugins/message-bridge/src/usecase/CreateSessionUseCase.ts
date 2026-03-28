@@ -6,6 +6,7 @@ import type { ResolveCreateSessionDirectoryUseCase } from './ResolveCreateSessio
 export interface CreateSessionUseCaseInput {
   payload: CreateSessionPayload;
   effectiveDirectory?: string;
+  mappingConfigured?: boolean;
 }
 
 export class CreateSessionUseCase {
@@ -18,6 +19,7 @@ export class CreateSessionUseCase {
     const resolvedDirectory = await this.resolveCreateSessionDirectoryUseCase.execute({
       assistantId: input.payload.assistantId,
       effectiveDirectory: input.effectiveDirectory,
+      mappingConfigured: input.mappingConfigured,
     });
 
     return this.sessionGatewayPort.createSession({

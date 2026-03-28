@@ -5,12 +5,27 @@ import { ResolveCreateSessionDirectoryUseCase } from '../../src/usecase/ResolveC
 import { CreateSessionUseCase } from '../../src/usecase/CreateSessionUseCase.ts';
 import { ChatUseCase } from '../../src/usecase/ChatUseCase.ts';
 
+function createLoggerRecorder() {
+  const calls = [];
+  const logger = {
+    debug: (message, extra) => calls.push({ level: 'debug', message, extra }),
+    info: (message, extra) => calls.push({ level: 'info', message, extra }),
+    warn: (message, extra) => calls.push({ level: 'warn', message, extra }),
+    error: (message, extra) => calls.push({ level: 'error', message, extra }),
+    child: () => logger,
+    getTraceId: () => 'test-trace-id',
+  };
+
+  return { calls, logger };
+}
+
 describe('assiant use cases', () => {
-  test('resolves mapped directory when channel is assiant', async () => {
+  test('resolves mapped directory when channel is uniassistant', async () => {
     const mappingCalls = [];
+    const { calls, logger } = createLoggerRecorder();
     const useCase = new ResolveCreateSessionDirectoryUseCase(
       {
-        getChannel: () => 'assiant',
+        getChannel: () => 'uniassistant',
         isAssiantChannel: () => true,
       },
       {
@@ -19,14 +34,17 @@ describe('assiant use cases', () => {
           return '/mapped/tenant-a';
         },
       },
+      logger,
     );
 
     const result = await useCase.execute({
       assistantId: 'tenant-a',
       effectiveDirectory: '/fallback',
+      mappingConfigured: true,
     });
 
     assert.deepStrictEqual(mappingCalls, ['tenant-a']);
+    assert.strictEqual(calls.some((call) => call.message === 'assiant.directory_map.unresolved'), false);
     assert.deepStrictEqual(result, {
       directory: '/mapped/tenant-a',
       source: 'mapping',
@@ -35,6 +53,7 @@ describe('assiant use cases', () => {
 
   test('falls back to effectiveDirectory when channel is not assiant', async () => {
     let mappingCalled = false;
+    const { calls, logger } = createLoggerRecorder();
     const useCase = new ResolveCreateSessionDirectoryUseCase(
       {
         getChannel: () => 'opencode',
@@ -46,18 +65,138 @@ describe('assiant use cases', () => {
           return '/mapped/tenant-b';
         },
       },
+      logger,
     );
 
     const result = await useCase.execute({
       assistantId: 'tenant-b',
       effectiveDirectory: '/fallback',
+      mappingConfigured: true,
     });
 
     assert.strictEqual(mappingCalled, false);
+    assert.strictEqual(calls.some((call) => call.message === 'assiant.directory_map.unresolved'), false);
     assert.deepStrictEqual(result, {
       directory: '/fallback',
       source: 'effective',
     });
+  });
+
+  test('warns when mapping file is not configured for uniassistant', async () => {
+    const { calls, logger } = createLoggerRecorder();
+    const useCase = new ResolveCreateSessionDirectoryUseCase(
+      {
+        getChannel: () => 'uniassistant',
+        isAssiantChannel: () => true,
+      },
+      {
+        resolveDirectory: async () => {
+          throw new Error('should not resolve when map is not configured');
+        },
+      },
+      logger,
+    );
+
+    const result = await useCase.execute({
+      assistantId: 'tenant-unconfigured',
+      effectiveDirectory: '/fallback',
+      mappingConfigured: false,
+    });
+
+    assert.deepStrictEqual(result, {
+      directory: '/fallback',
+      source: 'effective',
+    });
+    assert.deepStrictEqual(
+      calls.filter((call) => call.message === 'assiant.directory_map.unresolved').map((call) => call.extra),
+      [
+        {
+          reason: 'mapping_file_unconfigured',
+          channel: 'uniassistant',
+          assistantId: 'tenant-unconfigured',
+          mappingConfigured: false,
+          hasEffectiveDirectory: true,
+          fallbackSource: 'effective',
+        },
+      ],
+    );
+  });
+
+  test('warns when assistantId is missing for uniassistant mapping flow', async () => {
+    const { calls, logger } = createLoggerRecorder();
+    const useCase = new ResolveCreateSessionDirectoryUseCase(
+      {
+        getChannel: () => 'uniassistant',
+        isAssiantChannel: () => true,
+      },
+      {
+        resolveDirectory: async () => {
+          throw new Error('should not resolve when assistantId is missing');
+        },
+      },
+      logger,
+    );
+
+    const result = await useCase.execute({
+      effectiveDirectory: '/fallback',
+      mappingConfigured: true,
+    });
+
+    assert.deepStrictEqual(result, {
+      directory: '/fallback',
+      source: 'effective',
+    });
+    assert.deepStrictEqual(
+      calls.filter((call) => call.message === 'assiant.directory_map.unresolved').map((call) => call.extra),
+      [
+        {
+          reason: 'missing_assiant_id',
+          channel: 'uniassistant',
+          assistantId: undefined,
+          mappingConfigured: true,
+          hasEffectiveDirectory: true,
+          fallbackSource: 'effective',
+        },
+      ],
+    );
+  });
+
+  test('warns when assistantId exists but no valid mapped directory is resolved', async () => {
+    const { calls, logger } = createLoggerRecorder();
+    const useCase = new ResolveCreateSessionDirectoryUseCase(
+      {
+        getChannel: () => 'uniassistant',
+        isAssiantChannel: () => true,
+      },
+      {
+        resolveDirectory: async () => undefined,
+      },
+      logger,
+    );
+
+    const result = await useCase.execute({
+      assistantId: 'tenant-miss',
+      effectiveDirectory: '/fallback',
+      mappingConfigured: true,
+    });
+
+    assert.deepStrictEqual(result, {
+      directory: '/fallback',
+      source: 'effective',
+    });
+    assert.deepStrictEqual(
+      calls.filter((call) => call.message === 'assiant.directory_map.unresolved').map((call) => call.extra),
+      [
+        {
+          reason: 'directory_unresolved',
+          channel: 'uniassistant',
+          assistantId: 'tenant-miss',
+          mappingConfigured: true,
+          hasEffectiveDirectory: true,
+          fallbackSource: 'effective',
+        },
+      ],
+    );
   });
 
   test('create session use case uses resolved directory before gateway call', async () => {
