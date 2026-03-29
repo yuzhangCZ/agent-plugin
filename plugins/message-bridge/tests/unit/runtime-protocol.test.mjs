@@ -147,6 +147,39 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('ignores invoke messages until runtime state is READY', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    let routeCalls = 0;
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.actionRouter = {
+      route: async () => {
+        routeCalls += 1;
+        return { success: true, data: { sessionId: 'unexpected' } };
+      },
+    };
+    runtime.stateManager.setState('CONNECTING');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-chat',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-not-ready', text: 'hello' },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-create',
+      action: 'create_session',
+      payload: { title: 'should be ignored' },
+    });
+
+    assert.strictEqual(routeCalls, 0);
+    assert.deepStrictEqual(sent, []);
+  });
+
   test('rejects non-baseline nested invoke payload and returns tool_error without code', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -1501,5 +1534,116 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(runtimeInvokeReceived.extra.gatewayMessageId, 'gw-msg-1');
     assert.strictEqual(runtimeInvokeReceived.extra.toolSessionId, 'tool-42');
     assert.strictEqual(runtimeInvokeCompleted.extra.runtimeTraceId, runtimeInvokeReceived.extra.runtimeTraceId);
+  });
+
+  test('runtime.start reloads config on restart and uses the latest channel', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+
+    let resolveCount = 0;
+    const configs = [
+      createResolvedConfig(),
+      createResolvedConfig({
+        gateway: {
+          ...createResolvedConfig().gateway,
+          channel: 'uniassistant',
+        },
+      }),
+    ];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return configs[resolveCount++];
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+      runtime.stop();
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+
+      assert.strictEqual(resolveCount, 2);
+      assert.strictEqual(RegisterCaptureWebSocket.instances.length, 2);
+      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].toolType, 'openx');
+      assert.strictEqual(RegisterCaptureWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('runtime.start retries with refreshed config after a pre-open connection failure', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    class FlakyRegisterWebSocket {
+      static OPEN = 1;
+      static instances = [];
+
+      constructor() {
+        this.readyState = 0;
+        this.sent = [];
+        this.instanceIndex = FlakyRegisterWebSocket.instances.push(this) - 1;
+        setTimeout(() => {
+          if (this.instanceIndex === 0) {
+            this.onclose?.({ code: 1006, reason: 'dial failed', wasClean: false });
+            return;
+          }
+
+          this.readyState = FlakyRegisterWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+        }, 0);
+      }
+
+      send(data) {
+        this.sent.push(JSON.parse(data));
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+    globalThis.WebSocket = FlakyRegisterWebSocket;
+
+    let resolveCount = 0;
+    const configs = [
+      createResolvedConfig(),
+      createResolvedConfig({
+        gateway: {
+          ...createResolvedConfig().gateway,
+          channel: 'uniassistant',
+        },
+      }),
+    ];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return configs[resolveCount++];
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+
+      assert.strictEqual(resolveCount, 2);
+      assert.strictEqual(FlakyRegisterWebSocket.instances.length, 2);
+      assert.strictEqual(FlakyRegisterWebSocket.instances[0].sent.length, 0);
+      assert.strictEqual(FlakyRegisterWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
   });
 });

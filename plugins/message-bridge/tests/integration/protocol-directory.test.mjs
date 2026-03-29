@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,61 @@ function createRuntimeClient(overrides = {}) {
       ...(overrides._client ?? {}),
     },
   };
+}
+
+function setRuntimeChannel(runtime, channel) {
+  runtime.bridgeChannelPort.setChannel(channel);
+}
+
+function createRegisterCaptureWebSocket() {
+  return class RegisterCaptureWebSocket {
+    static OPEN = 1;
+    static instances = [];
+
+    constructor() {
+      this.readyState = 0;
+      this.sent = [];
+      RegisterCaptureWebSocket.instances.push(this);
+      setTimeout(() => {
+        this.readyState = RegisterCaptureWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+      }, 0);
+    }
+
+    send(data) {
+      this.sent.push(JSON.parse(data));
+    }
+
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  };
+}
+
+async function waitForReady(runtime, timeoutMs = 250) {
+  const startedAt = Date.now();
+  while (runtime.stateManager.getState() !== 'READY') {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`runtime did not become READY within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
+function snapshotEnv(keys) {
+  return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 }
 
 describe('protocol directory-context integration', () => {
@@ -300,6 +355,10 @@ describe('protocol directory-context integration', () => {
   test('uniassistant channel resolves mapped directory and forwards assistantId as agent without chat directory', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
+    const configDir = join(workspace, '.opencode');
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
     await writeFile(
       mapFile,
       JSON.stringify({
@@ -309,18 +368,61 @@ describe('protocol directory-context integration', () => {
       }),
       'utf8',
     );
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, 'message-bridge.json'),
+      JSON.stringify({
+        config_version: 1,
+        enabled: true,
+        gateway: {
+          url: 'ws://localhost:8081/ws/agent',
+          channel: 'uniassistant',
+          heartbeatIntervalMs: 30000,
+          reconnect: {
+            baseMs: 1000,
+            maxMs: 30000,
+            exponential: true,
+          },
+        },
+        sdk: {
+          timeoutMs: 10000,
+        },
+        auth: {
+          ak: 'test-ak',
+          sk: 'test-sk',
+        },
+        events: {
+          allowlist: ['message.updated'],
+        },
+      }),
+      'utf8',
+    );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    const envSnapshot = snapshotEnv([
+      'BRIDGE_ENABLED',
+      'BRIDGE_DEBUG',
+      'BRIDGE_DIRECTORY',
+      'BRIDGE_GATEWAY_URL',
+      'BRIDGE_GATEWAY_CHANNEL',
+      'BRIDGE_AUTH_AK',
+      'BRIDGE_AUTH_SK',
+      'BRIDGE_ASSIANT_DIRECTORY_MAP_FILE',
+    ]);
+    delete process.env.BRIDGE_ENABLED;
+    delete process.env.BRIDGE_DEBUG;
+    delete process.env.BRIDGE_DIRECTORY;
+    delete process.env.BRIDGE_GATEWAY_URL;
+    delete process.env.BRIDGE_GATEWAY_CHANNEL;
+    delete process.env.BRIDGE_AUTH_AK;
+    delete process.env.BRIDGE_AUTH_SK;
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
       const promptCalls = [];
       const runtime = new BridgeRuntime({
-        workspacePath: '/workspace/current',
-        hostDirectory: '/workspace/current',
+        workspacePath: workspace,
+        hostDirectory: '/bridge/directory',
         client: createRuntimeClient({
           session: {
             create: async (options) => {
@@ -334,13 +436,8 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
-      const sent = [];
-
-      runtime.effectiveDirectory = '/bridge/directory';
-      runtime.gatewayConnection = {
-        send: (message) => sent.push(message),
-      };
-      runtime.stateManager.setState('READY');
+      await runtime.start();
+      await waitForReady(runtime);
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -383,21 +480,18 @@ describe('protocol directory-context integration', () => {
           },
         },
       ]);
-      assert.strictEqual(sent[0].type, 'session_created');
-      assert.strictEqual(sent[0].toolSessionId, 'dir-assiant-1');
-      assert.strictEqual(sent[1].type, 'tool_done');
-      assert.strictEqual(sent[1].toolSessionId, 'dir-assiant-1');
+      const ws = RegisterCaptureWebSocket.instances[0];
+      assert.strictEqual(ws.sent[0].type, 'register');
+      assert.strictEqual(ws.sent[0].toolType, 'uniassistant');
+      assert.strictEqual(ws.sent[1].type, 'session_created');
+      assert.strictEqual(ws.sent[1].toolSessionId, 'dir-assiant-1');
+      assert.strictEqual(ws.sent[2].type, 'tool_done');
+      assert.strictEqual(ws.sent[2].toolSessionId, 'dir-assiant-1');
+
+      runtime.stop();
     } finally {
-      if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
-      } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
-      }
-      if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-      } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
-      }
+      globalThis.WebSocket = originalWebSocket;
+      restoreEnv(envSnapshot);
     }
   });
 
@@ -414,9 +508,9 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -438,6 +532,7 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
+      setRuntimeChannel(runtime, 'uniassistant');
 
       runtime.effectiveDirectory = '/bridge/directory';
       runtime.gatewayConnection = {
@@ -487,9 +582,9 @@ describe('protocol directory-context integration', () => {
       ]);
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -512,9 +607,9 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -574,6 +669,7 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
+      setRuntimeChannel(runtime, 'uniassistant');
 
       runtime.effectiveDirectory = '/bridge/directory';
       runtime.gatewayConnection = {
@@ -694,9 +790,9 @@ describe('protocol directory-context integration', () => {
       ]);
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -711,9 +807,9 @@ describe('protocol directory-context integration', () => {
     const mapFile = join(workspace, 'assiant-directory-map.json');
     await writeFile(mapFile, JSON.stringify({ 'persona-1': '/tenant/persona-1' }), 'utf8');
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -737,6 +833,7 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
+      setRuntimeChannel(runtime, 'uniassistant');
 
       runtime.effectiveDirectory = '/bridge/directory';
       runtime.gatewayConnection = {
@@ -812,9 +909,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.isLegacyFlatString, true);
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -837,9 +934,9 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -863,6 +960,7 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
+      setRuntimeChannel(runtime, 'uniassistant');
 
       runtime.effectiveDirectory = '/bridge/directory';
       runtime.gatewayConnection = {
@@ -901,9 +999,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
@@ -914,9 +1012,9 @@ describe('protocol directory-context integration', () => {
   });
 
   test('uniassistant channel warns when mapping file is not configured', async () => {
-    const previousChannel = process.env.BRIDGE_CHANNEL;
+    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
     const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_CHANNEL = 'uniassistant';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
     delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
 
     try {
@@ -940,6 +1038,7 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
+      setRuntimeChannel(runtime, 'uniassistant');
 
       runtime.effectiveDirectory = '/bridge/directory';
       runtime.gatewayConnection = {
@@ -979,9 +1078,9 @@ describe('protocol directory-context integration', () => {
       assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
     } finally {
       if (previousChannel === undefined) {
-        delete process.env.BRIDGE_CHANNEL;
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_CHANNEL = previousChannel;
+        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
         delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
