@@ -472,9 +472,9 @@ async function main() {
   }
 
   if (checkOpencodeInstalled()) {
-    writeLine('OpenCode 预检通过：已检测到 opencode 命令。');
+    writeLine('OpenCode 环境检查通过（opencode 可用）。');
   } else {
-    writeError('OpenCode 预检未通过：未检测到 opencode 命令，将继续写入配置。');
+    writeLine('OpenCode 环境检查提示：未检测到 opencode 命令，将继续写入配置。');
   }
 
   const scope = parsed.scope;
@@ -545,8 +545,6 @@ async function main() {
     writeLine(`2. OpenCode 配置已更新 ${opencodeConfig}`);
     writeLine(`3. npm scope 配置已更新 ${npmrcPath}`);
     writeLine('4. 下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。');
-    writeLine('5. 若首次 npx 无法拉取安装包，可执行:');
-    writeLine(`   npx -y --registry=${DEFAULT_SCOPE_REGISTRY} ${PLUGIN_NAME} install`);
   } finally {
     await prompts.close();
   }

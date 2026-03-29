@@ -94,6 +94,7 @@ describe('setup cli', () => {
       assert.ok(result.stdout.includes('- AK: ak-test'));
       assert.ok(result.stdout.includes('- SK: sk-test'));
       assert.ok(result.stdout.includes('下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。'));
+      assert.ok(!result.stdout.includes('npx -y --registry='));
     });
   });
 
@@ -386,7 +387,7 @@ describe('setup cli', () => {
       });
 
       assert.strictEqual(result.status, 0);
-      assert.ok(result.stderr.includes('OpenCode 预检未通过：未检测到 opencode 命令，将继续写入配置。'));
+      assert.ok(result.stdout.includes('OpenCode 环境检查提示：未检测到 opencode 命令，将继续写入配置。'));
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       assert.ok(bridge.includes('"ak": "ak-warn"'));
