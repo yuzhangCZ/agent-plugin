@@ -72,6 +72,30 @@ function createRegisterCaptureWebSocket() {
   };
 }
 
+async function waitForReady(runtime, timeoutMs = 250) {
+  const startedAt = Date.now();
+  while (runtime.stateManager.getState() !== 'READY') {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`runtime did not become READY within ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
+function snapshotEnv(keys) {
+  return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
 describe('protocol directory-context integration', () => {
   test('uses effectiveDirectory for create_session only without changing workspacePath', async () => {
     const createCalls = [];
@@ -374,9 +398,23 @@ describe('protocol directory-context integration', () => {
       'utf8',
     );
 
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    const envSnapshot = snapshotEnv([
+      'BRIDGE_ENABLED',
+      'BRIDGE_DEBUG',
+      'BRIDGE_DIRECTORY',
+      'BRIDGE_GATEWAY_URL',
+      'BRIDGE_GATEWAY_CHANNEL',
+      'BRIDGE_AUTH_AK',
+      'BRIDGE_AUTH_SK',
+      'BRIDGE_ASSIANT_DIRECTORY_MAP_FILE',
+    ]);
+    delete process.env.BRIDGE_ENABLED;
+    delete process.env.BRIDGE_DEBUG;
+    delete process.env.BRIDGE_DIRECTORY;
+    delete process.env.BRIDGE_GATEWAY_URL;
     delete process.env.BRIDGE_GATEWAY_CHANNEL;
+    delete process.env.BRIDGE_AUTH_AK;
+    delete process.env.BRIDGE_AUTH_SK;
     process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
@@ -399,7 +437,7 @@ describe('protocol directory-context integration', () => {
         }),
       });
       await runtime.start();
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForReady(runtime);
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -453,16 +491,7 @@ describe('protocol directory-context integration', () => {
       runtime.stop();
     } finally {
       globalThis.WebSocket = originalWebSocket;
-      if (previousChannel === undefined) {
-        delete process.env.BRIDGE_GATEWAY_CHANNEL;
-      } else {
-        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
-      }
-      if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
-      } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
-      }
+      restoreEnv(envSnapshot);
     }
   });
 
