@@ -242,15 +242,6 @@ export class ConfigResolver {
       if (typeof normalized.gateway.channel === 'string') {
         normalized.gateway.channel = normalized.gateway.channel.trim();
       }
-
-      const gatewayMetadata = normalized.gateway as unknown as {
-        deviceName?: unknown;
-        toolVersion?: unknown;
-        macAddress?: unknown;
-      };
-      delete gatewayMetadata.deviceName;
-      delete gatewayMetadata.toolVersion;
-      delete gatewayMetadata.macAddress;
     }
 
     return normalized;

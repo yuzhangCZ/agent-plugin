@@ -968,9 +968,9 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
 
     try {
       const config = await loadConfig(workspace);
-      assert.strictEqual('deviceName' in config.gateway, false);
-      assert.strictEqual('macAddress' in config.gateway, false);
-      assert.strictEqual('toolVersion' in config.gateway, false);
+      assert.strictEqual(config.gateway.url, 'ws://localhost:8081/ws/agent');
+      assert.strictEqual(config.gateway.channel, 'openx');
+      assert.strictEqual(config.gateway.heartbeatIntervalMs, 30000);
     } finally {
       if (originalDeviceName === undefined) {
         delete process.env.BRIDGE_GATEWAY_DEVICE_NAME;
