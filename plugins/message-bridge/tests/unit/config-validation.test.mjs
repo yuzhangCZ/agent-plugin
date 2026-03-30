@@ -495,7 +495,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('normalizes default channel to openx', async () => {
+  test('trims gateway.channel from config files without inventing a fallback', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-defaults-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     process.env.HOME = fakeHome;
@@ -512,7 +512,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
             maxMs: 30000,
             exponential: true,
           },
-          channel: 'openx',
+          channel: '  openx  ',
         },
       })),
       'utf8',
@@ -521,6 +521,154 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     try {
       const config = await loadConfig(workspace);
       assert.strictEqual(config.gateway.channel, 'openx');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('loadConfig reports invalid nested object shapes instead of silently restoring defaults', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-invalid-shapes-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify({
+        config_version: 1,
+        enabled: true,
+        debug: false,
+        gateway: null,
+        sdk: null,
+        auth: null,
+        events: null,
+      }),
+      'utf8',
+    );
+
+    try {
+      await assert.rejects(
+        loadConfig(workspace),
+        (err) =>
+          err instanceof ConfigValidationAggregateError &&
+          err.errors.some((e) => e.path === 'gateway' && e.code === 'INVALID_TYPE') &&
+          err.errors.some((e) => e.path === 'sdk' && e.code === 'INVALID_TYPE') &&
+          err.errors.some((e) => e.path === 'auth' && e.code === 'INVALID_TYPE') &&
+          err.errors.some((e) => e.path === 'events' && e.code === 'INVALID_TYPE'),
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('loadConfig reports invalid gateway nested object shapes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-invalid-gateway-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(createValidConfig({
+        gateway: {
+          url: 'ws://localhost:8081/ws/agent',
+          channel: 'openx',
+          heartbeatIntervalMs: 30000,
+          reconnect: null,
+          ping: null,
+        },
+      })),
+      'utf8',
+    );
+
+    try {
+      await assert.rejects(
+        loadConfig(workspace),
+        (err) =>
+          err instanceof ConfigValidationAggregateError &&
+          err.errors.some((e) => e.path === 'gateway.reconnect' && e.code === 'INVALID_TYPE') &&
+          err.errors.some((e) => e.path === 'gateway.ping' && e.code === 'INVALID_TYPE'),
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('resolver reaches validation for malformed config instead of throwing before validation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-invalid-logger-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify({
+        config_version: 1,
+        enabled: true,
+        gateway: null,
+        auth: {
+          ak: 'test-ak-001',
+          sk: 'test-sk-secret-001',
+        },
+      }),
+      'utf8',
+    );
+
+    const calls = [];
+    const logger = new AppLogger(
+      {
+        app: {
+          log: async (options) => {
+            calls.push(options);
+          },
+        },
+      },
+      { component: 'test' },
+      undefined,
+      undefined,
+      true,
+    );
+
+    try {
+      await assert.rejects(
+        loadConfig(workspace, logger),
+        (err) =>
+          err instanceof ConfigValidationAggregateError &&
+          err.errors.some((e) => e.path === 'gateway' && e.code === 'INVALID_TYPE'),
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      const messages = calls.map((entry) => entry.body.message);
+      assert.ok(messages.includes('config.resolve.completed'));
+      assert.ok(messages.includes('config.validation.failed'));
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('preserves explicit empty events.allowlist instead of restoring default allowlist', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-empty-allowlist-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    process.env.HOME = fakeHome;
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(createValidConfig({
+        events: {
+          allowlist: [],
+        },
+      })),
+      'utf8',
+    );
+
+    try {
+      const config = await loadConfig(workspace);
+      assert.deepStrictEqual(config.events.allowlist, []);
     } finally {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
