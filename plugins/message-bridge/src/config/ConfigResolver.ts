@@ -8,6 +8,7 @@ import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
+import { DEFAULT_GATEWAY_URL } from './default-gateway-url.js';
 
 const CONFIG_FILE_NAMES = ['message-bridge.jsonc', 'message-bridge.json'] as const;
 
@@ -241,7 +242,7 @@ export class ConfigResolver {
     }
 
     if (!normalized.gateway.url) {
-      normalized.gateway.url = 'ws://localhost:8081/ws/agent';
+      normalized.gateway.url = DEFAULT_GATEWAY_URL;
     }
 
     if (!normalized.gateway.channel) {

@@ -1,7 +1,7 @@
 # 配置契约
 
-**Version:** 2.2
-**Date:** 2026-03-28
+**Version:** 2.3
+**Date:** 2026-03-30
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`
@@ -29,13 +29,13 @@
 
 ## 2. 默认值
 
-默认值定义于 `src/config/default-config.ts`。
+默认值定义于 `src/config/default-config.ts`。其中 `gateway.url` 补充一条发布期规则：官方发布路径会在构建阶段通过 `MB_DEFAULT_GATEWAY_URL` 固化默认地址；普通本地构建未注入时仍回退到 localhost。
 
 | 配置键 | 默认值 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 是否启用 bridge |
 | `config_version` | `1` | 配置版本 |
-| `gateway.url` | `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
+| `gateway.url` | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
 | `gateway.channel` | `openx` | 配置侧字段名；注册报文中映射到 `toolType` |
 | `gateway.heartbeatIntervalMs` | `30000` | 心跳间隔，单位毫秒 |
 | `gateway.reconnect.baseMs` | `1000` | 重连基础退避，单位毫秒 |
@@ -75,7 +75,7 @@
   "debug": false,
   "config_version": 1,
   "gateway": {
-    "url": "ws://localhost:8081/ws/agent",
+    "url": "wss://gateway.example.com/ws/agent",
     "channel": "openx",
     "heartbeatIntervalMs": 30000,
     "reconnect": {
@@ -110,7 +110,7 @@
 | `enabled` | `boolean` | 否 | `true` | 为 `false` 时安全禁用，且不要求 `auth.ak/sk` |
 | `debug` | `boolean` | 否 | `false` | 调试日志开关；开启后额外以 `info` 级输出可读的原始 WebSocket 上下行报文 |
 | `config_version` | `number` | 否 | `1` | 当前只支持 `1` |
-| `gateway.url` | `string` | 否 | `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
+| `gateway.url` | `string` | 否 | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
 | `gateway.channel` | `string` | 否 | `openx` | 注册消息中的 `toolType` 来源；内置已知值为 `openx`、`uniassistant`、`codeagent` |
 | `gateway.heartbeatIntervalMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.baseMs` | `number` | 否 | `1000` | 正整数 |
@@ -160,7 +160,9 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 
 补充说明：
 
-- 运行时特殊通道值已收敛为 `uniassistant`
+- `MB_DEFAULT_GATEWAY_URL` 是构建期注入变量，不属于运行时 `BRIDGE_*` 环境变量集合
+- `BRIDGE_GATEWAY_URL` 仍然是最高优先级的运行时覆盖入口
+- 环境变量名 `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` 保留历史拼写；运行时特殊通道值已收敛为 `uniassistant`
 - `BRIDGE_GATEWAY_CHANNEL` 是唯一有效的通道环境变量入口；`BRIDGE_CHANNEL` 已移除，当前实现会忽略它
 - 下行协议公开字段已经统一为 `assistantId`
 - 旧协议字段 `assiantId` 已废弃，当前会被静默忽略，不再触发目录映射或 `agent` 透传

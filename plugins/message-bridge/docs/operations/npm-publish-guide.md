@@ -1,15 +1,21 @@
 # Message-Bridge NPM 发布指南
 
-**Version:** 1.0
-**Date:** 2026-03-13
+**Version:** 1.1
+**Date:** 2026-03-30
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../package.json`, `../../README.md`, `./release-checklist.md`
 
 > Local release CLI docs: [../../../../docs/operations/local-release-cli.md](../../../../docs/operations/local-release-cli.md)
-> Maintainer default: use `pnpm release:local -- --target message-bridge ...` or `pnpm release:plan -- --target message-bridge ...` instead of hand-running the individual publish commands below.
+> Maintainer default: use `pnpm release:local -- --target message-bridge ... --default-gateway-url <ws://...|wss://...>` or `pnpm release:plan -- --target message-bridge ... --default-gateway-url <ws://...|wss://...>` instead of hand-running the individual publish commands below。
 
 `@wecode/skill-opencode-plugin` 的标准发布手册，覆盖稳定版、beta 版以及私仓切换。
+
+补充约束：
+
+- 只有 GitHub release workflow 与 `pnpm release:local` 会受保障地注入默认 `gateway.url`
+- 这两条路径依赖构建期环境变量 `MB_DEFAULT_GATEWAY_URL`
+- 手工执行 `npm publish`、`prepublishOnly`、`pnpm pack` 等路径时，产物仍可能保留 localhost 默认值
 
 ## 1. 发布定位
 

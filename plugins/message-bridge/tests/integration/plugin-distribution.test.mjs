@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { access, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
@@ -21,12 +21,29 @@ describe('plugin distribution artifact', () => {
     const sourcemapPath = resolve('release/message-bridge.plugin.js.map');
     await access(artifactPath, constants.R_OK);
     await assert.rejects(access(sourcemapPath, constants.R_OK));
+    const artifactContent = await readFile(artifactPath, 'utf8');
+    assert.match(artifactContent, /ws:\/\/localhost:8081\/ws\/agent/);
 
     const mod = await import(pathToFileURL(artifactPath).href);
 
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+  });
+
+  test('builds artifact with injected default gateway url', async () => {
+    execFileSync('node', ['./scripts/build.mjs'], {
+      cwd: process.cwd(),
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        MB_DEFAULT_GATEWAY_URL: 'wss://gateway.example.com/ws/agent',
+      },
+    });
+
+    const artifactPath = resolve('release/message-bridge.plugin.js');
+    const artifactContent = await readFile(artifactPath, 'utf8');
+    assert.match(artifactContent, /wss:\/\/gateway\.example\.com\/ws\/agent/);
   });
 
   test('builds dev artifact with sourcemap', async () => {
