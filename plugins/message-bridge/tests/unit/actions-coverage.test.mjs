@@ -22,6 +22,20 @@ function readyContext(client, overrides = {}) {
   };
 }
 
+function createLoggerRecorder() {
+  const calls = [];
+  const logger = {
+    debug: (message, extra) => calls.push({ level: 'debug', message, extra }),
+    info: (message, extra) => calls.push({ level: 'info', message, extra }),
+    warn: (message, extra) => calls.push({ level: 'warn', message, extra }),
+    error: (message, extra) => calls.push({ level: 'error', message, extra }),
+    child: () => logger,
+    getTraceId: () => 'test-trace-id',
+  };
+
+  return { calls, logger };
+}
+
 describe('ChatAction coverage', () => {
   test('execute success path with strict prompt shape', async () => {
     const action = new ChatAction();
@@ -199,6 +213,69 @@ describe('CreateSessionAction coverage', () => {
       title: 'With directory',
       directory: '/tmp/bridge-dir',
     });
+  });
+
+  test('logs resolved directory from use case before create_session starts', async () => {
+    const { calls, logger } = createLoggerRecorder();
+    const action = new CreateSessionAction({
+      resolveCreateSession: async () => ({
+        directory: '/mapped/worktree',
+        source: 'mapping',
+        resolvedDirectory: '/mapped/worktree',
+        resolvedDirectorySource: 'mapping',
+      }),
+      execute: async () => ({
+        success: true,
+        data: {
+          sessionId: 'new-3',
+          session: { sessionId: 'new-3' },
+        },
+      }),
+    });
+
+    const result = await action.execute(
+      { title: 'Mapped Session', assistantId: 'persona-1' },
+      readyContext({ session: {}, postSessionIdPermissionsPermissionId: async () => ({}) }, { logger }),
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(
+      calls.filter((call) => call.message === 'action.create_session.started').map((call) => call.extra),
+      [
+        {
+          payloadKeys: ['title', 'assistantId'],
+          resolvedDirectory: '/mapped/worktree',
+          resolvedDirectorySource: 'mapping',
+        },
+      ],
+    );
+  });
+
+  test('logs none as resolved directory source when fallback create_session has no directory', async () => {
+    const { calls, logger } = createLoggerRecorder();
+    const action = new CreateSessionAction();
+    const client = {
+      session: {
+        create: async () => ({ data: { sessionId: 'new-4' } }),
+        abort: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+    };
+
+    const result = await action.execute({ title: 'No directory' }, readyContext(client, { logger }));
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(
+      calls.filter((call) => call.message === 'action.create_session.started').map((call) => call.extra),
+      [
+        {
+          payloadKeys: ['title'],
+          resolvedDirectory: undefined,
+          resolvedDirectorySource: 'none',
+        },
+      ],
+    );
   });
 
   test('execute handles sdk failures', async () => {

@@ -27,7 +27,7 @@ function getEntryType(value: unknown): string {
 
 export class JsonAssiantDirectoryMappingAdapter implements AssiantDirectoryMappingPort {
   constructor(
-    private readonly filePath = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE?.trim(),
+    private readonly filePath = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
     private readonly loggerProvider: () => BridgeLogger | undefined = () => undefined,
   ) {}
 

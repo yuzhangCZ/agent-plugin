@@ -225,15 +225,28 @@ describe('assiant use cases', () => {
       },
     );
 
-    const result = await createSessionUseCase.execute({
+    const preparedCreateSession = await createSessionUseCase.resolveCreateSession({
       payload: {
         title: 'tenant session',
         assistantId: 'tenant-c',
       },
       effectiveDirectory: '/fallback',
     });
+    const result = await createSessionUseCase.execute({
+      payload: {
+        title: 'tenant session',
+        assistantId: 'tenant-c',
+      },
+      effectiveDirectory: '/fallback',
+    }, preparedCreateSession);
 
     assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(preparedCreateSession, {
+      directory: '/mapped/tenant-c',
+      source: 'mapping',
+      resolvedDirectory: '/mapped/tenant-c',
+      resolvedDirectorySource: 'mapping',
+    });
     assert.deepStrictEqual(calls, [
       {
         title: 'tenant session',

@@ -108,7 +108,7 @@ export class BridgeRuntime {
     this.sdkClient = createSdkAdapter(options.client);
     this.bridgeChannelPort = new EnvBridgeChannelAdapter();
     this.assiantDirectoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
-      process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE?.trim(),
+      process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
       () => this.logger,
     );
     this.sessionGatewayPort = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
