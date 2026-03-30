@@ -1,5 +1,6 @@
 import { DEFAULT_EVENT_ALLOWLIST } from '../contracts/upstream-events.js';
 import type { BridgeConfig } from '../types/index.js';
+import { DEFAULT_GATEWAY_URL } from './default-gateway-url.js';
 
 export const DEFAULT_BRIDGE_CONFIG = {
   enabled: true,
@@ -7,7 +8,7 @@ export const DEFAULT_BRIDGE_CONFIG = {
   bridgeDirectory: undefined,
   config_version: 1,
   gateway: {
-    url: 'ws://localhost:8081/ws/agent',
+    url: DEFAULT_GATEWAY_URL,
     channel: 'openx',
     heartbeatIntervalMs: 30000,
     reconnect: {

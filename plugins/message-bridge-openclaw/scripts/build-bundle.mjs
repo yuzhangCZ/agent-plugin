@@ -10,8 +10,10 @@ const bundleDir = path.join(rootDir, "bundle");
 const sourcePackageJsonPath = path.join(rootDir, "package.json");
 const sourcePluginManifestPath = path.join(rootDir, "openclaw.plugin.json");
 const sourceReadmePath = path.join(rootDir, "README.bundle.md");
+const localhostDefaultGatewayUrl = "ws://localhost:8081/ws/agent";
 
 async function main() {
+  const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || localhostDefaultGatewayUrl;
   await rm(bundleDir, { recursive: true, force: true });
   await mkdir(bundleDir, { recursive: true });
 
@@ -23,6 +25,9 @@ async function main() {
     target: "es2022",
     outfile: path.join(bundleDir, "index.js"),
     external: ["openclaw", "openclaw/*"],
+    define: {
+      "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
+    },
   });
 
   const sourcePackageJson = JSON.parse(await readFile(sourcePackageJsonPath, "utf8"));

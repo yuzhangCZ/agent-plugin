@@ -19,12 +19,17 @@ export class ConfigValidator {
     const c = config as BridgeConfig;
 
     if (c.enabled !== false) {
-      if (!c.auth || typeof c.auth.ak !== 'string' || !c.auth.ak.trim()) {
+      if (c.auth === undefined) {
         errors.push({ path: 'auth.ak', code: 'MISSING_REQUIRED', message: 'auth.ak is required' });
-      }
-
-      if (!c.auth || typeof c.auth.sk !== 'string' || !c.auth.sk.trim()) {
         errors.push({ path: 'auth.sk', code: 'MISSING_REQUIRED', message: 'auth.sk is required' });
+      } else if (this.isRecord(c.auth)) {
+        if (typeof c.auth.ak !== 'string' || !c.auth.ak.trim()) {
+          errors.push({ path: 'auth.ak', code: 'MISSING_REQUIRED', message: 'auth.ak is required' });
+        }
+
+        if (typeof c.auth.sk !== 'string' || !c.auth.sk.trim()) {
+          errors.push({ path: 'auth.sk', code: 'MISSING_REQUIRED', message: 'auth.sk is required' });
+        }
       }
     }
 
@@ -46,26 +51,59 @@ export class ConfigValidator {
       }
     }
 
-    if (c.gateway?.url !== undefined) {
+    if (c.gateway !== undefined && !this.isRecord(c.gateway)) {
+      errors.push({ path: 'gateway', code: 'INVALID_TYPE', message: 'gateway must be an object' });
+    }
+
+    if (this.isRecord(c.gateway) && c.gateway.url !== undefined) {
       if (typeof c.gateway.url !== 'string' || !/^wss?:\/\//.test(c.gateway.url)) {
         errors.push({ path: 'gateway.url', code: 'INVALID_URL', message: 'gateway.url must start with ws:// or wss://' });
       }
     }
 
-    if (c.gateway?.reconnect?.baseMs !== undefined) {
+    if (this.isRecord(c.gateway) && c.gateway.reconnect !== undefined && !this.isRecord(c.gateway.reconnect)) {
+      errors.push({
+        path: 'gateway.reconnect',
+        code: 'INVALID_TYPE',
+        message: 'gateway.reconnect must be an object',
+      });
+    }
+
+    if (this.isRecord(c.gateway) && c.gateway.ping !== undefined && !this.isRecord(c.gateway.ping)) {
+      errors.push({
+        path: 'gateway.ping',
+        code: 'INVALID_TYPE',
+        message: 'gateway.ping must be an object',
+      });
+    }
+
+    if (this.isRecord(c.gateway?.reconnect) && c.gateway.reconnect.baseMs !== undefined) {
       this.validatePositiveInt(c.gateway.reconnect.baseMs, 'gateway.reconnect.baseMs', errors);
     }
-    if (c.gateway?.reconnect?.maxMs !== undefined) {
+    if (this.isRecord(c.gateway?.reconnect) && c.gateway.reconnect.maxMs !== undefined) {
       this.validatePositiveInt(c.gateway.reconnect.maxMs, 'gateway.reconnect.maxMs', errors);
     }
-    if (c.gateway?.heartbeatIntervalMs !== undefined) {
+    if (this.isRecord(c.gateway) && c.gateway.heartbeatIntervalMs !== undefined) {
       this.validatePositiveInt(c.gateway.heartbeatIntervalMs, 'gateway.heartbeatIntervalMs', errors);
     }
-    if (c.sdk?.timeoutMs !== undefined) {
+
+    if (c.sdk !== undefined && !this.isRecord(c.sdk)) {
+      errors.push({ path: 'sdk', code: 'INVALID_TYPE', message: 'sdk must be an object' });
+    }
+
+    if (this.isRecord(c.sdk) && c.sdk.timeoutMs !== undefined) {
       this.validatePositiveInt(c.sdk.timeoutMs, 'sdk.timeoutMs', errors);
     }
 
-    if (c.events?.allowlist !== undefined) {
+    if (c.auth !== undefined && !this.isRecord(c.auth)) {
+      errors.push({ path: 'auth', code: 'INVALID_TYPE', message: 'auth must be an object' });
+    }
+
+    if (c.events !== undefined && !this.isRecord(c.events)) {
+      errors.push({ path: 'events', code: 'INVALID_TYPE', message: 'events must be an object' });
+    }
+
+    if (this.isRecord(c.events) && c.events.allowlist !== undefined) {
       if (!Array.isArray(c.events.allowlist)) {
         errors.push({ path: 'events.allowlist', code: 'INVALID_TYPE', message: 'events.allowlist must be an array' });
       } else {
@@ -97,5 +135,9 @@ export class ConfigValidator {
     if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
       errors.push({ path, code: 'INVALID_NUMBER', message: `${path} must be a positive integer` });
     }
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }

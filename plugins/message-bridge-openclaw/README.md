@@ -10,6 +10,13 @@ This package is the OpenClaw-side adapter. It keeps the gateway protocol
 unchanged and translates OpenClaw channel runtime events into the gateway
 message contract.
 
+维护说明：
+
+- 官方受保障的发布路径只有 GitHub release workflow 和 `pnpm release:local`
+- 这两条路径会要求显式提供默认网关地址，并在构建期通过 `MB_DEFAULT_GATEWAY_URL` 固化到 bundle 产物
+- 普通本地开发构建未注入时，`channels.message-bridge.gateway.url` 默认仍回退到 `ws://localhost:8081/ws/agent`
+- 本次不新增 OpenClaw 侧运行时环境变量覆盖入口；仍以配置文件为准
+
 文档导航（联调优先）:
 
 - `docs/README.md`（文档总导航）

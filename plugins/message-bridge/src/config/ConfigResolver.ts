@@ -3,7 +3,6 @@ import { dirname, join, resolve } from 'path';
 import { promises } from 'fs';
 import type { BridgeConfig } from '../types/index.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
-import { DEFAULT_EVENT_ALLOWLIST } from '../contracts/upstream-events.js';
 import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
@@ -76,13 +75,16 @@ export class ConfigResolver {
     }
 
     const normalized = this.normalizeConfig(config as BridgeConfig);
-    warnUnknownToolType(this.logger, 'config.gateway.channel.unknown', normalized.gateway.channel, {
-      source: channelSource,
-    });
+    const gatewayChannel = this.readGatewayChannel(normalized);
+    if (gatewayChannel) {
+      warnUnknownToolType(this.logger, 'config.gateway.channel.unknown', gatewayChannel, {
+        source: channelSource,
+      });
+    }
     this.logger?.info('config.resolve.completed', {
       workspacePath: workspaceRoot,
       sources,
-      allowlistSize: normalized.events.allowlist.length,
+      allowlistSize: this.readAllowlistSize(normalized),
       debugEnabled: !!normalized.debug,
       projectConfigPath,
     });
@@ -232,86 +234,44 @@ export class ConfigResolver {
     if (typeof normalized.bridgeDirectory === 'string') {
       const trimmed = normalized.bridgeDirectory.trim();
       normalized.bridgeDirectory = trimmed || undefined;
-    } else {
-      normalized.bridgeDirectory = undefined;
     }
 
-    if (!normalized.gateway) {
-      normalized.gateway = {} as BridgeConfig['gateway'];
-    }
+    if (this.isRecord(normalized.gateway)) {
+      normalized.gateway = { ...normalized.gateway };
 
-    if (!normalized.gateway.url) {
-      normalized.gateway.url = 'ws://localhost:8081/ws/agent';
-    }
-
-    if (!normalized.gateway.channel) {
-      normalized.gateway.channel = 'openx';
-    } else {
-      normalized.gateway.channel = normalized.gateway.channel.trim();
-    }
-
-    if (!normalized.gateway.heartbeatIntervalMs) {
-      normalized.gateway.heartbeatIntervalMs = 30000;
-    }
-
-    if (!normalized.gateway.reconnect) {
-      normalized.gateway.reconnect = {
-        baseMs: 1000,
-        maxMs: 30000,
-        exponential: true,
-      };
-    } else {
-      if (!normalized.gateway.reconnect.baseMs) {
-        normalized.gateway.reconnect.baseMs = 1000;
+      if (typeof normalized.gateway.channel === 'string') {
+        normalized.gateway.channel = normalized.gateway.channel.trim();
       }
-      if (!normalized.gateway.reconnect.maxMs) {
-        normalized.gateway.reconnect.maxMs = 30000;
-      }
-      if (normalized.gateway.reconnect.exponential === undefined) {
-        normalized.gateway.reconnect.exponential = true;
-      }
-    }
-
-    const gatewayMetadata = normalized.gateway as unknown as {
-      deviceName?: unknown;
-      toolVersion?: unknown;
-      macAddress?: unknown;
-    };
-    delete gatewayMetadata.deviceName;
-    delete gatewayMetadata.toolVersion;
-    delete gatewayMetadata.macAddress;
-
-    if (!normalized.gateway.ping) {
-      normalized.gateway.ping = {
-        intervalMs: 30000,
-      };
-    }
-
-    if (!normalized.sdk) {
-      normalized.sdk = { timeoutMs: 10000 };
-    } else if (!normalized.sdk.timeoutMs) {
-      normalized.sdk.timeoutMs = 10000;
-    }
-
-    if (!normalized.auth) {
-      normalized.auth = { ak: '', sk: '' };
-    }
-
-    if (!normalized.events || !normalized.events.allowlist || normalized.events.allowlist.length === 0) {
-      normalized.events = {
-        allowlist: [...DEFAULT_EVENT_ALLOWLIST],
-      };
-    }
-
-    if (!normalized.config_version) {
-      normalized.config_version = 1;
-    }
-
-    if (normalized.enabled === undefined) {
-      normalized.enabled = true;
     }
 
     return normalized;
+  }
+
+  private readGatewayChannel(config: BridgeConfig): string | null {
+    const gateway = config.gateway;
+    if (!this.isRecord(gateway)) {
+      return null;
+    }
+
+    const channel = gateway.channel;
+    if (typeof channel !== 'string' || channel.length === 0) {
+      return null;
+    }
+
+    return channel;
+  }
+
+  private readAllowlistSize(config: BridgeConfig): number {
+    const events = config.events;
+    if (!this.isRecord(events) || !Array.isArray(events.allowlist)) {
+      return 0;
+    }
+
+    return events.allowlist.length;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private mergeConfig(target: unknown, source: unknown): any {

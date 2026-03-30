@@ -60,6 +60,7 @@ const validTargets = new Set([...Object.keys(releaseDescriptors), "dual"]);
 const validBumps = new Set(["patch", "minor", "major", "prerelease"]);
 const validReleaseKinds = new Set(["stable", "prerelease"]);
 const defaultPreid = "beta";
+const defaultGatewayUrlFlag = "--default-gateway-url";
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -112,6 +113,10 @@ function createProcessPorts(overrides = {}) {
       const output = execFileSync(resolvedCommand, args, {
         cwd: options.cwd,
         encoding: "utf8",
+        env: {
+          ...process.env,
+          ...(options.env ?? {}),
+        },
         shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand),
         stdio: options.stdio ?? "pipe",
       });
@@ -265,6 +270,35 @@ function normalizeRegistryValue(value) {
   return normalized;
 }
 
+function normalizeOptionalString(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function validateDefaultGatewayUrl(value) {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) {
+    throw new Error("default gateway url is required; pass --default-gateway-url <url> so MB_DEFAULT_GATEWAY_URL is set before build");
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("default gateway url must be a valid WebSocket URL using ws:// or wss://");
+  }
+
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error("default gateway url must use ws:// or wss://");
+  }
+
+  return normalized;
+}
+
 function readOptionValue(argv, index, flag) {
   const value = argv[index + 1];
   if (!value || value.startsWith("-")) {
@@ -280,6 +314,7 @@ export function parseReleaseLocalArgs(argv) {
     allowDirty: false,
     bridgeVersion: null,
     bump: null,
+    defaultGatewayUrl: null,
     dryRun: false,
     help: false,
     installDeps: false,
@@ -409,6 +444,17 @@ export function parseReleaseLocalArgs(argv) {
 
     if (arg.startsWith("--openclaw-version=")) {
       parsed.openclawVersion = arg.slice("--openclaw-version=".length);
+      continue;
+    }
+
+    if (arg === defaultGatewayUrlFlag) {
+      parsed.defaultGatewayUrl = readOptionValue(args, index, defaultGatewayUrlFlag);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith(`${defaultGatewayUrlFlag}=`)) {
+      parsed.defaultGatewayUrl = arg.slice(`${defaultGatewayUrlFlag}=`.length);
       continue;
     }
 
@@ -817,6 +863,7 @@ function formatTargetPlan(target, options = {}) {
 
 export function formatReleasePlan(plan) {
   const skipVerify = Boolean(plan.parsed?.skipVerify);
+  const defaultGatewayUrl = normalizeOptionalString(plan.parsed?.defaultGatewayUrl);
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
@@ -826,6 +873,7 @@ export function formatReleasePlan(plan) {
     `verify: ${skipVerify ? "no" : "yes"}`,
     `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
     `push remote: ${plan.actions.push ? "yes" : "no"}`,
+    `default gateway url: ${defaultGatewayUrl ?? "missing"}`,
     "",
     "Targets:",
     ...plan.targets.map((target) => formatTargetPlan(target, { skipVerify })),
@@ -889,6 +937,7 @@ Options:
   --version <semver>              Explicit version for single-target release
   --bridge-version <semver>       Explicit message-bridge version for dual release
   --openclaw-version <semver>     Explicit message-bridge-openclaw version for dual release
+  --default-gateway-url <url>     WebSocket gateway url injected into official release builds
   --bump <type>                   patch | minor | major | prerelease
   --preid <name>                  Prerelease identifier, default: beta
   --release <stable|prerelease>   Explicit release kind
@@ -914,24 +963,26 @@ Defaults:
   - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
   - missing packages fail fast unless an install flag is provided
   - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
+  - official release path requires --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
   - dual releases are non-atomic
 
 Examples:
   pnpm release:plan -- --target message-bridge --bump patch
-  pnpm release:local -- --target message-bridge --version 1.2.0
+  pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta
-  pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish
-  pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0
-  pnpm release:local -- --target message-bridge --bump patch --push
+  pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:local -- --target message-bridge --bump patch --push --default-gateway-url wss://gateway.example.com/ws/agent
 `.trimStart();
 }
 
-function runCommand(exec, command, cwd) {
+function runCommand(exec, command, cwd, env) {
   return exec(command[0], command.slice(1), {
     cwd,
+    env,
     stdio: "inherit",
   });
 }
@@ -1071,7 +1122,7 @@ function prepareDependencies(plan, ports, stdout) {
 }
 
 function readRegistry(exec, repoRoot) {
-  return exec("npm", ["config", "get", "registry"], {
+  return exec("npm", ["config", "get", "registry", "--force"], {
     cwd: repoRoot,
     stdio: "pipe",
   });
@@ -1081,7 +1132,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
   const packageScope = getPackageScope(packageName);
   if (packageScope) {
     const scopedRegistry = normalizeRegistryValue(
-      exec("npm", ["config", "get", `${packageScope}:registry`], {
+      exec("npm", ["config", "get", `${packageScope}:registry`, "--force"], {
         cwd: repoRoot,
         stdio: "pipe",
       }),
@@ -1101,7 +1152,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
 }
 
 function readWhoAmI(exec, repoRoot, registry) {
-  return exec("npm", ["whoami", "--registry", registry], {
+  return exec("npm", ["whoami", "--registry", registry, "--force"], {
     cwd: repoRoot,
     stdio: "pipe",
   });
@@ -1117,7 +1168,7 @@ function printRuntimeHeader(stdout, plan, registry, whoami) {
   stdout.write(`${formatReleasePlan(plan)}\n`);
   stdout.write("Registry Context\n");
   stdout.write(`registry: ${registry}\n`);
-  stdout.write(`npm whoami: ${whoami}\n`);
+  stdout.write(`registry whoami: ${whoami}\n`);
   if (plan.parsed.skipVerify) {
     stdout.write("verify skipped by user request (--skip-verify)\n");
   }
@@ -1147,6 +1198,13 @@ function restoreManifestVersion(fs, manifestPath, version) {
   const manifest = fs.readJson(manifestPath);
   manifest.version = version;
   fs.writeJson(manifestPath, manifest);
+}
+
+function createReleaseBuildEnv(plan) {
+  const defaultGatewayUrl = validateDefaultGatewayUrl(plan.parsed?.defaultGatewayUrl);
+  return {
+    MB_DEFAULT_GATEWAY_URL: defaultGatewayUrl,
+  };
 }
 
 function maybeInjectFailure(target, stage) {
@@ -1234,6 +1292,7 @@ export function executeRelease(plan, overrides = {}) {
   }
 
   prepareDependencies(plan, { exec, fs, inspectDependencies }, stdout);
+  const releaseBuildEnv = createReleaseBuildEnv(plan);
 
   const publishRegistries = plan.actions.publish
     ? Object.fromEntries(
@@ -1259,14 +1318,14 @@ export function executeRelease(plan, overrides = {}) {
 
       stdout.write(`Running build for ${target.id}\n`);
       for (const command of target.buildSteps) {
-        runCommand(exec, command, plan.repoRoot);
+        runCommand(exec, command, plan.repoRoot, releaseBuildEnv);
       }
 
       if (plan.parsed.skipVerify) {
         stdout.write(`Skipping verify for ${target.id} (--skip-verify)\n`);
       } else {
         stdout.write(`Running verify for ${target.id}\n`);
-        runCommand(exec, target.verifyStep, plan.repoRoot);
+        runCommand(exec, target.verifyStep, plan.repoRoot, releaseBuildEnv);
       }
 
       const readiness = evaluatePublishReadiness(target, {
@@ -1295,7 +1354,7 @@ export function executeRelease(plan, overrides = {}) {
         const publishCommand = ["npm", "publish", "--tag", target.distTag, "--registry", publishRegistries[target.id]];
         stdout.write(`Publishing ${target.id}: ${formatCommand(publishCommand)}\n`);
         publishAttemptedTargetIds.add(target.id);
-        runCommand(exec, publishCommand, target.publishRootAbsolute);
+        runCommand(exec, publishCommand, target.publishRootAbsolute, releaseBuildEnv);
         publishedTargets.push(target);
         printPublishedFact(stdout, target);
         maybeInjectFailure(target, "after-publish");
