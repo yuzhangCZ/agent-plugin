@@ -961,7 +961,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         'BRIDGE_AUTH_SK',
         'BRIDGE_SDK_TIMEOUT_MS',
         'BRIDGE_EVENTS_ALLOWLIST',
-        'BRIDGE_ASSIANT_DIRECTORY_MAP_FILE',
+        'BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE',
       ]);
       assert.deepStrictEqual(snapshot.body.extra.values.BRIDGE_DEBUG, {
         present: true,

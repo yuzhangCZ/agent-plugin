@@ -406,7 +406,7 @@ describe('protocol directory-context integration', () => {
       'BRIDGE_GATEWAY_CHANNEL',
       'BRIDGE_AUTH_AK',
       'BRIDGE_AUTH_SK',
-      'BRIDGE_ASSIANT_DIRECTORY_MAP_FILE',
+      'BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE',
     ]);
     delete process.env.BRIDGE_ENABLED;
     delete process.env.BRIDGE_DEBUG;
@@ -415,7 +415,7 @@ describe('protocol directory-context integration', () => {
     delete process.env.BRIDGE_GATEWAY_CHANNEL;
     delete process.env.BRIDGE_AUTH_AK;
     delete process.env.BRIDGE_AUTH_SK;
-    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
@@ -509,9 +509,9 @@ describe('protocol directory-context integration', () => {
     );
 
     const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
@@ -587,9 +587,9 @@ describe('protocol directory-context integration', () => {
         process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
       } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
       }
     }
   });
@@ -608,9 +608,9 @@ describe('protocol directory-context integration', () => {
     );
 
     const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
@@ -795,9 +795,9 @@ describe('protocol directory-context integration', () => {
         process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
       } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
       }
     }
   });
@@ -808,9 +808,9 @@ describe('protocol directory-context integration', () => {
     await writeFile(mapFile, JSON.stringify({ 'persona-1': '/tenant/persona-1' }), 'utf8');
 
     const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
@@ -914,9 +914,9 @@ describe('protocol directory-context integration', () => {
         process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
       } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
       }
     }
   });
@@ -935,9 +935,9 @@ describe('protocol directory-context integration', () => {
     );
 
     const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = mapFile;
+    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
 
     try {
       const createCalls = [];
@@ -1004,18 +1004,18 @@ describe('protocol directory-context integration', () => {
         process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
       } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
       }
     }
   });
 
   test('uniassistant channel warns when mapping file is not configured', async () => {
     const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
     process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+    delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
 
     try {
       const createCalls = [];
@@ -1083,9 +1083,9 @@ describe('protocol directory-context integration', () => {
         process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
       }
       if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE;
+        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
       } else {
-        process.env.BRIDGE_ASSIANT_DIRECTORY_MAP_FILE = previousMapFile;
+        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
       }
     }
   });

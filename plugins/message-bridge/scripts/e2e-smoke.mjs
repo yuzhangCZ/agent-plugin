@@ -285,7 +285,8 @@ function assertScenario(scenarioName, opencodeLogText, gatewayLogText, bridgeDir
       opencodeLogText.includes('runtime.directory.resolved') &&
       opencodeLogText.includes('action.create_session.started') &&
       opencodeLogText.includes('action.chat.started') &&
-      opencodeLogText.includes(`effectiveDirectory=${bridgeDirectory}`) &&
+      opencodeLogText.includes(`resolvedDirectory=${bridgeDirectory}`) &&
+      opencodeLogText.includes('resolvedDirectorySource=effective') &&
       opencodeLogText.includes(`"directory":"${bridgeDirectory}"`) &&
       opencodeLogText.includes(bridgeDirectory)
     );

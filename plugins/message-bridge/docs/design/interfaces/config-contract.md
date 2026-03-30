@@ -141,7 +141,7 @@
 | `BRIDGE_AUTH_SK` | `auth.sk` | 支持 `${VAR_NAME}` 替换 |
 | `BRIDGE_SDK_TIMEOUT_MS` | `sdk.timeoutMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
-| `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
+| `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
 
 环境变量示例：
 
@@ -155,12 +155,12 @@ BRIDGE_GATEWAY_RECONNECT_BASE_MS=1000
 BRIDGE_GATEWAY_RECONNECT_MAX_MS=30000
 BRIDGE_SDK_TIMEOUT_MS=10000
 BRIDGE_EVENTS_ALLOWLIST=message.updated,session.status
-BRIDGE_ASSIANT_DIRECTORY_MAP_FILE=/path/to/assiant-directory-map.json
+BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 ```
 
 补充说明：
 
-- 环境变量名 `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE` 保留历史拼写；运行时特殊通道值已收敛为 `uniassistant`
+- 运行时特殊通道值已收敛为 `uniassistant`
 - `BRIDGE_GATEWAY_CHANNEL` 是唯一有效的通道环境变量入口；`BRIDGE_CHANNEL` 已移除，当前实现会忽略它
 - 下行协议公开字段已经统一为 `assistantId`
 - 旧协议字段 `assiantId` 已废弃，当前会被静默忽略，不再触发目录映射或 `agent` 透传
@@ -201,7 +201,7 @@ BRIDGE_ASSIANT_DIRECTORY_MAP_FILE=/path/to/assiant-directory-map.json
 - `gateway.channel`
 - `gateway.reconnect.exponential`
 - `gateway.ping.intervalMs`
-- `BRIDGE_ASSIANT_DIRECTORY_MAP_FILE`
+- `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE`
 
 ## 9. 默认白名单
 
