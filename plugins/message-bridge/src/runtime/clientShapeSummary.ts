@@ -23,6 +23,7 @@ export function buildClientShapeSummary(client: unknown): Record<string, unknown
     hasAppHealth: typeof app?.health === 'function',
     hasAppLog: typeof app?.log === 'function',
     hasSessionCreate: typeof session?.create === 'function',
+    hasSessionGet: typeof session?.get === 'function',
     hasSessionPrompt: typeof session?.prompt === 'function',
     hasSessionAbort: typeof session?.abort === 'function',
     hasSessionDelete: typeof session?.delete === 'function',

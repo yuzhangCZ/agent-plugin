@@ -1,7 +1,7 @@
 # 协议契约
 
-**Version:** 2.2
-**Date:** 2026-03-28
+**Version:** 2.3
+**Date:** 2026-03-30
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`
@@ -208,6 +208,7 @@ type ToolErrorMessage = {
   welinkSessionId?: string;
   toolSessionId?: string;
   error: string;
+  reason?: 'session_not_found';
 };
 
 type SessionCreatedMessage = {
@@ -243,3 +244,18 @@ type StatusResponseMessage = {
 
 - 记录日志事件：`downstream.normalization_failed`
 - bridge 按现有 `tool_error` 语义返回错误
+
+`tool_error.reason` 判定边界（当前实现）：
+
+| 错误来源 | 证据 | reason |
+|---|---|---|
+| `chat` 执行前置探测 | `session.get` 返回 `NotFoundError` | `session_not_found` |
+| `chat` 执行前置探测 | `session.get` 返回其他错误或抛出其他异常 | `undefined` |
+| 其他 action（`create_session/close_session/abort_session/permission_reply/question_reply`） | 无会话缺失强证据 | `undefined` |
+| `chat` prompt 阶段错误 | 不命中 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` | `undefined` |
+
+补充说明：
+
+1. `session.get` 是启动必选能力；`chat` 执行时若前置 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
+2. 当前 `session_not_found` 只允许由 `chat` 前置 `session.get` 上报，不允许靠文案、泛化 `404` 或 `session.prompt` 错误推断。
+3. 分类器做“action + 结构化证据”映射：仅 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` 命中 `reason=session_not_found`。
