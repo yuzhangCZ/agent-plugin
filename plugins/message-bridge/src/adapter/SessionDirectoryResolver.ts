@@ -18,7 +18,7 @@ function extractSessionDirectory(result: unknown): string | undefined {
   }
 
   const nested = isRecord(result.data) ? result.data : undefined;
-  return pickString(nested?.directory) ?? pickString(result.directory);
+  return pickString(nested?.directory);
 }
 
 function isNotFoundError(error: unknown): boolean {

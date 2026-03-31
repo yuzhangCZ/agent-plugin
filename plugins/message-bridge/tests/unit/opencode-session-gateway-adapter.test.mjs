@@ -21,6 +21,46 @@ function createLoggerSpy() {
 }
 
 describe('OpencodeSessionGatewayAdapter.promptSession', () => {
+  test('createSession returns wrapped Session id from data.id', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async (options) => ({
+          data: {
+            id: 'ses-create',
+            title: options?.title ?? 'created session',
+            directory: options?.directory ?? '/tmp/create-dir',
+          },
+        }),
+        get: async () => ({ data: { id: 'unused', directory: '/tmp/unused' } }),
+        prompt: async () => ({ data: { ok: true } }),
+        abort: async () => ({ data: { ok: true } }),
+        delete: async () => ({ data: { ok: true } }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({ data: { ok: true } }),
+      _client: {
+        get: async () => ({ data: [] }),
+        post: async () => ({ data: true }),
+      },
+    }));
+
+    const result = await adapter.createSession({
+      title: 'created session',
+      directory: '/tmp/create-dir',
+    });
+
+    assert.deepStrictEqual(result, {
+      success: true,
+      data: {
+        sessionId: 'ses-create',
+        session: {
+          id: 'ses-create',
+          title: 'created session',
+          directory: '/tmp/create-dir',
+        },
+      },
+    });
+  });
+
   test('resolves directory from session.get and forwards it to session.prompt with debug log', async () => {
     const calls = [];
     const { logger, entries } = createLoggerSpy();

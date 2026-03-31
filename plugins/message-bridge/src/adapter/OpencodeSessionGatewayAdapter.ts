@@ -30,13 +30,9 @@ function extractSessionObject(result: unknown): {
   if (result && typeof result === 'object') {
     const root = result as Record<string, unknown>;
     const nested = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : undefined;
-    const session = nested ?? root;
+    const session = nested ?? {};
     return {
-      sessionId:
-        pickString(root.sessionId) ??
-        pickString(root.id) ??
-        pickString(nested?.sessionId) ??
-        pickString(nested?.id),
+      sessionId: pickString(nested?.id),
       session,
     };
   }

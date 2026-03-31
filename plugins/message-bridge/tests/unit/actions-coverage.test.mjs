@@ -152,7 +152,7 @@ describe('CreateSessionAction coverage', () => {
       session: {
         create: async (options) => {
           calls.push(options);
-          return { data: { sessionId: 'new-1' } };
+          return { data: { id: 'new-1' } };
         },
         abort: async () => ({}),
         prompt: async () => ({}),
@@ -172,7 +172,7 @@ describe('CreateSessionAction coverage', () => {
       session: {
         create: async (options) => {
           calls.push(options);
-          return { data: { sessionId: 'new-2' } };
+          return { data: { id: 'new-2' } };
         },
         abort: async () => ({}),
         prompt: async () => ({}),
@@ -231,7 +231,7 @@ describe('CreateSessionAction coverage', () => {
     const action = new CreateSessionAction();
     const client = {
       session: {
-        create: async () => ({ data: { sessionId: 'new-4' } }),
+        create: async () => ({ data: { id: 'new-4' } }),
         abort: async () => ({}),
         prompt: async () => ({}),
       },
