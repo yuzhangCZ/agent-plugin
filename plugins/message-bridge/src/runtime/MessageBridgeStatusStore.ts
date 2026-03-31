@@ -42,8 +42,7 @@ export function subscribeMessageBridgeStatus(listener: MessageBridgeStatusListen
 }
 
 export function resetMessageBridgeStatus(): MessageBridgeStatusSnapshot {
-  snapshot = createDefaultMessageBridgeStatusSnapshot();
-  return getMessageBridgeStatus();
+  return publishMessageBridgeStatus(createDefaultMessageBridgeStatusSnapshot());
 }
 
 export function __resetMessageBridgeStatusForTests(): MessageBridgeStatusSnapshot {

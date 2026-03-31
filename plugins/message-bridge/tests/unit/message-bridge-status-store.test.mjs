@@ -5,6 +5,7 @@ import {
   __resetMessageBridgeStatusForTests,
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
+  resetMessageBridgeStatus,
   subscribeMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
@@ -89,5 +90,30 @@ describe('message bridge status store', () => {
       updatedAt: 10,
       lastReadyAt: null,
     }), /message_bridge_status_invalid_snapshot/);
+  });
+
+  test('reset notifies subscribers when semantics fall back to default snapshot', () => {
+    const seen = [];
+    subscribeMessageBridgeStatus((snapshot) => {
+      seen.push(snapshot);
+    });
+
+    publishMessageBridgeStatus({
+      connected: true,
+      phase: 'ready',
+      unavailableReason: null,
+      willReconnect: null,
+      lastError: null,
+      updatedAt: 10,
+      lastReadyAt: 10,
+    });
+
+    const resetSnapshot = resetMessageBridgeStatus();
+
+    assert.strictEqual(seen.length, 2);
+    assert.strictEqual(seen[1].phase, 'unavailable');
+    assert.strictEqual(seen[1].unavailableReason, 'uninitialized');
+    assert.strictEqual(seen[1].willReconnect, false);
+    assert.deepStrictEqual(resetSnapshot, seen[1]);
   });
 });
