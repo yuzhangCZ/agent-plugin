@@ -70,7 +70,7 @@ function buildSdkPayloadFailure<TData>(
     success: false,
     errorCode: 'SDK_UNREACHABLE',
     errorMessage: `${failurePrefix}: ${errorMessage}`,
-    errorEvidence: getToolErrorEvidence(errorField, sourceOperation),
+    errorEvidence: getToolErrorEvidence(errorField, sourceOperation) ?? (sourceOperation ? { sourceOperation } : undefined),
   };
 }
 
@@ -108,6 +108,61 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
 
   constructor(private readonly getClient: () => OpencodeClient | null) {
     this.sessionDirectoryResolver = new SessionDirectoryResolver(getClient);
+  }
+
+  private async withResolvedDirectory<TResult>(parameters: {
+    sessionId: string;
+    failurePrefix: string;
+    logger?: BridgeLogger;
+    logFields?: Record<string, unknown>;
+    handler: (context: { client: OpencodeClient; directory: string }) => Promise<ActionResult<TResult>>;
+  }): Promise<ActionResult<TResult>> {
+    const client = this.requireClient();
+    const resolution = await this.sessionDirectoryResolver.resolve({
+      sessionId: parameters.sessionId,
+      logger: parameters.logger,
+      logFields: parameters.logFields,
+    });
+    if (!resolution.success) {
+      return buildDirectoryResolutionFailure(parameters.failurePrefix, resolution);
+    }
+
+    return parameters.handler({
+      client,
+      directory: resolution.directory,
+    });
+  }
+
+  private async executeSdkCall<TResult>(parameters: {
+    failurePrefix: string;
+    sourceOperation?: Parameters<typeof getToolErrorEvidence>[1];
+    promiseFactory: () => Promise<unknown>;
+    onSuccess: (data: unknown) => ActionResult<TResult>;
+  }): Promise<ActionResult<TResult>> {
+    const executionResult = await safeExecute(
+      parameters.promiseFactory(),
+      (error) => getErrorMessage(error),
+    );
+
+    if (!executionResult.success) {
+      return buildSdkExecutionFailure(parameters.failurePrefix, executionResult.error);
+    }
+
+    if (hasError(executionResult.data)) {
+      return buildSdkPayloadFailure(
+        parameters.failurePrefix,
+        this.extractSdkErrorField(executionResult.data),
+        parameters.sourceOperation,
+      );
+    }
+
+    return parameters.onSuccess(executionResult.data);
+  }
+
+  private extractSdkErrorField(result: unknown): unknown {
+    return result && typeof result === 'object' && 'error' in result
+      ? (result as { error: unknown }).error
+      : undefined;
   }
 
   async createSession(parameters: { title?: string; directory?: string }): Promise<ActionResult<CreateSessionResultData>> {
@@ -158,117 +213,72 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     agent?: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<void>> {
-    const client = this.requireClient();
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    return this.withResolvedDirectory({
       sessionId: parameters.sessionId,
+      failurePrefix: 'Failed to send message',
       logger: parameters.logger,
       logFields: { hasAgent: Boolean(parameters.agent) },
+      handler: ({ client, directory }) =>
+        this.executeSdkCall({
+          failurePrefix: 'Failed to send message',
+          sourceOperation: 'session.prompt',
+          promiseFactory: () => client.session.prompt({
+            sessionID: parameters.sessionId,
+            directory,
+            parts: [{ type: 'text', text: parameters.text }],
+            ...(parameters.agent ? { agent: parameters.agent } : {}),
+          }),
+          onSuccess: () => ({ success: true }),
+        }),
     });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to send message', resolution);
-    }
-
-    const executionResult = await safeExecute(
-      client.session.prompt({
-        sessionID: parameters.sessionId,
-        directory: resolution.directory,
-        parts: [{ type: 'text', text: parameters.text }],
-        ...(parameters.agent ? { agent: parameters.agent } : {}),
-      }),
-      (error) => getErrorMessage(error),
-    );
-
-    if (executionResult.success) {
-      if (!hasError(executionResult.data)) {
-        return { success: true };
-      }
-
-      const errorField =
-        executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data
-          ? (executionResult.data as { error: unknown }).error
-          : undefined;
-      return buildSdkPayloadFailure('Failed to send message', errorField, 'session.prompt');
-    }
-
-    return buildSdkExecutionFailure('Failed to send message', executionResult.error);
   }
 
   async abortSession(parameters: {
     sessionId: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<AbortSessionResultData>> {
-    const client = this.requireClient();
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    return this.withResolvedDirectory({
       sessionId: parameters.sessionId,
+      failurePrefix: 'Failed to abort session',
       logger: parameters.logger,
+      handler: ({ client, directory }) =>
+        this.executeSdkCall({
+          failurePrefix: 'Failed to abort session',
+          sourceOperation: 'session.abort',
+          promiseFactory: () => client.session.abort({
+            sessionID: parameters.sessionId,
+            directory,
+          }),
+          onSuccess: () => ({
+            success: true,
+            data: { sessionId: parameters.sessionId, aborted: true },
+          }),
+        }),
     });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to abort session', resolution);
-    }
-
-    const executionResult = await safeExecute(
-      client.session.abort({
-        sessionID: parameters.sessionId,
-        directory: resolution.directory,
-      }),
-      (error) => getErrorMessage(error),
-    );
-
-    if (executionResult.success) {
-      if (!hasError(executionResult.data)) {
-        return {
-          success: true,
-          data: { sessionId: parameters.sessionId, aborted: true },
-        };
-      }
-
-      const errorField =
-        executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data
-          ? (executionResult.data as { error: unknown }).error
-          : undefined;
-      return buildSdkPayloadFailure('Failed to abort session', errorField, 'session.abort');
-    }
-
-    return buildSdkExecutionFailure('Failed to abort session', executionResult.error);
   }
 
   async closeSession(parameters: {
     sessionId: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<CloseSessionResultData>> {
-    const client = this.requireClient();
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    return this.withResolvedDirectory({
       sessionId: parameters.sessionId,
+      failurePrefix: 'Failed to close session',
       logger: parameters.logger,
+      handler: ({ client, directory }) =>
+        this.executeSdkCall({
+          failurePrefix: 'Failed to close session',
+          sourceOperation: 'session.delete',
+          promiseFactory: () => client.session.delete({
+            sessionID: parameters.sessionId,
+            directory,
+          }),
+          onSuccess: () => ({
+            success: true,
+            data: { sessionId: parameters.sessionId, closed: true },
+          }),
+        }),
     });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to close session', resolution);
-    }
-
-    const executionResult = await safeExecute(
-      client.session.delete({
-        sessionID: parameters.sessionId,
-        directory: resolution.directory,
-      }),
-      (error) => getErrorMessage(error),
-    );
-
-    if (executionResult.success) {
-      if (!hasError(executionResult.data)) {
-        return {
-          success: true,
-          data: { sessionId: parameters.sessionId, closed: true },
-        };
-      }
-
-      const errorField =
-        executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data
-          ? (executionResult.data as { error: unknown }).error
-          : undefined;
-      return buildSdkPayloadFailure('Failed to close session', errorField, 'session.delete');
-    }
-
-    return buildSdkExecutionFailure('Failed to close session', executionResult.error);
   }
 
   async replyPermission(parameters: {
@@ -277,45 +287,30 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     response: PermissionReplyPayload['response'];
     logger?: BridgeLogger;
   }): Promise<ActionResult<PermissionReplyResultData>> {
-    const client = this.requireClient();
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    return this.withResolvedDirectory({
       sessionId: parameters.sessionId,
+      failurePrefix: 'Failed to reply to permission request',
       logger: parameters.logger,
-    });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to reply to permission request', resolution);
-    }
-
-    const executionResult = await safeExecute(
-      client.postSessionIdPermissionsPermissionId({
-        sessionID: parameters.sessionId,
-        permissionID: parameters.permissionId,
-        response: parameters.response,
-        directory: resolution.directory,
-      }),
-      (error) => getErrorMessage(error),
-    );
-
-    if (executionResult.success) {
-      if (!hasError(executionResult.data)) {
-        return {
-          success: true,
-          data: {
-            permissionId: parameters.permissionId,
+      handler: ({ client, directory }) =>
+        this.executeSdkCall({
+          failurePrefix: 'Failed to reply to permission request',
+          sourceOperation: 'permission.reply',
+          promiseFactory: () => client.postSessionIdPermissionsPermissionId({
+            sessionID: parameters.sessionId,
+            permissionID: parameters.permissionId,
             response: parameters.response,
-            applied: true,
-          },
-        };
-      }
-
-      const errorField =
-        executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data
-          ? (executionResult.data as { error: unknown }).error
-          : undefined;
-      return buildSdkPayloadFailure('Failed to reply to permission request', errorField, 'permission.reply');
-    }
-
-    return buildSdkExecutionFailure('Failed to reply to permission request', executionResult.error);
+            directory,
+          }),
+          onSuccess: () => ({
+            success: true,
+            data: {
+              permissionId: parameters.permissionId,
+              response: parameters.response,
+              applied: true,
+            },
+          }),
+        }),
+    });
   }
 
   async replyQuestion(parameters: {
@@ -324,94 +319,84 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     answer: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>> {
-    const client = this.requireClient();
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    return this.withResolvedDirectory({
       sessionId: parameters.sessionId,
+      failurePrefix: 'Failed to reply to question',
       logger: parameters.logger,
-    });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to reply to question', resolution);
-    }
+      handler: async ({ client, directory }) => {
+        const listResult = await this.executeSdkCall({
+          failurePrefix: 'Failed to reply to question',
+          sourceOperation: 'question.list',
+          promiseFactory: () => client._client.get({
+            url: '/question',
+            query: { directory },
+          }),
+          onSuccess: (data) => ({
+            success: true,
+            data: extractResultData<unknown>(data),
+          }),
+        });
 
-    const listExecutionResult = await safeExecute(
-      client._client.get({
-        url: '/question',
-        query: { directory: resolution.directory },
-      }),
-      (error) => getErrorMessage(error),
-    );
+        if (!listResult.success) {
+          return listResult;
+        }
 
-    if (!listExecutionResult.success) {
-      return buildSdkExecutionFailure('Failed to reply to question', listExecutionResult.error);
-    }
+        const requests = Array.isArray(listResult.data)
+          ? listResult.data.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+          : [];
 
-    if (hasError(listExecutionResult.data)) {
-      return buildSdkPayloadFailure('Failed to reply to question', listExecutionResult.data.error, 'question.list');
-    }
+        const matchedRequests = requests.filter((request) => {
+          const sessionID = readString(request.sessionID);
+          if (sessionID !== parameters.sessionId) {
+            return false;
+          }
 
-    const pendingQuestions = extractResultData<unknown>(listExecutionResult.data);
-    const requests = Array.isArray(pendingQuestions)
-      ? pendingQuestions.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-      : [];
+          if (!parameters.toolCallId) {
+            return true;
+          }
 
-    const matchedRequests = requests.filter((request) => {
-      const sessionID = readString(request.sessionID);
-      if (sessionID !== parameters.sessionId) {
-        return false;
-      }
+          const tool = readRecord(request.tool);
+          return readString(tool?.callID) === parameters.toolCallId;
+        });
 
-      if (!parameters.toolCallId) {
-        return true;
-      }
+        const requestId = parameters.toolCallId
+          ? readString(matchedRequests[0]?.id)
+          : matchedRequests.length === 1
+            ? readString(matchedRequests[0]?.id)
+            : undefined;
 
-      const tool = readRecord(request.tool);
-      return readString(tool?.callID) === parameters.toolCallId;
-    });
+        if (!requestId) {
+          return {
+            success: false,
+            errorCode: 'INVALID_PAYLOAD',
+            errorMessage: parameters.toolCallId
+              ? `Unable to resolve pending question request for toolSessionId=${parameters.sessionId}, toolCallId=${parameters.toolCallId}`
+              : `Unable to resolve a unique pending question request for toolSessionId=${parameters.sessionId}`,
+          };
+        }
 
-    const requestId = parameters.toolCallId
-      ? readString(matchedRequests[0]?.id)
-      : matchedRequests.length === 1
-        ? readString(matchedRequests[0]?.id)
-        : undefined;
-
-    if (!requestId) {
-      return {
-        success: false,
-        errorCode: 'INVALID_PAYLOAD',
-        errorMessage: parameters.toolCallId
-          ? `Unable to resolve pending question request for toolSessionId=${parameters.sessionId}, toolCallId=${parameters.toolCallId}`
-          : `Unable to resolve a unique pending question request for toolSessionId=${parameters.sessionId}`,
-      };
-    }
-
-    const replyExecutionResult = await safeExecute(
-      client._client.post({
-        url: '/question/{requestID}/reply',
-        path: { requestID: requestId },
-        body: { answers: [[parameters.answer]] },
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        query: { directory: resolution.directory },
-      }),
-      (error) => getErrorMessage(error),
-    );
-
-    if (!replyExecutionResult.success) {
-      return buildSdkExecutionFailure('Failed to reply to question', replyExecutionResult.error);
-    }
-
-    if (hasError(replyExecutionResult.data)) {
-      return buildSdkPayloadFailure('Failed to reply to question', replyExecutionResult.data.error, 'question.reply');
-    }
-
-    return {
-      success: true,
-      data: {
-        requestId,
-        replied: true,
+        return this.executeSdkCall({
+          failurePrefix: 'Failed to reply to question',
+          sourceOperation: 'question.reply',
+          promiseFactory: () => client._client.post({
+            url: '/question/{requestID}/reply',
+            path: { requestID: requestId },
+            body: { answers: [[parameters.answer]] },
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            query: { directory },
+          }),
+          onSuccess: () => ({
+            success: true,
+            data: {
+              requestId,
+              replied: true,
+            },
+          }),
+        });
       },
-    };
+    });
   }
 
   private requireClient(): OpencodeClient {
