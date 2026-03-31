@@ -11,7 +11,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
-      get: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
@@ -40,6 +45,15 @@ function createRuntimeClient(overrides = {}) {
       ...(overrides._client ?? {}),
     },
   };
+}
+
+function createSessionGetResponder(directory) {
+  return async (options) => ({
+    data: {
+      id: options?.path?.id ?? 'session-default',
+      directory,
+    },
+  });
 }
 
 function setRuntimeChannel(runtime, channel) {
@@ -98,7 +112,7 @@ function restoreEnv(snapshot) {
 }
 
 describe('protocol directory-context integration', () => {
-  test('uses effectiveDirectory for create_session only without changing workspacePath', async () => {
+  test('uses effectiveDirectory for create_session and chat without changing workspacePath', async () => {
     const createCalls = [];
     const promptCalls = [];
     const runtime = new BridgeRuntime({
@@ -110,6 +124,7 @@ describe('protocol directory-context integration', () => {
             createCalls.push(options);
             return { data: { id: 'dir-session-1' } };
           },
+          get: createSessionGetResponder('/bridge/directory'),
           prompt: async (options) => {
             promptCalls.push(options);
             return { data: { ok: true } };
@@ -158,6 +173,9 @@ describe('protocol directory-context integration', () => {
         path: {
           id: 'dir-session-1',
         },
+        query: {
+          directory: '/bridge/directory',
+        },
         body: {
           parts: [{ type: 'text', text: 'hello directory' }],
         },
@@ -179,7 +197,7 @@ describe('protocol directory-context integration', () => {
     assert.strictEqual(sent[1].toolSessionId, 'dir-session-1');
   });
 
-  test('only create_session carries directory across create/chat/abort/permission/question/close', async () => {
+  test('all session-scoped actions restore and forward the same directory', async () => {
     const createCalls = [];
     const promptCalls = [];
     const abortCalls = [];
@@ -196,6 +214,7 @@ describe('protocol directory-context integration', () => {
             createCalls.push(options);
             return { data: { id: 'dir-chain-1' } };
           },
+          get: createSessionGetResponder('/bridge/directory'),
           prompt: async (options) => {
             promptCalls.push(options);
             return { data: { ok: true } };
@@ -312,6 +331,9 @@ describe('protocol directory-context integration', () => {
         path: {
           id: 'dir-chain-1',
         },
+        query: {
+          directory: '/bridge/directory',
+        },
         body: {
           parts: [{ type: 'text', text: 'hello chain' }],
         },
@@ -322,12 +344,18 @@ describe('protocol directory-context integration', () => {
         path: {
           id: 'dir-chain-1',
         },
+        query: {
+          directory: '/bridge/directory',
+        },
       },
     ]);
     assert.deepStrictEqual(deleteCalls, [
       {
         path: {
           id: 'dir-chain-1',
+        },
+        query: {
+          directory: '/bridge/directory',
         },
       },
     ]);
@@ -340,20 +368,31 @@ describe('protocol directory-context integration', () => {
         body: {
           response: 'once',
         },
+        query: {
+          directory: '/bridge/directory',
+        },
       },
     ]);
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/bridge/directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-1' },
         body: { answers: [['yes']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/bridge/directory',
+        },
       },
     ]);
   });
 
-  test('uniassistant channel resolves mapped directory and forwards assistantId as agent without chat directory', async () => {
+  test('uniassistant channel resolves mapped directory and forwards assistantId as agent with chat directory', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
     const configDir = join(workspace, '.opencode');
@@ -430,6 +469,7 @@ describe('protocol directory-context integration', () => {
               createCalls.push(options);
               return { data: { id: 'dir-assiant-1' } };
             },
+            get: createSessionGetResponder('/tenant/persona-1'),
             prompt: async (options) => {
               promptCalls.push(options);
               return { data: { ok: true } };
@@ -474,6 +514,9 @@ describe('protocol directory-context integration', () => {
         {
           path: {
             id: 'dir-assiant-1',
+          },
+          query: {
+            directory: '/tenant/persona-1',
           },
           body: {
             agent: 'persona-1',
@@ -526,6 +569,7 @@ describe('protocol directory-context integration', () => {
               createCalls.push(options);
               return { data: { id: 'dir-assiant-legacy-1' } };
             },
+            get: createSessionGetResponder('/bridge/directory'),
             prompt: async (options) => {
               promptCalls.push(options);
               return { data: { ok: true } };
@@ -575,6 +619,9 @@ describe('protocol directory-context integration', () => {
         {
           path: {
             id: 'dir-assiant-legacy-1',
+          },
+          query: {
+            directory: '/bridge/directory',
           },
           body: {
             parts: [{ type: 'text', text: 'hello legacy assiant' }],
@@ -630,6 +677,7 @@ describe('protocol directory-context integration', () => {
               createCalls.push(options);
               return { data: { id: 'dir-assiant-chain-1' } };
             },
+            get: createSessionGetResponder('/tenant/persona-1'),
             prompt: async (options) => {
               promptCalls.push(options);
               return { data: { ok: true } };
@@ -749,6 +797,9 @@ describe('protocol directory-context integration', () => {
           path: {
             id: 'dir-assiant-chain-1',
           },
+          query: {
+            directory: '/tenant/persona-1',
+          },
           body: {
             agent: 'persona-1',
             parts: [{ type: 'text', text: 'hello assiant chain' }],
@@ -760,12 +811,18 @@ describe('protocol directory-context integration', () => {
           path: {
             id: 'dir-assiant-chain-1',
           },
+          query: {
+            directory: '/tenant/persona-1',
+          },
         },
       ]);
       assert.deepStrictEqual(deleteCalls, [
         {
           path: {
             id: 'dir-assiant-chain-1',
+          },
+          query: {
+            directory: '/tenant/persona-1',
           },
         },
       ]);
@@ -778,15 +835,26 @@ describe('protocol directory-context integration', () => {
           body: {
             response: 'always',
           },
+          query: {
+            directory: '/tenant/persona-1',
+          },
         },
       ]);
-      assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+      assert.deepStrictEqual(getCalls, [{
+        url: '/question',
+        query: {
+          directory: '/tenant/persona-1',
+        },
+      }]);
       assert.deepStrictEqual(postCalls, [
         {
           url: '/question/{requestID}/reply',
           path: { requestID: 'question-assiant-request-1' },
           body: { answers: [['agree']] },
           headers: { 'Content-Type': 'application/json' },
+          query: {
+            directory: '/tenant/persona-1',
+          },
         },
       ]);
     } finally {

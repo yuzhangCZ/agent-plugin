@@ -13,7 +13,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
-      get: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
@@ -108,13 +113,21 @@ describe('protocol question-roundtrip', () => {
       },
     });
 
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-1' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
       },
     ]);
     assert.strictEqual(sent.length, 1);

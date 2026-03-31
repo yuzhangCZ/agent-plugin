@@ -82,7 +82,7 @@ export class BridgeRuntime {
   private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
   private readonly bridgeChannelPort: EnvBridgeChannelAdapter;
   private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
-  private readonly sessionGatewayPort: OpencodeSessionGatewayAdapter;
+  private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
@@ -112,7 +112,7 @@ export class BridgeRuntime {
       process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
       () => this.logger,
     );
-    this.sessionGatewayPort = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
+    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
     this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
       this.bridgeChannelPort,
       this.assiantDirectoryMappingPort,
@@ -120,9 +120,9 @@ export class BridgeRuntime {
     );
     this.createSessionUseCase = new CreateSessionUseCase(
       this.resolveCreateSessionDirectoryUseCase,
-      this.sessionGatewayPort,
+      this.opencodeSessionGatewayAdapter,
     );
-    this.chatUseCase = new ChatUseCase(this.sessionGatewayPort);
+    this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -349,11 +349,11 @@ export class BridgeRuntime {
     const actions = [
       new ChatAction(this.chatUseCase),
       new CreateSessionAction(this.createSessionUseCase),
-      new CloseSessionAction(),
-      new PermissionReplyAction(),
+      new CloseSessionAction(this.opencodeSessionGatewayAdapter),
+      new PermissionReplyAction(this.opencodeSessionGatewayAdapter),
       new StatusQueryAction(),
-      new AbortSessionAction(),
-      new QuestionReplyAction(),
+      new AbortSessionAction(this.opencodeSessionGatewayAdapter),
+      new QuestionReplyAction(this.opencodeSessionGatewayAdapter),
     ] as const;
 
     for (const action of actions) {

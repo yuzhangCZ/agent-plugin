@@ -1,12 +1,9 @@
 import {
   Action,
   ChatPayload,
-  OpencodeClient,
   ActionResult,
   ActionContext,
   ErrorCode,
-  hasError,
-  safeExecute,
   stateToErrorCode
 } from '../types/index.js';
 import type { ChatUseCase } from '../usecase/ChatUseCase.js';
@@ -17,62 +14,10 @@ import type { ChatUseCase } from '../usecase/ChatUseCase.js';
 export class ChatAction implements Action<'chat', ChatPayload, void> {
   name: 'chat' = 'chat';
 
-  constructor(private readonly chatUseCase?: ChatUseCase) {}
-
-  private formatUnknownError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
+  constructor(private readonly chatUseCase: ChatUseCase) {
+    if (!chatUseCase) {
+      throw new Error('chat_use_case_required');
     }
-    if (typeof error === 'string') {
-      return error;
-    }
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return String(error);
-    }
-  }
-
-  private getErrorMessageFromResult(data: unknown): string {
-    if (data && typeof data === 'object' && 'error' in data) {
-      const errorField = (data as { error: unknown }).error;
-      if (errorField && typeof errorField === 'object' && 'message' in (errorField as Record<string, unknown>)) {
-        const messageField = (errorField as { message: unknown }).message;
-        if (typeof messageField === 'string') {
-          return messageField;
-        }
-        return String(messageField);
-      }
-      return this.formatUnknownError(errorField);
-    }
-    return 'Unknown error';
-  }
-
-  private async sendPrompt(
-    client: OpencodeClient,
-    toolSessionId: string,
-    text: string,
-    agent?: string,
-  ): Promise<{ success: true; data: unknown } | { success: false; error: string }> {
-    const executionResult = await safeExecute(
-      client.session.prompt({
-        sessionID: toolSessionId,
-        parts: [{ type: 'text', text }],
-        ...(agent ? { agent } : {}),
-      }),
-      (error) => this.formatUnknownError(error),
-    );
-
-    if (executionResult.success) {
-      if (!hasError(executionResult.data)) {
-        return { success: true, data: executionResult.data };
-      }
-
-      const sdkError = this.getErrorMessageFromResult(executionResult.data);
-      return { success: false, error: `Failed to send message: ${sdkError || 'Unknown error'}` };
-    }
-
-    return { success: false, error: `Failed to send message: ${executionResult.error}` };
   }
 
   /**
@@ -93,50 +38,28 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
       };
     }
 
-    const client = context.client;
-
     try {
-      if (this.chatUseCase) {
-        const useCaseResult = await this.chatUseCase.execute({
-          payload,
-          logger: context.logger,
-        });
+      const useCaseResult = await this.chatUseCase.execute({
+        payload,
+        logger: context.logger,
+      });
 
-        if (useCaseResult.success) {
-          return {
-            success: true,
-          };
-        }
-
-        context.logger?.error('action.chat.failed', {
-          error: useCaseResult.errorMessage,
-          errorCode: useCaseResult.errorCode,
-          latencyMs: Date.now() - startedAt,
-        });
-        return {
-          success: false,
-          errorCode: useCaseResult.errorCode ?? 'SDK_UNREACHABLE',
-          errorMessage: useCaseResult.errorMessage ?? 'Failed to send message',
-          errorEvidence: useCaseResult.errorEvidence,
-        };
-      }
-
-      const executionResult = await this.sendPrompt(client, payload.toolSessionId, payload.text, payload.assistantId);
-
-      if (executionResult.success) {
+      if (useCaseResult.success) {
         return {
           success: true,
-        };
+        }
       }
 
       context.logger?.error('action.chat.failed', {
-        error: executionResult.error,
+        error: useCaseResult.errorMessage,
+        errorCode: useCaseResult.errorCode,
         latencyMs: Date.now() - startedAt,
       });
       return {
         success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: executionResult.error
+        errorCode: useCaseResult.errorCode ?? 'SDK_UNREACHABLE',
+        errorMessage: useCaseResult.errorMessage ?? 'Failed to send message',
+        errorEvidence: useCaseResult.errorEvidence,
       };
     } catch (error) {
       const errorCode = this.errorMapper(error);

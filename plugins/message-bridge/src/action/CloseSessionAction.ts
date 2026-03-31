@@ -5,16 +5,17 @@ import {
   ActionResult,
   ActionContext,
   ErrorCode,
-  hasError,
-  safeExecute,
   stateToErrorCode
 } from '../types/index.js';
+import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
 
 /**
  * Concrete implementation of close_session action.
  */
 export class CloseSessionAction implements Action<'close_session', CloseSessionPayload, CloseSessionResultData> {
   name: 'close_session' = 'close_session';
+
+  constructor(private readonly sessionScopedActionGatewayPort: SessionScopedActionGatewayPort) {}
 
   /**
    * Execute close session action.
@@ -34,53 +35,21 @@ export class CloseSessionAction implements Action<'close_session', CloseSessionP
         };
       }
 
-      const client = context.client;
-      const executionResult = await safeExecute(
-        client.session.delete({
-          sessionID: payload.toolSessionId,
-        }),
-        (error) => `Close session failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      const gatewayResult = await this.sessionScopedActionGatewayPort.closeSession({
+        sessionId: payload.toolSessionId,
+        ...(context.logger ? { logger: context.logger } : {}),
+      });
 
-      if (executionResult.success) {
-        if (!hasError(executionResult.data)) {
-          return {
-            success: true,
-            data: { sessionId: payload.toolSessionId, closed: true }
-          };
-        }
-
-        let errorMessage = 'Unknown error';
-        if (executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data) {
-          const errorField = (executionResult.data as { error: unknown }).error;
-          if (errorField && typeof errorField === 'object' && errorField !== null && 'message' in errorField) {
-            const messageField = (errorField as { message: unknown }).message;
-            errorMessage = typeof messageField === 'string' ? messageField : String(messageField) || 'Unknown error';
-          } else {
-            errorMessage = String(errorField) || 'Unknown error';
-          }
-        }
-
-        context.logger?.error('action.close_session.sdk_error_payload', {
-          error: errorMessage,
-          latencyMs: Date.now() - startedAt,
-        });
-        return {
-          success: false,
-          errorCode: 'SDK_UNREACHABLE',
-          errorMessage: `Failed to close session: ${errorMessage}`
-        };
+      if (gatewayResult.success) {
+        return gatewayResult;
       }
 
       context.logger?.error('action.close_session.failed', {
-        error: executionResult.error,
+        error: gatewayResult.errorMessage,
+        errorCode: gatewayResult.errorCode,
         latencyMs: Date.now() - startedAt,
       });
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: executionResult.error
-      };
+      return gatewayResult;
     } catch (error) {
       const errorCode = this.errorMapper(error);
       const errorMessage = error instanceof Error ? error.message : String(error);

@@ -1,5 +1,5 @@
 import type { CreateSessionPayload, CreateSessionResultData } from '../contracts/downstream-messages.js';
-import type { SessionGatewayPort } from '../port/SessionGatewayPort.js';
+import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type {
   ResolveCreateSessionDirectoryUseCase,
@@ -20,7 +20,7 @@ export interface PreparedCreateSession extends ResolvedCreateSessionDirectory {
 export class CreateSessionUseCase {
   constructor(
     private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase,
-    private readonly sessionGatewayPort: SessionGatewayPort,
+    private readonly sessionCreationPort: SessionCreationPort,
   ) {}
 
   async resolveCreateSession(input: CreateSessionUseCaseInput): Promise<PreparedCreateSession> {
@@ -43,7 +43,7 @@ export class CreateSessionUseCase {
   ): Promise<ActionResult<CreateSessionResultData>> {
     const prepared = preparedCreateSession ?? await this.resolveCreateSession(input);
 
-    return this.sessionGatewayPort.createSession({
+    return this.sessionCreationPort.createSession({
       title: input.payload.title,
       directory: prepared.resolvedDirectory,
     });

@@ -88,14 +88,10 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         if (!hasError(executionResult.data)) {
           const root = executionResult.data as Record<string, unknown> | undefined;
           const nested = root?.data as Record<string, unknown> | undefined;
-          const sessionObject = nested ?? root ?? {};
+          const sessionObject = nested ?? {};
           const pick = (value: unknown): string | undefined =>
             typeof value === 'string' && value.trim() ? value : undefined;
-          const returnedSessionId =
-            pick(root?.sessionId) ??
-            pick(root?.id) ??
-            pick(nested?.sessionId) ??
-            pick(nested?.id);
+          const returnedSessionId = pick(nested?.id);
 
           return {
             success: true,

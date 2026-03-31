@@ -13,7 +13,12 @@ function createPluginClient(overrides = {}) {
     app: {},
     session: {
       create: async () => ({}),
-      get: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
