@@ -6,6 +6,7 @@ import type {
 } from '../contracts/downstream-messages.js';
 import type { HostClientLike, OpencodeClient } from './sdk.js';
 import type { BridgeLogger } from './logger.js';
+import type { ToolErrorEvidence } from '../utils/error.js';
 
 export interface ActionContext {
   client: OpencodeClient;
@@ -27,10 +28,7 @@ export interface ActionFailure {
   success: false;
   errorCode?: ErrorCode;
   errorMessage?: string;
-  errorEvidence?: {
-    sourceErrorCode?: string;
-    httpStatus?: number;
-  };
+  errorEvidence?: ToolErrorEvidence;
 }
 
 export type ActionResult<TData = void> = ActionSuccess<TData> | ActionFailure;

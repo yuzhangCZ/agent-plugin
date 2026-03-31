@@ -482,8 +482,9 @@ type NormalizedDownstreamMessage =
 
 `reason` 约束：
 
+- `chat` 执行前先调用 `session.get`；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
 - 仅当 `chat` 前置 `session.get` 命中 `NotFoundError` 时，返回 `"session_not_found"`。
-- 其余 action 失败路径不返回 `session_not_found`，避免 gateway 误判会话缺失。
+- 其余 action 失败路径，或 `session.get` 的非 NotFound 异常，不返回 `session_not_found`，避免 gateway 误判会话缺失。
 
 会话缺失样例：
 

@@ -225,6 +225,7 @@
 - `StatusResponse = { type: 'status_response', opencodeOnline: boolean }`
 - `tool_error = { type, welinkSessionId?, toolSessionId?, error, reason? }`
 - `tool_error.reason` 当前仅定义：`session_not_found`（仅当 `chat` 前置 `session.get` 可证实会话不存在时上报）
+- `chat` 执行时，`session.get` 属于必选前置探测能力；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续执行 `session.prompt`
 
 错误码最小集：
 - `GATEWAY_UNREACHABLE`

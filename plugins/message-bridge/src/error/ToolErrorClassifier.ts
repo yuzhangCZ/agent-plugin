@@ -23,7 +23,10 @@ export class ToolErrorClassifier {
       return undefined;
     }
 
-    if (isSessionNotFoundCode(result.errorEvidence?.sourceErrorCode)) {
+    if (
+      result.errorEvidence?.sourceOperation === 'session.get' &&
+      isSessionNotFoundCode(result.errorEvidence?.sourceErrorCode)
+    ) {
       return TOOL_ERROR_REASON.SESSION_NOT_FOUND;
     }
 

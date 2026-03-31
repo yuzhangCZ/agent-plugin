@@ -8,6 +8,7 @@ function createRuntimeClient() {
     global: {},
     session: {
       create: async () => ({}),
+      get: async () => ({}),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),

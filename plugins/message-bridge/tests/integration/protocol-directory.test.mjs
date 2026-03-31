@@ -11,6 +11,7 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
+      get: async () => ({}),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),

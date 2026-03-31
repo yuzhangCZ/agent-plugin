@@ -1,9 +1,11 @@
 import type { ChatPayload } from '../contracts/downstream-messages.js';
 import type { SessionGatewayPort } from '../port/SessionGatewayPort.js';
 import type { ActionResult } from '../types/action-runtime.js';
+import type { BridgeLogger } from '../types/logger.js';
 
 export interface ChatUseCaseInput {
   payload: ChatPayload;
+  logger?: BridgeLogger;
 }
 
 export class ChatUseCase {
@@ -14,6 +16,7 @@ export class ChatUseCase {
       sessionId: input.payload.toolSessionId,
       text: input.payload.text,
       agent: input.payload.assistantId,
+      ...(input.logger ? { logger: input.logger } : {}),
     });
   }
 }

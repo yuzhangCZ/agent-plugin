@@ -12,6 +12,7 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
+      get: async () => ({}),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
@@ -219,6 +220,7 @@ describe('runtime protocol strictness', () => {
         errorMessage: 'Failed to send message',
         errorEvidence: {
           sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
         },
       }),
     };
@@ -283,6 +285,7 @@ describe('runtime protocol strictness', () => {
         errorMessage: 'Failed to close session',
         errorEvidence: {
           sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
         },
       }),
     };
@@ -314,6 +317,7 @@ describe('runtime protocol strictness', () => {
         errorMessage: 'Failed to create session',
         errorEvidence: {
           sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
         },
       }),
     };
@@ -323,6 +327,38 @@ describe('runtime protocol strictness', () => {
       welinkSessionId: 's-create-evidence',
       action: 'create_session',
       payload: { title: 'new session' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('chat prompt evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.prompt',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-chat-prompt',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-chat-prompt', text: 'hello' },
     });
 
     assert.strictEqual((sent).length, 1);
@@ -1403,6 +1439,55 @@ describe('runtime protocol strictness', () => {
         process.env.HOME = originalHome;
       }
       globalThis.WebSocket = originalWebSocket;
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start fails when session.get capability is missing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-start-missing-get-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-home-missing-get-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    await writeEnabledConfig(workspace);
+
+    const appLogs = [];
+    try {
+      const runtime = new BridgeRuntime({
+        workspacePath: workspace,
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+              return true;
+            },
+          },
+          session: {
+            get: undefined,
+          },
+        }),
+      });
+
+      await assert.rejects(runtime.start(), (err) => {
+        assert.deepStrictEqual(err, {
+          code: 'SDK_CLIENT_CAPABILITIES_MISSING',
+          message: 'OpenCode client is missing required action capabilities',
+          details: {
+            missingCapabilities: ['session.get'],
+          },
+        });
+        return true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const failureLog = appLogs.find((entry) => entry.message === 'runtime.start.failed_capabilities');
+      assert.deepStrictEqual(failureLog.extra.missingCapabilities, ['session.get']);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }

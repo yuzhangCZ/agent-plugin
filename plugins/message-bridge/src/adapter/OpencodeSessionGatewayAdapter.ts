@@ -3,7 +3,8 @@ import type { SessionGatewayPort } from '../port/SessionGatewayPort.js';
 import type { OpencodeClient } from '../types/sdk.js';
 import { hasError, safeExecute } from '../types/sdk.js';
 import type { ActionResult } from '../types/action-runtime.js';
-import { getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
+import type { BridgeLogger } from '../types/logger.js';
+import { getErrorDetailsForLog, getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -55,7 +56,19 @@ function buildSessionNotFoundFailure(error: unknown): ActionResult<void> {
     success: false,
     errorCode: 'SDK_UNREACHABLE',
     errorMessage: `Failed to send message: ${getErrorMessage(error)}`,
-    errorEvidence: { sourceErrorCode: 'session_not_found' },
+    errorEvidence: {
+      sourceErrorCode: 'session_not_found',
+      sourceOperation: 'session.get',
+    },
+  };
+}
+
+function buildSessionGetFailure(error: unknown): ActionResult<void> {
+  return {
+    success: false,
+    errorCode: 'SDK_UNREACHABLE',
+    errorMessage: `Failed to send message: ${getErrorMessage(error)}`,
+    errorEvidence: getToolErrorEvidence(error, 'session.get') ?? { sourceOperation: 'session.get' },
   };
 }
 
@@ -93,7 +106,7 @@ export class OpencodeSessionGatewayAdapter implements SessionGatewayPort {
         success: false,
         errorCode: 'SDK_UNREACHABLE',
         errorMessage: `Failed to create session: ${errorMessage}`,
-        errorEvidence: getToolErrorEvidence(errorField),
+        errorEvidence: getToolErrorEvidence(errorField, 'session.create'),
       };
     }
 
@@ -108,23 +121,43 @@ export class OpencodeSessionGatewayAdapter implements SessionGatewayPort {
     sessionId: string;
     text: string;
     agent?: string;
+    logger?: BridgeLogger;
   }): Promise<ActionResult<void>> {
     const client = this.requireClient();
+    try {
+      const getResult = await client.session.get({
+        sessionID: parameters.sessionId,
+      });
 
-    if (typeof client.session.get === 'function') {
-      try {
-        const getResult = await client.session.get({
-          sessionID: parameters.sessionId,
-        });
-
-        if (hasError(getResult) && isNotFoundError(getResult.error)) {
+      if (hasError(getResult)) {
+        if (isNotFoundError(getResult.error)) {
+          parameters.logger?.warn('session_gateway.session_get.not_found', {
+            toolSessionId: parameters.sessionId,
+            ...getErrorDetailsForLog(getResult.error),
+          });
           return buildSessionNotFoundFailure(getResult.error);
         }
-      } catch (error) {
-        if (isNotFoundError(error)) {
-          return buildSessionNotFoundFailure(error);
-        }
+
+        parameters.logger?.warn('session_gateway.session_get.failed', {
+          toolSessionId: parameters.sessionId,
+          ...getErrorDetailsForLog(getResult.error),
+        });
+        return buildSessionGetFailure(getResult.error);
       }
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        parameters.logger?.warn('session_gateway.session_get.not_found', {
+          toolSessionId: parameters.sessionId,
+          ...getErrorDetailsForLog(error),
+        });
+        return buildSessionNotFoundFailure(error);
+      }
+
+      parameters.logger?.warn('session_gateway.session_get.failed', {
+        toolSessionId: parameters.sessionId,
+        ...getErrorDetailsForLog(error),
+      });
+      return buildSessionGetFailure(error);
     }
 
     const executionResult = await safeExecute(
@@ -150,7 +183,7 @@ export class OpencodeSessionGatewayAdapter implements SessionGatewayPort {
         success: false,
         errorCode: 'SDK_UNREACHABLE',
         errorMessage: `Failed to send message: ${errorMessage}`,
-        errorEvidence: getToolErrorEvidence(errorField),
+        errorEvidence: getToolErrorEvidence(errorField, 'session.prompt'),
       };
     }
 

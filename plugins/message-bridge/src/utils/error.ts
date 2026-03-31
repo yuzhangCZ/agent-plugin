@@ -11,6 +11,7 @@ export interface ErrorDetails {
 export interface ToolErrorEvidence {
   sourceErrorCode?: string;
   httpStatus?: number;
+  sourceOperation?: 'session.create' | 'session.get' | 'session.prompt';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,7 +175,10 @@ export function getErrorDetailsForLog(error: unknown): Record<string, unknown> {
   return logDetails;
 }
 
-export function getToolErrorEvidence(error: unknown): ToolErrorEvidence | undefined {
+export function getToolErrorEvidence(
+  error: unknown,
+  sourceOperation?: ToolErrorEvidence['sourceOperation'],
+): ToolErrorEvidence | undefined {
   const details = getErrorDetails(error);
   const sourceErrorCode = details.code;
 
@@ -202,5 +206,6 @@ export function getToolErrorEvidence(error: unknown): ToolErrorEvidence | undefi
   return {
     sourceErrorCode,
     httpStatus,
+    ...(sourceOperation ? { sourceOperation } : {}),
   };
 }

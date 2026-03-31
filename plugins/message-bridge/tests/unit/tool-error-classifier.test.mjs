@@ -12,7 +12,10 @@ describe('ToolErrorClassifier', () => {
         success: false,
         errorCode: 'SDK_UNREACHABLE',
         errorMessage: 'request failed',
-        errorEvidence: { sourceErrorCode: 'session_not_found' },
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
       }, 'chat'),
       'session_not_found',
     );
@@ -27,11 +30,29 @@ describe('ToolErrorClassifier', () => {
           success: false,
           errorCode: 'SDK_UNREACHABLE',
           errorMessage: 'request failed',
-          errorEvidence: { sourceErrorCode: 'session_not_found' },
+          errorEvidence: {
+            sourceErrorCode: 'session_not_found',
+            sourceOperation: 'session.get',
+          },
         }, action),
         undefined,
       );
     }
+  });
+
+  test('does not map prompt evidence to session_not_found', () => {
+    assert.strictEqual(
+      classifier.classify({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'request failed',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.prompt',
+        },
+      }, 'chat'),
+      undefined,
+    );
   });
 
   test('does not infer session_not_found from message text or 404', () => {
