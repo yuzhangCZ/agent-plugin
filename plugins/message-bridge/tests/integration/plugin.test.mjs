@@ -99,6 +99,26 @@ describe('plugin contract', () => {
     assert.strictEqual(snapshot.willReconnect, false);
   });
 
+  test('stopRuntime resets status and notifies private status subscribers', async () => {
+    await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
+    const startedSnapshot = getMessageBridgeStatus();
+    assert.strictEqual(startedSnapshot.phase, 'unavailable');
+    assert.strictEqual(startedSnapshot.unavailableReason, 'disabled');
+
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push(snapshot);
+    });
+
+    stopRuntime();
+    unsubscribe();
+
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].phase, 'unavailable');
+    assert.strictEqual(seen[0].unavailableReason, 'uninitialized');
+    assert.strictEqual(seen[0].willReconnect, false);
+  });
+
   test('PluginInput -> Hooks', async () => {
     const hooks = await MessageBridgePlugin(mockInput());
     assert.ok(hooks !== null && typeof hooks === 'object');

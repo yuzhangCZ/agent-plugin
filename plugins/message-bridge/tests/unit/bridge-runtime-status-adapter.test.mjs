@@ -92,4 +92,27 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(closed.willReconnect, false);
     assert.strictEqual(closed.lastError, 'server shutdown');
   });
+
+  test('publishes connecting when connection closes but runtime will reconnect', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnectionState('READY');
+    adapter.publishConnectionClosed({
+      opened: true,
+      manuallyDisconnected: false,
+      aborted: false,
+      rejected: false,
+      code: 1006,
+      reason: 'network jitter',
+      wasClean: false,
+      willReconnect: true,
+    });
+
+    const reconnecting = getMessageBridgeStatus();
+    assert.strictEqual(reconnecting.connected, false);
+    assert.strictEqual(reconnecting.phase, 'connecting');
+    assert.strictEqual(reconnecting.unavailableReason, null);
+    assert.strictEqual(reconnecting.willReconnect, true);
+    assert.strictEqual(reconnecting.lastError, null);
+  });
 });

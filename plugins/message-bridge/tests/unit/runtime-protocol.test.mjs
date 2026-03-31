@@ -271,6 +271,51 @@ describe('runtime protocol strictness', () => {
     }
   });
 
+  test('start keeps register_rejected when close follows rejection', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RegisterRejectedWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RegisterRejectedWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.onmessage?.({
+              data: JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }),
+            });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.({ code: 4403, reason: 'device_conflict', wasClean: true });
+      }
+    }
+
+    globalThis.WebSocket = RegisterRejectedWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'register_rejected');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'device_conflict');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
