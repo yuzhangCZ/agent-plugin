@@ -286,12 +286,12 @@ class PromptSession {
 
   async confirmAction(promptLabel) {
     if (this.useBufferedInput) {
-      writeLine(`${promptLabel} [y/N]`);
+      writeLine(`${promptLabel} [Y/N]`);
       const value = (this.queue.shift() ?? '').trim().toLowerCase();
       return value === 'y' || value === 'yes';
     }
 
-    const answer = await this.readline.question(`${promptLabel} [y/N]: `);
+    const answer = await this.readline.question(`${promptLabel} [Y/N]: `);
     const normalized = answer.trim().toLowerCase();
     return normalized === 'y' || normalized === 'yes';
   }

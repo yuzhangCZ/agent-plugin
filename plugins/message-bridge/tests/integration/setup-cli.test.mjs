@@ -238,7 +238,7 @@ describe('setup cli', () => {
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
       assert.ok(result.stdout.includes('请输入 AK（必填）'));
       assert.ok(result.stdout.includes('请输入 SK（必填）'));
-      assert.ok(result.stdout.includes('确认写入以上配置 [y/N]'));
+      assert.ok(result.stdout.includes('确认写入以上配置 [Y/N]'));
     });
   });
 
