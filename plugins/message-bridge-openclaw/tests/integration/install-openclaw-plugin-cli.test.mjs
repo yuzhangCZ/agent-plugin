@@ -159,9 +159,10 @@ test("installer runs preflight, install, verify, configure, and restart with non
 
     const npmrc = await readFile(path.join(home, ".npmrc"), "utf8");
     assert.ok(npmrc.includes("@wecode:registry=https://npm.example.com"));
-    assert.ok(result.stdout.includes("正在检查 OpenClaw 环境"));
+    assert.ok(result.stdout.includes("[skill-openclaw-plugin] 正在检查 OpenClaw 环境"));
+    assert.ok(result.stdout.includes("正在通过 OpenClaw 安装 skill-openclaw-plugin 插件"));
     assert.ok(result.stdout.includes("Downloading package..."));
-    assert.ok(result.stdout.includes("插件安装校验通过"));
+    assert.ok(result.stdout.includes("skill-openclaw-plugin 插件安装校验通过"));
     assert.ok(result.stdout.includes("正在重启 OpenClaw gateway"));
   });
 });
@@ -269,6 +270,12 @@ test("installer stops immediately when plugin install fails", async () => {
 
     assert.notEqual(result.status, 0);
     assert.ok(result.stderr.includes("error_code=PLUGIN_INSTALL_FAILED"));
+    assert.match(
+      result.stderr,
+      /plugins install @wecode\/skill-openclaw-plugin failed with code 11/,
+    );
+    assert.equal(result.stderr.includes("Downloading package..."), false);
+    assert.equal((result.stderr.match(/install failed/g) ?? []).length, 1);
     const commands = await readLoggedCommands(logFile);
     assert.deepEqual(commands, [
       ["--version"],

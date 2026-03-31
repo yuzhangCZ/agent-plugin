@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
 const PLUGIN_ID = "skill-openclaw-plugin";
+const PLUGIN_LABEL = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
 
@@ -291,7 +292,7 @@ export function parseArgs(argv) {
 }
 
 function formatStep(message) {
-  return `[message-bridge-openclaw-install] ${message}`;
+  return `[${PLUGIN_LABEL}] ${message}`;
 }
 
 function writeStdout(message) {
@@ -334,11 +335,10 @@ function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
         resolve({ combined });
         return;
       }
-      const detail = combined.trim();
       reject(
         createInstallerError(
           failureCode,
-          `${cmd} ${args.join(" ")} failed with code ${code}${detail ? `\n${detail}` : ""}`,
+          `${cmd} ${args.join(" ")} failed with code ${code}`,
         ),
       );
     });
@@ -413,7 +413,7 @@ export async function runInstaller({
 
   const openclawArgsPrefix = args.dev ? ["--dev"] : [];
 
-  writeStdout(formatStep("正在通过 OpenClaw 安装插件"));
+  writeStdout(formatStep(`正在通过 OpenClaw 安装 ${PLUGIN_LABEL} 插件`));
   await spawnForwarded(
     openclaw.openclawBin,
     [...openclawArgsPrefix, "plugins", "install", PACKAGE_NAME],
@@ -421,7 +421,7 @@ export async function runInstaller({
     cwd,
   );
 
-  writeStdout(formatStep("插件安装命令执行完成，正在校验安装结果"));
+  writeStdout(formatStep(`${PLUGIN_LABEL} 插件安装命令执行完成，正在校验安装结果`));
   const pluginInfo = execJson(
     openclaw.openclawBin,
     [...openclawArgsPrefix, "plugins", "info", PLUGIN_ID, "--json"],
@@ -434,7 +434,7 @@ export async function runInstaller({
       `Plugin install verification failed for ${PLUGIN_ID}.`,
     );
   }
-  writeStdout(formatStep("插件安装校验通过"));
+  writeStdout(formatStep(`${PLUGIN_LABEL} 插件安装校验通过`));
 
   writeStdout(formatStep("正在配置 Message Bridge channel"));
   const hasNonInteractiveArgs = Boolean(args.url && args.token && args.password);
