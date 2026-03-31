@@ -21,7 +21,7 @@ async function withTempDirs(fn) {
 function runSetup({ cwd, home, input, scope = 'user' }) {
   const spawnEnv = createDefaultUserEnv(home);
 
-  return spawnSync('node', [scriptPath, '--scope', scope], {
+  return spawnSync(process.execPath, [scriptPath, '--scope', scope], {
     cwd,
     env: spawnEnv,
     input,
@@ -38,8 +38,20 @@ function createDefaultUserEnv(home) {
   };
 }
 
+function runSetupCommand({ cwd, home, input = '', args = [], extraEnv = {} }) {
+  return spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd,
+    env: {
+      ...createDefaultUserEnv(home),
+      ...extraEnv,
+    },
+    input,
+    encoding: 'utf8',
+  });
+}
+
 function runSetupWithEnv({ cwd, env: extraEnv, input, scope = 'user' }) {
-  return spawnSync('node', [scriptPath, '--scope', scope], {
+  return spawnSync(process.execPath, [scriptPath, '--scope', scope], {
     cwd,
     env: {
       ...process.env,
@@ -78,10 +90,11 @@ describe('setup cli', () => {
       assert.ok(bridge.includes('"ak": "ak-test"'));
       assert.ok(bridge.includes('"sk": "sk-test"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
-      assert.ok(npmrc.includes('@wecode:registry='));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
       assert.ok(result.stdout.includes('- AK: ak-test'));
       assert.ok(result.stdout.includes('- SK: sk-test'));
-      assert.ok(result.stdout.includes('下次启动 OpenCode 时会自动安装并加载 npm 插件。'));
+      assert.ok(result.stdout.includes('下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。'));
+      assert.ok(!result.stdout.includes('npx -y --registry='));
     });
   });
 
@@ -177,7 +190,7 @@ describe('setup cli', () => {
       assert.ok(bridge.includes('"ak": "ak-project"'));
       assert.ok(bridge.includes('"sk": "sk-project"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
-      assert.ok(npmrc.includes('@wecode:registry='));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
     });
   });
 
@@ -222,10 +235,10 @@ describe('setup cli', () => {
       assert.ok(bridge.includes('"ak": "ak-stdin"'));
       assert.ok(bridge.includes('"sk": "sk-stdin"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
-      assert.ok(npmrc.includes('@wecode:registry='));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
       assert.ok(result.stdout.includes('请输入 AK（必填）'));
       assert.ok(result.stdout.includes('请输入 SK（必填）'));
-      assert.ok(result.stdout.includes('确认写入以上配置 [y/N]'));
+      assert.ok(result.stdout.includes('确认写入以上配置 [Y/N]'));
     });
   });
 
@@ -273,7 +286,7 @@ describe('setup cli', () => {
 
       assert.ok(bridge.includes('"ak": "ak-win"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
-      assert.ok(npmrc.includes('@wecode:registry='));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
     });
   });
 
@@ -295,11 +308,109 @@ describe('setup cli', () => {
       const resolvedNpmrcPath = extractNpmrcPathFromOutput(result.stdout);
       const npmrc = await readFile(customNpmrc, 'utf8');
       assert.strictEqual(resolvedNpmrcPath, customNpmrc);
-      assert.ok(npmrc.includes('@wecode:registry='));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
       assert.strictEqual(
         await readFile(join(home, '.npmrc'), 'utf8').then(() => true).catch(() => false),
         false,
       );
+    });
+  });
+
+  test('supports install subcommand and --yes argument mode', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        args: ['install', '--yes', '--ak', 'ak-arg', '--sk', 'sk-arg'],
+      });
+
+      assert.strictEqual(result.status, 0);
+
+      const configRoot = join(home, '.config', 'opencode');
+      const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
+      const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
+      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+
+      assert.ok(bridge.includes('"ak": "ak-arg"'));
+      assert.ok(bridge.includes('"sk": "sk-arg"'));
+      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
+      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
+    });
+  });
+
+  test('keeps compatibility for no-subcommand invocation', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        args: ['--yes', '--ak', 'ak-legacy', '--sk', 'sk-legacy'],
+      });
+
+      assert.strictEqual(result.status, 0);
+      const configRoot = join(home, '.config', 'opencode');
+      const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
+      assert.ok(bridge.includes('"ak": "ak-legacy"'));
+      assert.ok(bridge.includes('"sk": "sk-legacy"'));
+    });
+  });
+
+  test('supports registry override via --registry', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        args: [
+          'install',
+          '--yes',
+          '--ak',
+          'ak-reg',
+          '--sk',
+          'sk-reg',
+          '--registry',
+          'https://registry.override.example/npm',
+        ],
+      });
+
+      assert.strictEqual(result.status, 0);
+      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+      assert.ok(npmrc.includes('@wecode:registry=https://registry.override.example/npm/'));
+    });
+  });
+
+  test('prints warning and keeps going when opencode command is not installed', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        args: ['install', '--yes', '--ak', 'ak-warn', '--sk', 'sk-warn'],
+        extraEnv: { PATH: '/dev/null' },
+      });
+
+      assert.strictEqual(result.status, 0);
+      assert.ok(result.stdout.includes('OpenCode 环境检查提示：未检测到 opencode 命令，将继续写入配置。'));
+      const configRoot = join(home, '.config', 'opencode');
+      const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
+      assert.ok(bridge.includes('"ak": "ak-warn"'));
+    });
+  });
+
+  test('uses existing scope registry as preview when --registry is not provided', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      await writeFile(join(home, '.npmrc'), '@wecode:registry=https://existing.registry.example.com/npm\n', 'utf8');
+
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        args: ['install', '--yes', '--ak', 'ak-existing', '--sk', 'sk-existing'],
+      });
+
+      assert.strictEqual(result.status, 0);
+      assert.ok(result.stdout.includes('默认 npm scope registry: https://existing.registry.example.com/npm/'));
+      assert.ok(result.stdout.includes('- npm scope: @wecode:registry=https://existing.registry.example.com/npm/'));
+
+      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+      assert.ok(npmrc.includes('@wecode:registry=https://existing.registry.example.com/npm'));
+      assert.ok(!npmrc.includes('cmc.centralrepo.rnd.huawei.com'));
     });
   });
 });

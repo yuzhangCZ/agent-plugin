@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout, stderr, argv, env, cwd, exit } from 'node:process';
 import { dirname, join } from 'node:path';
@@ -10,7 +11,21 @@ import { platform } from 'node:process';
 
 const PLUGIN_NAME = '@wecode/skill-opencode-plugin';
 const NPM_SCOPE_REGISTRY_LINE = '@wecode:registry=';
-const NPM_SCOPE_REGISTRY_HINT = '; TODO: fill private registry url';
+const DEFAULT_SCOPE_REGISTRY = 'https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/';
+const HELP_TEXT = `Message Bridge 安装 CLI
+
+用法:
+  node ./scripts/setup-message-bridge.mjs install [options]
+  node ./scripts/setup-message-bridge.mjs [options]  # 兼容旧入口，等价于 install
+
+选项:
+  --ak <value>        指定 AK
+  --sk <value>        指定 SK
+  --registry <url>    指定 @wecode scope registry
+  --scope <value>     user | project，默认 user
+  --yes               跳过确认；缺少必填字段时直接失败
+  --help              显示帮助
+`;
 
 function writeLine(message) {
   stdout.write(`${message}\n`);
@@ -92,14 +107,54 @@ function resolveUserNpmrcPath() {
   return join(env.HOME || homedir(), '.npmrc');
 }
 
-async function buildNextNpmrcContent(path) {
+function normalizeRegistryUrl(value) {
+  return value.endsWith('/') ? value : `${value}/`;
+}
+
+function upsertScopeRegistryLine(content, registry) {
+  const normalized = normalizeRegistryUrl(registry);
+  const scopeLine = `${NPM_SCOPE_REGISTRY_LINE}${normalized}`;
+  const lines = content.split(/\r?\n/);
+  let updated = false;
+
+  const nextLines = lines.map((line) => {
+    if (!line.trim().startsWith(NPM_SCOPE_REGISTRY_LINE)) {
+      return line;
+    }
+    updated = true;
+    return scopeLine;
+  });
+
+  if (!updated) {
+    const joined = content.trim().length > 0 ? content.replace(/\s*$/, '') : '';
+    return `${joined}${joined ? '\n' : ''}${scopeLine}\n`;
+  }
+
+  return `${nextLines.join('\n').replace(/\s*$/, '')}\n`;
+}
+
+function readScopeRegistry(content) {
+  const match = content.match(new RegExp(`^\\s*${NPM_SCOPE_REGISTRY_LINE.replace(':', '\\:')}(\\S+)\\s*$`, 'm'));
+  return match?.[1] ?? null;
+}
+
+async function buildNextNpmrcContent(path, desiredRegistry) {
   const existing = await readOptionalTextFile(path);
-  if (existing && existing.includes(NPM_SCOPE_REGISTRY_LINE)) {
+  if (existing === null) {
+    const registry = normalizeRegistryUrl(desiredRegistry ?? DEFAULT_SCOPE_REGISTRY);
+    return `${NPM_SCOPE_REGISTRY_LINE}${registry}\n`;
+  }
+
+  if (desiredRegistry) {
+    return upsertScopeRegistryLine(existing, desiredRegistry);
+  }
+
+  const existingRegistry = readScopeRegistry(existing);
+  if (existingRegistry) {
     return existing;
   }
 
-  const prefix = existing && existing.trim().length > 0 ? `${existing.replace(/\s*$/, '')}\n` : '';
-  return `${prefix}${NPM_SCOPE_REGISTRY_LINE}\n${NPM_SCOPE_REGISTRY_HINT}\n`;
+  return upsertScopeRegistryLine(existing, DEFAULT_SCOPE_REGISTRY);
 }
 
 function readConfiguredCredential(content, key) {
@@ -231,12 +286,12 @@ class PromptSession {
 
   async confirmAction(promptLabel) {
     if (this.useBufferedInput) {
-      writeLine(`${promptLabel} [y/N]`);
+      writeLine(`${promptLabel} [Y/N]`);
       const value = (this.queue.shift() ?? '').trim().toLowerCase();
       return value === 'y' || value === 'yes';
     }
 
-    const answer = await this.readline.question(`${promptLabel} [y/N]: `);
+    const answer = await this.readline.question(`${promptLabel} [Y/N]: `);
     const normalized = answer.trim().toLowerCase();
     return normalized === 'y' || normalized === 'yes';
   }
@@ -256,14 +311,81 @@ async function promptRequiredField(prompts, fieldName, promptLabel, currentValue
   }
 }
 
-function parseScope(args) {
-  if (args[0] === '--scope') {
-    if (args[1] !== 'user' && args[1] !== 'project') {
-      throw new Error('--scope 仅支持 user 或 project');
+function parseArgs(rawArgs) {
+  const parsed = {
+    command: 'install',
+    scope: 'user',
+    ak: null,
+    sk: null,
+    registry: null,
+    yes: false,
+    help: false,
+  };
+
+  const args = [...rawArgs];
+  const readOptionValue = (option, currentIndex) => {
+    const value = args[currentIndex + 1];
+    if (!value || value.startsWith('-')) {
+      throw new Error(`${option} 需要一个值`);
     }
-    return args[1];
+    return value;
+  };
+
+  if (args.length > 0 && !args[0].startsWith('-')) {
+    if (args[0] !== 'install') {
+      throw new Error(`不支持的子命令: ${args[0]}`);
+    }
+    args.shift();
   }
-  return 'user';
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === '--help' || token === '-h') {
+      parsed.help = true;
+      continue;
+    }
+    if (token === '--yes') {
+      parsed.yes = true;
+      continue;
+    }
+    if (token === '--scope') {
+      const value = readOptionValue('--scope', index);
+      if (value !== 'user' && value !== 'project') {
+        throw new Error('--scope 仅支持 user 或 project');
+      }
+      parsed.scope = value;
+      index += 1;
+      continue;
+    }
+    if (token === '--ak') {
+      parsed.ak = readOptionValue('--ak', index);
+      index += 1;
+      continue;
+    }
+    if (token === '--sk') {
+      parsed.sk = readOptionValue('--sk', index);
+      index += 1;
+      continue;
+    }
+    if (token === '--registry') {
+      parsed.registry = readOptionValue('--registry', index);
+      index += 1;
+      continue;
+    }
+    throw new Error(`不支持的参数: ${token}`);
+  }
+
+  if (parsed.ak === '') {
+    parsed.ak = null;
+  }
+  if (parsed.sk === '') {
+    parsed.sk = null;
+  }
+  if (parsed.registry === '') {
+    parsed.registry = null;
+  }
+
+  return parsed;
 }
 
 function buildTargetPaths(scope) {
@@ -293,28 +415,73 @@ async function resolveTargetFilePaths(scope) {
   };
 }
 
-function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath) {
+function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, registryValue) {
   writeLine('Message Bridge 配置向导');
   writeLine(`配置作用域: ${scope}`);
   writeLine(`Message Bridge 配置文件: ${bridgeConfig}`);
   writeLine(`OpenCode 配置文件: ${opencodeConfig}`);
   writeLine(`npm scope 配置文件: ${npmrcPath}`);
+  writeLine(`默认 npm scope registry: ${registryValue}`);
   writeLine('');
 }
 
-function printChangePreview(ak, sk) {
+function printChangePreview(ak, sk, registry) {
   writeLine('');
   writeLine('即将写入以下配置：');
   writeLine(`- AK: ${ak}`);
   writeLine(`- SK: ${sk}`);
   writeLine(`- OpenCode plugin: ${PLUGIN_NAME}`);
-  writeLine(`- npm scope: ${NPM_SCOPE_REGISTRY_LINE}`);
+  writeLine(`- npm scope: ${NPM_SCOPE_REGISTRY_LINE}${registry}`);
   writeLine('');
 }
 
+function checkOpencodeInstalled() {
+  const result = spawnSync('opencode', ['--version'], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: 3000,
+  });
+  if (result.error) {
+    return false;
+  }
+  return result.status === 0;
+}
+
+async function resolveCredential(parsedValue, existingValue, prompts, fieldName, promptLabel, nonInteractive) {
+  if (parsedValue) {
+    return parsedValue;
+  }
+  if (nonInteractive) {
+    if (existingValue) {
+      return existingValue;
+    }
+    throw new Error(`--yes 模式下必须提供 ${fieldName} 或确保现有配置包含该字段`);
+  }
+  return promptRequiredField(prompts, fieldName, promptLabel, existingValue);
+}
+
 async function main() {
-  const scope = parseScope(argv.slice(2));
+  const parsed = parseArgs(argv.slice(2));
+  if (parsed.help) {
+    writeLine(HELP_TEXT);
+    return;
+  }
+
+  if (parsed.command !== 'install') {
+    throw new Error(`不支持的子命令: ${parsed.command}`);
+  }
+
+  if (checkOpencodeInstalled()) {
+    writeLine('OpenCode 环境检查通过（opencode 可用）。');
+  } else {
+    writeLine('OpenCode 环境检查提示：未检测到 opencode 命令，将继续写入配置。');
+  }
+
+  const scope = parsed.scope;
   const { bridgeConfig, opencodeConfig, npmrcPath } = await resolveTargetFilePaths(scope);
+  const existingNpmrc = await readOptionalTextFile(npmrcPath);
+  const existingScopeRegistry = existingNpmrc ? readScopeRegistry(existingNpmrc) : null;
+  const effectiveRegistry = normalizeRegistryUrl(parsed.registry ?? existingScopeRegistry ?? DEFAULT_SCOPE_REGISTRY);
 
   const existingBridge = await readOptionalTextFile(bridgeConfig);
   const currentAk = existingBridge ? readConfiguredCredential(existingBridge, 'ak') : '';
@@ -324,21 +491,35 @@ async function main() {
   await prompts.init();
 
   try {
-    printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath);
+    printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, effectiveRegistry);
 
-    const ak = await promptRequiredField(prompts, 'AK', '请输入 AK（必填）', currentAk);
-    const sk = await promptRequiredField(prompts, 'SK', '请输入 SK（必填）', currentSk);
+    const ak = await resolveCredential(
+      parsed.ak,
+      currentAk,
+      prompts,
+      'AK',
+      '请输入 AK（必填）',
+      parsed.yes,
+    );
+    const sk = await resolveCredential(
+      parsed.sk,
+      currentSk,
+      prompts,
+      'SK',
+      '请输入 SK（必填）',
+      parsed.yes,
+    );
 
-    printChangePreview(ak, sk);
+    printChangePreview(ak, sk, effectiveRegistry);
 
-    const confirmed = await prompts.confirmAction('确认写入以上配置');
+    const confirmed = parsed.yes ? true : await prompts.confirmAction('确认写入以上配置');
     if (!confirmed) {
       writeLine('已取消，未写入任何文件。');
       return;
     }
 
     const existingOpencode = await readOptionalTextFile(opencodeConfig);
-    const nextNpmrc = await buildNextNpmrcContent(npmrcPath);
+    const nextNpmrc = await buildNextNpmrcContent(npmrcPath, parsed.registry);
     let nextBridge;
     let nextOpencode;
 
@@ -363,7 +544,7 @@ async function main() {
     writeLine(`1. Message Bridge 配置已写入 ${bridgeConfig}`);
     writeLine(`2. OpenCode 配置已更新 ${opencodeConfig}`);
     writeLine(`3. npm scope 配置已更新 ${npmrcPath}`);
-    writeLine('4. 下次启动 OpenCode 时会自动安装并加载 npm 插件。');
+    writeLine('4. 下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。');
   } finally {
     await prompts.close();
   }

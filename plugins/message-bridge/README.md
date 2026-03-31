@@ -195,9 +195,18 @@ bridge 到 gateway 的上行消息当前包括：
 
 ## 配置
 
-交互式安装/配置 CLI（仓库内维护脚本，不随 npm 包发布）：
+快速安装 CLI（推荐）：
 
-- `node ./scripts/setup-message-bridge.mjs`
+- `npx @wecode/skill-opencode-plugin install`
+
+首次尚未配置 `@wecode` 源时，使用 bootstrap 命令：
+
+- `npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-opencode-plugin install`
+
+仓库内开发入口（兼容保留）：
+
+- `node ./scripts/setup-message-bridge.mjs install`
+- `node ./scripts/setup-message-bridge.mjs`（无子命令时默认等价 `install`）
 
 自包含启动示例（幂等写入 `.npmrc`，通过运行时 `OPENCODE_CONFIG_CONTENT` 注入 plugin 配置，再启动 `opencode serve`）：
 
@@ -205,10 +214,11 @@ bridge 到 gateway 的上行消息当前包括：
 
 CLI 当前会：
 
-- 提示输入 `ak` 和 `sk`
+- 支持交互输入 `ak` 和 `sk`，也支持参数模式 `--ak --sk --registry --scope --yes`
 - 默认在用户级写入 `message-bridge.jsonc`
 - 在 OpenCode `plugin` 配置中启用 `@wecode/skill-opencode-plugin`
-- 为 `@wecode` 写入默认 `.npmrc` scope 条目
+- 为 `@wecode` 写入 `.npmrc` scope 条目，默认值为 `https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`
+- 预检 `opencode --version`：若未检测到 OpenCode，只输出 warning，不阻塞配置写入
 
 CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 
@@ -218,7 +228,12 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 - Windows：`%USERPROFILE%\\.npmrc`（回退到 `%HOMEDRIVE%%HOMEPATH%\\.npmrc`）
 - macOS / Linux：`~/.npmrc`
 
-在 Windows 上，用户级 OpenCode 配置目录与 OpenCode 本身一致：`%USERPROFILE%\\.config\\opencode`。生成的 npm scope 占位值会写入解析后的 `.npmrc` 路径，registry 当前保留为空，供后续内部仓库补全。
+在 Windows 上，用户级 OpenCode 配置目录与 OpenCode 本身一致：`%USERPROFILE%\\.config\\opencode`。生成的 npm scope 默认值会写入解析后的 `.npmrc` 路径。
+
+注意：
+
+- 安装 CLI 成功仅表示配置写入完成
+- npm 插件实际下载到 OpenCode 缓存目录发生在后续启动/重启 OpenCode 时
 
 配置优先级从高到低：
 

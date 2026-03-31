@@ -149,6 +149,12 @@ server.close();
 - 企业私仓是否要求禁用 SSL 校验
 - 以上配置是否都在 OpenCode 启动前完成
 
+如果首次通过 `npx` 无法拉取安装器包，可先使用私仓 bootstrap 命令执行安装：
+
+```bash
+npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-opencode-plugin install
+```
+
 OpenCode 的插件下载与依赖缓存目录：
 
 - macOS：`~/.cache/opencode/node_modules/`
