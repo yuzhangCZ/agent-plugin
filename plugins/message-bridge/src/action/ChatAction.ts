@@ -116,6 +116,7 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
           success: false,
           errorCode: useCaseResult.errorCode ?? 'SDK_UNREACHABLE',
           errorMessage: useCaseResult.errorMessage ?? 'Failed to send message',
+          errorEvidence: useCaseResult.errorEvidence,
         };
       }
 

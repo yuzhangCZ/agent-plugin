@@ -8,6 +8,11 @@ export interface ErrorDetails {
   rawType?: string;
 }
 
+export interface ToolErrorEvidence {
+  sourceErrorCode?: string;
+  httpStatus?: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
@@ -21,6 +26,19 @@ function stringifyScalar(value: unknown): string | undefined {
   }
   if (typeof value === 'symbol') {
     return String(value);
+  }
+  return undefined;
+}
+
+function asHttpStatus(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isInteger(parsed) && parsed >= 100 && parsed <= 599) {
+      return parsed;
+    }
   }
   return undefined;
 }
@@ -154,4 +172,35 @@ export function getErrorDetailsForLog(error: unknown): Record<string, unknown> {
   }
 
   return logDetails;
+}
+
+export function getToolErrorEvidence(error: unknown): ToolErrorEvidence | undefined {
+  const details = getErrorDetails(error);
+  const sourceErrorCode = details.code;
+
+  let httpStatus: number | undefined;
+  if (isRecord(error)) {
+    httpStatus =
+      asHttpStatus(error.httpStatus) ??
+      asHttpStatus(error.statusCode) ??
+      asHttpStatus(error.status);
+    if (httpStatus === undefined && 'error' in error) {
+      const nested = (error as { error?: unknown }).error;
+      if (isRecord(nested)) {
+        httpStatus =
+          asHttpStatus(nested.httpStatus) ??
+          asHttpStatus(nested.statusCode) ??
+          asHttpStatus(nested.status);
+      }
+    }
+  }
+
+  if (!sourceErrorCode && httpStatus === undefined) {
+    return undefined;
+  }
+
+  return {
+    sourceErrorCode,
+    httpStatus,
+  };
 }

@@ -201,6 +201,7 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
   const root = client as {
     session: {
       create: (options?: Record<string, unknown>) => Promise<unknown>;
+      get?: (options: Record<string, unknown>) => Promise<unknown>;
       prompt: (options: Record<string, unknown>) => Promise<unknown>;
       abort: (options: Record<string, unknown>) => Promise<unknown>;
       delete: (options: Record<string, unknown>) => Promise<unknown>;
@@ -212,9 +213,14 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
     };
   };
 
+  const getSession = typeof root.session.get === 'function'
+    ? (parameters: { sessionID: string; directory?: string }) => root.session.get!(buildLegacySessionTarget(parameters))
+    : undefined;
+
   return {
     session: {
       create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
+      ...(getSession ? { get: getSession } : {}),
       prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
       abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
       delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),

@@ -5,7 +5,7 @@ import {
   StatusQueryPayload,
   StatusQueryResultData,
 } from '../types/index.js';
-import { TOOL_ERROR_REASON, type ToolErrorReason } from '../contracts/transport-messages.js';
+import { ToolErrorClassifier } from '../error/ToolErrorClassifier.js';
 import { ChatAction } from '../action/ChatAction.js';
 import { CreateSessionAction } from '../action/CreateSessionAction.js';
 import { CloseSessionAction } from '../action/CloseSessionAction.js';
@@ -98,6 +98,7 @@ export class BridgeRuntime {
   private effectiveDirectory?: string;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
+  private readonly toolErrorClassifier = new ToolErrorClassifier();
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -729,9 +730,14 @@ export class BridgeRuntime {
     }
 
     const error = result.success ? 'Unknown error' : result.errorMessage ?? 'Unknown error';
-    const reason = this.getToolErrorReason(result);
+    const reason = this.toolErrorClassifier.classify(result, logOptions?.action);
     const logger = logOptions?.logger ?? this.logger;
-    logger.error('runtime.tool_error.sending', { welinkSessionId, error, reason });
+    logger.error('runtime.tool_error.sending', {
+      welinkSessionId,
+      error,
+      reason,
+      sourceErrorCode: result.success ? undefined : result.errorEvidence?.sourceErrorCode,
+    });
 
     this.gatewayConnection.send({
       type: 'tool_error',
@@ -747,25 +753,6 @@ export class BridgeRuntime {
       action: logOptions?.action,
       toolSessionId: logOptions?.toolSessionId,
     });
-  }
-
-  private getToolErrorReason(result: ActionResult): ToolErrorReason | undefined {
-    if (result.success) {
-      return undefined;
-    }
-
-    const message = (result.errorMessage ?? '').toLowerCase();
-    if (
-      message.includes('not found') ||
-      message.includes('404') ||
-      message.includes(TOOL_ERROR_REASON.SESSION_NOT_FOUND) ||
-      message.includes('unexpected eof') ||
-      message.includes('json parse error')
-    ) {
-      return TOOL_ERROR_REASON.SESSION_NOT_FOUND;
-    }
-
-    return undefined;
   }
 
   private sendToolDone(

@@ -27,6 +27,10 @@ export interface ActionFailure {
   success: false;
   errorCode?: ErrorCode;
   errorMessage?: string;
+  errorEvidence?: {
+    sourceErrorCode?: string;
+    httpStatus?: number;
+  };
 }
 
 export type ActionResult<TData = void> = ActionSuccess<TData> | ActionFailure;
