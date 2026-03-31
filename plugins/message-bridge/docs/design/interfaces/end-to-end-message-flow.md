@@ -1,7 +1,7 @@
 # OpenCode 全链路接口与报文分层说明
 
-**Version:** 1.1  
-**Date:** 2026-03-11  
+**Version:** 1.2  
+**Date:** 2026-03-30  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/BridgeRuntime.ts`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
@@ -450,7 +450,7 @@ type NormalizedDownstreamMessage =
 |---|---|---|
 | `session_created` | `create_session` 成功 | `welinkSessionId`、`toolSessionId`、`session` |
 | `tool_done` | `chat` 成功 | `toolSessionId`、`welinkSessionId?` |
-| `tool_error` | 归一化失败或 action 失败 | `welinkSessionId?`、`toolSessionId?`、`error` |
+| `tool_error` | 归一化失败或 action 失败 | `welinkSessionId?`、`toolSessionId?`、`error`、`reason?` |
 | `status_response` | `status_query` 成功 | `opencodeOnline` |
 
 输出报文样例：`session_created`
@@ -477,6 +477,23 @@ type NormalizedDownstreamMessage =
   "welinkSessionId": "skill-42",
   "toolSessionId": "tool-42",
   "error": "Invalid invoke payload shape"
+}
+```
+
+`reason` 约束：
+
+- 仅当 `chat` 前置 `session.get` 命中 `NotFoundError` 时，返回 `"session_not_found"`。
+- 其余 action 失败路径不返回 `session_not_found`，避免 gateway 误判会话缺失。
+
+会话缺失样例：
+
+```json
+{
+  "type": "tool_error",
+  "welinkSessionId": "skill-42",
+  "toolSessionId": "ses-missing",
+  "error": "Failed to send message: Session not found: ses-missing",
+  "reason": "session_not_found"
 }
 ```
 

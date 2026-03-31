@@ -223,7 +223,8 @@
 - `InvokeAction = chat | create_session | abort_session | close_session | permission_reply | question_reply`
 - `PermissionReplyPayload = { permissionId, toolSessionId, response }`
 - `StatusResponse = { type: 'status_response', opencodeOnline: boolean }`
-- `tool_error = { type, welinkSessionId?, toolSessionId?, error }`
+- `tool_error = { type, welinkSessionId?, toolSessionId?, error, reason? }`
+- `tool_error.reason` 当前仅定义：`session_not_found`（仅当 `chat` 前置 `session.get` 可证实会话不存在时上报）
 
 错误码最小集：
 - `GATEWAY_UNREACHABLE`
