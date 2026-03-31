@@ -4,6 +4,11 @@ import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
 } from './MessageBridgeStatusStore.js';
+import {
+  createConnectingStatus,
+  createReadyStatus,
+  createUnavailableStatus,
+} from './MessageBridgeStatus.js';
 
 export interface BridgeRuntimeStatusAdapter {
   publishConnecting(): void;
@@ -29,95 +34,66 @@ export function createBridgeRuntimeStatusAdapter(
   return {
     publishConnecting() {
       const current = read();
-      publish({
-        connected: false,
-        phase: 'connecting',
-        unavailableReason: null,
-        willReconnect: true,
-        lastError: null,
-        updatedAt: now(),
-        lastReadyAt: current.lastReadyAt,
-      });
+      const updatedAt = now();
+      publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
     },
 
     publishDisabled() {
       const current = read();
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: 'disabled',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'disabled',
         lastError: null,
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
 
     publishConfigInvalid(errorMessage: string) {
       const current = read();
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: 'config_invalid',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'config_invalid',
         lastError: errorMessage,
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
 
     publishStartupFailed(errorMessage: string) {
       const current = read();
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: 'startup_failed',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'startup_failed',
         lastError: errorMessage,
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
 
     publishRegisterRejected(reason?: string) {
       const current = read();
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: 'register_rejected',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'register_rejected',
         lastError: reason ?? 'register rejected',
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
 
     publishConnectionState(state: ConnectionState) {
       const current = read();
 
       if (state === 'READY') {
-        publish({
-          connected: true,
-          phase: 'ready',
-          unavailableReason: null,
-          willReconnect: null,
-          lastError: null,
-          updatedAt: now(),
-          lastReadyAt: now(),
-        });
+        const updatedAt = now();
+        publish(createReadyStatus({ updatedAt }));
         return;
       }
 
       if (state === 'CONNECTING' || state === 'CONNECTED') {
-        publish({
-          connected: false,
-          phase: 'connecting',
-          unavailableReason: null,
-          willReconnect: true,
-          lastError: null,
-          updatedAt: now(),
-          lastReadyAt: current.lastReadyAt,
-        });
+        const updatedAt = now();
+        publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
         return;
       }
 
@@ -125,30 +101,21 @@ export function createBridgeRuntimeStatusAdapter(
         return;
       }
 
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: 'disconnected',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'disconnected',
         lastError: null,
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
 
     publishConnectionClosed(detail: GatewayConnectionCloseDetail) {
       const current = read();
 
       if (detail.willReconnect) {
-        publish({
-          connected: false,
-          phase: 'connecting',
-          unavailableReason: null,
-          willReconnect: true,
-          lastError: null,
-          updatedAt: now(),
-          lastReadyAt: current.lastReadyAt,
-        });
+        const updatedAt = now();
+        publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
         return;
       }
 
@@ -160,15 +127,13 @@ export function createBridgeRuntimeStatusAdapter(
         return;
       }
 
-      publish({
-        connected: false,
-        phase: 'unavailable',
-        unavailableReason: detail.rejected ? 'server_disconnected' : 'disconnected',
-        willReconnect: false,
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: detail.rejected ? 'server_disconnected' : 'disconnected',
         lastError: detail.reason ?? null,
-        updatedAt: now(),
+        updatedAt,
         lastReadyAt: current.lastReadyAt,
-      });
+      }));
     },
   };
 }

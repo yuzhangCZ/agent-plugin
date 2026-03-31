@@ -19,6 +19,22 @@ export interface MessageBridgeStatusSnapshot {
   lastReadyAt: number | null;
 }
 
+interface ConnectingStatusInput {
+  updatedAt: number;
+  lastReadyAt: number | null;
+}
+
+interface ReadyStatusInput {
+  updatedAt: number;
+}
+
+interface UnavailableStatusInput {
+  reason: MessageBridgeUnavailableReason;
+  lastError: string | null;
+  updatedAt: number;
+  lastReadyAt: number | null;
+}
+
 export function createDefaultMessageBridgeStatusSnapshot(now: () => number = Date.now): MessageBridgeStatusSnapshot {
   return {
     connected: false,
@@ -28,6 +44,42 @@ export function createDefaultMessageBridgeStatusSnapshot(now: () => number = Dat
     lastError: null,
     updatedAt: now(),
     lastReadyAt: null,
+  };
+}
+
+export function createConnectingStatus(input: ConnectingStatusInput): MessageBridgeStatusSnapshot {
+  return {
+    connected: false,
+    phase: 'connecting',
+    unavailableReason: null,
+    willReconnect: true,
+    lastError: null,
+    updatedAt: input.updatedAt,
+    lastReadyAt: input.lastReadyAt,
+  };
+}
+
+export function createReadyStatus(input: ReadyStatusInput): MessageBridgeStatusSnapshot {
+  return {
+    connected: true,
+    phase: 'ready',
+    unavailableReason: null,
+    willReconnect: null,
+    lastError: null,
+    updatedAt: input.updatedAt,
+    lastReadyAt: input.updatedAt,
+  };
+}
+
+export function createUnavailableStatus(input: UnavailableStatusInput): MessageBridgeStatusSnapshot {
+  return {
+    connected: false,
+    phase: 'unavailable',
+    unavailableReason: input.reason,
+    willReconnect: false,
+    lastError: input.lastError,
+    updatedAt: input.updatedAt,
+    lastReadyAt: input.lastReadyAt,
   };
 }
 
