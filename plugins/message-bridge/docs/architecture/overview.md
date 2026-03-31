@@ -1,10 +1,10 @@
 # message-bridge 架构总览
 
-**Version:** 2.2
-**Date:** 2026-03-28
+**Version:** 2.3
+**Date:** 2026-03-31
 **Status:** Active
 **Owner:** message-bridge maintainers
-**Related:** `../product/prd.md`, `../design/interfaces/protocol-contract.md`, `../design/interfaces/config-contract.md`
+**Related:** `../product/prd.md`, `../design/interfaces/protocol-contract.md`, `../design/interfaces/config-contract.md`, `../design/interfaces/private-status-api-contract.md`
 
 ## 1. 目标
 
@@ -58,6 +58,7 @@
 - 生命周期
 - 配置加载
 - 连接管理
+- 私有状态快照发布
 - action 路由
 - gateway 发送
 - usecase 与 adapter 装配
@@ -159,6 +160,30 @@ bridge 发往 gateway 的消息类型：
 - `session.idle` 继续作为 `tool_event` 向上游转发
 - `tool_done` 作为兼容层完成态投影保留给 UI 消费者
 - 上行白名单默认值不支持通配符
+
+## 5.1 私有状态 API 边界
+
+除 gateway 协议外，当前实现还提供一套**插件私有**状态读取面，供与 OpenCode 同进程集成的宿主 UI 读取 bridge 连接状态。
+
+该能力的边界如下：
+
+- 它属于 `message-bridge` 插件私有实现，不属于 gateway 外部协议
+- 它不替代 `status_query -> status_response`
+- 它不定义宿主通用状态中心，也不要求其他插件复用
+
+当前状态模型采用：
+
+- `phase`：`connecting | ready | unavailable`
+- `unavailableReason`：不可用原因
+- `willReconnect`：后续是否会自动恢复
+
+其中：
+
+- `ready` 表示 runtime 已收到 `register_ok`
+- `connecting` 表示首连或自动重连中
+- `unavailable + server_disconnected + willReconnect=false` 可表达“服务端主动断开，且当前不会重连”
+
+详细契约见 `design/interfaces/private-status-api-contract.md`。
 
 ## 6. 配置与日志
 
