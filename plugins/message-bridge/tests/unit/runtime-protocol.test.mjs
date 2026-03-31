@@ -215,8 +215,11 @@ describe('runtime protocol strictness', () => {
     runtime.actionRouter = {
       route: async () => ({
         success: false,
-        errorCode: 'INVALID_PAYLOAD',
-        errorMessage: 'Failed to send message: session not found',
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+        },
       }),
     };
 
@@ -232,9 +235,99 @@ describe('runtime protocol strictness', () => {
       type: 'tool_error',
       welinkSessionId: 's-rebuild',
       toolSessionId: 'tool-rebuild',
-      error: 'Failed to send message: session not found',
+      error: 'Failed to send message',
       reason: 'session_not_found',
     });
+  });
+
+  test('close_session not-found text does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'INVALID_PAYLOAD',
+        errorMessage: 'session not found',
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('close_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to close session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close-evidence',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close-evidence' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('create_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to create session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-create-evidence',
+      action: 'create_session',
+      payload: { title: 'new session' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
   });
 
   test('accepts baseline invoke shape and emits tool_done on chat success', async () => {

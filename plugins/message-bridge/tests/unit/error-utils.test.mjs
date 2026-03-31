@@ -5,6 +5,7 @@ import {
   getErrorDetails,
   getErrorDetailsForLog,
   getErrorMessage,
+  getToolErrorEvidence,
   safeStringify,
 } from '../../src/utils/error.ts';
 import { safeExecute } from '../../src/types/index.ts';
@@ -61,6 +62,20 @@ describe('error utils', () => {
     assert.deepStrictEqual(result, {
       success: false,
       error: 'nested failure',
+    });
+  });
+
+  test('extracts tool error evidence from nested payload', () => {
+    const evidence = getToolErrorEvidence({
+      error: {
+        code: 'session_not_found',
+        statusCode: 404,
+      },
+    });
+
+    assert.deepStrictEqual(evidence, {
+      sourceErrorCode: 'session_not_found',
+      httpStatus: 404,
     });
   });
 });
