@@ -5,6 +5,7 @@ import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { __resetMessageBridgeStatusForTests, getMessageBridgeStatus } from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 
 function createRuntimeClient(overrides = {}) {
@@ -153,6 +154,123 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('status api defaults to unavailable and uninitialized before runtime start', () => {
+    __resetMessageBridgeStatusForTests();
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), {
+      connected: false,
+      phase: 'unavailable',
+      unavailableReason: 'uninitialized',
+      willReconnect: false,
+      lastError: null,
+      updatedAt: getMessageBridgeStatus().updatedAt,
+      lastReadyAt: null,
+    });
+  });
+
+  test('start publishes disabled when config disables bridge', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'disabled');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
+  test('start publishes config_invalid when config resolution fails', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = new (class extends BridgeRuntime {
+      async resolveConfig() {
+        throw new Error('broken config');
+      }
+    })({
+      client: createRuntimeClient(),
+    });
+
+    await assert.rejects(runtime.start(), /broken config/);
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'broken config');
+  });
+
+  test('start publishes startup_failed when startup prerequisites fail', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        global: undefined,
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              throw new Error('startup boom');
+            }
+            return { data: [] };
+          },
+          post: async () => ({ data: undefined }),
+        },
+      }),
+    });
+
+    await assert.rejects(runtime.start());
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'startup_failed');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
+  });
+
+  test('start publishes server_disconnected when gateway closes and will not reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RejectedCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 4403, reason: 'server closed', wasClean: true });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = RejectedCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_disconnected');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'server closed');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

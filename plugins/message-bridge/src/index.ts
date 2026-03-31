@@ -1,4 +1,5 @@
 import { getOrCreateRuntime } from './runtime/singleton.js';
+import { getMessageBridgeStatus, subscribeMessageBridgeStatus } from './runtime/MessageBridgeStatusStore.js';
 import { AppLogger } from './runtime/AppLogger.js';
 import type { Plugin } from './runtime/types.js';
 import { getErrorDetailsForLog, getErrorMessage } from './utils/error.js';
@@ -33,4 +34,5 @@ export const MessageBridgePlugin: Plugin = async (input) => {
   }
 };
 
+export { getMessageBridgeStatus, subscribeMessageBridgeStatus };
 export default MessageBridgePlugin;

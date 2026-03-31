@@ -1,10 +1,10 @@
 # Message-Bridge OpenCode 集成指导
 
-**Version:** 1.6  
+**Version:** 1.9  
 **Date:** 2026-04-01  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
-**Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `./npm-publish-guide.md`
+**Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `../design/interfaces/private-status-api-contract.md`, `./third-party-status-api-guide.md`, `./npm-publish-guide.md`
 
 面向通过 `@opencode-ai/sdk` 代码方式集成 OpenCode 的应用方，说明如何接入 `message-bridge` 插件。
 
@@ -140,6 +140,37 @@ server.close();
 ```
 
 ## 6. FAQ
+
+### 6.0 如何在宿主 UI 中读取插件连接状态
+
+如果你的应用与 `message-bridge` 运行在同一进程内，可以直接读取插件私有状态 API：
+
+```js
+import {
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '@wecode/skill-opencode-plugin';
+
+const snapshot = getMessageBridgeStatus();
+console.log(snapshot.phase, snapshot.unavailableReason, snapshot.willReconnect);
+
+const unsubscribe = subscribeMessageBridgeStatus((nextSnapshot) => {
+  console.log(nextSnapshot.phase);
+});
+```
+
+当前推荐的 UI 解释方式：
+
+- `phase='ready'`：显示“已连接”
+- `phase='connecting'`：显示“连接中”
+- `phase='unavailable'`：显示“不可用”
+- `unavailableReason='server_disconnected'` 且 `willReconnect=false`：可提示“服务端已断开连接，当前不会自动重连”
+
+边界说明：
+
+- 该能力是 `message-bridge` 私有 API，不是宿主通用插件能力
+- 只适用于与插件同进程的集成方式
+- 不应通过 `status_query -> status_response` 读取 bridge 连接状态
 
 ### 6.1 如何判断插件已加载成功
 

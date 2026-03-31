@@ -4,7 +4,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MessageBridgePlugin, default as DefaultPlugin } from '../../src/index.ts';
+import {
+  MessageBridgePlugin,
+  default as DefaultPlugin,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/index.ts';
 import { __resetRuntimeForTests, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
@@ -83,6 +88,17 @@ describe('plugin contract', () => {
     assert.strictEqual(DefaultPlugin, MessageBridgePlugin);
   });
 
+  test('exports private status api helpers', () => {
+    assert.strictEqual(typeof getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'uninitialized');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
   test('PluginInput -> Hooks', async () => {
     const hooks = await MessageBridgePlugin(mockInput());
     assert.ok(hooks !== null && typeof hooks === 'object');
@@ -155,8 +171,9 @@ describe('plugin contract', () => {
     const seen = new Set();
     const hooks = [];
 
-    for (const [, fn] of Object.entries(mod)) {
+    for (const [name, fn] of Object.entries(mod)) {
       if (typeof fn !== 'function') continue;
+      if (name !== 'default' && name !== 'MessageBridgePlugin') continue;
       if (seen.has(fn)) continue;
       seen.add(fn);
       hooks.push(await fn(mockInput()));
