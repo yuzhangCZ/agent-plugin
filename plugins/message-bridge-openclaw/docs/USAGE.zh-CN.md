@@ -27,6 +27,14 @@
 
 ## 1. 当前支持的安装方式
 
+- 正式私有 npm 安装
+  - 首次安装推荐通过 `npx` 显式指定二方仓源拉起 `message-bridge-openclaw-install`
+  - 安装过一次后也可以直接运行 `message-bridge-openclaw-install`
+  - 自动校验 `openclaw` 是否已安装且版本满足最低要求
+  - 自动幂等配置 `@wecode` 二方仓源到用户级 `.npmrc`
+  - 自动执行 `openclaw plugins install`
+  - 自动执行 `openclaw channels add`
+  - 默认自动执行 `openclaw gateway restart`
 - bundle 安装（推荐交付）
   - 执行 `pnpm run install:bundle:dev`
   - 自动生成完整的 `bundle/` 安装目录
@@ -40,9 +48,9 @@
 
 推荐顺序：
 
-1. 本地部署或交付验证：bundle 安装
-2. 手动交付或排障：手动复制 bundle
-3. 私有 npm 安装：通过 OpenClaw npm 安装流
+1. 正式安装：`npx --registry ... --package @wecode/skill-openclaw-plugin message-bridge-openclaw-install ...`
+2. 本地部署或交付验证：bundle 安装
+3. 手动交付或排障：手动复制 bundle
 
 ## 2. 前置条件
 
@@ -94,6 +102,29 @@ pnpm test
 ```bash
 pnpm run install:bundle:dev
 ```
+
+如果你要验证发布态安装流程，安装包后可执行：
+
+```bash
+npx --yes \
+  --registry https://your-private-registry.example.com/ \
+  --package @wecode/skill-openclaw-plugin \
+  message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent \
+  --token <ak> \
+  --password <sk> \
+  --dev
+```
+
+说明：
+
+- `npx --registry ...` 负责让首次执行时能从私仓下载 helper 自身
+- 命令会先检查 `openclaw --version`
+- 命令会实时透传 `openclaw plugins install` 的终端输出
+- 命令默认执行 `openclaw gateway restart`
+- 如果确实不希望自动重启，显式追加 `--no-restart`
+- 如果私仓需要认证，执行前要保证 npm 认证环境已可用
 
 ## 4. 手动复制 bundle
 

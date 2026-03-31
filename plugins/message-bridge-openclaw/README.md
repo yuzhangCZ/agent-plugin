@@ -46,6 +46,29 @@ message contract.
 - 手动复制 bundle：复制 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md`
 - 私有 npm 分发：通过 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
 
+首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起 helper：
+
+```bash
+npx --yes \
+  --registry https://your-private-registry.example.com/ \
+  --package @wecode/skill-openclaw-plugin \
+  message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent \
+  --token <ak> \
+  --password <sk> \
+  --dev
+```
+
+安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
+
+- 检查 `openclaw` 是否已安装且版本满足 `>=2026.3.11`
+- 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
+- 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
+- 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
+- 调用 `openclaw channels add --channel message-bridge ...`
+- 默认执行 `openclaw gateway restart`
+
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
 关键约束：
@@ -251,6 +274,36 @@ The generated bundle directory already contains:
 - `README.md`
 
 No manual `package.json` edits are required.
+
+## NPM Install Helper
+
+For first-time private registry installation, prefer an explicit `npx` bootstrap command:
+
+```bash
+npx --yes \
+  --registry https://your-private-registry.example.com/ \
+  --package @wecode/skill-openclaw-plugin \
+  message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent \
+  --token <ak> \
+  --password <sk> \
+  --dev
+```
+
+Behavior:
+
+- `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
+- checks `openclaw --version` against the package `peerDependencies.openclaw`
+- writes or updates `@wecode:registry=...` in the resolved user `.npmrc`
+- streams `openclaw plugins install` output directly to the terminal
+- verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
+- runs `openclaw channels add --channel message-bridge ...`
+- restarts the OpenClaw gateway by default
+
+If the private registry requires auth, make sure your npm auth environment is already available before running the command.
+
+Pass `--no-restart` only when you explicitly need to defer gateway restart.
 
 ## Runtime Version Conflicts
 

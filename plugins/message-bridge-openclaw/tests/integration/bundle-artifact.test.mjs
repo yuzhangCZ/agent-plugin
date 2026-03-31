@@ -14,17 +14,20 @@ test("builds bundle-only artifact with publish metadata", async () => {
 
   const bundleRoot = resolve("bundle");
   const bundleEntry = resolve("bundle/index.js");
+  const bundleInstallPath = resolve("bundle/install.mjs");
   const bundleManifestPath = resolve("bundle/package.json");
   const bundleReadmePath = resolve("bundle/README.md");
 
   await access(bundleRoot, constants.R_OK);
   await access(bundleEntry, constants.R_OK);
+  await access(bundleInstallPath, constants.R_OK);
   await access(bundleManifestPath, constants.R_OK);
   await access(bundleReadmePath, constants.R_OK);
 
   const manifest = JSON.parse(await readFile(bundleManifestPath, "utf8"));
   const bundleContent = await readFile(bundleEntry, "utf8");
   assert.equal(manifest.main, "index.js");
+  assert.equal(manifest.bin["message-bridge-openclaw-install"], "./install.mjs");
   assert.equal(manifest.openclaw.extensions[0], "./index.js");
   assert.equal(manifest.openclaw.install.defaultChoice, "npm");
   assert.equal(manifest.peerDependencies.openclaw, ">=2026.3.11");
