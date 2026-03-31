@@ -40,6 +40,11 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 | `gateway.url` | `BRIDGE_GATEWAY_URL` | 否 | 生产环境通常不需要配置；切换到 UAT 等非生产环境时再显式填写 |
 | `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文 |
 
+`auth` 凭证读取补充：
+
+- 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 只能通过环境变量提供，本地配置中的 `auth.ak/sk` 不参与回退。
+- 当 `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白时，`BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 只有“同时提供”才会覆盖本地；若只提供一项，会整体回退本地 `auth.ak/sk`。
+
 最小示例：
 
 ```js

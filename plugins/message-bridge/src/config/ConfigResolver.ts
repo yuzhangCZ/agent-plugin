@@ -7,6 +7,7 @@ import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
+import { resolveAuthCredentialPolicy } from './AuthCredentialPolicy.js';
 
 const CONFIG_FILE_NAMES = ['message-bridge.jsonc', 'message-bridge.json'] as const;
 
@@ -191,15 +192,16 @@ export class ConfigResolver {
       envConfig.gateway = gateway as unknown as BridgeConfig['gateway'];
     }
 
-    const auth: Record<string, unknown> = {};
-    if (process.env.BRIDGE_AUTH_AK) {
-      auth.ak = this.substituteEnvVars(process.env.BRIDGE_AUTH_AK);
-    }
-    if (process.env.BRIDGE_AUTH_SK) {
-      auth.sk = this.substituteEnvVars(process.env.BRIDGE_AUTH_SK);
-    }
-    if (Object.keys(auth).length > 0) {
-      envConfig.auth = auth as unknown as BridgeConfig['auth'];
+    const authPolicy = resolveAuthCredentialPolicy({
+      bridgeGatewayChannel: process.env.BRIDGE_GATEWAY_CHANNEL,
+      authAk: process.env.BRIDGE_AUTH_AK,
+      authSk: process.env.BRIDGE_AUTH_SK,
+    });
+    if (authPolicy.shouldInjectEnvAuth) {
+      envConfig.auth = {
+        ak: process.env.BRIDGE_AUTH_AK ? this.substituteEnvVars(process.env.BRIDGE_AUTH_AK) : '',
+        sk: process.env.BRIDGE_AUTH_SK ? this.substituteEnvVars(process.env.BRIDGE_AUTH_SK) : '',
+      };
     }
 
     const sdk: Record<string, unknown> = {};
