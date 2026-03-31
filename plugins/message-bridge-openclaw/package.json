@@ -4,6 +4,9 @@
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
   "private": true,
   "type": "module",
+  "bin": {
+    "message-bridge-openclaw-install": "./scripts/install-openclaw-plugin.mjs"
+  },
   "files": [
     "bundle",
     "README.md",
