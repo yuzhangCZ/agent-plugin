@@ -11,7 +11,15 @@ export interface ErrorDetails {
 export interface ToolErrorEvidence {
   sourceErrorCode?: string;
   httpStatus?: number;
-  sourceOperation?: 'session.create' | 'session.get' | 'session.prompt';
+  sourceOperation?:
+    | 'session.create'
+    | 'session.get'
+    | 'session.prompt'
+    | 'session.abort'
+    | 'session.delete'
+    | 'permission.reply'
+    | 'question.list'
+    | 'question.reply';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

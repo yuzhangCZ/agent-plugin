@@ -12,7 +12,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
-      get: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
@@ -393,6 +398,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'tool-100' },
+      query: { directory: '/session/default-directory' },
       body: {
         parts: [{ type: 'text', text: 'hello' }],
       },
@@ -464,13 +470,21 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-42', toolCallId: 'call-42', answer: 'Vite' },
     });
 
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-42' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
@@ -548,6 +562,9 @@ describe('runtime protocol strictness', () => {
         },
         body: {
           response: 'once',
+        },
+        query: {
+          directory: '/session/default-directory',
         },
       },
     ]);
@@ -1082,7 +1099,12 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-close-1' },
     });
 
-    assert.deepStrictEqual(deleteCalls, [{ path: { id: 'tool-close-1' } }]);
+    assert.deepStrictEqual(deleteCalls, [{
+      path: { id: 'tool-close-1' },
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.strictEqual((sent).length, 0);
   });
 
@@ -1094,6 +1116,12 @@ describe('runtime protocol strictness', () => {
       hostDirectory: '/workspace/current',
       client: createRuntimeClient({
         session: {
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'created-dir-1',
+              directory: '/env/bridge-root',
+            },
+          }),
           create: async (options) => {
             createCalls.push(options);
             return { data: { id: 'created-dir-1' } };
@@ -1142,6 +1170,9 @@ describe('runtime protocol strictness', () => {
       {
         path: {
           id: 'created-dir-1',
+        },
+        query: {
+          directory: '/env/bridge-root',
         },
         body: {
           parts: [{ type: 'text', text: 'hello from bridge directory' }],

@@ -219,9 +219,6 @@ describe('assiant use cases', () => {
             },
           };
         },
-        promptSession: async () => ({
-          success: true,
-        }),
       },
     );
 
@@ -258,7 +255,6 @@ describe('assiant use cases', () => {
   test('chat use case forwards assistantId as agent without directory', async () => {
     const calls = [];
     const chatUseCase = new ChatUseCase({
-      createSession: async () => ({ success: true, data: { sessionId: 'ignored', session: {} } }),
       promptSession: async (parameters) => {
         calls.push(parameters);
         return { success: true };

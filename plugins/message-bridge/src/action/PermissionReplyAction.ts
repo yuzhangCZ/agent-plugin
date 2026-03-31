@@ -5,10 +5,9 @@ import {
   ActionResult,
   ActionContext,
   ErrorCode,
-  hasError,
-  safeExecute,
   stateToErrorCode
 } from '../types/index.js';
+import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
 
 /**
  * Concrete implementation of permission_reply action.
@@ -16,6 +15,8 @@ import {
  */
 export class PermissionReplyAction implements Action<'permission_reply', PermissionReplyPayload, PermissionReplyResultData> {
   name: 'permission_reply' = 'permission_reply';
+
+  constructor(private readonly sessionScopedActionGatewayPort: SessionScopedActionGatewayPort) {}
 
   /**
    * Execute permission reply action
@@ -38,58 +39,23 @@ export class PermissionReplyAction implements Action<'permission_reply', Permiss
         };
       }
 
-      const executionResult = await safeExecute(
-        context.client.postSessionIdPermissionsPermissionId({
-          sessionID: payload.toolSessionId,
-          permissionID: payload.permissionId,
-          response: payload.response,
-        }),
-        (error) => `Permission reply failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      const gatewayResult = await this.sessionScopedActionGatewayPort.replyPermission({
+        sessionId: payload.toolSessionId,
+        permissionId: payload.permissionId,
+        response: payload.response,
+        ...(context.logger ? { logger: context.logger } : {}),
+      });
 
-      if (executionResult.success) {
-        if (!hasError(executionResult.data)) {
-          return {
-              success: true,
-              data: {
-              permissionId: payload.permissionId,
-              response: payload.response,
-              applied: true
-            }
-          };
-        }
-
-        let errorMessage = 'Unknown error';
-        if (executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data) {
-          const errorField = (executionResult.data as { error: unknown }).error;
-          if (errorField && typeof errorField === 'object' && errorField !== null && 'message' in errorField) {
-            const messageField = (errorField as { message: unknown }).message;
-            errorMessage = typeof messageField === 'string' ? messageField : String(messageField) || 'Unknown error';
-          } else {
-            errorMessage = String(errorField) || 'Unknown error';
-          }
-        }
-
-        context.logger?.error('action.permission_reply.sdk_error_payload', {
-          error: errorMessage,
-          latencyMs: Date.now() - startedAt,
-        });
-        return {
-          success: false,
-          errorCode: 'SDK_UNREACHABLE',
-          errorMessage: `Failed to reply to permission request: ${errorMessage}`
-        };
+      if (gatewayResult.success) {
+        return gatewayResult;
       }
 
       context.logger?.error('action.permission_reply.failed', {
-        error: executionResult.error,
+        error: gatewayResult.errorMessage,
+        errorCode: gatewayResult.errorCode,
         latencyMs: Date.now() - startedAt,
       });
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: executionResult.error
-      };
+      return gatewayResult;
     } catch (error) {
       const errorCode = this.errorMapper(error);
       const errorMessage = error instanceof Error ? error.message : String(error);
