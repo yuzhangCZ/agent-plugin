@@ -36,6 +36,7 @@ import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
+import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
@@ -132,9 +133,11 @@ export class BridgeRuntime {
   }
 
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
+    const pluginVersion = resolvePluginVersion();
     this.logger.info('runtime.start.requested', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
+      pluginVersion,
     });
     if (this.started) {
       this.logger.debug('runtime.start.skipped_already_started');
