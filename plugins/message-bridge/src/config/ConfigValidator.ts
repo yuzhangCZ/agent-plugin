@@ -1,5 +1,5 @@
 import { SUPPORTED_UPSTREAM_EVENT_TYPES } from '../contracts/upstream-events.js';
-import type { BridgeConfig } from '../types/index.js';
+import { isReconnectJitter, RECONNECT_JITTERS, type BridgeConfig } from '../types/index.js';
 
 export interface ConfigValidationError {
   path: string;
@@ -83,6 +83,12 @@ export class ConfigValidator {
     if (this.isRecord(c.gateway?.reconnect) && c.gateway.reconnect.maxMs !== undefined) {
       this.validatePositiveInt(c.gateway.reconnect.maxMs, 'gateway.reconnect.maxMs', errors);
     }
+    if (this.isRecord(c.gateway?.reconnect) && c.gateway.reconnect.maxElapsedMs !== undefined) {
+      this.validatePositiveInt(c.gateway.reconnect.maxElapsedMs, 'gateway.reconnect.maxElapsedMs', errors);
+    }
+    if (this.isRecord(c.gateway?.reconnect) && c.gateway.reconnect.jitter !== undefined) {
+      this.validateReconnectJitter(c.gateway.reconnect.jitter, 'gateway.reconnect.jitter', errors);
+    }
     if (this.isRecord(c.gateway) && c.gateway.heartbeatIntervalMs !== undefined) {
       this.validatePositiveInt(c.gateway.heartbeatIntervalMs, 'gateway.heartbeatIntervalMs', errors);
     }
@@ -134,6 +140,12 @@ export class ConfigValidator {
   private validatePositiveInt(value: unknown, path: string, errors: ConfigValidationError[]): void {
     if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
       errors.push({ path, code: 'INVALID_NUMBER', message: `${path} must be a positive integer` });
+    }
+  }
+
+  private validateReconnectJitter(value: unknown, path: string, errors: ConfigValidationError[]): void {
+    if (!isReconnectJitter(value)) {
+      errors.push({ path, code: 'INVALID_VALUE', message: `${path} must be one of: ${RECONNECT_JITTERS.join(', ')}` });
     }
   }
 

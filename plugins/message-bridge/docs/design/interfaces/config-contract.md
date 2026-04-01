@@ -65,6 +65,8 @@
 | `gateway.reconnect.baseMs` | `1000` | 重连基础退避，单位毫秒 |
 | `gateway.reconnect.maxMs` | `30000` | 重连最大退避，单位毫秒 |
 | `gateway.reconnect.exponential` | `true` | 是否启用指数退避 |
+| `gateway.reconnect.jitter` | `full` | 重连抖动策略；`full` 表示在 `0..cappedDelay` 间随机 |
+| `gateway.reconnect.maxElapsedMs` | `600000` | 单轮自动重连总时长上限，单位毫秒 |
 | `gateway.ping.intervalMs` | `30000` | 保留字段，当前未见运行时消费 |
 | `sdk.timeoutMs` | `10000` | SDK 调用超时，单位毫秒 |
 | `auth.ak` | `""` | Access Key，启用时必填 |
@@ -140,6 +142,8 @@
 | `gateway.reconnect.baseMs` | `number` | 否 | `1000` | 正整数 |
 | `gateway.reconnect.maxMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.exponential` | `boolean` | 否 | `true` | 是否指数退避 |
+| `gateway.reconnect.jitter` | `'none' \| 'full'` | 否 | `full` | `full` 会在 `0..cappedDelay` 间随机 |
+| `gateway.reconnect.maxElapsedMs` | `number` | 否 | `600000` | 正整数；表示单轮自动重连总时长 |
 | `gateway.ping.intervalMs` | `number` | 否 | `30000` | 当前仅配置层存在，未见运行时消费 |
 | `sdk.timeoutMs` | `number` | 否 | `10000` | 正整数 |
 | `auth.ak` | `string` | 条件必填 | `""` | `enabled !== false` 时必填 |
@@ -158,6 +162,8 @@
 | `BRIDGE_GATEWAY_RECONNECT_BASE_MS` | `gateway.reconnect.baseMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_GATEWAY_RECONNECT_MAX_MS` | `gateway.reconnect.maxMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL` | `gateway.reconnect.exponential` | 仅当值为 `true` 时解析为 `true` |
+| `BRIDGE_GATEWAY_RECONNECT_JITTER` | `gateway.reconnect.jitter` | 仅接受 `none` 或 `full` |
+| `BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS` | `gateway.reconnect.maxElapsedMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_GATEWAY_HEARTBEAT_INTERVAL_MS` | `gateway.heartbeatIntervalMs` | 优先于兼容别名 |
 | `BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS` | `gateway.heartbeatIntervalMs` | 兼容别名；仅在前者不存在时生效 |
 | `BRIDGE_GATEWAY_PING_INTERVAL_MS` | `gateway.ping.intervalMs` | 当前仅配置层存在，未见运行时消费 |
@@ -232,6 +238,7 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `gateway.url` 必须以 `ws://` 或 `wss://` 开头
 - `gateway.reconnect.baseMs` 必须为正整数
 - `gateway.reconnect.maxMs` 必须为正整数
+- `gateway.reconnect.maxElapsedMs` 必须为正整数
 - `gateway.heartbeatIntervalMs` 必须为正整数
 - `sdk.timeoutMs` 必须为正整数
 - `events.allowlist` 必须为字符串数组
@@ -243,6 +250,12 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `debug`
 - `gateway.channel`
 - `gateway.reconnect.exponential`
+- `gateway.reconnect.jitter`
+
+补充说明：
+
+- `exponential=true` 表示按指数增长重连间隔，再受 `maxMs` 截断
+- `maxElapsedMs` 表示单轮自动重连总时长，而不是单次等待时间
 - `gateway.ping.intervalMs`
 - `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE`
 

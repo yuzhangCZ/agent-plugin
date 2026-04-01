@@ -19,6 +19,7 @@ import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSe
 import { loadConfig } from '../config/index.js';
 import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
 import { DefaultGatewayConnection, GatewayConnection } from '../connection/GatewayConnection.js';
+import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
@@ -45,6 +46,7 @@ import {
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
+import type { ReconnectConfig } from '../types/index.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
@@ -132,6 +134,14 @@ export class BridgeRuntime {
     return loadConfig(this.workspacePath, this.logger);
   }
 
+  protected createReconnectPolicy(reconnect: ReconnectConfig): ReconnectPolicy {
+    return new DefaultReconnectPolicy(reconnect);
+  }
+
+  protected createGatewayConnection(options: ConstructorParameters<typeof DefaultGatewayConnection>[0]): GatewayConnection {
+    return new DefaultGatewayConnection(options);
+  }
+
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
     const pluginVersion = resolvePluginVersion();
     this.logger.info('runtime.start.requested', {
@@ -202,13 +212,13 @@ export class BridgeRuntime {
 
     const auth = new DefaultAkSkAuth(config.auth.ak, config.auth.sk);
     const authPayloadProvider = () => auth.generateAuthPayload();
+    const reconnectPolicy = this.createReconnectPolicy(config.gateway.reconnect);
 
-    const connection = new DefaultGatewayConnection({
+    const connection = this.createGatewayConnection({
       url: config.gateway.url,
       debug: effectiveDebug,
-      reconnectBaseMs: config.gateway.reconnect.baseMs,
-      reconnectMaxMs: config.gateway.reconnect.maxMs,
-      reconnectExponential: config.gateway.reconnect.exponential,
+      reconnect: config.gateway.reconnect,
+      reconnectPolicy,
       heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
       abortSignal: options.abortSignal,
       authPayloadProvider,

@@ -1,5 +1,5 @@
 import { DEFAULT_EVENT_ALLOWLIST } from '../contracts/upstream-events.js';
-import type { BridgeConfig } from '../types/index.js';
+import { RECONNECT_JITTER, type BridgeConfig } from '../types/index.js';
 import { DEFAULT_GATEWAY_URL } from './default-gateway-url.js';
 
 export const DEFAULT_BRIDGE_CONFIG = {
@@ -15,6 +15,8 @@ export const DEFAULT_BRIDGE_CONFIG = {
       baseMs: 1000,
       maxMs: 30000,
       exponential: true,
+      jitter: RECONNECT_JITTER.FULL,
+      maxElapsedMs: 600000,
     },
     ping: {
       intervalMs: 30000,

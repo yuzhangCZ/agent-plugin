@@ -80,6 +80,17 @@ function registerMessage() {
   };
 }
 
+function reconnectConfig(overrides = {}) {
+  return {
+    baseMs: 1000,
+    maxMs: 30000,
+    exponential: true,
+    jitter: 'full',
+    maxElapsedMs: 600000,
+    ...overrides,
+  };
+}
+
 function createLoggerRecorder() {
   const entries = [];
   const logger = {
@@ -293,6 +304,44 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
+  test('does not reset reconnect policy when websocket opens but never reaches READY', async () => {
+    ScriptedWebSocket.scripts.push({ autoRegisterOk: false, closeAfterOpenMs: 0 });
+    let resetCalls = 0;
+    const reconnectPolicy = {
+      reset() {
+        resetCalls += 1;
+      },
+      startWindow() {},
+      scheduleNextAttempt() {
+        return {
+          ok: false,
+          elapsedMs: 0,
+          maxElapsedMs: 1,
+        };
+      },
+      getExhaustedDecision() {
+        return {
+          ok: false,
+          elapsedMs: 0,
+          maxElapsedMs: 1,
+        };
+      },
+    };
+
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnectPolicy,
+      registerMessage: registerMessage(),
+    });
+
+    await conn.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.strictEqual(conn.getState(), 'DISCONNECTED');
+    assert.strictEqual(resetCalls, 0);
+    conn.disconnect();
+  });
+
   test('rejects on invalid url and websocket error', async () => {
     const badUrl = new DefaultGatewayConnection({
       url: 'not-a-valid-url',
@@ -402,8 +451,7 @@ describe('DefaultGatewayConnection coverage', () => {
     const states = [];
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
-      reconnectBaseMs: 5,
-      reconnectMaxMs: 5,
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
     });
     conn.on('stateChange', (state) => states.push(state));
@@ -426,8 +474,7 @@ describe('DefaultGatewayConnection coverage', () => {
       });
       const conn = new DefaultGatewayConnection({
         url: 'ws://localhost:8081/ws/agent',
-        reconnectBaseMs: 5,
-        reconnectMaxMs: 5,
+        reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
         registerMessage: registerMessage(),
         logger,
       });
@@ -455,8 +502,7 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({ open: true });
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
-      reconnectBaseMs: 5,
-      reconnectMaxMs: 5,
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       abortSignal: controller.signal,
       registerMessage: registerMessage(),
     });
@@ -817,8 +863,7 @@ describe('DefaultGatewayConnection coverage', () => {
     );
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
-      reconnectBaseMs: 5,
-      reconnectMaxMs: 5,
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
       logger,
     });
@@ -862,5 +907,64 @@ describe('DefaultGatewayConnection coverage', () => {
         payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
       },
     ]);
+  });
+
+  test('logs reconnect exhaustion and stops before opening a new socket', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+
+    const reconnectPolicy = {
+      reset() {},
+      startWindow() {},
+      scheduleNextAttempt() {
+        return {
+          ok: true,
+          attempt: 1,
+          delayMs: 0,
+          elapsedMs: 0,
+        };
+      },
+      getExhaustedDecision() {
+        return {
+          ok: false,
+          elapsedMs: 10,
+          maxElapsedMs: 10,
+        };
+      },
+    };
+
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnectPolicy,
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await conn.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.strictEqual(ScriptedWebSocket.instances.length, 1);
+    assert.ok(entries.some((entry) => entry.message === 'gateway.reconnect.exhausted'));
+    conn.disconnect();
+  });
+
+  test('stops immediately when the next retry would exceed the remaining reconnect budget', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 20, maxMs: 20, jitter: 'none', maxElapsedMs: 5 }),
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await conn.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.strictEqual(ScriptedWebSocket.instances.length, 1);
+    assert.ok(entries.some((entry) => entry.message === 'gateway.reconnect.exhausted'));
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+    conn.disconnect();
   });
 });

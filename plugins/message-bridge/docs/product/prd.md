@@ -133,7 +133,7 @@
 2. 不可达时立即回传 `tool_error`（含 `error` 与可路由字段 `welinkSessionId/toolSessionId`），采用 best effort 发送。  
 3. 若发送失败，记录本地结构化日志并累计错误计数。  
 4. 不排队、不缓冲 invoke。  
-5. 连接层继续重连，不退出进程。  
+5. 连接层在单轮自动重连窗口内继续重连，不退出进程；超过窗口后停止自动重连并保持 `DISCONNECTED`。  
 
 ### FR-MB-08（P1）注册与状态查询
 - 连接成功发送 `register(deviceName, macAddress, os, toolType, toolVersion)`，其中 `deviceName/toolVersion/macAddress` 由运行时自动采集  
@@ -210,7 +210,9 @@
 - `heartbeatIntervalMs=30000`
 - `reconnectBaseMs=1000`
 - `reconnectMaxMs=30000`
-- 指数退避，最大 30s
+- `reconnectJitter=full`
+- `reconnectMaxElapsedMs=600000`
+- 指数退避，最大 30s；`full jitter` 时在 `0..cappedDelay` 间随机
 
 ### NFR-MB-03 安全
 - `sk`、签名原文、敏感鉴权参数不得落日志

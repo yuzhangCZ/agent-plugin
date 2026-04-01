@@ -108,8 +108,13 @@ describe('gateway connection contract', () => {
 
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
-      reconnectBaseMs: 5,
-      reconnectMaxMs: 5,
+      reconnect: {
+        baseMs: 5,
+        maxMs: 5,
+        exponential: true,
+        jitter: 'none',
+        maxElapsedMs: 600000,
+      },
       registerMessage: {
         type: 'register',
         deviceName: 'dev',

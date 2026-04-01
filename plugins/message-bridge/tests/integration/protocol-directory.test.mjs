@@ -422,6 +422,8 @@ describe('protocol directory-context integration', () => {
             baseMs: 1000,
             maxMs: 30000,
             exponential: true,
+            jitter: 'full',
+            maxElapsedMs: 600000,
           },
         },
         sdk: {

@@ -27,6 +27,8 @@ const createValidConfig = (overrides = {}) => ({
       baseMs: 1000,
       maxMs: 30000,
       exponential: true,
+      jitter: 'full',
+      maxElapsedMs: 600000,
     },
   },
   sdk: {
@@ -1833,6 +1835,8 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         'BRIDGE_GATEWAY_RECONNECT_BASE_MS',
         'BRIDGE_GATEWAY_RECONNECT_MAX_MS',
         'BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL',
+        'BRIDGE_GATEWAY_RECONNECT_JITTER',
+        'BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS',
         'BRIDGE_GATEWAY_HEARTBEAT_INTERVAL_MS',
         'BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS',
         'BRIDGE_GATEWAY_PING_INTERVAL_MS',
@@ -2011,5 +2015,47 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }
+  });
+
+  test('validateConfig rejects unsupported gateway.reconnect.jitter', () => {
+    const errors = validateConfig(createValidConfig({
+      gateway: {
+        url: 'ws://localhost:8081/ws/agent',
+        channel: 'openx',
+        heartbeatIntervalMs: 30000,
+        reconnect: {
+          baseMs: 1000,
+          maxMs: 30000,
+          exponential: true,
+          jitter: 'equal',
+          maxElapsedMs: 600000,
+        },
+      },
+    }));
+
+    assert.ok(errors.some((error) =>
+      error.path === 'gateway.reconnect.jitter' && error.code === 'INVALID_VALUE'
+    ));
+  });
+
+  test('validateConfig rejects non-positive gateway.reconnect.maxElapsedMs', () => {
+    const errors = validateConfig(createValidConfig({
+      gateway: {
+        url: 'ws://localhost:8081/ws/agent',
+        channel: 'openx',
+        heartbeatIntervalMs: 30000,
+        reconnect: {
+          baseMs: 1000,
+          maxMs: 30000,
+          exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 0,
+        },
+      },
+    }));
+
+    assert.ok(errors.some((error) =>
+      error.path === 'gateway.reconnect.maxElapsedMs' && error.code === 'INVALID_NUMBER'
+    ));
   });
 });
