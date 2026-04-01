@@ -13,7 +13,7 @@
 
 - 官方受保障的发布路径只有 GitHub release workflow 和 `pnpm release:local`
 - 这两条路径会要求显式提供默认网关地址，并在构建期通过 `MB_DEFAULT_GATEWAY_URL` 固化到产物
-- 普通本地开发构建未注入时，`gateway.url` 仍回退到 `ws://localhost:8081/ws/agent`
+- 普通本地开发构建未注入时，`gateway.url` 会继续走 `default-config` 默认链路，并最终回退到 `ws://localhost:8081/ws/agent`
 - 手工执行 `npm publish`、`pnpm pack` 或其他非官方发包路径时，产物仍可能保留 localhost 默认值
 
 ## 插件异常隔离语义
@@ -275,7 +275,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 |---|---|
 | `enabled` | `true` |
 | `config_version` | `1` |
-| `gateway.url` | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` |
+| `gateway.url` | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` |
 | `gateway.channel` | `openx` |
 | `gateway.heartbeatIntervalMs` | `30000` |
 | `gateway.reconnect.baseMs` | `1000` |

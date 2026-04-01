@@ -1,6 +1,6 @@
 # 配置契约
 
-**Version:** 2.4
+**Version:** 2.5
 **Date:** 2026-04-01
 **Status:** Active
 **Owner:** message-bridge maintainers
@@ -53,13 +53,13 @@
 
 ## 2. 默认值
 
-默认值定义于 `src/config/default-config.ts`。其中 `gateway.url` 补充一条发布期规则：官方发布路径会在构建阶段通过 `MB_DEFAULT_GATEWAY_URL` 固化默认地址；普通本地构建未注入时仍回退到 localhost。
+默认值定义于 `src/config/default-config.ts`。其中 `gateway.url` 通过 `src/config/default-gateway-url.ts` 统一提供：构建阶段仅在显式设置 `MB_DEFAULT_GATEWAY_URL` 时注入覆盖值；未注入时继续使用源码默认值，并最终回退到 localhost。
 
 | 配置键 | 默认值 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 是否启用 bridge |
 | `config_version` | `1` | 配置版本 |
-| `gateway.url` | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
+| `gateway.url` | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
 | `gateway.channel` | `openx` | 配置侧字段名；注册报文中映射到 `toolType` |
 | `gateway.heartbeatIntervalMs` | `30000` | 心跳间隔，单位毫秒 |
 | `gateway.reconnect.baseMs` | `1000` | 重连基础退避，单位毫秒 |
@@ -134,7 +134,7 @@
 | `enabled` | `boolean` | 否 | `true` | 为 `false` 时安全禁用，且不要求 `auth.ak/sk` |
 | `debug` | `boolean` | 否 | `false` | 调试日志开关；开启后额外以 `info` 级输出可读的原始 WebSocket 上下行报文 |
 | `config_version` | `number` | 否 | `1` | 当前只支持 `1` |
-| `gateway.url` | `string` | 否 | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
+| `gateway.url` | `string` | 否 | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
 | `gateway.channel` | `string` | 否 | `openx` | 注册消息中的 `toolType` 来源；内置已知值为 `openx`、`uniassistant`、`codeagent` |
 | `gateway.heartbeatIntervalMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.baseMs` | `number` | 否 | `1000` | 正整数 |
