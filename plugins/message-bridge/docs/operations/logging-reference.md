@@ -71,7 +71,7 @@
 | `deltaBytes` | 事件 delta 字段 UTF-8 字节数 |
 | `diffCount` | `session.diff` 中 diff 项数量 |
 | `latencyMs` | 单次动作耗时 |
-| `attempt`/`delayMs` | 重连次数与重连延迟 |
+| `attempt`/`delayMs` | 重连次数与实际重连延迟 |
 
 ## 3. 关键路径时序图（Mermaid）
 
@@ -209,6 +209,7 @@ sequenceDiagram
 | `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
 | `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
 | `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
+| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs` | `src/connection/GatewayConnection.ts` |
 | `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
 | `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
 | `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
@@ -289,6 +290,7 @@ sequenceDiagram
 4. `gateway.ready`
 5. `gateway.close` / `gateway.error`
 6. `gateway.reconnect.scheduled` / `gateway.reconnect.attempt`
+7. 若看到 `gateway.reconnect.exhausted`，表示单轮自动重连总时长已达到 `maxElapsedMs`，连接会停在 `DISCONNECTED`
 
 若没有 `gateway.open`，优先检查网关地址、AK/SK 签名参数与网络可达性。
 

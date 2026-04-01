@@ -42,7 +42,11 @@ export interface ReconnectConfig {
   baseMs: number;
   maxMs: number;
   exponential: boolean;
+  jitter: ReconnectJitter;
+  maxElapsedMs: number;
 }
+
+export type ReconnectJitter = 'none' | 'full';
 
 export interface EventConfig {
   allowlist: string[];
@@ -87,6 +91,7 @@ export const DEFAULT_CONFIG = {
   heartbeatIntervalMs: 30000,
   reconnectBaseMs: 1000,
   reconnectMaxMs: 30000,
+  reconnectMaxElapsedMs: 600000,
   sdkTimeoutMs: 10000,
   configVersion: 1,
 } as const;

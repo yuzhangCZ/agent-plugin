@@ -21,6 +21,8 @@ describe('ConfigResolver debug defaults', () => {
     try {
       const config = await new ConfigResolver().resolveConfig(tempHome);
       assert.deepStrictEqual(config.gateway, DEFAULT_BRIDGE_CONFIG.gateway);
+      assert.strictEqual(config.gateway.reconnect.jitter, 'full');
+      assert.strictEqual(config.gateway.reconnect.maxElapsedMs, 600000);
       assert.deepStrictEqual(config.sdk, DEFAULT_BRIDGE_CONFIG.sdk);
       assert.deepStrictEqual(config.events, DEFAULT_BRIDGE_CONFIG.events);
       assert.strictEqual(config.enabled, DEFAULT_BRIDGE_CONFIG.enabled);
@@ -231,6 +233,22 @@ describe('ConfigResolver debug defaults', () => {
     } finally {
       await rm(tempHome, { recursive: true, force: true });
       await rm(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('parses reconnect jitter and max elapsed from environment', async () => {
+    const tempHome = await mkdtemp(join(tmpdir(), 'message-bridge-config-'));
+    process.env.HOME = tempHome;
+    process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = 'none';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = '12345';
+    try {
+      const config = await new ConfigResolver().resolveConfig(tempHome);
+      assert.strictEqual(config.gateway.reconnect.jitter, 'none');
+      assert.strictEqual(config.gateway.reconnect.maxElapsedMs, 12345);
+    } finally {
+      await rm(tempHome, { recursive: true, force: true });
+      delete process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+      delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
     }
   });
 });

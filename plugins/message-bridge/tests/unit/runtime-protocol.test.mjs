@@ -66,6 +66,8 @@ function createResolvedConfig(overrides = {}) {
         baseMs: 1000,
         maxMs: 30000,
         exponential: true,
+        jitter: 'full',
+        maxElapsedMs: 600000,
       },
     },
     sdk: {
@@ -108,6 +110,8 @@ async function writeEnabledConfig(workspace) {
           baseMs: 1000,
           maxMs: 30000,
           exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
         },
       },
       sdk: {
@@ -1200,11 +1204,13 @@ describe('runtime protocol strictness', () => {
           channel: 'openx',
           toolVersion: '1.2.3',
           heartbeatIntervalMs: 30000,
-          reconnect: {
-            baseMs: 1000,
-            maxMs: 30000,
-            exponential: true,
-          },
+        reconnect: {
+          baseMs: 1000,
+          maxMs: 30000,
+          exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
+        },
         },
         sdk: {
           timeoutMs: 10000,
@@ -1853,6 +1859,112 @@ describe('runtime protocol strictness', () => {
       runtime.stop();
     } finally {
       globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('runtime.start applies reconnect env overrides to scheduling and exhaustion behavior', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const originalHome = process.env.HOME;
+    const originalJitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+    const originalMaxElapsed = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+    const originalBaseMs = process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+    const originalMaxMs = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+
+    class ExhaustingWebSocket {
+      static OPEN = 1;
+      static instances = [];
+
+      constructor() {
+        this.readyState = 0;
+        this.sent = [];
+        ExhaustingWebSocket.instances.push(this);
+        setTimeout(() => {
+          this.readyState = ExhaustingWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network-loss', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send(data) {
+        this.sent.push(JSON.parse(data));
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    globalThis.WebSocket = ExhaustingWebSocket;
+
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-env-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-home-'));
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = 'none';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = '1';
+    process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = '20';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = '20';
+
+    const appLogs = [];
+
+    try {
+      await writeEnabledConfig(workspace);
+
+      const runtime = new BridgeRuntime({
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+            },
+          },
+        }),
+        workspacePath: workspace,
+      });
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const exhausted = appLogs.find((entry) => entry.message === 'gateway.reconnect.exhausted');
+
+      assert.strictEqual(ExhaustingWebSocket.instances.length, 1);
+      assert.strictEqual(appLogs.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+      assert.ok(exhausted);
+      assert.strictEqual(exhausted.extra.maxElapsedMs, 1);
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalJitter === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = originalJitter;
+      }
+      if (originalMaxElapsed === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = originalMaxElapsed;
+      }
+      if (originalBaseMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = originalBaseMs;
+      }
+      if (originalMaxMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = originalMaxMs;
+      }
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
     }
   });
 });
