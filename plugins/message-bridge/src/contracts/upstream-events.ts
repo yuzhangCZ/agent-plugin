@@ -3,6 +3,7 @@ import type {
   EventMessagePartUpdated,
   EventMessageUpdated,
   EventPermissionUpdated,
+  EventSessionCreated,
   EventSessionError,
   EventSessionIdle,
   EventSessionStatus,
@@ -21,6 +22,7 @@ export const SUPPORTED_UPSTREAM_EVENT_TYPES = [
   'message.part.removed',
   'session.status',
   'session.idle',
+  'session.created',
   'session.updated',
   'session.error',
   'permission.updated',
@@ -36,6 +38,7 @@ export type MessagePartDeltaEvent = EventMessagePartDelta;
 export type MessagePartRemovedEvent = EventMessagePartRemoved;
 export type SessionStatusEvent = EventSessionStatus;
 export type SessionIdleEvent = EventSessionIdle;
+export type SessionCreatedEvent = EventSessionCreated;
 export type SessionUpdatedEvent = EventSessionUpdated;
 export type SessionErrorEvent = EventSessionError;
 export type PermissionUpdatedEvent = EventPermissionUpdated;
@@ -49,6 +52,7 @@ export type SupportedUpstreamEvent =
   | EventMessagePartRemoved
   | EventSessionStatus
   | EventSessionIdle
+  | EventSessionCreated
   | EventSessionUpdated
   | EventSessionError
   | EventPermissionUpdated

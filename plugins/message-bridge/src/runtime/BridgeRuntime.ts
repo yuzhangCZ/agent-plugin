@@ -36,6 +36,7 @@ import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
+import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
@@ -99,6 +100,7 @@ export class BridgeRuntime {
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
   private readonly toolErrorClassifier = new ToolErrorClassifier();
+  private readonly subagentSessionMapper: SubagentSessionMapper;
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -123,6 +125,10 @@ export class BridgeRuntime {
       this.opencodeSessionGatewayAdapter,
     );
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.subagentSessionMapper = new SubagentSessionMapper(
+      () => this.sdkClient,
+      this.logger,
+    );
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -301,12 +307,37 @@ export class BridgeRuntime {
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
+
+    // ===== Subagent: session.created 拦截（仅建立映射，不转发） =====
+    if (normalized.common.eventType === 'session.created') {
+      this.subagentSessionMapper.onSessionCreated(normalized.raw as {
+        properties?: { info?: { id?: string; parentID?: string; title?: string } };
+      });
+      forwardingLogger.info('event.session_created_mapped');
+      return;
+    }
+
     const transportEvent = this.upstreamTransportProjector.project(normalized);
-    const transportEnvelope = {
+
+    // ===== Subagent: 子 session 事件映射重写 =====
+    const subagentMapping = await this.subagentSessionMapper.resolve(
+      normalized.common.toolSessionId,
+    );
+
+    const effectiveToolSessionId = subagentMapping
+      ? subagentMapping.parentSessionId
+      : normalized.common.toolSessionId;
+
+    const transportEnvelope: Record<string, unknown> = {
       type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: effectiveToolSessionId,
       event: transportEvent,
     };
+    if (subagentMapping) {
+      transportEnvelope.subagentSessionId = normalized.common.toolSessionId;
+      transportEnvelope.subagentName = subagentMapping.agentName;
+    }
+
     const originalEnvelope = {
       type: 'tool_event',
       toolSessionId: normalized.common.toolSessionId,
@@ -316,7 +347,7 @@ export class BridgeRuntime {
       traceId: bridgeMessageId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: bridgeMessageId,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: effectiveToolSessionId,
       eventType: normalized.common.eventType,
       opencodeMessageId: eventFields.opencodeMessageId,
       opencodePartId: eventFields.opencodePartId,
@@ -327,6 +358,14 @@ export class BridgeRuntime {
     forwardingLogger.debug('event.forwarded');
 
     if (normalized.common.eventType === 'session.idle') {
+      // 子 session 的 idle 不进入 ToolDoneCompat
+      if (subagentMapping) {
+        forwardingLogger.debug('event.subagent_idle_skipped_tool_done', {
+          childSessionId: normalized.common.toolSessionId,
+          parentSessionId: subagentMapping.parentSessionId,
+        });
+        return;
+      }
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
         logger: forwardingLogger,

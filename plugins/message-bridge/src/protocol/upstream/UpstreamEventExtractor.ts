@@ -10,6 +10,7 @@ import {
   type PermissionAskedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
+  type SessionCreatedEvent,
   type SessionErrorEvent,
   type SessionIdleEvent,
   type SessionStatusEvent,
@@ -45,6 +46,7 @@ type UpstreamExtraByType = {
   'message.part.removed': MessagePartExtra;
   'session.status': SessionStatusExtra;
   'session.idle': undefined;
+  'session.created': undefined;
   'session.updated': undefined;
   'session.error': undefined;
   'permission.updated': undefined;
@@ -340,6 +342,19 @@ function extractSessionIdleCommon(event: SessionIdleEvent): ExtractResult<Common
   return ok(buildCommon(event.type, sessionResult.value));
 }
 
+function extractSessionCreatedCommon(
+  event: SessionCreatedEvent,
+): ExtractResult<CommonUpstreamFields> {
+  const sessionResult = requireNonEmptyString(
+    event.properties?.info?.id,
+    'session.created',
+    'common',
+    'properties.info.id',
+  );
+  if (!sessionResult.ok) return sessionResult;
+  return ok(buildCommon('session.created', sessionResult.value));
+}
+
 function extractSessionUpdatedCommon(event: SessionUpdatedEvent): ExtractResult<CommonUpstreamFields> {
   const sessionResult = requireNonEmptyString(
     event.properties.info.id,
@@ -395,6 +410,7 @@ export const UPSTREAM_EVENT_EXTRACTORS: {
   'message.part.removed': { extractCommon: extractMessagePartRemovedCommon, extractExtra: extractMessagePartRemovedExtra },
   'session.status': { extractCommon: extractSessionStatusCommon, extractExtra: extractSessionStatusExtra },
   'session.idle': { extractCommon: extractSessionIdleCommon, extractExtra: noExtra },
+  'session.created': { extractCommon: extractSessionCreatedCommon, extractExtra: noExtra },
   'session.updated': { extractCommon: extractSessionUpdatedCommon, extractExtra: noExtra },
   'session.error': { extractCommon: extractSessionErrorCommon, extractExtra: noExtra },
   'permission.updated': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
