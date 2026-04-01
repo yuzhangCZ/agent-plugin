@@ -1,12 +1,29 @@
 # 配置契约
 
-**Version:** 2.3
-**Date:** 2026-03-30
+**Version:** 2.4
+**Date:** 2026-04-01
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`
 
 本文档以当前代码实现为准，描述 `message-bridge` 已支持的配置项、环境变量、默认值、校验规则与兼容约束。
+
+## In Scope
+
+- 插件侧用户级配置根解析
+- `message-bridge.jsonc|json` 的发现顺序、优先级与环境变量覆盖规则
+- 第三方宿主通过 `OPENCODE_CONFIG_DIR` 实现用户级 bridge 配置隔离
+
+## Out of Scope
+
+- OpenCode 自身配置文件的完整合并语义
+- setup/install CLI 的配置写入路径
+- 服务端或 gateway 侧的配置发现逻辑
+
+## External Dependencies
+
+- OpenCode 宿主需把 `OPENCODE_CONFIG_DIR` 传递到插件运行环境
+- 若宿主仅设置 `OPENCODE_CONFIG`，插件只会记录诊断 warning，不会把它当作 bridge 配置根
 
 ## 1. 配置来源与优先级
 
@@ -14,8 +31,12 @@
 
 1. 内建默认值
 2. 用户级配置
-   - `~/.config/opencode/message-bridge.jsonc`
-   - `~/.config/opencode/message-bridge.json`
+   - 若设置 `OPENCODE_CONFIG_DIR`
+     - `$OPENCODE_CONFIG_DIR/message-bridge.jsonc`
+     - `$OPENCODE_CONFIG_DIR/message-bridge.json`
+   - 否则
+     - `~/.config/opencode/message-bridge.jsonc`
+     - `~/.config/opencode/message-bridge.json`
 3. 项目级配置
    - `<workspace>/.opencode/message-bridge.jsonc`
    - `<workspace>/.opencode/message-bridge.json`
@@ -24,9 +45,11 @@
 补充规则：
 
 - 同一目录下若 `.jsonc` 与 `.json` 同时存在，优先读取 `.jsonc`
+- 当设置 `OPENCODE_CONFIG_DIR` 时，用户级 bridge 配置只从该目录读取，不再回退默认 `~/.config/opencode`
 - 项目级配置会从 `workspacePath` 或 `process.cwd()` 开始，沿父目录向上查找，直到文件系统根目录
 - 配置文件支持 JSONC，包括注释与尾逗号
 - `auth.ak` / `auth.sk` 在环境变量层采用成对（原子）解析策略，且会受 `BRIDGE_GATEWAY_CHANNEL` 是否显式设置影响（见第 6.1 节）
+- `OPENCODE_CONFIG` 不参与 bridge 用户级配置定位；若仅设置该变量，配置层会记录 `config.user_config.opencode_config_ignored` warning
 
 ## 2. 默认值
 
@@ -144,6 +167,13 @@
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
 | `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
 
+宿主侧用户级配置根相关变量：
+
+| 环境变量 | 是否参与 bridge 配置定位 | 说明 |
+|---|---|---|
+| `OPENCODE_CONFIG_DIR` | 是 | 作为 bridge 用户级配置的硬隔离根 |
+| `OPENCODE_CONFIG` | 否 | 仅用于诊断；单独设置时会记录 warning，不会改变 bridge 用户级配置目录 |
+
 ### 6.1 `auth.ak` / `auth.sk` 解析规则（与 `BRIDGE_GATEWAY_CHANNEL` 关联）
 
 `auth.ak` 与 `auth.sk` 按“成对凭证”处理，不支持半覆盖混用来源。
@@ -241,6 +271,7 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `config.resolve.started`
 - `config.source.loaded`
 - `config.resolve.completed`
+- `config.user_config.opencode_config_ignored`
 - `config.source.load_failed`
 - `config.validation.passed`
 - `config.validation.failed`

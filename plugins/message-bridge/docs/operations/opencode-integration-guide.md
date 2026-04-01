@@ -1,7 +1,7 @@
 # Message-Bridge OpenCode 集成指导
 
-**Version:** 1.5  
-**Date:** 2026-03-23  
+**Version:** 1.6  
+**Date:** 2026-04-01  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `./npm-publish-guide.md`
@@ -40,6 +40,12 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 | `gateway.url` | `BRIDGE_GATEWAY_URL` | 否 | 生产环境通常不需要配置；切换到 UAT 等非生产环境时再显式填写 |
 | `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文 |
 
+如果应用希望把 bridge 用户级配置与原生 OpenCode 隔离，还需要显式设置：
+
+| 配置项 | 环境变量 | 是否必须 | 说明 |
+|---|---|---|---|
+| `bridge user config root` | `OPENCODE_CONFIG_DIR` | 建议 | 作为 `message-bridge.jsonc|json` 的用户级硬隔离目录 |
+
 `auth` 凭证读取补充：
 
 - 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 只能通过环境变量提供，本地配置中的 `auth.ak/sk` 不参与回退。
@@ -51,6 +57,7 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 ```
 
 UAT 示例：
@@ -60,7 +67,13 @@ process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
 process.env.BRIDGE_GATEWAY_URL = 'wss://gateway-uat.example.com/ws/agent';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 ```
+
+隔离规则补充：
+
+- `OPENCODE_CONFIG_DIR` 一旦设置，`message-bridge` 的用户级配置只从该目录读取，不再回退 `~/.config/opencode`
+- `OPENCODE_CONFIG` 不会改变 bridge 的用户级配置目录；仅设置它不能解决第三方宿主与原生 OpenCode 的配置污染问题
 
 ## 3. `.npmrc` 要求
 
@@ -88,6 +101,7 @@ strict-ssl=false
 - `BRIDGE_GATEWAY_CHANNEL`
 - `BRIDGE_GATEWAY_URL`（如有）
 - `BRIDGE_DIRECTORY`（如有）
+- `OPENCODE_CONFIG_DIR`（如需用户级配置隔离）
 - `.npmrc`
 
 配置变更后需要重启 OpenCode 才会生效，包括：
@@ -113,6 +127,7 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 
 const { server } = await createOpencode({
   hostname: '127.0.0.1',

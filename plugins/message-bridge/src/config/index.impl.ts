@@ -3,6 +3,7 @@ import { AppLogger, type BridgeLogger } from '../runtime/AppLogger.js';
 import { ConfigResolver } from './ConfigResolver.js';
 import { ConfigValidator } from './ConfigValidator.js';
 import { buildConsumedEnvSnapshot } from './env-snapshot.js';
+import { EnvHostConfigLocator } from './HostConfigLocator.js';
 
 /**
  * Configuration validation error that aggregates multiple validation errors
@@ -57,7 +58,8 @@ function createConsoleBackedLogger(): BridgeLogger {
  */
 export async function loadConfig(workspacePath?: string, logger?: BridgeLogger): Promise<BridgeConfig> {
   const configLogger = logger?.child({ component: 'config' }) ?? createConsoleBackedLogger();
-  const resolver = new ConfigResolver(configLogger);
+  const hostConfigLocator = new EnvHostConfigLocator();
+  const resolver = new ConfigResolver(configLogger, hostConfigLocator);
   const config = await resolver.resolveConfig(workspacePath);
 
   if (config.debug) {
