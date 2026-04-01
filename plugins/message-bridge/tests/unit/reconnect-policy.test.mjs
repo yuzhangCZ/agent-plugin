@@ -108,6 +108,23 @@ describe('DefaultReconnectPolicy', () => {
     assert.deepStrictEqual(policy.scheduleNextAttempt(), { ok: false, elapsedMs: 6, maxElapsedMs: 15 });
   });
 
+  test('does not schedule a retry that would consume the remaining reconnect budget exactly', () => {
+    const clock = createClock(7000);
+    const policy = new DefaultReconnectPolicy(
+      {
+        baseMs: 5,
+        maxMs: 5,
+        exponential: false,
+        jitter: 'none',
+        maxElapsedMs: 5,
+      },
+      { clock, random: () => 0.5 },
+    );
+
+    policy.startWindow();
+    assert.deepStrictEqual(policy.scheduleNextAttempt(), { ok: false, elapsedMs: 0, maxElapsedMs: 5 });
+  });
+
   test('resets attempts and reconnect window after success', () => {
     const clock = createClock(5000);
     const policy = new DefaultReconnectPolicy(

@@ -80,7 +80,7 @@ export class DefaultReconnectPolicy implements ReconnectPolicy {
     const delayMs = this.config.jitter === 'full'
       ? Math.floor(this.random() * (cappedDelay + 1))
       : cappedDelay;
-    if (elapsedMs + delayMs > this.config.maxElapsedMs) {
+    if (elapsedMs + delayMs >= this.config.maxElapsedMs) {
       return {
         ok: false,
         elapsedMs,
