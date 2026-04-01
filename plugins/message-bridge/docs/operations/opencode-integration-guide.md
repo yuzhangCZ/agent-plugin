@@ -15,7 +15,7 @@
 ```js
 process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
   $schema: 'https://opencode.ai/config.json',
-  plugin: ['@opencode-cui/message-bridge'],
+  plugin: ['@wecode/skill-opencode-plugin'],
 });
 ```
 
@@ -80,14 +80,14 @@ process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config
 如果使用 npm 包方式接入，必须提前准备 `.npmrc`：
 
 ```ini
-@opencode-cui:registry=https://<your-private-registry>/
+@wecode:registry=https://<your-private-registry>/
 registry=https://registry.npmjs.org/
 strict-ssl=false
 ```
 
 说明：
 
-- `@opencode-cui:registry`：指定 `@opencode-cui` 走企业二方仓
+- `@wecode:registry`：指定 `@wecode` 作用域包走企业二方仓
 - `registry`：保留公共 npm 默认源
 - `strict-ssl=false`：在企业私仓证书链不完整时禁用 SSL 校验，避免启动阶段拉包失败
 
@@ -121,7 +121,7 @@ import { createOpencode } from '@opencode-ai/sdk';
 
 process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
   $schema: 'https://opencode.ai/config.json',
-  plugin: ['@opencode-cui/message-bridge'],
+  plugin: ['@wecode/skill-opencode-plugin'],
 });
 
 process.env.BRIDGE_AUTH_AK = 'your-ak';
@@ -172,6 +172,8 @@ const unsubscribe = subscribeMessageBridgeStatus((nextSnapshot) => {
 - 只适用于与插件同进程的集成方式
 - 不应通过 `status_query -> status_response` 读取 bridge 连接状态
 
+如果你是三方应用集成方，且需要查看私有状态 API 的导出方式、状态对象和字段语义，请直接阅读 [三方应用私有状态 API 接口说明](./third-party-status-api-guide.md)。
+
 ### 6.1 如何判断插件已加载成功
 
 启动后可通过日志确认插件加载结果。
@@ -196,7 +198,7 @@ const unsubscribe = subscribeMessageBridgeStatus((nextSnapshot) => {
 
 优先检查以下几项：
 
-- `.npmrc` 是否已配置 `@opencode-cui` 二方仓地址
+- `.npmrc` 是否已配置 `@wecode` 作用域包的私仓地址
 - 企业私仓是否要求禁用 SSL 校验
 - 以上配置是否都在 OpenCode 启动前完成
 
