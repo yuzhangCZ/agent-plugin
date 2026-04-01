@@ -62,13 +62,11 @@ export async function loadConfig(workspacePath?: string, logger?: BridgeLogger):
   const resolver = new ConfigResolver(configLogger, hostConfigLocator);
   const config = await resolver.resolveConfig(workspacePath);
 
-  if (config.debug) {
-    const envSnapshot = buildConsumedEnvSnapshot(process.env);
-    configLogger.info('config.env.snapshot', {
-      keys: envSnapshot.keys,
-      values: envSnapshot.values,
-    });
-  }
+  const envSnapshot = buildConsumedEnvSnapshot(process.env);
+  configLogger.info('config.env.snapshot', {
+    keys: envSnapshot.keys,
+    values: envSnapshot.values,
+  });
 
   const errors = validateConfig(config);
   if (errors.length > 0) {

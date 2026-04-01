@@ -20,6 +20,7 @@
 补充说明：
 
 - `debug` 默认关闭
+- `config.env.snapshot` 固定使用 `info` 级输出，不受 `debug` 开关影响
 - 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文
 - 这些原始报文日志固定使用 `info` 级别，避免依赖宿主 `debug` 级过滤后丢失
 

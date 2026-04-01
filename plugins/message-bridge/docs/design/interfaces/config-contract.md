@@ -271,10 +271,13 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `config.resolve.started`
 - `config.source.loaded`
 - `config.resolve.completed`
+- `config.env.snapshot`
 - `config.user_config.opencode_config_ignored`
 - `config.source.load_failed`
 - `config.validation.passed`
 - `config.validation.failed`
+
+其中 `config.env.snapshot` 固定以 `info` 级输出，不受 `debug` 开关影响；敏感字段仍按统一日志脱敏规则处理。
 
 当 `debug=true` 时，连接层还会额外输出以下 `info` 级原始报文日志：
 

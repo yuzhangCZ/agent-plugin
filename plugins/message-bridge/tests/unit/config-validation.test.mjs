@@ -1770,7 +1770,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('logs env snapshot only when BRIDGE_DEBUG=true and redacts sensitive values', async () => {
+  test('logs env snapshot at info level and redacts sensitive values', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-snapshot-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalDebug = process.env.BRIDGE_DEBUG;
@@ -1914,7 +1914,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('does not log env snapshot when BRIDGE_DEBUG is disabled', async () => {
+  test('logs env snapshot when BRIDGE_DEBUG is disabled', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-snapshot-off-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalDebug = process.env.BRIDGE_DEBUG;
@@ -1947,7 +1947,10 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       await loadConfig(workspace, logger);
       await new Promise((resolve) => setTimeout(resolve, 10));
       const snapshot = calls.find((entry) => entry.body.message === 'config.env.snapshot');
-      assert.strictEqual(snapshot, undefined);
+      assert.ok(snapshot);
+      assert.deepStrictEqual(snapshot.body.extra.values.BRIDGE_DEBUG, {
+        present: false,
+      });
     } finally {
       if (originalDebug === undefined) {
         delete process.env.BRIDGE_DEBUG;
