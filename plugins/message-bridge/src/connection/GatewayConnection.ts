@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { ConnectionState, type ReconnectConfig } from '../types/index.js';
+import { ConnectionState, RECONNECT_JITTER, type ReconnectConfig } from '../types/index.js';
 import type { HeartbeatMessage, RegisterMessage } from '../contracts/transport-messages.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import type { AkSkAuthPayload } from './AkSkAuth.js';
@@ -215,7 +215,7 @@ const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
   baseMs: 1000,
   maxMs: 30000,
   exponential: true,
-  jitter: 'full',
+  jitter: RECONNECT_JITTER.FULL,
   maxElapsedMs: 600000,
 };
 

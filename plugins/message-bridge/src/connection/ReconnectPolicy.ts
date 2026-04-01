@@ -1,4 +1,4 @@
-import type { ReconnectConfig } from '../types/index.js';
+import { RECONNECT_JITTER, type ReconnectConfig } from '../types/index.js';
 
 export interface ReconnectClock {
   now(): number;
@@ -77,7 +77,7 @@ export class DefaultReconnectPolicy implements ReconnectPolicy {
     const cappedDelay = this.config.exponential
       ? Math.min(this.config.baseMs * Math.pow(2, this.attempt - 1), this.config.maxMs)
       : Math.min(this.config.baseMs, this.config.maxMs);
-    const delayMs = this.config.jitter === 'full'
+    const delayMs = this.config.jitter === RECONNECT_JITTER.FULL
       ? Math.floor(this.random() * (cappedDelay + 1))
       : cappedDelay;
     if (elapsedMs + delayMs >= this.config.maxElapsedMs) {

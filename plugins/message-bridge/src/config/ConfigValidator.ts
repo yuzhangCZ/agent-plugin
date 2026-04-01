@@ -1,5 +1,5 @@
 import { SUPPORTED_UPSTREAM_EVENT_TYPES } from '../contracts/upstream-events.js';
-import type { BridgeConfig } from '../types/index.js';
+import { isReconnectJitter, RECONNECT_JITTERS, type BridgeConfig } from '../types/index.js';
 
 export interface ConfigValidationError {
   path: string;
@@ -144,8 +144,8 @@ export class ConfigValidator {
   }
 
   private validateReconnectJitter(value: unknown, path: string, errors: ConfigValidationError[]): void {
-    if (value !== 'none' && value !== 'full') {
-      errors.push({ path, code: 'INVALID_VALUE', message: `${path} must be one of: none, full` });
+    if (!isReconnectJitter(value)) {
+      errors.push({ path, code: 'INVALID_VALUE', message: `${path} must be one of: ${RECONNECT_JITTERS.join(', ')}` });
     }
   }
 

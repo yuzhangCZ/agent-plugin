@@ -46,7 +46,21 @@ export interface ReconnectConfig {
   maxElapsedMs: number;
 }
 
-export type ReconnectJitter = 'none' | 'full';
+export const RECONNECT_JITTER = {
+  NONE: 'none',
+  FULL: 'full',
+} as const;
+
+export const RECONNECT_JITTERS = [
+  RECONNECT_JITTER.NONE,
+  RECONNECT_JITTER.FULL,
+] as const;
+
+export type ReconnectJitter = typeof RECONNECT_JITTERS[number];
+
+export function isReconnectJitter(value: unknown): value is ReconnectJitter {
+  return typeof value === 'string' && RECONNECT_JITTERS.includes(value as ReconnectJitter);
+}
 
 export interface EventConfig {
   allowlist: string[];
