@@ -1,4 +1,3 @@
-import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { promises } from 'fs';
 import type { BridgeConfig } from '../types/index.js';
@@ -8,16 +7,19 @@ import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
 import { resolveAuthCredentialPolicy } from './AuthCredentialPolicy.js';
+import { EnvHostConfigLocator, type HostConfigLocator } from './HostConfigLocator.js';
 
 const CONFIG_FILE_NAMES = ['message-bridge.jsonc', 'message-bridge.json'] as const;
 
 export class ConfigResolver {
   private readonly jsoncParser: JsoncParser;
   private readonly logger?: BridgeLogger;
+  private readonly hostConfigLocator: HostConfigLocator;
 
-  constructor(logger?: BridgeLogger) {
+  constructor(logger?: BridgeLogger, hostConfigLocator: HostConfigLocator = new EnvHostConfigLocator()) {
     this.jsoncParser = new JsoncParser();
     this.logger = logger;
+    this.hostConfigLocator = hostConfigLocator;
   }
 
   async resolveConfig(workspacePath?: string): Promise<BridgeConfig> {
@@ -26,10 +28,17 @@ export class ConfigResolver {
     let channelSource: 'default' | 'user' | 'project' | 'env' = 'default';
     const workspaceRoot = workspacePath ?? process.cwd();
     this.logger?.info('config.resolve.started', { workspacePath: workspaceRoot });
+    const userConfigLocation = this.hostConfigLocator.resolveUserConfigLocation();
 
-    const userConfigHome = process.env.HOME || homedir();
+    if (userConfigLocation.warningCode === 'opencode_config_ignored_without_config_dir') {
+      this.logger?.warn('config.user_config.opencode_config_ignored', {
+        opencodeConfig: userConfigLocation.opencodeConfig,
+        resolvedUserConfigDir: userConfigLocation.dir,
+      });
+    }
+
     const userConfigPath = await this.findFirstExistingPath(
-      this.getConfigCandidatePaths(join(userConfigHome, '.config', 'opencode')),
+      this.getConfigCandidatePaths(userConfigLocation.dir),
     );
     if (userConfigPath) {
       const userConfig = await this.loadConfigFile(userConfigPath);
@@ -42,6 +51,8 @@ export class ConfigResolver {
         this.logger?.info('config.source.loaded', {
           source: 'user',
           path: userConfigPath,
+          userConfigSource: userConfigLocation.source,
+          isolationEnabled: userConfigLocation.isolationEnabled,
         });
       }
     }

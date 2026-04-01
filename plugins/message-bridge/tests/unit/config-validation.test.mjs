@@ -13,6 +13,8 @@ import { AppLogger } from '../../src/runtime/AppLogger.ts';
 
 const originalHome = process.env.HOME;
 const originalBridgeDirectory = process.env.BRIDGE_DIRECTORY;
+const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
+const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 
 const createValidConfig = (overrides = {}) => ({
   config_version: 1,
@@ -51,6 +53,18 @@ afterEach(() => {
     delete process.env.BRIDGE_DIRECTORY;
   } else {
     process.env.BRIDGE_DIRECTORY = originalBridgeDirectory;
+  }
+
+  if (originalOpencodeConfig === undefined) {
+    delete process.env.OPENCODE_CONFIG;
+  } else {
+    process.env.OPENCODE_CONFIG = originalOpencodeConfig;
+  }
+
+  if (originalOpencodeConfigDir === undefined) {
+    delete process.env.OPENCODE_CONFIG_DIR;
+  } else {
+    process.env.OPENCODE_CONFIG_DIR = originalOpencodeConfigDir;
   }
 });
 
@@ -350,6 +364,243 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('loadConfig reads user message-bridge.json from OPENCODE_CONFIG_DIR when project config is absent', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-custom-user-workspace-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const customConfigRoot = await mkdtemp(join(tmpdir(), 'mb-custom-opencode-'));
+    process.env.HOME = fakeHome;
+    process.env.OPENCODE_CONFIG_DIR = customConfigRoot;
+
+    await writeFile(
+      join(customConfigRoot, 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'custom-user-json-ak',
+            sk: 'custom-user-json-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+
+    try {
+      const config = await loadConfig(workspace);
+      assert.strictEqual(config.auth.ak, 'custom-user-json-ak');
+      assert.strictEqual(config.auth.sk, 'custom-user-json-sk');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(customConfigRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not fallback to default user config when OPENCODE_CONFIG_DIR is set', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-custom-user-no-fallback-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const customConfigRoot = await mkdtemp(join(tmpdir(), 'mb-custom-opencode-'));
+    process.env.HOME = fakeHome;
+    process.env.OPENCODE_CONFIG_DIR = customConfigRoot;
+
+    await mkdir(join(fakeHome, '.config', 'opencode'), { recursive: true });
+    await writeFile(
+      join(fakeHome, '.config', 'opencode', 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'default-user-ak',
+            sk: 'default-user-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+    await writeFile(
+      join(customConfigRoot, 'message-bridge.json'),
+      JSON.stringify({
+        gateway: {
+          channel: 'uniassistant',
+        },
+      }),
+      'utf8',
+    );
+
+    try {
+      await assert.rejects(
+        loadConfig(workspace),
+        (err) =>
+          err instanceof ConfigValidationAggregateError &&
+          err.errors.some((entry) => entry.path === 'auth.ak' && entry.code === 'MISSING_REQUIRED') &&
+          err.errors.some((entry) => entry.path === 'auth.sk' && entry.code === 'MISSING_REQUIRED'),
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(customConfigRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('project config still overrides custom user config directory', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-custom-user-project-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const customConfigRoot = await mkdtemp(join(tmpdir(), 'mb-custom-opencode-'));
+    process.env.HOME = fakeHome;
+    process.env.OPENCODE_CONFIG_DIR = customConfigRoot;
+
+    await mkdir(join(workspace, '.opencode'), { recursive: true });
+    await writeFile(
+      join(customConfigRoot, 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'custom-user-ak',
+            sk: 'custom-user-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+    await writeFile(
+      join(workspace, '.opencode', 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'project-ak',
+            sk: 'project-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+
+    try {
+      const config = await loadConfig(workspace);
+      assert.strictEqual(config.auth.ak, 'project-ak');
+      assert.strictEqual(config.auth.sk, 'project-sk');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(customConfigRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('uses default user config and logs warning when only OPENCODE_CONFIG is set', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-opencode-config-only-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const customConfigRoot = await mkdtemp(join(tmpdir(), 'mb-custom-opencode-'));
+    process.env.HOME = fakeHome;
+    process.env.OPENCODE_CONFIG = join(customConfigRoot, 'opencode.json');
+
+    await mkdir(join(fakeHome, '.config', 'opencode'), { recursive: true });
+    await writeFile(
+      join(fakeHome, '.config', 'opencode', 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'default-user-ak',
+            sk: 'default-user-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+    await writeFile(
+      join(customConfigRoot, 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'custom-user-ak',
+            sk: 'custom-user-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+
+    const calls = [];
+    const logger = new AppLogger(
+      {
+        app: {
+          log: async (options) => {
+            calls.push(options);
+          },
+        },
+      },
+      { component: 'test' },
+      undefined,
+      undefined,
+      true,
+    );
+
+    try {
+      const config = await loadConfig(workspace, logger);
+      assert.strictEqual(config.auth.ak, 'default-user-ak');
+      assert.strictEqual(config.auth.sk, 'default-user-sk');
+      await new Promise((r) => setTimeout(r, 10));
+
+      const warning = calls.find((entry) => entry.body.message === 'config.user_config.opencode_config_ignored');
+      assert.ok(warning);
+      assert.deepStrictEqual(warning.body.extra.opencodeConfig, join(customConfigRoot, 'opencode.json'));
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(customConfigRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not log OPENCODE_CONFIG warning when OPENCODE_CONFIG_DIR is also set', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-opencode-config-dir-priority-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
+    const customConfigRoot = await mkdtemp(join(tmpdir(), 'mb-custom-opencode-'));
+    const ignoredConfigRoot = await mkdtemp(join(tmpdir(), 'mb-opencode-config-'));
+    process.env.HOME = fakeHome;
+    process.env.OPENCODE_CONFIG_DIR = customConfigRoot;
+    process.env.OPENCODE_CONFIG = join(ignoredConfigRoot, 'opencode.json');
+
+    await writeFile(
+      join(customConfigRoot, 'message-bridge.json'),
+      JSON.stringify(
+        createValidConfig({
+          auth: {
+            ak: 'custom-user-ak',
+            sk: 'custom-user-sk',
+          },
+        }),
+      ),
+      'utf8',
+    );
+
+    const calls = [];
+    const logger = new AppLogger(
+      {
+        app: {
+          log: async (options) => {
+            calls.push(options);
+          },
+        },
+      },
+      { component: 'test' },
+      undefined,
+      undefined,
+      true,
+    );
+
+    try {
+      const config = await loadConfig(workspace, logger);
+      assert.strictEqual(config.auth.ak, 'custom-user-ak');
+      assert.strictEqual(config.auth.sk, 'custom-user-sk');
+      await new Promise((r) => setTimeout(r, 10));
+
+      const warning = calls.find((entry) => entry.body.message === 'config.user_config.opencode_config_ignored');
+      assert.strictEqual(warning, undefined);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(customConfigRoot, { recursive: true, force: true });
+      await rm(ignoredConfigRoot, { recursive: true, force: true });
     }
   });
 
@@ -1519,7 +1770,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('logs env snapshot only when BRIDGE_DEBUG=true and redacts sensitive values', async () => {
+  test('logs env snapshot at info level and redacts sensitive values', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-snapshot-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalDebug = process.env.BRIDGE_DEBUG;
@@ -1571,6 +1822,8 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       const snapshot = calls.find((entry) => entry.body.message === 'config.env.snapshot');
       assert.ok(snapshot);
       assert.deepStrictEqual(snapshot.body.extra.keys, [
+        'OPENCODE_CONFIG',
+        'OPENCODE_CONFIG_DIR',
         'BRIDGE_ENABLED',
         'BRIDGE_DEBUG',
         'BRIDGE_DIRECTORY',
@@ -1592,6 +1845,12 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       assert.deepStrictEqual(snapshot.body.extra.values.BRIDGE_DEBUG, {
         present: true,
         value: 'true',
+      });
+      assert.deepStrictEqual(snapshot.body.extra.values.OPENCODE_CONFIG, {
+        present: false,
+      });
+      assert.deepStrictEqual(snapshot.body.extra.values.OPENCODE_CONFIG_DIR, {
+        present: false,
       });
       assert.deepStrictEqual(snapshot.body.extra.values.BRIDGE_GATEWAY_CHANNEL, {
         present: true,
@@ -1655,7 +1914,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('does not log env snapshot when BRIDGE_DEBUG is disabled', async () => {
+  test('logs env snapshot when BRIDGE_DEBUG is disabled', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-snapshot-off-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     const originalDebug = process.env.BRIDGE_DEBUG;
@@ -1688,7 +1947,10 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       await loadConfig(workspace, logger);
       await new Promise((resolve) => setTimeout(resolve, 10));
       const snapshot = calls.find((entry) => entry.body.message === 'config.env.snapshot');
-      assert.strictEqual(snapshot, undefined);
+      assert.ok(snapshot);
+      assert.deepStrictEqual(snapshot.body.extra.values.BRIDGE_DEBUG, {
+        present: false,
+      });
     } finally {
       if (originalDebug === undefined) {
         delete process.env.BRIDGE_DEBUG;

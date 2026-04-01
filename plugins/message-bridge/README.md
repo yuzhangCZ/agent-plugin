@@ -239,8 +239,15 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 
 1. `BRIDGE_*` 环境变量
 2. 项目级配置：`.opencode/message-bridge.jsonc`，其次 `.opencode/message-bridge.json`
-3. 用户级配置：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
+3. 用户级配置：
+   - 设置 `OPENCODE_CONFIG_DIR` 时：`$OPENCODE_CONFIG_DIR/message-bridge.jsonc`，其次 `.json`
+   - 否则：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
 4. 内置默认值
+
+用户级配置隔离补充：
+
+- `OPENCODE_CONFIG_DIR` 是 `message-bridge` 用户级配置的硬隔离根；设置后不会再回退默认 `~/.config/opencode`
+- `OPENCODE_CONFIG` 不参与 bridge 用户级配置定位；如果只设置了它，插件会记录 warning，但仍继续读取默认用户级目录
 
 `auth.ak` / `auth.sk` 额外规则：
 
