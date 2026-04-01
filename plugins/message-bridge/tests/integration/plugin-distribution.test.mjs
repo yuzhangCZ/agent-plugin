@@ -46,6 +46,22 @@ describe('plugin distribution artifact', () => {
     assert.match(artifactContent, /wss:\/\/gateway\.example\.com\/ws\/agent/);
   });
 
+  test('falls back to default-config chain when MB_DEFAULT_GATEWAY_URL is blank', async () => {
+    execFileSync('node', ['./scripts/build.mjs'], {
+      cwd: process.cwd(),
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        MB_DEFAULT_GATEWAY_URL: '   ',
+      },
+    });
+
+    const artifactPath = resolve('release/message-bridge.plugin.js');
+    const artifactContent = await readFile(artifactPath, 'utf8');
+    assert.match(artifactContent, /ws:\/\/localhost:8081\/ws\/agent/);
+    assert.doesNotMatch(artifactContent, /globalThis\.__MB_DEFAULT_GATEWAY_URL__="\s+"/);
+  });
+
   test('builds dev artifact with sourcemap', async () => {
     execFileSync('node', ['./scripts/build-plugin.mjs', '--mode=dev'], {
       cwd: process.cwd(),

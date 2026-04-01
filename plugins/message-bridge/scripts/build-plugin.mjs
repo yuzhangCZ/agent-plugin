@@ -8,7 +8,6 @@ import { build } from 'esbuild';
 const ROOT_DIR = process.cwd();
 const RELEASE_DIR = path.join(ROOT_DIR, 'release');
 const OUTFILE = path.join(RELEASE_DIR, 'message-bridge.plugin.js');
-const LOCALHOST_DEFAULT_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
 
 function resolveBuildMode(argv) {
   const modeArg = argv.find((arg) => arg.startsWith('--mode='));
@@ -19,9 +18,14 @@ function resolveBuildMode(argv) {
   return mode;
 }
 
+function resolveInjectedDefaultGatewayUrl(value) {
+  const normalized = value?.trim();
+  return normalized || null;
+}
+
 async function main() {
   const mode = resolveBuildMode(process.argv.slice(2));
-  const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || LOCALHOST_DEFAULT_GATEWAY_URL;
+  const injectedDefaultGatewayUrl = resolveInjectedDefaultGatewayUrl(process.env.MB_DEFAULT_GATEWAY_URL);
   await rm(RELEASE_DIR, { recursive: true, force: true });
   await mkdir(RELEASE_DIR, { recursive: true });
 
@@ -34,9 +38,11 @@ async function main() {
     platform: 'node',
     minify: mode === 'prod',
     sourcemap: mode === 'dev',
-    define: {
-      'globalThis.__MB_DEFAULT_GATEWAY_URL__': JSON.stringify(defaultGatewayUrl),
-    },
+    define: injectedDefaultGatewayUrl
+      ? {
+          'globalThis.__MB_DEFAULT_GATEWAY_URL__': JSON.stringify(injectedDefaultGatewayUrl),
+        }
+      : {},
   });
 
   await access(OUTFILE, constants.R_OK);
