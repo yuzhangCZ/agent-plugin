@@ -41,7 +41,7 @@
 - `plugins/message-bridge/docs/` 由该目录下的 `AGENTS.md` 统一治理
 - 根文件只写仓库级通用规则，不复制子目录文档规范
 - 详细背景继续放在各自 `README.md` 或子目录文档中
-- 提 PR 时使用 `.github/PULL_REQUEST_TEMPLATE.md`
+- 提 PR 时必须使用 `.github/PULL_REQUEST_TEMPLATE.md`，并遵循 `docs/operations/pull-request-process.md` 中的流程、字段要求与检查项
 - 提 Issue 时使用 `.github/ISSUE_TEMPLATE/` 下对应表单
 - PR 详细流程、字段要求、检查项统一维护在 `docs/operations/pull-request-process.md`
 
