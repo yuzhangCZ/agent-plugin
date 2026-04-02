@@ -30,8 +30,8 @@
 任务：
 
 1. 修正 `SubagentSessionMapper`
-   - 兼容 `session.get() -> { data: ... }`
-   - 兼容平铺返回形态作为 fallback
+   - 按当前 `@opencode-ai/plugin` / SDK 接口契约解析 `session.get()`
+   - 不再额外兼容平铺返回形态
    - child session 写正缓存
    - 主会话写负缓存
    - 保留 `clear()` 便于测试
@@ -82,7 +82,7 @@
 
 2. 新增 `SubagentSessionMapper` 单测文件
    - 主/子 session 缓存
-   - `session.get` 两种返回形态
+   - `session.get` 当前官方接口形态
    - 负缓存避免重复查询
 
 3. 扩充 `runtime-protocol.test`

@@ -123,6 +123,7 @@
 2. **兜底查询**
    - 若普通事件到达时缓存未命中
    - 使用 `session.get(sessionID)` 查询该 session 元信息
+   - 查询结果按当前 `@opencode-ai/plugin` / SDK 接口契约解析
    - 若结果包含 `parentID`，补写映射
 
 同时，主会话也要写入负缓存，避免普通主会话首个事件反复触发兜底查询。
@@ -236,7 +237,7 @@
 2. `SubagentSessionMapper`
    - child `session.created` 建立映射
    - 主会话 `session.created` 建立负缓存
-   - `resolve()` 能解析 `session.get -> { data: ... }`
+   - `resolve()` 按当前 `@opencode-ai/plugin` 接口契约解析 `session.get`
    - 缓存命中时不重复查询
 
 3. `runtime-protocol`
@@ -273,7 +274,7 @@
 
 为了实现上述特性，当前分支需要补齐以下差距：
 
-1. `session.get()` 兜底逻辑需兼容仓库现有 `{ data: ... }` 返回形态
+1. `session.get()` 兜底逻辑需严格按当前 `@opencode-ai/plugin` 接口契约实现，不再兼容平铺 fallback
 2. `session.created` 需升级为不受业务 allowlist 影响的控制事件，并同步更新测试与契约
 3. 主会话需加入负缓存，降低热路径查询
 4. 需要新增覆盖 subagent 聚合与 `permission_reply/question_reply` 闭环路由的测试
