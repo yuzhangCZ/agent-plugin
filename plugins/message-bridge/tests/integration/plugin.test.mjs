@@ -99,6 +99,74 @@ describe('plugin contract', () => {
     assert.strictEqual(snapshot.willReconnect, false);
   });
 
+  test('binds private status api logs to client.app.log during plugin init', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client }));
+    const unsubscribe = subscribeMessageBridgeStatus(() => {});
+    const snapshot = getMessageBridgeStatus();
+    unsubscribe();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const changedLog = logs.find(
+      (entry) => entry?.message === 'status_api.changed' && entry?.extra?.toUnavailableReason === 'disabled',
+    );
+    const queryLog = logs.find(
+      (entry) =>
+        entry?.message === 'status_api.query'
+        && entry?.extra?.phase === snapshot.phase
+        && entry?.extra?.unavailableReason === snapshot.unavailableReason,
+    );
+    const subscribeLog = logs.find((entry) => entry?.message === 'status_api.subscribe');
+    const unsubscribeLog = logs.find((entry) => entry?.message === 'status_api.unsubscribe');
+
+    assert.ok(changedLog);
+    assert.strictEqual(changedLog.extra.toPhase, 'unavailable');
+    assert.ok(queryLog);
+    assert.strictEqual(queryLog.extra.phase, snapshot.phase);
+    assert.strictEqual(queryLog.extra.unavailableReason, snapshot.unavailableReason);
+    assert.ok(subscribeLog);
+    assert.strictEqual(subscribeLog.extra.listenerCount, 1);
+    assert.ok(unsubscribeLog);
+    assert.strictEqual(unsubscribeLog.extra.listenerCount, 0);
+  });
+
+  test('keeps existing private status api logger when later init client has no app.log', async () => {
+    const logs = [];
+    const loggingClient = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client: loggingClient }));
+    await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
+    const snapshot = getMessageBridgeStatus();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const queryLog = logs.find(
+      (entry) =>
+        entry?.message === 'status_api.query'
+        && entry?.extra?.phase === snapshot.phase
+        && entry?.extra?.unavailableReason === snapshot.unavailableReason,
+    );
+
+    assert.ok(queryLog);
+    assert.strictEqual(queryLog.extra.phase, snapshot.phase);
+    assert.strictEqual(queryLog.extra.unavailableReason, snapshot.unavailableReason);
+  });
+
   test('stopRuntime resets status and notifies private status subscribers', async () => {
     await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
     const startedSnapshot = getMessageBridgeStatus();
