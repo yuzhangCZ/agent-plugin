@@ -3,11 +3,27 @@ import assert from 'node:assert/strict';
 
 import {
   __resetMessageBridgeStatusForTests,
+  configureMessageBridgeStatusLogger,
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
   resetMessageBridgeStatus,
   subscribeMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
+
+function createLoggingClient(logs) {
+  return {
+    app: {
+      log: async (options) => {
+        logs.push(options?.body);
+        return true;
+      },
+    },
+  };
+}
+
+async function flushLogs() {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
 
 describe('message bridge status store', () => {
   beforeEach(() => {
@@ -68,6 +84,77 @@ describe('message bridge status store', () => {
 
     assert.strictEqual(seen.length, 1);
     assert.strictEqual(seen[0].phase, 'connecting');
+  });
+
+  test('logs query snapshot when status api is read', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+
+    const snapshot = getMessageBridgeStatus();
+    await flushLogs();
+
+    const queryLogs = logs.filter((entry) => entry?.message === 'status_api.query');
+    assert.strictEqual(queryLogs.length, 1);
+    assert.strictEqual(queryLogs[0].level, 'info');
+    assert.strictEqual(queryLogs[0].extra.phase, snapshot.phase);
+    assert.strictEqual(queryLogs[0].extra.connected, snapshot.connected);
+    assert.strictEqual(queryLogs[0].extra.unavailableReason, snapshot.unavailableReason);
+    assert.strictEqual(queryLogs[0].extra.willReconnect, snapshot.willReconnect);
+    assert.strictEqual(queryLogs[0].extra.updatedAt, snapshot.updatedAt);
+  });
+
+  test('logs subscribe and unsubscribe with listener count', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+
+    const unsubscribe = subscribeMessageBridgeStatus(() => {});
+    unsubscribe();
+    await flushLogs();
+
+    const subscribeLogs = logs.filter((entry) => entry?.message === 'status_api.subscribe');
+    const unsubscribeLogs = logs.filter((entry) => entry?.message === 'status_api.unsubscribe');
+    assert.strictEqual(subscribeLogs.length, 1);
+    assert.strictEqual(unsubscribeLogs.length, 1);
+    assert.strictEqual(subscribeLogs[0].extra.listenerCount, 1);
+    assert.strictEqual(unsubscribeLogs[0].extra.listenerCount, 0);
+  });
+
+  test('logs semantic status changes and suppresses duplicates', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+
+    publishMessageBridgeStatus({
+      connected: false,
+      phase: 'connecting',
+      unavailableReason: null,
+      willReconnect: true,
+      lastError: null,
+      updatedAt: 10,
+      lastReadyAt: null,
+    });
+
+    publishMessageBridgeStatus({
+      connected: false,
+      phase: 'connecting',
+      unavailableReason: null,
+      willReconnect: true,
+      lastError: null,
+      updatedAt: 11,
+      lastReadyAt: null,
+    });
+
+    await flushLogs();
+
+    const changedLogs = logs.filter((entry) => entry?.message === 'status_api.changed');
+    assert.strictEqual(changedLogs.length, 1);
+    assert.strictEqual(changedLogs[0].extra.fromPhase, 'unavailable');
+    assert.strictEqual(changedLogs[0].extra.toPhase, 'connecting');
+    assert.strictEqual(changedLogs[0].extra.fromConnected, false);
+    assert.strictEqual(changedLogs[0].extra.toConnected, false);
+    assert.strictEqual(changedLogs[0].extra.fromUnavailableReason, 'uninitialized');
+    assert.strictEqual(changedLogs[0].extra.toUnavailableReason, null);
+    assert.strictEqual(changedLogs[0].extra.fromWillReconnect, false);
+    assert.strictEqual(changedLogs[0].extra.toWillReconnect, true);
   });
 
   test('enforces snapshot invariants', () => {

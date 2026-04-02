@@ -1,7 +1,7 @@
 # 私有状态 API 契约
 
-**Version:** 1.0  
-**Date:** 2026-03-31  
+**Version:** 1.1  
+**Date:** 2026-04-02  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`, `../../operations/opencode-integration-guide.md`
@@ -54,6 +54,7 @@ function subscribeMessageBridgeStatus(
 - `getMessageBridgeStatus()` 返回当前最新快照，不抛异常
 - `subscribeMessageBridgeStatus()` 返回取消订阅函数
 - 若状态语义没有变化，订阅者不会收到重复通知
+- 这两个接口的调用与状态变化会输出 `status_api.*` 日志，便于宿主排障
 
 ## 6. 状态模型
 
