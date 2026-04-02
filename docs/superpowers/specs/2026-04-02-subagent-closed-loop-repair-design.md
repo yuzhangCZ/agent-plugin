@@ -1,150 +1,165 @@
-# Subagent 闭环修复设计
+# Subagent 会话聚合与闭环路由设计
 
 日期：2026-04-02
 
-## 背景
+## 功能概述
 
-`plugins/message-bridge` 的 PR 53 试图把 OpenCode subagent 事件按父 session 聚合转发给 gateway：
+本特性的目标是让 `message-bridge` 正式支持 OpenCode subagent 会话，并与 `opencode-cui release-0401` 形成一致协议：
 
-- 上行事件外层 `toolSessionId` 被改写为父 session id
-- 同时附带 `subagentSessionId` 和 `subagentName`
+1. 上游事件按父会话聚合展示
+2. 事件仍保留真实 subagent 身份
+3. 用户对 subagent 产生的交互进行回复时，消息能准确回到对应子会话
 
-该方向本身正确，但当前实现还不能形成稳定闭环，主要问题有：
+换句话说，本特性要解决的是：
 
-1. `session.get()` 兜底解析错误，缓存 miss 时无法可靠识别 child session。
-2. `session.created` 被纳入支持事件后，相关测试和契约未同步更新。
-3. 插件侧没有明确写清“下行闭环依赖什么协议语义”，导致容易误判为还需要插件额外解析下行 `subagentSessionId`。
-4. 普通 session 未做负缓存，首个事件会多一次不必要的 `session.get()` 查询。
+- **展示层面**：主会话中能看见“这是哪个 subagent 发出的事件”
+- **路由层面**：中间层可以把针对 subagent 的回复准确送回原始 child session
+- **协议层面**：插件、中间层、Miniapp 对 `toolSessionId / subagentSessionId / subagentName` 的含义一致
 
-同时，`integration/opencode-cui` 的 `release-0401` 已经引入并消费了：
+## 用户可见结果
 
-- `subagentSessionId`
-- `subagentName`
+特性完成后，外部观察到的行为应为：
 
-并在 Skill Server / Miniapp 链路中把 `subagentSessionId` 用于回写真实目标 `payload.toolSessionId`。因此插件侧应直接对齐该语义，而不是另起一套双向映射协议。
+1. 对于 subagent 产生的上行事件，gateway / skill 侧看到的是父会话主线，而不是把每个 child session 当成独立主会话。
+2. 同一条事件会携带 subagent 身份信息，供 skill-server / miniapp 展示“来自哪个 subagent”。
+3. 当用户对 subagent 的 question / permission 进行回复时，该回复不会误打到父 session，而会准确回到 child session。
+4. 对于普通非 subagent 会话，协议和行为与当前一致。
 
 ## 目标
 
-本次修复只采用“对齐 `release-0401` 的最小闭环方案”：
+本设计限定以下目标：
 
-1. 插件上行继续使用：
-   - `toolSessionId` = 父 session id
-   - `subagentSessionId` = 子 session id
-   - `subagentName` = 子 agent 展示名
-2. 插件下行继续只消费 `payload.toolSessionId`
-3. 中间层若要命中 subagent，必须在下行请求中把 child session id 写回 `payload.toolSessionId`
-4. 补齐测试和契约，使该语义在代码中可验证、可回归
+1. 在插件上行协议中稳定产出：
+   - 父会话路由键
+   - 子会话标识
+   - 子 agent 展示名
+2. 明确插件与 `release-0401` 的协议分工
+3. 使下游回复形成闭环，但不在插件内引入猜测式路由
+4. 以测试形式固化该契约
 
-## 不做的事
+## 非目标
 
-本次不做以下扩展：
+本次不做：
 
-- 不在插件中引入新的下行 `subagentSessionId` 解析分支
-- 不在插件内维护 `parent -> child` 的交互态推断映射
-- 不尝试在下游未回填 child session id 时，由插件猜测目标 subagent
+- 在插件中新增一个独立的下行 `subagentSessionId` 解析分支
+- 在插件内推断“父会话下当前活跃的 child session 是谁”
+- 在下游未提供真实 child session id 时，由插件自行猜测目标子会话
+- 重写原始 event payload 内部的 session 字段
 
-原因是这些能力会引入歧义，尤其在多个 subagent 并发时不可可靠验证。
+## 协议语义
 
-## 选定方案
+### 上行语义
 
-### 协议契约
+插件发送 `tool_event` 时，字段语义固定为：
 
-插件与 `release-0401` 对齐后的协议语义如下：
+- `toolSessionId`
+  - 表示**父会话 id**
+  - 是 gateway / skill 侧聚合主会话的主路由键
+- `subagentSessionId`
+  - 表示**真实 child session id**
+  - 用于展示 subagent 来源，以及为后续回复提供定位依据
+- `subagentName`
+  - 表示 child agent 的展示名
 
-- 上行 `tool_event`
-  - `toolSessionId`：父 session id，用于 gateway 和 skill 侧聚合主会话
-  - `subagentSessionId`：真实子 session id，用于展示和后续回复定位
-  - `subagentName`：展示字段
-- 下行 `invoke`
-  - 插件只读取 `payload.toolSessionId`
-  - 若目标是 subagent，中间层必须把 child session id 写回 `payload.toolSessionId`
+对普通主会话事件：
 
-这意味着插件侧的“闭环”并不是解析新的下行字段，而是保证上行字段稳定、清晰，并依赖中间层把目标 child id 重新投影回现有下行协议。
+- `toolSessionId` 仍为该主会话本身
+- `subagentSessionId/subagentName` 不出现
 
-### 插件内部职责
+### 下行语义
 
-`BridgeRuntime` 和 `SubagentSessionMapper` 的职责边界调整为：
+插件下行继续只认现有协议：
 
-- `SubagentSessionMapper`
-  - 维护 `childSessionId -> { parentSessionId, agentName }`
-  - 支持主 session 负缓存，避免重复 `session.get()`
-  - 兜底查询时兼容 `session.get() -> { data: ... }` 返回形态
-- `BridgeRuntime`
-  - 对 `session.created` 只建映射，不转发
-  - 对识别出的 child session 事件改写外层 `toolSessionId`
-  - 对 child `session.idle` 不进入 `ToolDoneCompat`
-  - 对普通 session 保持现有行为不变
+- `invoke.payload.toolSessionId`
 
-### 兼容性约束
+若目标是 subagent，中间层必须在下行请求中把 **child session id** 写入 `payload.toolSessionId`。
 
-如果下游未把 child session id 回填到 `payload.toolSessionId`，插件不会尝试恢复真实 child session，而是按收到的 session id 继续执行。
+因此，本特性的闭环语义不是“插件解析一个新的下行 subagent 字段”，而是：
 
-这不是插件侧 bug，而是调用方未遵守协议契约。该边界必须写入测试与 PR 描述。
+1. 插件上行稳定提供 `subagentSessionId`
+2. 中间层保留该字段
+3. 中间层在真正回发插件前，把 child session id 写回现有下行 `payload.toolSessionId`
 
-## 详细设计
+这与 `release-0401` 的现有语义保持一致。
 
-### 1. Upstream 事件处理
+## 系统边界
 
-保留 PR 53 的总体结构，但修正细节：
+### 插件负责什么
 
-- `session.created`
-  - 作为内部控制事件使用
-  - 提取 `properties.info.id`
-  - 若存在 `parentID`，写入 child 映射缓存
-  - 若不存在 `parentID`，写入主 session 负缓存
-  - 该事件不转发给 gateway
+`message-bridge` 负责：
 
-- 其他事件
-  - 先根据当前事件里的 session id 查询映射
-  - 若命中 child 映射，则：
-    - 外层 `toolSessionId` 改写为 `parentSessionId`
-    - 附加 `subagentSessionId`
-    - 附加 `subagentName`
-  - 若未命中，则保持原始 `toolSessionId`
+1. 识别某个 session 是否为 subagent child session
+2. 把 child session 的上行事件聚合到父 session
+3. 附带真实 `subagentSessionId/subagentName`
+4. 对 child `session.idle` 采取与主会话不同的完成态处理，避免误发 `tool_done`
 
-### 2. `session.get()` 兜底查询
+### 中间层负责什么
 
-`SubagentSessionMapper.resolve()` 必须兼容仓库现有 SDK 适配语义。
+`release-0401` 范围内的 gateway / skill-server / miniapp 负责：
 
-已知仓库其他实现普遍把 `session.get()` 当作：
+1. 保留 `subagentSessionId/subagentName`
+2. 在用户回复 permission / question 等交互时，把目标 child session id 写回 `payload.toolSessionId`
 
-```ts
-{ data: { ...sessionFields } }
-```
+### 插件不负责什么
 
-因此 mapper 解析逻辑必须：
+插件不负责：
 
-1. 先判断返回值是否为对象
-2. 优先读取 `result.data`
-3. 若 `result.data` 存在则从其中读取 `parentID/title`
-4. 若 `result.data` 不存在，再兼容读取平铺字段
+1. 从父会话上下文猜测应该回复给哪个 child session
+2. 在下游没有回填 child id 时做歧义决策
 
-这样可以兼容当前 SDK 适配层，也降低未来协议变更的脆弱性。
+## 核心设计
 
-### 3. 主 session 负缓存
+### 1. Child Session 识别
 
-当前 PR 只缓存 child session，导致普通 session 首个事件会额外触发一次 `session.get()`。
+插件内部维护 `childSessionId -> parentSessionId` 映射。
 
-修复后应统一缓存两类结果：
+映射来源分两类：
 
-- child session：`Map<sessionId, SubagentMapping>`
-- 主 session：`Map<sessionId, null>`
+1. **主动缓存**
+   - 收到 `session.created`
+   - 若包含 `parentID`
+   - 立即写入 child 映射
 
-收益：
+2. **兜底查询**
+   - 若普通事件到达时缓存未命中
+   - 使用 `session.get(sessionID)` 查询该 session 元信息
+   - 若结果包含 `parentID`，补写映射
 
-- 避免热路径不必要查询
-- 降低对 SDK 可用性的耦合
-- 使事件转发延迟更稳定
+同时，主会话也要写入负缓存，避免普通主会话首个事件反复触发兜底查询。
 
-### 4. Downstream 动作闭环
+### 2. Event 聚合投影
 
-插件侧不新增新的解析分支。闭环成立条件为：
+当事件来自 child session 时：
 
-- gateway / skill-server / miniapp 在收到上行 `subagentSessionId` 后保留该字段
-- 用户对 permission/question 等交互作答时，中间层使用 `subagentSessionId` 作为真实目标 session
-- 中间层在发回插件前，把该值写回下行 `payload.toolSessionId`
+1. 外层 `toolSessionId` 改写为父 session id
+2. 外层附加：
+   - `subagentSessionId = childSessionId`
+   - `subagentName = agentName`
+3. 原始 event payload 保持原始来源，不做深层字段重写
 
-因此，对插件来说：
+这样做的原因是：
+
+- 外层 envelope 是跨系统路由和聚合键
+- 内层 raw event 是 OpenCode 原始事实
+
+本特性选择明确区分这两层语义，而不是强行让两者看起来完全一致。
+
+### 3. Idle / Done 行为
+
+对 child session 的 `session.idle`，插件不进入主会话的 `ToolDoneCompat` 逻辑。
+
+原因：
+
+- child session 的 idle 仅表示 subagent 自己的局部完成
+- 若直接沿用主会话 `tool_done` 兼容逻辑，会误把父主线视为完成
+
+对主会话保持现有行为不变。
+
+### 4. Downstream 闭环
+
+插件侧下行动作不新增特殊分支，继续按 `payload.toolSessionId` 路由。
+
+因此：
 
 - `chat`
 - `abort_session`
@@ -152,99 +167,146 @@
 - `permission_reply`
 - `question_reply`
 
-都继续按现有 `payload.toolSessionId` 路由，不新增插件内的特殊分支。
+对插件来说都保持同一规则：
+
+- 收到哪个 `payload.toolSessionId`
+- 就路由到哪个真实 OpenCode session
+
+这要求中间层在面向 subagent 时，必须把 child session id 填回该字段。
+
+## 数据流
+
+### 上行
+
+1. OpenCode 发出 child session 事件
+2. 插件识别其 parent-child 关系
+3. 插件发送：
+   - `toolSessionId = parent`
+   - `subagentSessionId = child`
+   - `subagentName = ...`
+4. Gateway / skill / miniapp 按父会话聚合展示，并保留 subagent 身份
+
+### 下行
+
+1. 用户在 UI 中对某个 subagent 事件进行回复
+2. 中间层根据保存的 `subagentSessionId` 确定真实 child session
+3. 中间层向插件发送 `invoke`
+4. `invoke.payload.toolSessionId = child`
+5. 插件按现有逻辑把动作路由到对应 child session
+
+## 兼容性与约束
+
+### 普通主会话兼容性
+
+普通非 subagent 会话：
+
+- 不出现 `subagentSessionId/subagentName`
+- `toolSessionId` 与当前一致
+- 下行动作行为不变
+
+### 调用方契约约束
+
+如果下游没有把 child session id 写回 `payload.toolSessionId`，插件不会报错地“恢复正确 child”，而会按收到的 session id 正常执行。
+
+这是明确的协议边界，不属于插件内部恢复逻辑。
 
 ## 测试设计
 
 ### 单元测试
 
-1. `upstream-event-extractor.test`
-   - 更新 `session.created` 相关预期
-   - 增加合法 `session.created` 抽取用例
-   - 增加缺字段时返回 `missing_required_field` 的用例
+1. `upstream-event-extractor`
+   - `session.created` 成为受支持控制事件
+   - 校验合法 `session.created` 可抽取
+   - 校验字段缺失时返回明确错误
 
-2. `SubagentSessionMapper` 新增独立单测
-   - `session.created` child 写缓存
-   - `session.created` 主 session 写负缓存
-   - `resolve()` 解析 `{ data: { parentID, title } }`
-   - `resolve()` 对主 session 返回 `null` 并缓存
-   - `resolve()` 在缓存命中时不重复查询
+2. `SubagentSessionMapper`
+   - child `session.created` 建立映射
+   - 主会话 `session.created` 建立负缓存
+   - `resolve()` 能解析 `session.get -> { data: ... }`
+   - 缓存命中时不重复查询
 
-3. `runtime-protocol.test`
-   - child `tool_event` 被重写为父 `toolSessionId`
-   - `subagentSessionId/subagentName` 被附加到上行消息
+3. `runtime-protocol`
+   - child 事件上行后外层 `toolSessionId` 被改写为父 session
+   - child 事件附带 `subagentSessionId/subagentName`
    - child `session.idle` 不触发 `tool_done`
-   - 主 session 行为保持原样
+   - 主会话事件保持现有行为
 
 ### 集成测试
 
-新增一组最小闭环集成测试，覆盖：
+增加一组最小闭环测试：
 
-1. 上游 child permission/question 事件进入插件后，转发结果中包含 `subagentSessionId`
-2. 模拟中间层把 child id 写回下行 `payload.toolSessionId`
-3. 插件按该 child id 成功路由 `permission_reply/question_reply`
+1. child `permission/question` 事件进入插件后，上行结果包含 `subagentSessionId`
+2. 模拟中间层把 child id 写回 `payload.toolSessionId`
+3. `permission_reply/question_reply` 命中正确 child session
 
-说明：插件侧不需要直接断言 Miniapp UI 展示，只验证协议闭环和动作命中。
+插件侧不测试 Miniapp 的视觉展示，只测试协议和路由闭环。
 
 ## 验证标准
 
 必须满足：
 
 1. `pnpm --filter @wecode/skill-opencode-plugin typecheck` 通过
-2. `@wecode/skill-opencode-plugin` 受影响 unit tests 通过
-3. `@wecode/skill-opencode-plugin` 至少一组闭环 integration test 通过
+2. `@wecode/skill-opencode-plugin` 受影响单测通过
+3. 至少一组 subagent 闭环集成测试通过
 4. PR 描述明确说明：
-   - 上行 `toolSessionId` 已重写为父 session id
-   - `subagentSessionId` 是下游闭环所依赖的定位字段
-   - 插件下行仍只认 `payload.toolSessionId`
+   - 上行 `toolSessionId` 的父会话语义
+   - `subagentSessionId` 的定位语义
+   - 插件下行仍只消费 `payload.toolSessionId`
 
-## 风险与缓解
+## 当前实现差距
 
-### 风险 1：中间层未遵守回填契约
+为了实现上述特性，当前分支需要补齐以下差距：
 
-风险：
-若 gateway / skill-server 未把 child id 回填到下行 `payload.toolSessionId`，插件会命中父 session。
+1. `session.get()` 兜底逻辑需兼容仓库现有 `{ data: ... }` 返回形态
+2. `session.created` 纳入支持事件后，测试与契约需同步更新
+3. 主会话需加入负缓存，降低热路径查询
+4. 需要新增覆盖 subagent 聚合与闭环路由的测试
 
-缓解：
-- 在测试中把该契约固定下来
+这些差距属于该特性的实现收尾工作，而不是另一个独立功能。
+
+## 风险
+
+### 风险 1：中间层未正确回填 child id
+
+结果：
+回复会落到父 session，而不是 child session。
+
+控制方式：
+- 在测试中把契约固定下来
 - 在 PR 描述中明确边界
-- 与 `release-0401` 对齐验证联调结果
 
-### 风险 2：事件体内 session id 与外层 envelope 不一致
+### 风险 2：外层与内层 session 语义不同
 
-风险：
-当前设计只改写外层 `toolSessionId`，原始事件体内部仍保留子 session id。
+结果：
+消费方如果错误读取 raw event 内部 session 字段，可能与 envelope 产生理解偏差。
 
-缓解：
-- 本次保持现状，不改 raw event
-- 以“外层 envelope 是路由主键，事件体保留原始来源”作为明确契约
-- 若后续消费方需要完全一致的投影视图，再单独设计 transport projector 扩展
+控制方式：
+- 把“外层用于路由聚合，内层保留原始来源”写成明确契约
+- 本次不引入更复杂的 raw event 重写逻辑
 
-### 风险 3：热路径额外查询带来延迟抖动
+### 风险 3：首次事件查询带来抖动
 
-风险：
-缓存 miss 时会触发 `session.get()`
+结果：
+缓存 miss 时增加一次 `session.get()`
 
-缓解：
-- 加入主 session 负缓存
-- 以 `session.created` 作为主缓存预热路径
+控制方式：
+- child 通过 `session.created` 主动建缓存
+- 主会话写入负缓存
 
 ## 实现任务骨架
 
-1. 修复 `SubagentSessionMapper` 的 `session.get()` 解析与主 session 负缓存
-2. 调整 `session.created` 的契约和测试预期
-3. 为 runtime 增加 child 重写与 idle 行为测试
-4. 增加最小闭环 integration test
-5. 更新 PR 描述中的协议说明与验证证据
+1. 修正 `SubagentSessionMapper` 的兜底解析与负缓存
+2. 固化 `session.created` 的控制事件契约
+3. 完成 child 事件聚合与 idle 行为测试
+4. 补最小闭环集成测试
+5. 更新 PR 描述，使协议语义与测试一致
 
 ## 结论
 
-本方案采用最小且完整的闭环修复策略：
+本特性不是“为当前 PR 打补丁”，而是为 `message-bridge` 正式定义 subagent 会话协议：
 
-- 插件上行对齐 `release-0401`
-- 插件下行不新增分支
-- 把闭环责任清晰地拆分为：
-  - 插件负责稳定产出 `subagentSessionId`
-  - 中间层负责把 child id 写回下行 `payload.toolSessionId`
+- 上行按父会话聚合
+- 同时保留真实 subagent 身份
+- 下行继续沿用既有 `payload.toolSessionId`，由中间层回填 child id 实现闭环
 
-这样既能修复当前 PR 的功能和测试问题，也能避免在插件内引入不可验证的会话猜测逻辑。
+这是与 `release-0401` 最一致、最可验证、也最小化额外复杂度的方案。
