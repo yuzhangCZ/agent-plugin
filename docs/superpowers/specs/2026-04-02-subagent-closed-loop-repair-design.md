@@ -98,7 +98,7 @@
 `release-0401` 范围内的 gateway / skill-server / miniapp 负责：
 
 1. 保留 `subagentSessionId/subagentName`
-2. 在用户回复 permission / question 等交互时，把目标 child session id 写回 `payload.toolSessionId`
+2. 在用户回复 `permission_reply/question_reply` 时，把目标 child session id 写回 `payload.toolSessionId`
 
 ### 插件不负责什么
 
@@ -126,6 +126,14 @@
    - 若结果包含 `parentID`，补写映射
 
 同时，主会话也要写入负缓存，避免普通主会话首个事件反复触发兜底查询。
+
+`session.created` 在本特性中被定义为**插件内部控制事件**：
+
+- 插件必须处理它，用于维护 parent-child 映射
+- 插件永远不向 gateway 转发它
+- 它不受业务上游转发 allowlist 影响
+
+这样可以避免用户显式配置 allowlist 时，因为遗漏 `session.created` 而导致 subagent 映射预热失效。
 
 ### 2. Event 聚合投影
 
@@ -159,20 +167,25 @@
 
 插件侧下行动作不新增特殊分支，继续按 `payload.toolSessionId` 路由。
 
-因此：
+当前特性只对齐 `release-0401` 已明确支持的闭环动作：
 
-- `chat`
-- `abort_session`
-- `close_session`
 - `permission_reply`
 - `question_reply`
 
-对插件来说都保持同一规则：
+对插件来说保持同一规则：
 
 - 收到哪个 `payload.toolSessionId`
 - 就路由到哪个真实 OpenCode session
 
 这要求中间层在面向 subagent 时，必须把 child session id 填回该字段。
+
+对于以下动作：
+
+- `chat`
+- `abort_session`
+- `close_session`
+
+本次特性不承诺 subagent 精确回路由能力。若后续需要支持，应在中间层协议和交互语义明确后单独扩展，不在本次范围内一并定义。
 
 ## 数据流
 
@@ -192,7 +205,7 @@
 2. 中间层根据保存的 `subagentSessionId` 确定真实 child session
 3. 中间层向插件发送 `invoke`
 4. `invoke.payload.toolSessionId = child`
-5. 插件按现有逻辑把动作路由到对应 child session
+5. 插件按现有逻辑把 `permission_reply/question_reply` 路由到对应 child session
 
 ## 兼容性与约束
 
@@ -218,6 +231,7 @@
    - `session.created` 成为受支持控制事件
    - 校验合法 `session.created` 可抽取
    - 校验字段缺失时返回明确错误
+   - 校验 `session.created` 作为控制事件不受业务转发 allowlist 约束
 
 2. `SubagentSessionMapper`
    - child `session.created` 建立映射
@@ -229,6 +243,7 @@
    - child 事件上行后外层 `toolSessionId` 被改写为父 session
    - child 事件附带 `subagentSessionId/subagentName`
    - child `session.idle` 不触发 `tool_done`
+   - `session.created` 在显式 allowlist 未包含时仍能建缓存且不转发
    - 主会话事件保持现有行为
 
 ### 集成测试
@@ -252,15 +267,16 @@
    - 上行 `toolSessionId` 的父会话语义
    - `subagentSessionId` 的定位语义
    - 插件下行仍只消费 `payload.toolSessionId`
+   - 当前闭环动作范围仅包含 `permission_reply/question_reply`
 
 ## 当前实现差距
 
 为了实现上述特性，当前分支需要补齐以下差距：
 
 1. `session.get()` 兜底逻辑需兼容仓库现有 `{ data: ... }` 返回形态
-2. `session.created` 纳入支持事件后，测试与契约需同步更新
+2. `session.created` 需升级为不受业务 allowlist 影响的控制事件，并同步更新测试与契约
 3. 主会话需加入负缓存，降低热路径查询
-4. 需要新增覆盖 subagent 聚合与闭环路由的测试
+4. 需要新增覆盖 subagent 聚合与 `permission_reply/question_reply` 闭环路由的测试
 
 这些差距属于该特性的实现收尾工作，而不是另一个独立功能。
 
@@ -296,10 +312,10 @@
 ## 实现任务骨架
 
 1. 修正 `SubagentSessionMapper` 的兜底解析与负缓存
-2. 固化 `session.created` 的控制事件契约
+2. 固化 `session.created` 的控制事件契约，并提前于业务转发 allowlist 处理
 3. 完成 child 事件聚合与 idle 行为测试
-4. 补最小闭环集成测试
-5. 更新 PR 描述，使协议语义与测试一致
+4. 补 `permission_reply/question_reply` 的最小闭环集成测试
+5. 更新 PR 描述，使协议语义、动作范围与测试一致
 
 ## 结论
 
@@ -307,6 +323,6 @@
 
 - 上行按父会话聚合
 - 同时保留真实 subagent 身份
-- 下行继续沿用既有 `payload.toolSessionId`，由中间层回填 child id 实现闭环
+- 下行继续沿用既有 `payload.toolSessionId`，由中间层回填 child id 实现 `permission_reply/question_reply` 闭环
 
 这是与 `release-0401` 最一致、最可验证、也最小化额外复杂度的方案。
