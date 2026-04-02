@@ -1,0 +1,8 @@
+{
+  "type": "permission.replied",
+  "properties": {
+    "sessionID": "ses_permission_replied_1",
+    "requestID": "perm_fixture_replied_1",
+    "reply": "once"
+  }
+}

@@ -10,6 +10,9 @@ import {
   type PermissionAskedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
+  type PermissionRepliedEvent,
+  type QuestionRepliedEvent,
+  type QuestionRejectedEvent,
   type SessionCreatedEvent,
   type SessionErrorEvent,
   type SessionIdleEvent,
@@ -52,6 +55,9 @@ type UpstreamExtraByType = {
   'permission.updated': undefined;
   'permission.asked': undefined;
   'question.asked': undefined;
+  'permission.replied': undefined;
+  'question.replied': undefined;
+  'question.rejected': undefined;
 };
 
 const EXTRACTION_LOG_EVENT = 'event.extraction_failed';
@@ -401,6 +407,39 @@ function extractQuestionAskedCommon(event: QuestionAskedEvent): ExtractResult<Co
   return ok(buildCommon(event.type, sessionResult.value));
 }
 
+function extractPermissionRepliedCommon(event: PermissionRepliedEvent): ExtractResult<CommonUpstreamFields> {
+  const sessionResult = requireNonEmptyString(
+    event.properties.sessionID,
+    event.type,
+    'common',
+    'properties.sessionID',
+  );
+  if (!sessionResult.ok) return sessionResult;
+  return ok(buildCommon(event.type, sessionResult.value));
+}
+
+function extractQuestionRepliedCommon(event: QuestionRepliedEvent): ExtractResult<CommonUpstreamFields> {
+  const sessionResult = requireNonEmptyString(
+    event.properties.sessionID,
+    event.type,
+    'common',
+    'properties.sessionID',
+  );
+  if (!sessionResult.ok) return sessionResult;
+  return ok(buildCommon(event.type, sessionResult.value));
+}
+
+function extractQuestionRejectedCommon(event: QuestionRejectedEvent): ExtractResult<CommonUpstreamFields> {
+  const sessionResult = requireNonEmptyString(
+    event.properties.sessionID,
+    event.type,
+    'common',
+    'properties.sessionID',
+  );
+  if (!sessionResult.ok) return sessionResult;
+  return ok(buildCommon(event.type, sessionResult.value));
+}
+
 export const UPSTREAM_EVENT_EXTRACTORS: {
   [K in SupportedUpstreamEventType]: EventExtractor<K, UpstreamExtraByType[K]>;
 } = {
@@ -416,6 +455,9 @@ export const UPSTREAM_EVENT_EXTRACTORS: {
   'permission.updated': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
   'permission.asked': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
   'question.asked': { extractCommon: extractQuestionAskedCommon, extractExtra: noExtra },
+  'permission.replied': { extractCommon: extractPermissionRepliedCommon, extractExtra: noExtra },
+  'question.replied': { extractCommon: extractQuestionRepliedCommon, extractExtra: noExtra },
+  'question.rejected': { extractCommon: extractQuestionRejectedCommon, extractExtra: noExtra },
 };
 
 function buildEventPreview(event: BridgeEvent): Record<string, unknown> {

@@ -1,0 +1,7 @@
+{
+  "type": "question.rejected",
+  "properties": {
+    "sessionID": "ses_question_rejected_1",
+    "requestID": "question_fixture_rejected_1"
+  }
+}

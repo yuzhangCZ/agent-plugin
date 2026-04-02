@@ -1,0 +1,8 @@
+{
+  "type": "question.replied",
+  "properties": {
+    "sessionID": "ses_question_replied_1",
+    "requestID": "question_fixture_replied_1",
+    "answers": [{"answer": "Option A"}]
+  }
+}
