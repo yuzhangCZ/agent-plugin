@@ -20,6 +20,7 @@
 补充说明：
 
 - `debug` 默认关闭
+- `config.env.snapshot` 固定使用 `info` 级输出，不受 `debug` 开关影响
 - 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文
 - 这些原始报文日志固定使用 `info` 级别，避免依赖宿主 `debug` 级过滤后丢失
 
@@ -70,7 +71,7 @@
 | `deltaBytes` | 事件 delta 字段 UTF-8 字节数 |
 | `diffCount` | `session.diff` 中 diff 项数量 |
 | `latencyMs` | 单次动作耗时 |
-| `attempt`/`delayMs` | 重连次数与重连延迟 |
+| `attempt`/`delayMs` | 重连次数与实际重连延迟 |
 
 ## 3. 关键路径时序图（Mermaid）
 
@@ -208,6 +209,7 @@ sequenceDiagram
 | `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
 | `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
 | `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
+| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs` | `src/connection/GatewayConnection.ts` |
 | `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
 | `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
 | `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
@@ -254,12 +256,12 @@ sequenceDiagram
 | `action.chat.failed` | error | chat 失败（可映射 code） | `error`,`errorCode?` | `src/action/ChatAction.ts:126` |
 | `action.chat.exception` | error | chat 执行抛异常 | `error`,`errorCode?` | `src/action/ChatAction.ts:139` |
 | `action.chat.finished` | debug | chat 结束（finally） | `latencyMs` | `src/action/ChatAction.ts:151` |
-| `action.create_session.started` | info | create_session 开始 | `requestedSessionId`,`hasMetadata` | `src/action/CreateSessionAction.ts:58` |
-| `action.create_session.rejected_state` | warn | 连接态不允许创建会话 | `state` | `src/action/CreateSessionAction.ts:65` |
-| `action.create_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CreateSessionAction.ts:132` |
-| `action.create_session.failed` | error | create_session 失败 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:143` |
-| `action.create_session.exception` | error | create_session 抛异常 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:156` |
-| `action.create_session.finished` | debug | create_session 结束（finally） | `latencyMs` | `src/action/CreateSessionAction.ts:168` |
+| `action.create_session.started` | info | 最终创建目录解析完成后，create_session 开始 | `payloadKeys`,`resolvedDirectory`,`resolvedDirectorySource` | `src/action/CreateSessionAction.ts:192` |
+| `action.create_session.rejected_state` | warn | 连接态不允许创建会话 | `state` | `src/action/CreateSessionAction.ts:35` |
+| `action.create_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CreateSessionAction.ts:115` |
+| `action.create_session.failed` | error | create_session 失败 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:63` |
+| `action.create_session.exception` | error | create_session 抛异常 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:147` |
+| `action.create_session.finished` | debug | create_session 结束（finally） | `latencyMs` | `src/action/CreateSessionAction.ts:164` |
 | `action.close_session.started` | info | close_session 开始 | `sessionId` | `src/action/CloseSessionAction.ts:50` |
 | `action.close_session.rejected_state` | warn | 连接态不允许关闭会话 | `state` | `src/action/CloseSessionAction.ts:56` |
 | `action.close_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CloseSessionAction.ts:108` |
@@ -288,6 +290,7 @@ sequenceDiagram
 4. `gateway.ready`
 5. `gateway.close` / `gateway.error`
 6. `gateway.reconnect.scheduled` / `gateway.reconnect.attempt`
+7. 若看到 `gateway.reconnect.exhausted`，表示单轮自动重连总时长已达到 `maxElapsedMs`，连接会停在 `DISCONNECTED`
 
 若没有 `gateway.open`，优先检查网关地址、AK/SK 签名参数与网络可达性。
 

@@ -1,15 +1,7 @@
 import { randomUUID } from 'crypto';
+import type { BridgeLogLevel, BridgeLogger } from '../types/logger.js';
 
-export type BridgeLogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-export interface BridgeLogger {
-  debug(message: string, extra?: Record<string, unknown>): void;
-  info(message: string, extra?: Record<string, unknown>): void;
-  warn(message: string, extra?: Record<string, unknown>): void;
-  error(message: string, extra?: Record<string, unknown>): void;
-  child(extra: Record<string, unknown>): BridgeLogger;
-  getTraceId(): string;
-}
+export type { BridgeLogLevel, BridgeLogger } from '../types/logger.js';
 
 type AppLogFn = (options?: {
   body?: {
@@ -24,6 +16,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
 
+function isRedactablePresenceValueRecord(value: unknown): value is { present: boolean; value?: unknown } {
+  if (!isRecord(value) || typeof value.present !== 'boolean') {
+    return false;
+  }
+
+  return Object.keys(value).every((key) => key === 'present' || key === 'value');
+}
+
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => redact(item));
@@ -36,6 +36,13 @@ function redact(value: unknown): unknown {
   for (const [k, v] of Object.entries(value)) {
     const lower = k.toLowerCase();
     if (sensitive.some((key) => lower.includes(key))) {
+      if (isRedactablePresenceValueRecord(v)) {
+        output[k] = {
+          present: v.present,
+          ...(Object.prototype.hasOwnProperty.call(v, 'value') ? { value: '***' } : {}),
+        };
+        continue;
+      }
       output[k] = '***';
       continue;
     }

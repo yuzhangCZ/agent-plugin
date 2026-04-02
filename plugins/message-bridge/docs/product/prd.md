@@ -133,7 +133,7 @@
 2. 不可达时立即回传 `tool_error`（含 `error` 与可路由字段 `welinkSessionId/toolSessionId`），采用 best effort 发送。  
 3. 若发送失败，记录本地结构化日志并累计错误计数。  
 4. 不排队、不缓冲 invoke。  
-5. 连接层继续重连，不退出进程。  
+5. 连接层在单轮自动重连窗口内继续重连，不退出进程；超过窗口后停止自动重连并保持 `DISCONNECTED`。  
 
 ### FR-MB-08（P1）注册与状态查询
 - 连接成功发送 `register(deviceName, macAddress, os, toolType, toolVersion)`，其中 `deviceName/toolVersion/macAddress` 由运行时自动采集  
@@ -210,7 +210,9 @@
 - `heartbeatIntervalMs=30000`
 - `reconnectBaseMs=1000`
 - `reconnectMaxMs=30000`
-- 指数退避，最大 30s
+- `reconnectJitter=full`
+- `reconnectMaxElapsedMs=600000`
+- 指数退避，最大 30s；`full jitter` 时在 `0..cappedDelay` 间随机
 
 ### NFR-MB-03 安全
 - `sk`、签名原文、敏感鉴权参数不得落日志
@@ -223,7 +225,9 @@
 - `InvokeAction = chat | create_session | abort_session | close_session | permission_reply | question_reply`
 - `PermissionReplyPayload = { permissionId, toolSessionId, response }`
 - `StatusResponse = { type: 'status_response', opencodeOnline: boolean }`
-- `tool_error = { type, welinkSessionId?, toolSessionId?, error }`
+- `tool_error = { type, welinkSessionId?, toolSessionId?, error, reason? }`
+- `tool_error.reason` 当前仅定义：`session_not_found`（仅当 `chat` 前置 `session.get` 可证实会话不存在时上报）
+- `chat` 执行时，`session.get` 属于必选前置探测能力；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续执行 `session.prompt`
 
 错误码最小集：
 - `GATEWAY_UNREACHABLE`

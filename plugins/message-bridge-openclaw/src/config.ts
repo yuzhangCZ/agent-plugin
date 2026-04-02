@@ -10,18 +10,29 @@ import type { MessageBridgeAccountConfig, MessageBridgeResolvedAccount } from ".
 
 export const CHANNEL_ID = "message-bridge";
 export const DEFAULT_ACCOUNT_ID = "default";
+const LOCALHOST_DEFAULT_GATEWAY_URL = "ws://localhost:8081/ws/agent";
 export const LEGACY_ACCOUNTS_MIGRATION_FIX =
   "删除 channels.message-bridge.accounts，并把唯一账号配置迁移到 channels.message-bridge 顶层。";
 export const CHANNEL_ADD_FIX =
   "运行 openclaw channels add --channel message-bridge --url <gateway-url> --token <ak> --password <sk>。";
 const NON_DEFAULT_ACCOUNT_ERROR_PREFIX = "message_bridge_single_account_only";
 
+function resolveBuildDefaultGatewayUrl() {
+  const candidate = (globalThis as typeof globalThis & { __MB_DEFAULT_GATEWAY_URL__?: unknown }).__MB_DEFAULT_GATEWAY_URL__;
+  if (typeof candidate !== "string") {
+    return LOCALHOST_DEFAULT_GATEWAY_URL;
+  }
+
+  const normalized = candidate.trim();
+  return normalized || LOCALHOST_DEFAULT_GATEWAY_URL;
+}
+
 export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
   enabled: true,
   debug: false,
   streaming: true,
   gateway: {
-    url: "ws://localhost:8081/ws/agent",
+    url: resolveBuildDefaultGatewayUrl(),
     heartbeatIntervalMs: 30_000,
     reconnect: {
       baseMs: 1_000,

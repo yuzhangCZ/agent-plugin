@@ -12,6 +12,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
@@ -54,12 +60,14 @@ function createResolvedConfig(overrides = {}) {
     debug: false,
     gateway: {
       url: 'ws://localhost:8081/ws/agent',
-      channel: 'opencode',
+      channel: 'openx',
       heartbeatIntervalMs: 30000,
       reconnect: {
         baseMs: 1000,
         maxMs: 30000,
         exponential: true,
+        jitter: 'full',
+        maxElapsedMs: 600000,
       },
     },
     sdk: {
@@ -96,12 +104,14 @@ async function writeEnabledConfig(workspace) {
       enabled: true,
       gateway: {
         url: 'ws://localhost:8081/ws/agent',
-        channel: 'opencode',
+        channel: 'openx',
         heartbeatIntervalMs: 30000,
         reconnect: {
           baseMs: 1000,
           maxMs: 30000,
           exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
         },
       },
       sdk: {
@@ -147,6 +157,39 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('ignores invoke messages until runtime state is READY', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    let routeCalls = 0;
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.actionRouter = {
+      route: async () => {
+        routeCalls += 1;
+        return { success: true, data: { sessionId: 'unexpected' } };
+      },
+    };
+    runtime.stateManager.setState('CONNECTING');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-chat',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-not-ready', text: 'hello' },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-create',
+      action: 'create_session',
+      payload: { title: 'should be ignored' },
+    });
+
+    assert.strictEqual(routeCalls, 0);
+    assert.deepStrictEqual(sent, []);
+  });
+
   test('rejects non-baseline nested invoke payload and returns tool_error without code', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -182,8 +225,12 @@ describe('runtime protocol strictness', () => {
     runtime.actionRouter = {
       route: async () => ({
         success: false,
-        errorCode: 'INVALID_PAYLOAD',
-        errorMessage: 'Failed to send message: session not found',
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
       }),
     };
 
@@ -199,9 +246,133 @@ describe('runtime protocol strictness', () => {
       type: 'tool_error',
       welinkSessionId: 's-rebuild',
       toolSessionId: 'tool-rebuild',
-      error: 'Failed to send message: session not found',
+      error: 'Failed to send message',
       reason: 'session_not_found',
     });
+  });
+
+  test('close_session not-found text does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'INVALID_PAYLOAD',
+        errorMessage: 'session not found',
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('close_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to close session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close-evidence',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close-evidence' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('create_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to create session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-create-evidence',
+      action: 'create_session',
+      payload: { title: 'new session' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('chat prompt evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.prompt',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-chat-prompt',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-chat-prompt', text: 'hello' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
   });
 
   test('accepts baseline invoke shape and emits tool_done on chat success', async () => {
@@ -231,6 +402,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'tool-100' },
+      query: { directory: '/session/default-directory' },
       body: {
         parts: [{ type: 'text', text: 'hello' }],
       },
@@ -302,13 +474,21 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-42', toolCallId: 'call-42', answer: 'Vite' },
     });
 
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-42' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
@@ -386,6 +566,9 @@ describe('runtime protocol strictness', () => {
         },
         body: {
           response: 'once',
+        },
+        query: {
+          directory: '/session/default-directory',
         },
       },
     ]);
@@ -920,7 +1103,12 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-close-1' },
     });
 
-    assert.deepStrictEqual(deleteCalls, [{ path: { id: 'tool-close-1' } }]);
+    assert.deepStrictEqual(deleteCalls, [{
+      path: { id: 'tool-close-1' },
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.strictEqual((sent).length, 0);
   });
 
@@ -932,6 +1120,12 @@ describe('runtime protocol strictness', () => {
       hostDirectory: '/workspace/current',
       client: createRuntimeClient({
         session: {
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'created-dir-1',
+              directory: '/env/bridge-root',
+            },
+          }),
           create: async (options) => {
             createCalls.push(options);
             return { data: { id: 'created-dir-1' } };
@@ -981,6 +1175,9 @@ describe('runtime protocol strictness', () => {
         path: {
           id: 'created-dir-1',
         },
+        query: {
+          directory: '/env/bridge-root',
+        },
         body: {
           parts: [{ type: 'text', text: 'hello from bridge directory' }],
         },
@@ -1004,14 +1201,16 @@ describe('runtime protocol strictness', () => {
           url: 'ws://localhost:8081/ws/agent',
           deviceName: 'dev',
           macAddress: '11:22:33:44:55:66',
-          channel: 'opencode',
+          channel: 'openx',
           toolVersion: '1.2.3',
           heartbeatIntervalMs: 30000,
-          reconnect: {
-            baseMs: 1000,
-            maxMs: 30000,
-            exponential: true,
-          },
+        reconnect: {
+          baseMs: 1000,
+          maxMs: 30000,
+          exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
+        },
         },
         sdk: {
           timeoutMs: 10000,
@@ -1081,7 +1280,7 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(ws.sent[0].deviceName, hostname());
       assert.strictEqual(ws.sent[0].macAddress, '11:22:33:44:55:66');
       assert.strictEqual(typeof ws.sent[0].os, 'string');
-      assert.strictEqual(ws.sent[0].toolType, 'opencode');
+      assert.strictEqual(ws.sent[0].toolType, 'openx');
       assert.strictEqual(ws.sent[0].toolVersion, '9.9.9');
 
       runtime.stop();
@@ -1090,6 +1289,45 @@ describe('runtime protocol strictness', () => {
       globalThis.WebSocket = originalWebSocket;
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start logs unknown toolType before register and keeps register payload', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+    const logs = [];
+
+    const resolvedConfig = createResolvedConfig();
+    resolvedConfig.gateway.channel = 'legacy-tool-type';
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(resolvedConfig, {
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              logs.push(options);
+              return true;
+            },
+          },
+        }),
+      });
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const ws = RegisterCaptureWebSocket.instances[0];
+      assert.strictEqual(ws.sent[0].type, 'register');
+      assert.strictEqual(ws.sent[0].toolType, 'legacy-tool-type');
+
+      const unknownLog = logs.find((entry) => entry?.body?.message === 'runtime.register.tool_type.unknown');
+      assert.ok(unknownLog);
+      assert.strictEqual(unknownLog.body.extra.toolType, 'legacy-tool-type');
+      assert.deepStrictEqual(unknownLog.body.extra.knownToolTypes, ['openx', 'uniassistant', 'codeagent']);
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
     }
   });
 
@@ -1106,7 +1344,7 @@ describe('runtime protocol strictness', () => {
         enabled: true,
         gateway: {
           url: 'ws://localhost:8081/ws/agent',
-          channel: 'opencode',
+          channel: 'openx',
           heartbeatIntervalMs: 30000,
           reconnect: {
             baseMs: 1000,
@@ -1238,6 +1476,55 @@ describe('runtime protocol strictness', () => {
         process.env.HOME = originalHome;
       }
       globalThis.WebSocket = originalWebSocket;
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start fails when session.get capability is missing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-start-missing-get-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-home-missing-get-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    await writeEnabledConfig(workspace);
+
+    const appLogs = [];
+    try {
+      const runtime = new BridgeRuntime({
+        workspacePath: workspace,
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+              return true;
+            },
+          },
+          session: {
+            get: undefined,
+          },
+        }),
+      });
+
+      await assert.rejects(runtime.start(), (err) => {
+        assert.deepStrictEqual(err, {
+          code: 'SDK_CLIENT_CAPABILITIES_MISSING',
+          message: 'OpenCode client is missing required action capabilities',
+          details: {
+            missingCapabilities: ['session.get'],
+          },
+        });
+        return true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const failureLog = appLogs.find((entry) => entry.message === 'runtime.start.failed_capabilities');
+      assert.deepStrictEqual(failureLog.extra.missingCapabilities, ['session.get']);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }
@@ -1462,5 +1749,222 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(runtimeInvokeReceived.extra.gatewayMessageId, 'gw-msg-1');
     assert.strictEqual(runtimeInvokeReceived.extra.toolSessionId, 'tool-42');
     assert.strictEqual(runtimeInvokeCompleted.extra.runtimeTraceId, runtimeInvokeReceived.extra.runtimeTraceId);
+  });
+
+  test('runtime.start reloads config on restart and uses the latest channel', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+
+    let resolveCount = 0;
+    const configs = [
+      createResolvedConfig(),
+      createResolvedConfig({
+        gateway: {
+          ...createResolvedConfig().gateway,
+          channel: 'uniassistant',
+        },
+      }),
+    ];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return configs[resolveCount++];
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+      runtime.stop();
+
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+
+      assert.strictEqual(resolveCount, 2);
+      assert.strictEqual(RegisterCaptureWebSocket.instances.length, 2);
+      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].toolType, 'openx');
+      assert.strictEqual(RegisterCaptureWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('runtime.start retries with refreshed config after a pre-open connection failure', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    class FlakyRegisterWebSocket {
+      static OPEN = 1;
+      static instances = [];
+
+      constructor() {
+        this.readyState = 0;
+        this.sent = [];
+        this.instanceIndex = FlakyRegisterWebSocket.instances.push(this) - 1;
+        setTimeout(() => {
+          if (this.instanceIndex === 0) {
+            this.onclose?.({ code: 1006, reason: 'dial failed', wasClean: false });
+            return;
+          }
+
+          this.readyState = FlakyRegisterWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+        }, 0);
+      }
+
+      send(data) {
+        this.sent.push(JSON.parse(data));
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+    globalThis.WebSocket = FlakyRegisterWebSocket;
+
+    let resolveCount = 0;
+    const configs = [
+      createResolvedConfig(),
+      createResolvedConfig({
+        gateway: {
+          ...createResolvedConfig().gateway,
+          channel: 'uniassistant',
+        },
+      }),
+    ];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return configs[resolveCount++];
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+      await runtime.start();
+      await new Promise((r) => setTimeout(r, 10));
+
+      assert.strictEqual(resolveCount, 2);
+      assert.strictEqual(FlakyRegisterWebSocket.instances.length, 2);
+      assert.strictEqual(FlakyRegisterWebSocket.instances[0].sent.length, 0);
+      assert.strictEqual(FlakyRegisterWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('runtime.start applies reconnect env overrides to scheduling and exhaustion behavior', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const originalHome = process.env.HOME;
+    const originalJitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+    const originalMaxElapsed = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+    const originalBaseMs = process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+    const originalMaxMs = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+
+    class ExhaustingWebSocket {
+      static OPEN = 1;
+      static instances = [];
+
+      constructor() {
+        this.readyState = 0;
+        this.sent = [];
+        ExhaustingWebSocket.instances.push(this);
+        setTimeout(() => {
+          this.readyState = ExhaustingWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network-loss', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send(data) {
+        this.sent.push(JSON.parse(data));
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    globalThis.WebSocket = ExhaustingWebSocket;
+
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-env-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-home-'));
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = 'none';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = '1';
+    process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = '20';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = '20';
+
+    const appLogs = [];
+
+    try {
+      await writeEnabledConfig(workspace);
+
+      const runtime = new BridgeRuntime({
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+            },
+          },
+        }),
+        workspacePath: workspace,
+      });
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const exhausted = appLogs.find((entry) => entry.message === 'gateway.reconnect.exhausted');
+
+      assert.strictEqual(ExhaustingWebSocket.instances.length, 1);
+      assert.strictEqual(appLogs.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+      assert.ok(exhausted);
+      assert.strictEqual(exhausted.extra.maxElapsedMs, 1);
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalJitter === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = originalJitter;
+      }
+      if (originalMaxElapsed === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = originalMaxElapsed;
+      }
+      if (originalBaseMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = originalBaseMs;
+      }
+      if (originalMaxMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = originalMaxMs;
+      }
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
   });
 });

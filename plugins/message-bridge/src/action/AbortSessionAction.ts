@@ -5,14 +5,15 @@ import {
   ActionResult,
   ActionContext,
   ErrorCode,
-  hasError,
-  safeExecute,
   stateToErrorCode,
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
 
 export class AbortSessionAction implements Action<'abort_session', AbortSessionPayload, AbortSessionResultData> {
   name: 'abort_session' = 'abort_session';
+
+  constructor(private readonly sessionScopedActionGatewayPort: SessionScopedActionGatewayPort) {}
 
   async execute(
     payload: AbortSessionPayload,
@@ -33,50 +34,22 @@ export class AbortSessionAction implements Action<'abort_session', AbortSessionP
         };
       }
 
-      const executionResult = await safeExecute(
-        context.client.session.abort({
-          sessionID: payload.toolSessionId,
-        }),
-        (error) => `Abort session failed: ${getErrorMessage(error)}`,
-      );
+      const gatewayResult = await this.sessionScopedActionGatewayPort.abortSession({
+        sessionId: payload.toolSessionId,
+        ...(context.logger ? { logger: context.logger } : {}),
+      });
 
-      if (executionResult.success) {
-        if (!hasError(executionResult.data)) {
-          return {
-            success: true,
-            data: { sessionId: payload.toolSessionId, aborted: true },
-          };
-        }
-
-        const errorField =
-          executionResult.data && typeof executionResult.data === 'object' && 'error' in executionResult.data
-            ? (executionResult.data as { error: unknown }).error
-            : undefined;
-        const errorMessage = errorField !== undefined ? getErrorMessage(errorField) : 'Unknown error';
-
-        context.logger?.error('action.abort_session.sdk_error_payload', {
-          toolSessionId: payload.toolSessionId,
-          error: errorMessage,
-          ...(errorField !== undefined ? getErrorDetailsForLog(errorField) : {}),
-          latencyMs: Date.now() - startedAt,
-        });
-        return {
-          success: false,
-          errorCode: 'SDK_UNREACHABLE',
-          errorMessage: `Failed to abort session: ${errorMessage}`,
-        };
+      if (gatewayResult.success) {
+        return gatewayResult;
       }
 
       context.logger?.error('action.abort_session.failed', {
         toolSessionId: payload.toolSessionId,
-        error: executionResult.error,
+        error: gatewayResult.errorMessage,
+        errorCode: gatewayResult.errorCode,
         latencyMs: Date.now() - startedAt,
       });
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: executionResult.error,
-      };
+      return gatewayResult;
     } catch (error) {
       const errorCode = this.errorMapper(error);
       const errorMessage = getErrorMessage(error);

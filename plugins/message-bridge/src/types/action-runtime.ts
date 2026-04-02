@@ -5,6 +5,8 @@ import type {
   ActionResultDataByName,
 } from '../contracts/downstream-messages.js';
 import type { HostClientLike, OpencodeClient } from './sdk.js';
+import type { BridgeLogger } from './logger.js';
+import type { ToolErrorEvidence } from '../utils/error.js';
 
 export interface ActionContext {
   client: OpencodeClient;
@@ -14,13 +16,8 @@ export interface ActionContext {
   welinkSessionId?: string;
   // 兼容字段：仅 create_session 的目录决策链路消费，其他 action 不应透传。
   effectiveDirectory?: string;
-  logger?: {
-    debug(message: string, extra?: Record<string, unknown>): void;
-    info(message: string, extra?: Record<string, unknown>): void;
-    warn(message: string, extra?: Record<string, unknown>): void;
-    error(message: string, extra?: Record<string, unknown>): void;
-    getTraceId(): string;
-  };
+  assiantDirectoryMappingConfigured?: boolean;
+  logger?: BridgeLogger;
 }
 
 export type ActionSuccess<TData = void> = TData extends void
@@ -31,6 +28,7 @@ export interface ActionFailure {
   success: false;
   errorCode?: ErrorCode;
   errorMessage?: string;
+  errorEvidence?: ToolErrorEvidence;
 }
 
 export type ActionResult<TData = void> = ActionSuccess<TData> | ActionFailure;

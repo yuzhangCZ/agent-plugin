@@ -6,11 +6,26 @@ import { CreateSessionAction } from '../../src/action/CreateSessionAction.ts';
 import { CloseSessionAction } from '../../src/action/CloseSessionAction.ts';
 import { PermissionReplyAction } from '../../src/action/PermissionReplyAction.ts';
 
+const sessionScopedActionGatewayStub = {
+  abortSession: async () => ({ success: true, data: { sessionId: 'ignored', aborted: true } }),
+  closeSession: async () => ({ success: true, data: { sessionId: 'ignored', closed: true } }),
+  replyPermission: async () => ({
+    success: true,
+    data: { permissionId: 'ignored', response: 'once', applied: true },
+  }),
+  replyQuestion: async () => ({ success: true, data: { requestId: 'ignored', replied: true } }),
+  promptSession: async () => ({ success: true }),
+};
+
+const chatUseCaseStub = {
+  execute: async () => ({ success: true }),
+};
+
 const actions = [
-  new ChatAction(),
+  new ChatAction(chatUseCaseStub),
   new CreateSessionAction(),
-  new CloseSessionAction(),
-  new PermissionReplyAction(),
+  new CloseSessionAction(sessionScopedActionGatewayStub),
+  new PermissionReplyAction(sessionScopedActionGatewayStub),
 ];
 
 function context(state) {

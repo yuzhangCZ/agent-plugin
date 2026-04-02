@@ -50,6 +50,7 @@ describe('createSdkAdapter coverage', () => {
         create: async () => ({}),
       },
     }), [
+      'session.get',
       'session.prompt',
       'session.abort',
       'session.delete',
@@ -65,11 +66,15 @@ describe('createSdkAdapter coverage', () => {
   });
 
   test('creates adapted sdk methods and forwards calls', async () => {
-    const calls = { create: 0, abort: 0, delete: 0, prompt: 0, permission: 0, get: 0, post: 0 };
+    const calls = { create: 0, sessionGet: 0, abort: 0, delete: 0, prompt: 0, permission: 0, get: 0, post: 0 };
     const raw = {
       session: {
         create: async (options) => {
           calls.create += 1;
+          return { data: options };
+        },
+        get: async (options) => {
+          calls.sessionGet += 1;
           return { data: options };
         },
         abort: async (options) => {
@@ -103,23 +108,24 @@ describe('createSdkAdapter coverage', () => {
 
     const adapted = createSdkAdapter(raw);
     const r1 = await adapted.session.create({ title: 'session-1', directory: '/tmp/bridge' });
-    const r2 = await adapted.session.abort({ sessionID: 's1', directory: '/tmp/bridge' });
-    const r3 = await adapted.session.delete({ sessionID: 's1', directory: '/tmp/bridge' });
-    const r4 = await adapted.session.prompt({
+    const r2 = await adapted.session.get({ sessionID: 's1', directory: '/tmp/bridge' });
+    const r3 = await adapted.session.abort({ sessionID: 's1', directory: '/tmp/bridge' });
+    const r4 = await adapted.session.delete({ sessionID: 's1', directory: '/tmp/bridge' });
+    const r5 = await adapted.session.prompt({
       sessionID: 's1',
       directory: '/tmp/bridge',
       parts: [{ type: 'text', text: 'hi' }],
     });
-    const r5 = await adapted.postSessionIdPermissionsPermissionId({
+    const r6 = await adapted.postSessionIdPermissionsPermissionId({
       sessionID: 's1',
       permissionID: 'p1',
       directory: '/tmp/bridge',
       response: 'once',
     });
-    const r6 = await adapted._client.get({ url: '/question' });
-    const r7 = await adapted._client.post({ url: '/question/reply' });
+    const r7 = await adapted._client.get({ url: '/question' });
+    const r8 = await adapted._client.post({ url: '/question/reply' });
 
-    assert.deepStrictEqual(calls, { create: 1, abort: 1, delete: 1, prompt: 1, permission: 1, get: 1, post: 1 });
+    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, abort: 1, delete: 1, prompt: 1, permission: 1, get: 1, post: 1 });
     assert.deepStrictEqual(r1.data, {
       body: { title: 'session-1' },
       query: { directory: '/tmp/bridge' },
@@ -135,14 +141,18 @@ describe('createSdkAdapter coverage', () => {
     assert.deepStrictEqual(r4.data, {
       path: { id: 's1' },
       query: { directory: '/tmp/bridge' },
-      body: { parts: [{ type: 'text', text: 'hi' }] },
     });
     assert.deepStrictEqual(r5.data, {
+      path: { id: 's1' },
+      query: { directory: '/tmp/bridge' },
+      body: { parts: [{ type: 'text', text: 'hi' }] },
+    });
+    assert.deepStrictEqual(r6.data, {
       path: { id: 's1', permissionID: 'p1' },
       query: { directory: '/tmp/bridge' },
       body: { response: 'once' },
     });
-    assert.strictEqual(r6.data.url, '/question');
-    assert.strictEqual(r7.data.url, '/question/reply');
+    assert.strictEqual(r7.data.url, '/question');
+    assert.strictEqual(r8.data.url, '/question/reply');
   });
 });

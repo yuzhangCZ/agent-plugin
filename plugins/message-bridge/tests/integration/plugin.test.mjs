@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from 'node:test';
+import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,12 +7,29 @@ import { join } from 'node:path';
 import { MessageBridgePlugin, default as DefaultPlugin } from '../../src/index.ts';
 import { __resetRuntimeForTests, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 
+const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
+
+function restoreInjectedPluginVersion() {
+  if (typeof ORIGINAL_PLUGIN_VERSION === 'undefined') {
+    delete globalThis.__MB_PLUGIN_VERSION__;
+    return;
+  }
+
+  globalThis.__MB_PLUGIN_VERSION__ = ORIGINAL_PLUGIN_VERSION;
+}
+
 function createPluginClient(overrides = {}) {
   const base = {
     global: {},
     app: {},
     session: {
       create: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
@@ -55,6 +72,10 @@ describe('plugin contract', () => {
   beforeEach(() => {
     __resetRuntimeForTests();
     process.env.BRIDGE_ENABLED = 'false';
+  });
+
+  afterEach(() => {
+    restoreInjectedPluginVersion();
   });
 
   test('exports named and default as same plugin function', () => {
@@ -106,6 +127,27 @@ describe('plugin contract', () => {
     assert.strictEqual(shapeLogs[0].extra.hasSessionCreate, true);
     assert.strictEqual(shapeLogs[0].extra.hasRawClientGet, true);
     assert.strictEqual(shapeLogs[0].extra.hasRawClientPost, true);
+  });
+
+  test('logs plugin version in runtime.start.requested', async () => {
+    globalThis.__MB_PLUGIN_VERSION__ = '1.2.0-test';
+
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const startLogs = logs.filter((entry) => entry?.message === 'runtime.start.requested');
+    assert.strictEqual(startLogs.length, 1);
+    assert.strictEqual(startLogs[0].extra.pluginVersion, '1.2.0-test');
   });
 
   test('loader semantics: Object.entries + duplicate function references only init once', async () => {

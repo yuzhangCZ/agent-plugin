@@ -7,6 +7,16 @@ export interface RegisterMessage {
   toolVersion: string;
 }
 
+export const KNOWN_TOOL_TYPES = [
+  "openx",
+] as const;
+
+export type KnownToolType = (typeof KNOWN_TOOL_TYPES)[number];
+
+export function isKnownToolType(value: string): value is KnownToolType {
+  return KNOWN_TOOL_TYPES.includes(value as KnownToolType);
+}
+
 export interface HeartbeatMessage {
   type: "heartbeat";
   timestamp: string;

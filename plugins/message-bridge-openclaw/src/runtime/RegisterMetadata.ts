@@ -2,9 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { KNOWN_TOOL_TYPES, isKnownToolType } from "../contracts/transport.js";
 import type { BridgeLogger } from "../types.js";
 
-export const MESSAGE_BRIDGE_TOOL_TYPE = "openclaw";
+export const MESSAGE_BRIDGE_TOOL_TYPE = "openx";
 
 export interface RegisterMetadata {
   deviceName: string;
@@ -103,4 +104,16 @@ export function resolveRegisterMetadata(
     toolVersion: deps.toolVersion?.trim() || resolvePackageVersion(logger),
     macAddress: resolveMacAddress(logger, deps.networkInterfaces ?? os.networkInterfaces),
   };
+}
+
+export function warnUnknownToolType(logger: BridgeLogger, toolType: string, accountId?: string): void {
+  if (isKnownToolType(toolType)) {
+    return;
+  }
+
+  logger.warn("runtime.register.tool_type.unknown", {
+    toolType,
+    knownToolTypes: [...KNOWN_TOOL_TYPES],
+    ...(accountId ? { accountId } : {}),
+  });
 }

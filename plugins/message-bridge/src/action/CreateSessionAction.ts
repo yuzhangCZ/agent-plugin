@@ -11,7 +11,7 @@ import {
 } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { attachDirectory } from './directory.js';
-import type { CreateSessionUseCase } from '../usecase/CreateSessionUseCase.js';
+import type { CreateSessionUseCase, PreparedCreateSession } from '../usecase/CreateSessionUseCase.js';
 
 /**
  * Concrete implementation of create_session action for creating OpenCode sessions
@@ -26,10 +26,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
    */
   async execute(payload: CreateSessionPayload, context: ActionContext): Promise<ActionResult<CreateSessionResultData>> {
     const startedAt = Date.now();
-    context.logger?.info('action.create_session.started', {
-      payloadKeys: Object.keys(payload ?? {}),
-      effectiveDirectory: context.effectiveDirectory,
-    });
+    const payloadKeys = Object.keys(payload ?? {});
+    let resolvedDirectory: string | undefined;
+    let resolvedDirectorySource: PreparedCreateSession['resolvedDirectorySource'] | undefined;
 
     try {
       if (context.connectionState !== 'READY') {
@@ -42,10 +41,20 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       }
 
       if (this.createSessionUseCase) {
+        const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession({
+          payload,
+          effectiveDirectory: context.effectiveDirectory,
+          mappingConfigured: context.assiantDirectoryMappingConfigured,
+        });
+        resolvedDirectory = preparedCreateSession.resolvedDirectory;
+        resolvedDirectorySource = preparedCreateSession.resolvedDirectorySource;
+        this.logCreateSessionStarted(context, payloadKeys, preparedCreateSession);
+
         const useCaseResult = await this.createSessionUseCase.execute({
           payload,
           effectiveDirectory: context.effectiveDirectory,
-        });
+          mappingConfigured: context.assiantDirectoryMappingConfigured,
+        }, preparedCreateSession);
 
         if (useCaseResult.success) {
           return useCaseResult;
@@ -53,8 +62,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
 
         context.logger?.error('action.create_session.failed', {
           requestedTitle: payload.title,
-          effectiveDirectory: context.effectiveDirectory,
-          payloadKeys: Object.keys(payload ?? {}),
+          resolvedDirectory: preparedCreateSession.resolvedDirectory,
+          resolvedDirectorySource: preparedCreateSession.resolvedDirectorySource,
+          payloadKeys,
           error: useCaseResult.errorMessage,
           errorCode: useCaseResult.errorCode,
           latencyMs: Date.now() - startedAt,
@@ -62,10 +72,15 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         return useCaseResult;
       }
 
+      const fallbackResolvedDirectory = this.resolveFallbackDirectory(context.effectiveDirectory);
+      resolvedDirectory = fallbackResolvedDirectory.resolvedDirectory;
+      resolvedDirectorySource = fallbackResolvedDirectory.resolvedDirectorySource;
+      this.logCreateSessionStarted(context, payloadKeys, fallbackResolvedDirectory);
+
       const executionResult = await safeExecute(
         context.client.session.create(attachDirectory({
           ...(payload.title ? { title: payload.title } : {}),
-        }, context.effectiveDirectory)),
+        }, fallbackResolvedDirectory.resolvedDirectory)),
         (error) => `Create session failed: ${getErrorMessage(error)}`
       );
 
@@ -73,14 +88,10 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         if (!hasError(executionResult.data)) {
           const root = executionResult.data as Record<string, unknown> | undefined;
           const nested = root?.data as Record<string, unknown> | undefined;
-          const sessionObject = nested ?? root ?? {};
+          const sessionObject = nested ?? {};
           const pick = (value: unknown): string | undefined =>
             typeof value === 'string' && value.trim() ? value : undefined;
-          const returnedSessionId =
-            pick(root?.sessionId) ??
-            pick(root?.id) ??
-            pick(nested?.sessionId) ??
-            pick(nested?.id);
+          const returnedSessionId = pick(nested?.id);
 
           return {
             success: true,
@@ -99,8 +110,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
 
         context.logger?.error('action.create_session.sdk_error_payload', {
           requestedTitle: payload.title,
-          effectiveDirectory: context.effectiveDirectory,
-          payloadKeys: Object.keys(payload ?? {}),
+          resolvedDirectory: fallbackResolvedDirectory.resolvedDirectory,
+          resolvedDirectorySource: fallbackResolvedDirectory.resolvedDirectorySource,
+          payloadKeys,
           error: errorMessage,
           ...(errorField !== undefined ? getErrorDetailsForLog(errorField) : {}),
           latencyMs: Date.now() - startedAt,
@@ -114,8 +126,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
 
       context.logger?.error('action.create_session.failed', {
         requestedTitle: payload.title,
-        effectiveDirectory: context.effectiveDirectory,
-        payloadKeys: Object.keys(payload ?? {}),
+        resolvedDirectory: fallbackResolvedDirectory.resolvedDirectory,
+        resolvedDirectorySource: fallbackResolvedDirectory.resolvedDirectorySource,
+        payloadKeys,
         error: executionResult.error,
         latencyMs: Date.now() - startedAt,
       });
@@ -129,8 +142,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       const errorMessage = getErrorMessage(error);
       context.logger?.error('action.create_session.exception', {
         requestedTitle: payload.title,
-        effectiveDirectory: context.effectiveDirectory,
-        payloadKeys: Object.keys(payload ?? {}),
+        resolvedDirectory,
+        resolvedDirectorySource,
+        payloadKeys,
         error: errorMessage,
         errorCode,
         ...getErrorDetailsForLog(error),
@@ -164,5 +178,26 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
     }
 
     return 'SDK_UNREACHABLE';
+  }
+
+  private logCreateSessionStarted(
+    context: ActionContext,
+    payloadKeys: string[],
+    preparedCreateSession: PreparedCreateSession,
+  ): void {
+    context.logger?.info('action.create_session.started', {
+      payloadKeys,
+      resolvedDirectory: preparedCreateSession.resolvedDirectory,
+      resolvedDirectorySource: preparedCreateSession.resolvedDirectorySource,
+    });
+  }
+
+  private resolveFallbackDirectory(effectiveDirectory?: string): PreparedCreateSession {
+    return {
+      directory: effectiveDirectory,
+      source: effectiveDirectory ? 'effective' : 'none',
+      resolvedDirectory: effectiveDirectory,
+      resolvedDirectorySource: effectiveDirectory ? 'effective' : 'none',
+    };
   }
 }

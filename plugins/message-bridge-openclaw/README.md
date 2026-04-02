@@ -10,6 +10,13 @@ This package is the OpenClaw-side adapter. It keeps the gateway protocol
 unchanged and translates OpenClaw channel runtime events into the gateway
 message contract.
 
+维护说明：
+
+- 官方受保障的发布路径只有 GitHub release workflow 和 `pnpm release:local`
+- 这两条路径会要求显式提供默认网关地址，并在构建期通过 `MB_DEFAULT_GATEWAY_URL` 固化到 bundle 产物
+- 普通本地开发构建未注入时，`channels.message-bridge.gateway.url` 默认仍回退到 `ws://localhost:8081/ws/agent`
+- 本次不新增 OpenClaw 侧运行时环境变量覆盖入口；仍以配置文件为准
+
 文档导航（联调优先）:
 
 - `docs/README.md`（文档总导航）
@@ -38,6 +45,29 @@ message contract.
 - bundle 安装（推荐交付）：执行 `pnpm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
 - 手动复制 bundle：复制 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md`
 - 私有 npm 分发：通过 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
+
+首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起 helper：
+
+```bash
+npx --yes \
+  --registry https://your-private-registry.example.com/ \
+  --package @wecode/skill-openclaw-plugin \
+  message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent \
+  --token <ak> \
+  --password <sk> \
+  --dev
+```
+
+安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
+
+- 检查 `openclaw` 是否已安装且版本满足 `>=2026.3.11`
+- 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
+- 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
+- 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
+- 调用 `openclaw channels add --channel message-bridge ...`
+- 默认执行 `openclaw gateway restart`
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
@@ -190,10 +220,13 @@ Interactive `setup` / `onboarding` only writes:
 
 The following register metadata fields are runtime-derived and not user-configurable:
 
-- `toolType` is fixed to `openclaw`
+- `toolType` defaults to `openx`
 - `deviceName` comes from `os.hostname()`
 - `toolVersion` comes from the plugin package version at runtime
 - `macAddress` comes from the first usable local network interface, or `""` when unavailable
+
+Known `toolType` values in this plugin: `openx`.  
+When a non-`openx` value is injected, runtime logs `runtime.register.tool_type.unknown` and continues.
 
 Progressive text delivery is enabled by default. Optional controls:
 
@@ -242,6 +275,36 @@ The generated bundle directory already contains:
 
 No manual `package.json` edits are required.
 
+## NPM Install Helper
+
+For first-time private registry installation, prefer an explicit `npx` bootstrap command:
+
+```bash
+npx --yes \
+  --registry https://your-private-registry.example.com/ \
+  --package @wecode/skill-openclaw-plugin \
+  message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent \
+  --token <ak> \
+  --password <sk> \
+  --dev
+```
+
+Behavior:
+
+- `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
+- checks `openclaw --version` against the package `peerDependencies.openclaw`
+- writes or updates `@wecode:registry=...` in the resolved user `.npmrc`
+- streams `openclaw plugins install` output directly to the terminal
+- verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
+- runs `openclaw channels add --channel message-bridge ...`
+- restarts the OpenClaw gateway by default
+
+If the private registry requires auth, make sure your npm auth environment is already available before running the command.
+
+Pass `--no-restart` only when you explicitly need to defer gateway restart.
+
 ## Runtime Version Conflicts
 
 如果启动时报类似下面的错误：
@@ -272,7 +335,7 @@ Check the gateway log:
 Expected result:
 
 - registration for `test-ak-openclaw-001`
-- `toolType=openclaw`
+- `toolType=openx`
 - periodic heartbeat logs
 
 ## Verify control path

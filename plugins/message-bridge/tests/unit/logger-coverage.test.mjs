@@ -92,6 +92,34 @@ describe('AppLogger coverage', () => {
     assert.deepStrictEqual(calls[0].body.extra.items, ['x', 'y']);
   });
 
+  test('preserves presence/value shape for redacted env snapshot entries', async () => {
+    const calls = [];
+    const logger = new AppLogger({
+      app: {
+        log: async (options) => {
+          calls.push(options);
+          return true;
+        },
+      },
+    });
+
+    logger.info('config.env.snapshot', {
+      values: {
+        BRIDGE_AUTH_AK: { present: true, value: 'secret-ak' },
+        BRIDGE_AUTH_SK: { present: false },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.deepStrictEqual(calls[0].body.extra.values.BRIDGE_AUTH_AK, {
+      present: true,
+      value: '***',
+    });
+    assert.deepStrictEqual(calls[0].body.extra.values.BRIDGE_AUTH_SK, {
+      present: false,
+    });
+  });
+
   test('swallows app.log errors and falls back to console.debug in debug mode', async () => {
     process.env.BRIDGE_DEBUG = 'true';
     const debugMock = mock.method(console, 'debug', () => {});

@@ -1,42 +1,58 @@
-import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { promises } from 'fs';
 import type { BridgeConfig } from '../types/index.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
-import { DEFAULT_EVENT_ALLOWLIST } from '../contracts/upstream-events.js';
+import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
+import { resolveAuthCredentialPolicy } from './AuthCredentialPolicy.js';
+import { EnvHostConfigLocator, type HostConfigLocator } from './HostConfigLocator.js';
 
 const CONFIG_FILE_NAMES = ['message-bridge.jsonc', 'message-bridge.json'] as const;
 
 export class ConfigResolver {
   private readonly jsoncParser: JsoncParser;
   private readonly logger?: BridgeLogger;
+  private readonly hostConfigLocator: HostConfigLocator;
 
-  constructor(logger?: BridgeLogger) {
+  constructor(logger?: BridgeLogger, hostConfigLocator: HostConfigLocator = new EnvHostConfigLocator()) {
     this.jsoncParser = new JsoncParser();
     this.logger = logger;
+    this.hostConfigLocator = hostConfigLocator;
   }
 
   async resolveConfig(workspacePath?: string): Promise<BridgeConfig> {
     let config: Partial<BridgeConfig> = this.mergeConfig({}, DEFAULT_BRIDGE_CONFIG);
     const sources: string[] = ['default'];
+    let channelSource: 'default' | 'user' | 'project' | 'env' = 'default';
     const workspaceRoot = workspacePath ?? process.cwd();
     this.logger?.info('config.resolve.started', { workspacePath: workspaceRoot });
+    const userConfigLocation = this.hostConfigLocator.resolveUserConfigLocation();
 
-    const userConfigHome = process.env.HOME || homedir();
+    if (userConfigLocation.warningCode === 'opencode_config_ignored_without_config_dir') {
+      this.logger?.warn('config.user_config.opencode_config_ignored', {
+        opencodeConfig: userConfigLocation.opencodeConfig,
+        resolvedUserConfigDir: userConfigLocation.dir,
+      });
+    }
+
     const userConfigPath = await this.findFirstExistingPath(
-      this.getConfigCandidatePaths(join(userConfigHome, '.config', 'opencode')),
+      this.getConfigCandidatePaths(userConfigLocation.dir),
     );
     if (userConfigPath) {
       const userConfig = await this.loadConfigFile(userConfigPath);
       if (userConfig) {
         config = this.mergeConfig(config, userConfig);
         sources.push(`user:${userConfigPath}`);
+        if (this.hasConfiguredGatewayChannel(userConfig)) {
+          channelSource = 'user';
+        }
         this.logger?.info('config.source.loaded', {
           source: 'user',
           path: userConfigPath,
+          userConfigSource: userConfigLocation.source,
+          isolationEnabled: userConfigLocation.isolationEnabled,
         });
       }
     }
@@ -47,6 +63,9 @@ export class ConfigResolver {
       if (projectConfig) {
         config = this.mergeConfig(config, projectConfig);
         sources.push(`project:${projectConfigPath}`);
+        if (this.hasConfiguredGatewayChannel(projectConfig)) {
+          channelSource = 'project';
+        }
         this.logger?.info('config.source.loaded', {
           source: 'project',
           path: projectConfigPath,
@@ -58,6 +77,9 @@ export class ConfigResolver {
     if (Object.keys(envConfig).length > 0) {
       config = this.mergeConfig(config, envConfig);
       sources.push('env');
+      if (this.hasConfiguredGatewayChannel(envConfig)) {
+        channelSource = 'env';
+      }
       this.logger?.info('config.source.loaded', {
         source: 'env',
         overrideCount: Object.keys(envConfig).length,
@@ -65,10 +87,16 @@ export class ConfigResolver {
     }
 
     const normalized = this.normalizeConfig(config as BridgeConfig);
+    const gatewayChannel = this.readGatewayChannel(normalized);
+    if (gatewayChannel) {
+      warnUnknownToolType(this.logger, 'config.gateway.channel.unknown', gatewayChannel, {
+        source: channelSource,
+      });
+    }
     this.logger?.info('config.resolve.completed', {
       workspacePath: workspaceRoot,
       sources,
-      allowlistSize: normalized.events.allowlist.length,
+      allowlistSize: this.readAllowlistSize(normalized),
       debugEnabled: !!normalized.debug,
       projectConfigPath,
     });
@@ -160,6 +188,8 @@ export class ConfigResolver {
     if (process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS) reconnect.baseMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS, 10);
     if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS) reconnect.maxMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS, 10);
     if (process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL !== undefined) reconnect.exponential = process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL.toLowerCase() === 'true';
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_JITTER) reconnect.jitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS) reconnect.maxElapsedMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS, 10);
     if (Object.keys(reconnect).length > 0) gateway.reconnect = reconnect;
 
     const hb = process.env.BRIDGE_GATEWAY_HEARTBEAT_INTERVAL_MS ?? process.env.BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS;
@@ -175,15 +205,16 @@ export class ConfigResolver {
       envConfig.gateway = gateway as unknown as BridgeConfig['gateway'];
     }
 
-    const auth: Record<string, unknown> = {};
-    if (process.env.BRIDGE_AUTH_AK) {
-      auth.ak = this.substituteEnvVars(process.env.BRIDGE_AUTH_AK);
-    }
-    if (process.env.BRIDGE_AUTH_SK) {
-      auth.sk = this.substituteEnvVars(process.env.BRIDGE_AUTH_SK);
-    }
-    if (Object.keys(auth).length > 0) {
-      envConfig.auth = auth as unknown as BridgeConfig['auth'];
+    const authPolicy = resolveAuthCredentialPolicy({
+      bridgeGatewayChannel: process.env.BRIDGE_GATEWAY_CHANNEL,
+      authAk: process.env.BRIDGE_AUTH_AK,
+      authSk: process.env.BRIDGE_AUTH_SK,
+    });
+    if (authPolicy.shouldInjectEnvAuth) {
+      envConfig.auth = {
+        ak: process.env.BRIDGE_AUTH_AK ? this.substituteEnvVars(process.env.BRIDGE_AUTH_AK) : '',
+        sk: process.env.BRIDGE_AUTH_SK ? this.substituteEnvVars(process.env.BRIDGE_AUTH_SK) : '',
+      };
     }
 
     const sdk: Record<string, unknown> = {};
@@ -203,6 +234,11 @@ export class ConfigResolver {
     return envConfig;
   }
 
+  private hasConfiguredGatewayChannel(config: Partial<BridgeConfig> | undefined | null): boolean {
+    const channel = config?.gateway?.channel;
+    return typeof channel === 'string' && channel.trim().length > 0;
+  }
+
   private substituteEnvVars(value: string): string {
     return value.replace(/\$\{([^}]+)\}/g, (match, varName) => process.env[varName] || match);
   }
@@ -213,86 +249,44 @@ export class ConfigResolver {
     if (typeof normalized.bridgeDirectory === 'string') {
       const trimmed = normalized.bridgeDirectory.trim();
       normalized.bridgeDirectory = trimmed || undefined;
-    } else {
-      normalized.bridgeDirectory = undefined;
     }
 
-    if (!normalized.gateway) {
-      normalized.gateway = {} as BridgeConfig['gateway'];
-    }
+    if (this.isRecord(normalized.gateway)) {
+      normalized.gateway = { ...normalized.gateway };
 
-    if (!normalized.gateway.url) {
-      normalized.gateway.url = 'ws://localhost:8081/ws/agent';
-    }
-
-    if (!normalized.gateway.channel) {
-      normalized.gateway.channel = 'opencode';
-    } else {
-      normalized.gateway.channel = normalized.gateway.channel.trim();
-    }
-
-    if (!normalized.gateway.heartbeatIntervalMs) {
-      normalized.gateway.heartbeatIntervalMs = 30000;
-    }
-
-    if (!normalized.gateway.reconnect) {
-      normalized.gateway.reconnect = {
-        baseMs: 1000,
-        maxMs: 30000,
-        exponential: true,
-      };
-    } else {
-      if (!normalized.gateway.reconnect.baseMs) {
-        normalized.gateway.reconnect.baseMs = 1000;
+      if (typeof normalized.gateway.channel === 'string') {
+        normalized.gateway.channel = normalized.gateway.channel.trim();
       }
-      if (!normalized.gateway.reconnect.maxMs) {
-        normalized.gateway.reconnect.maxMs = 30000;
-      }
-      if (normalized.gateway.reconnect.exponential === undefined) {
-        normalized.gateway.reconnect.exponential = true;
-      }
-    }
-
-    const gatewayMetadata = normalized.gateway as unknown as {
-      deviceName?: unknown;
-      toolVersion?: unknown;
-      macAddress?: unknown;
-    };
-    delete gatewayMetadata.deviceName;
-    delete gatewayMetadata.toolVersion;
-    delete gatewayMetadata.macAddress;
-
-    if (!normalized.gateway.ping) {
-      normalized.gateway.ping = {
-        intervalMs: 30000,
-      };
-    }
-
-    if (!normalized.sdk) {
-      normalized.sdk = { timeoutMs: 10000 };
-    } else if (!normalized.sdk.timeoutMs) {
-      normalized.sdk.timeoutMs = 10000;
-    }
-
-    if (!normalized.auth) {
-      normalized.auth = { ak: '', sk: '' };
-    }
-
-    if (!normalized.events || !normalized.events.allowlist || normalized.events.allowlist.length === 0) {
-      normalized.events = {
-        allowlist: [...DEFAULT_EVENT_ALLOWLIST],
-      };
-    }
-
-    if (!normalized.config_version) {
-      normalized.config_version = 1;
-    }
-
-    if (normalized.enabled === undefined) {
-      normalized.enabled = true;
     }
 
     return normalized;
+  }
+
+  private readGatewayChannel(config: BridgeConfig): string | null {
+    const gateway = config.gateway;
+    if (!this.isRecord(gateway)) {
+      return null;
+    }
+
+    const channel = gateway.channel;
+    if (typeof channel !== 'string' || channel.length === 0) {
+      return null;
+    }
+
+    return channel;
+  }
+
+  private readAllowlistSize(config: BridgeConfig): number {
+    const events = config.events;
+    if (!this.isRecord(events) || !Array.isArray(events.allowlist)) {
+      return 0;
+    }
+
+    return events.allowlist.length;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private mergeConfig(target: unknown, source: unknown): any {

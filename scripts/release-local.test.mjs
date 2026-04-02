@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import path from "node:path";
 
@@ -76,6 +77,7 @@ function createExecDouble({
       args: [...args],
       command,
       cwd: options.cwd,
+      env: options.env ? { ...options.env } : undefined,
       stdio: options.stdio ?? "pipe",
     });
 
@@ -185,6 +187,7 @@ test("parseReleaseLocalArgs accepts single-target bump release", () => {
     allowDirty: false,
     bridgeVersion: null,
     bump: "patch",
+    defaultGatewayUrl: null,
     dryRun: false,
     help: false,
     installDeps: false,
@@ -200,6 +203,19 @@ test("parseReleaseLocalArgs accepts single-target bump release", () => {
     target: "message-bridge",
     version: null,
   });
+});
+
+test("parseReleaseLocalArgs accepts default gateway url", () => {
+  const parsed = parseReleaseLocalArgs([
+    "--target",
+    "message-bridge",
+    "--version",
+    "1.2.0",
+    "--default-gateway-url",
+    "wss://gateway.example.com/ws/agent",
+  ]);
+
+  assert.equal(parsed.defaultGatewayUrl, "wss://gateway.example.com/ws/agent");
 });
 
 test("parseReleaseLocalArgs rejects version plus bump", () => {
@@ -555,6 +571,7 @@ test("formatReleasePlan shows skip-verify in dry-run output", () => {
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: true,
@@ -571,12 +588,43 @@ test("formatReleasePlan shows skip-verify in dry-run output", () => {
 
   const rendered = formatReleasePlan(plan);
   assert.match(rendered, /verify: no/i);
+  assert.match(rendered, /default gateway url: wss:\/\/gateway\.example\.com\/ws\/agent/i);
   assert.match(rendered, /verify step: skipped \(\-\-skip-verify\)/i);
   assert.match(rendered, /verify was skipped by user request/i);
   assert.match(
     rendered,
     /verify steps are being skipped by user request; publish may continue without verify:release safeguards\./i,
   );
+});
+
+test("formatReleasePlan shows missing default gateway url status", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+
+  assert.match(formatReleasePlan(plan), /default gateway url: missing/i);
 });
 
 test("createReleasePlan rejects existing tags", () => {
@@ -727,6 +775,7 @@ test("executeRelease skips publish and still stages git flow", () => {
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -762,6 +811,7 @@ test("executeRelease skips verify and still runs build readiness and publish", (
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -800,6 +850,7 @@ test("executeRelease fails fast on missing packages without install flags", () =
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -848,6 +899,7 @@ test("executeRelease installs missing packages with frozen lockfile mode", () =>
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -903,6 +955,7 @@ test("executeRelease installs missing packages with update-lockfile mode", () =>
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -957,6 +1010,7 @@ test("executeRelease does not install when dependency presence already passes", 
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -998,6 +1052,7 @@ test("executeRelease stops if packages are still missing after install", () => {
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1045,6 +1100,7 @@ test("executeRelease blocks publish when readiness fails", () => {
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1083,6 +1139,7 @@ test("executeRelease still blocks publish when readiness fails under skip-verify
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1124,6 +1181,7 @@ test("executeRelease restores bumped version when verify fails before publish", 
       target: "message-bridge",
       bump: "patch",
       version: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1162,6 +1220,7 @@ test("executeRelease preserves existing recovery semantics when publish fails un
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1204,6 +1263,7 @@ test("executeRelease resolves scoped registry and publishes against that registr
       target: "message-bridge",
       version: "1.1.0",
       bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       preid: "beta",
       release: null,
       dryRun: false,
@@ -1266,6 +1326,7 @@ test("executeRelease surfaces dual release non-atomic recovery on second publish
       target: "dual",
       bridgeVersion: "1.1.0",
       openclawVersion: "0.2.0",
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       bump: null,
       preid: "beta",
       release: null,
@@ -1300,6 +1361,7 @@ test("executeRelease skips verify for both targets in dual mode", () => {
       target: "dual",
       bridgeVersion: "1.1.0",
       openclawVersion: "0.2.0",
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
       bump: null,
       preid: "beta",
       release: null,
@@ -1322,6 +1384,185 @@ test("executeRelease skips verify for both targets in dual mode", () => {
   assert.match(stdout.toString(), /Skipping verify for message-bridge-openclaw \(\-\-skip-verify\)/);
 });
 
+test("executeRelease fails before build when default gateway url is missing", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
+      }),
+    /default gateway url/i,
+  );
+  assert.match(stdout.toString(), /dependency presence check: passed/i);
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
+});
+
+test("executeRelease fails before build when default gateway url is invalid", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      defaultGatewayUrl: "https://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
+      }),
+    /ws:\/\/ or wss:\/\//i,
+  );
+  assert.match(stdout.toString(), /dependency presence check: passed/i);
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
+});
+
+test("executeRelease fails before build when registry auth check fails", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({
+    repoRoot,
+    failCommands: [{ match: "npm whoami --registry", message: "auth failed" }],
+  });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
+      }),
+    /auth failed/i,
+  );
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
+});
+
+test("executeRelease forwards MB_DEFAULT_GATEWAY_URL to build and verify for dual releases", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const gatewayUrl = "wss://gateway.example.com/ws/agent";
+  const plan = createReleasePlan(
+    {
+      target: "dual",
+      bridgeVersion: "1.1.0",
+      openclawVersion: "0.2.0",
+      bump: null,
+      defaultGatewayUrl: gatewayUrl,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      skipVerify: false,
+      allowDirty: true,
+      version: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
+  });
+
+  assert.equal(result.exitCode, 0);
+  const buildAndVerifyCalls = execDouble.calls.filter(
+    (entry) => entry.command === "pnpm" && (entry.args.includes("build") || entry.args.includes("verify:release")),
+  );
+  assert.equal(buildAndVerifyCalls.length >= 4, true);
+  for (const call of buildAndVerifyCalls) {
+    assert.equal(call.env?.MB_DEFAULT_GATEWAY_URL, gatewayUrl);
+  }
+  assert.match(stdout.toString(), /default gateway url: wss:\/\/gateway\.example\.com\/ws\/agent/i);
+});
+
 test("main prints help output", async () => {
   const stdout = createCapture();
   const stderr = createCapture();
@@ -1334,12 +1575,26 @@ test("main prints help output", async () => {
   assert.equal(exitCode, 0);
   assert.equal(stderr.toString(), "");
   assert.match(stdout.toString(), /pnpm release:local -- --target/i);
+  assert.match(stdout.toString(), /--default-gateway-url <url>/i);
   assert.match(stdout.toString(), /--skip-verify/);
   assert.match(stdout.toString(), /--install-deps/);
   assert.match(stdout.toString(), /presence sanity check/i);
+  assert.match(stdout.toString(), /official release path requires --default-gateway-url/i);
   assert.match(stdout.toString(), /pnpm install --frozen-lockfile/);
   assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
+});
+
+test("release workflows validate and forward MB_DEFAULT_GATEWAY_URL", () => {
+  for (const workflowPath of [
+    path.resolve(".github/workflows/release-message-bridge.yml"),
+    path.resolve(".github/workflows/release-message-bridge-openclaw.yml"),
+  ]) {
+    const content = readFileSync(workflowPath, "utf8");
+    assert.match(content, /MB_DEFAULT_GATEWAY_URL:\s*\$\{\{\s*vars\.MB_DEFAULT_GATEWAY_URL\s*\}\}/i);
+    assert.match(content, /Validate default gateway url/i);
+    assert.match(content, /MB_DEFAULT_GATEWAY_URL is required/i);
+  }
 });
 
 test("isCliEntry normalizes argv paths before comparing ESM entry files", () => {

@@ -9,6 +9,13 @@
 - `runtime/`：编排、连接与传输
 - `action/`：只负责业务执行
 
+维护说明：
+
+- 官方受保障的发布路径只有 GitHub release workflow 和 `pnpm release:local`
+- 这两条路径会要求显式提供默认网关地址，并在构建期通过 `MB_DEFAULT_GATEWAY_URL` 固化到产物
+- 普通本地开发构建未注入时，`gateway.url` 会继续走 `default-config` 默认链路，并最终回退到 `ws://localhost:8081/ws/agent`
+- 手工执行 `npm publish`、`pnpm pack` 或其他非官方发包路径时，产物仍可能保留 localhost 默认值
+
 ## 插件异常隔离语义
 
 `message-bridge` 在插件入口层实现了宿主保护边界：
@@ -188,9 +195,18 @@ bridge 到 gateway 的上行消息当前包括：
 
 ## 配置
 
-交互式安装/配置 CLI：
+快速安装 CLI（推荐）：
 
-- `node ./scripts/setup-message-bridge.mjs`
+- `npx @wecode/skill-opencode-plugin install`
+
+首次尚未配置 `@wecode` 源时，使用 bootstrap 命令：
+
+- `npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-opencode-plugin install`
+
+仓库内开发入口（兼容保留）：
+
+- `node ./scripts/setup-message-bridge.mjs install`
+- `node ./scripts/setup-message-bridge.mjs`（无子命令时默认等价 `install`）
 
 自包含启动示例（幂等写入 `.npmrc`，通过运行时 `OPENCODE_CONFIG_CONTENT` 注入 plugin 配置，再启动 `opencode serve`）：
 
@@ -198,10 +214,11 @@ bridge 到 gateway 的上行消息当前包括：
 
 CLI 当前会：
 
-- 提示输入 `ak` 和 `sk`
+- 支持交互输入 `ak` 和 `sk`，也支持参数模式 `--ak --sk --registry --scope --yes`
 - 默认在用户级写入 `message-bridge.jsonc`
 - 在 OpenCode `plugin` 配置中启用 `@wecode/skill-opencode-plugin`
-- 为 `@wecode` 写入默认 `.npmrc` scope 条目
+- 为 `@wecode` 写入 `.npmrc` scope 条目，默认值为 `https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`
+- 预检 `opencode --version`：若未检测到 OpenCode，只输出 warning，不阻塞配置写入
 
 CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 
@@ -211,14 +228,31 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 - Windows：`%USERPROFILE%\\.npmrc`（回退到 `%HOMEDRIVE%%HOMEPATH%\\.npmrc`）
 - macOS / Linux：`~/.npmrc`
 
-在 Windows 上，用户级 OpenCode 配置目录与 OpenCode 本身一致：`%USERPROFILE%\\.config\\opencode`。生成的 npm scope 占位值会写入解析后的 `.npmrc` 路径，registry 当前保留为空，供后续内部仓库补全。
+在 Windows 上，用户级 OpenCode 配置目录与 OpenCode 本身一致：`%USERPROFILE%\\.config\\opencode`。生成的 npm scope 默认值会写入解析后的 `.npmrc` 路径。
+
+注意：
+
+- 安装 CLI 成功仅表示配置写入完成
+- npm 插件实际下载到 OpenCode 缓存目录发生在后续启动/重启 OpenCode 时
 
 配置优先级从高到低：
 
 1. `BRIDGE_*` 环境变量
 2. 项目级配置：`.opencode/message-bridge.jsonc`，其次 `.opencode/message-bridge.json`
-3. 用户级配置：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
+3. 用户级配置：
+   - 设置 `OPENCODE_CONFIG_DIR` 时：`$OPENCODE_CONFIG_DIR/message-bridge.jsonc`，其次 `.json`
+   - 否则：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
 4. 内置默认值
+
+用户级配置隔离补充：
+
+- `OPENCODE_CONFIG_DIR` 是 `message-bridge` 用户级配置的硬隔离根；设置后不会再回退默认 `~/.config/opencode`
+- `OPENCODE_CONFIG` 不参与 bridge 用户级配置定位；如果只设置了它，插件会记录 warning，但仍继续读取默认用户级目录
+
+`auth.ak` / `auth.sk` 额外规则：
+
+1. 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`auth.ak/sk` 仅从 `BRIDGE_AUTH_AK/SK` 读取（不再回退本地配置）。
+2. 当 `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白时，只有同时提供 `BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 才会覆盖本地；否则完整回退本地 `auth.ak/sk`（不做半覆盖）。
 
 默认值定义见：
 
@@ -241,18 +275,28 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 |---|---|
 | `enabled` | `true` |
 | `config_version` | `1` |
-| `gateway.url` | `ws://localhost:8081/ws/agent` |
-| `gateway.channel` | `opencode` |
+| `gateway.url` | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` |
+| `gateway.channel` | `openx` |
 | `gateway.heartbeatIntervalMs` | `30000` |
 | `gateway.reconnect.baseMs` | `1000` |
 | `gateway.reconnect.maxMs` | `30000` |
 | `gateway.reconnect.exponential` | `true` |
+| `gateway.reconnect.jitter` | `full` |
+| `gateway.reconnect.maxElapsedMs` | `600000` |
 | `gateway.ping.intervalMs` | `30000` |
 | `gateway.ping.pongTimeoutMs` | `10000` |
 | `sdk.timeoutMs` | `10000` |
 | `events.allowlist` | `DEFAULT_EVENT_ALLOWLIST` |
 
 `gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `toolType` 字段。
+当前内置已知值集合为 `openx`、`uniassistant`、`codeagent`；如果配置了其他值，运行时会记录 `config.gateway.channel.unknown` 警告日志，但不会阻断连接。
+
+当前自动重连策略：
+
+- `exponential=true` 时按截断指数退避计算目标间隔：`1s -> 2s -> 4s -> 8s -> 16s -> 30s -> 30s ...`
+- `exponential=false` 时固定按 `baseMs` 重试，仍受 `maxMs` 截断
+- `jitter=full` 时，实际重连延迟会在 `0..cappedDelay` 范围内随机
+- `maxElapsedMs=600000` 表示单轮自动重连总时长最多 10 分钟；超时后停止自动重连，连接保持 `DISCONNECTED`
 
 ## 日志
 

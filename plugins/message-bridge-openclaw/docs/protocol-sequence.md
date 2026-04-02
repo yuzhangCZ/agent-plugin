@@ -78,7 +78,7 @@ sequenceDiagram
   - upstream `register`
   - upstream periodic `heartbeat`
 - Register metadata
-  - `toolType` is fixed to `openclaw`
+  - `toolType` defaults to `openx` (unknown values only warn and do not block runtime)
   - `deviceName` / `toolVersion` / `macAddress` are runtime-derived, not user-configured
 - ID mapping
   - none yet; `SessionRegistry` is not populated during startup
