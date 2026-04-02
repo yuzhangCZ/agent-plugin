@@ -12,7 +12,10 @@ import type {
 import type {
   EventMessagePartDelta,
   EventPermissionAsked,
+  EventPermissionReplied,
   EventQuestionAsked,
+  EventQuestionReplied,
+  EventQuestionRejected,
 } from '@opencode-ai/sdk/v2' with { 'resolution-mode': 'import' };
 
 export const SUPPORTED_UPSTREAM_EVENT_TYPES = [
@@ -28,6 +31,9 @@ export const SUPPORTED_UPSTREAM_EVENT_TYPES = [
   'permission.updated',
   'permission.asked',
   'question.asked',
+  'permission.replied',
+  'question.replied',
+  'question.rejected',
 ] as const;
 
 export type SupportedUpstreamEventType = typeof SUPPORTED_UPSTREAM_EVENT_TYPES[number];
@@ -44,6 +50,9 @@ export type SessionErrorEvent = EventSessionError;
 export type PermissionUpdatedEvent = EventPermissionUpdated;
 export type PermissionAskedEvent = EventPermissionAsked;
 export type QuestionAskedEvent = EventQuestionAsked;
+export type PermissionRepliedEvent = EventPermissionReplied;
+export type QuestionRepliedEvent = EventQuestionReplied;
+export type QuestionRejectedEvent = EventQuestionRejected;
 
 export type SupportedUpstreamEvent =
   | EventMessageUpdated
@@ -57,7 +66,10 @@ export type SupportedUpstreamEvent =
   | EventSessionError
   | EventPermissionUpdated
   | EventPermissionAsked
-  | EventQuestionAsked;
+  | EventPermissionReplied
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected;
 
 export type MessageRole = Extract<EventMessageUpdated['properties']['info']['role'], 'user' | 'assistant'>;
 
