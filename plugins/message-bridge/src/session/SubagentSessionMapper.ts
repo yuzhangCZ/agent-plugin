@@ -44,6 +44,7 @@ export class SubagentSessionMapper {
   constructor(private readonly source: SessionLookupSource) {}
 
   recordSessionCreated(record: SessionCreatedRecord): void {
+    // session.created 能明确告诉我们这是 child 还是 root，优先用它建立稳定缓存，避免后续事件走懒查询。
     if (record.parentSessionId) {
       this.childToParent.set(record.childSessionId, {
         childSessionId: record.childSessionId,
@@ -95,6 +96,7 @@ export class SubagentSessionMapper {
 
       const parentSessionId = asNonEmptyString(session.parentID);
       if (!parentSessionId) {
+        // 只有在官方 session.get 成功且明确不存在 parentID 时，才把它负缓存为 root session。
         this.rootSessions.add(sessionId);
         return { status: 'root' };
       }

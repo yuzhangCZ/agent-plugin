@@ -302,6 +302,7 @@ export class BridgeRuntime {
     const eventLogger = this.createMessageLogger(eventFields, eventTraceId);
     eventLogger.debug('event.received');
 
+    // session.created 只用于预热父子 session 映射，不参与业务 allowlist 和上行转发。
     if (normalized.common.eventType === 'session.created') {
       this.recordSessionCreated(normalized, eventLogger);
       eventLogger.debug('event.control_session_created');
@@ -323,8 +324,10 @@ export class BridgeRuntime {
     const bridgeMessageId = randomUUID();
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
+    // 对 child session，外层 envelope 始终聚合到 parent；真正的 child 身份通过 subagent 字段保留给下游。
     const subagentResolution = await this.subagentSessionMapper.resolve(normalized.common.toolSessionId);
     if (subagentResolution.status === 'lookup_failed') {
+      // 懒查询失败时按原 session 继续上报，避免 lookup 抖动阻断正常事件转发。
       forwardingLogger.warn('event.subagent_lookup_failed', {
         toolSessionId: normalized.common.toolSessionId,
         ...getErrorDetailsForLog(subagentResolution.error),
@@ -366,6 +369,7 @@ export class BridgeRuntime {
     });
     forwardingLogger.debug('event.forwarded');
 
+    // child session 的 idle 仅表示子代理收尾，不能向父 session 额外补发 tool_done。
     if (normalized.common.eventType === 'session.idle' && !subagentMapping) {
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
