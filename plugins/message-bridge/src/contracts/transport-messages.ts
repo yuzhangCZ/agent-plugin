@@ -58,6 +58,8 @@ export interface HeartbeatMessage {
 export interface ToolEventMessage {
   type: 'tool_event';
   toolSessionId: string;
+  subagentSessionId?: string;
+  subagentName?: string;
   event: SupportedUpstreamEvent;
 }
 

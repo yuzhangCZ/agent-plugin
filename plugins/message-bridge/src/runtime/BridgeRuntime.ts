@@ -27,11 +27,13 @@ import {
   type MessagePartExtra,
   type MessageUpdatedExtra,
   type NormalizedUpstreamEvent,
+  type SessionCreatedExtra,
   type SessionStatusExtra,
 } from '../protocol/upstream/index.js';
 import {
   normalizeDownstreamMessage,
 } from '../protocol/downstream/index.js';
+import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
@@ -47,6 +49,7 @@ import {
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
 import type { ReconnectConfig } from '../types/index.js';
+import { getErrorDetailsForLog } from '../utils/error.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
@@ -102,6 +105,7 @@ export class BridgeRuntime {
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
   private readonly toolErrorClassifier = new ToolErrorClassifier();
+  private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -298,6 +302,12 @@ export class BridgeRuntime {
     const eventLogger = this.createMessageLogger(eventFields, eventTraceId);
     eventLogger.debug('event.received');
 
+    if (normalized.common.eventType === 'session.created') {
+      this.recordSessionCreated(normalized, eventLogger);
+      eventLogger.debug('event.control_session_created');
+      return;
+    }
+
     if (!this.stateManager.isReady() || !this.gatewayConnection || !this.eventFilter) {
       eventLogger.debug('event.ignored_not_ready', {
         state: this.stateManager.getState(),
@@ -313,23 +323,40 @@ export class BridgeRuntime {
     const bridgeMessageId = randomUUID();
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
+    const subagentResolution = await this.subagentSessionMapper.resolve(normalized.common.toolSessionId);
+    if (subagentResolution.status === 'lookup_failed') {
+      forwardingLogger.warn('event.subagent_lookup_failed', {
+        toolSessionId: normalized.common.toolSessionId,
+        ...getErrorDetailsForLog(subagentResolution.error),
+      });
+    }
+    const subagentMapping = subagentResolution.status === 'mapped' ? subagentResolution.mapping : null;
+    const envelopeToolSessionId = subagentMapping?.parentSessionId ?? normalized.common.toolSessionId;
+    const subagentEnvelopeFields = subagentMapping
+      ? {
+          subagentSessionId: subagentMapping.childSessionId,
+          subagentName: subagentMapping.agentName,
+        }
+      : {};
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
     const transportEnvelope = {
       type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: transportEvent,
     };
     const originalEnvelope = {
       type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: normalized.raw,
     };
     this.gatewayConnection.send(transportEnvelope, {
       traceId: bridgeMessageId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: bridgeMessageId,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
       eventType: normalized.common.eventType,
       opencodeMessageId: eventFields.opencodeMessageId,
       opencodePartId: eventFields.opencodePartId,
@@ -339,7 +366,7 @@ export class BridgeRuntime {
     });
     forwardingLogger.debug('event.forwarded');
 
-    if (normalized.common.eventType === 'session.idle') {
+    if (normalized.common.eventType === 'session.idle' && !subagentMapping) {
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
         logger: forwardingLogger,
@@ -352,6 +379,20 @@ export class BridgeRuntime {
         });
       }
     }
+  }
+
+  private recordSessionCreated(normalized: NormalizedUpstreamEvent, logger: BridgeLogger): void {
+    const extra = normalized.extra as SessionCreatedExtra | undefined;
+    if (!extra || extra.kind !== 'session.created') {
+      logger.warn('event.control_session_created_invalid_extra');
+      return;
+    }
+
+    this.subagentSessionMapper.recordSessionCreated({
+      childSessionId: normalized.common.toolSessionId,
+      parentSessionId: extra.parentSessionId,
+      agentName: extra.agentName,
+    });
   }
 
   getStarted(): boolean {

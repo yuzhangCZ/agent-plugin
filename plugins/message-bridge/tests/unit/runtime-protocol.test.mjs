@@ -6,6 +6,10 @@ import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 
 function createRuntimeClient(overrides = {}) {
   const base = {
@@ -157,6 +161,168 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('status api defaults to unavailable and not_ready before runtime start', () => {
+    __resetMessageBridgeStatusForTests();
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), {
+      connected: false,
+      phase: 'unavailable',
+      unavailableReason: 'not_ready',
+      willReconnect: false,
+      lastError: null,
+      updatedAt: getMessageBridgeStatus().updatedAt,
+      lastReadyAt: null,
+    });
+  });
+
+  test('start publishes disabled when config disables bridge', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'disabled');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
+  test('start publishes config_invalid when config resolution fails', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = new (class extends BridgeRuntime {
+      async resolveConfig() {
+        throw new Error('broken config');
+      }
+    })({
+      client: createRuntimeClient(),
+    });
+
+    await assert.rejects(runtime.start(), /broken config/);
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'broken config');
+  });
+
+  test('start publishes plugin_failure when startup prerequisites fail', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        global: undefined,
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              throw new Error('startup boom');
+            }
+            return { data: [] };
+          },
+          post: async () => ({ data: undefined }),
+        },
+      }),
+    });
+
+    await assert.rejects(runtime.start());
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
+  });
+
+  test('start publishes server_failure when gateway closes and will not reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RejectedCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 4403, reason: 'server closed', wasClean: true });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = RejectedCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'server closed');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start keeps server_failure when close follows rejection', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RegisterRejectedWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RegisterRejectedWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.onmessage?.({
+              data: JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }),
+            });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.({ code: 4403, reason: 'device_conflict', wasClean: true });
+      }
+    }
+
+    globalThis.WebSocket = RegisterRejectedWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'device_conflict');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -998,6 +1164,118 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-1');
   });
 
+  test('session.created primes child mapping outside the allowlist and rewrites later child events to parent envelope', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_permission_1',
+          parentID: 'ses_parent_permission_1',
+          title: 'research-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_1',
+        permissionID: 'perm-child-1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_1',
+      subagentSessionId: 'ses_child_permission_1',
+      subagentName: 'research-agent',
+      event: {
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'ses_child_permission_1',
+          permissionID: 'perm-child-1',
+        },
+      },
+    });
+    assert.strictEqual(sent[0].context.toolSessionId, 'ses_parent_permission_1');
+  });
+
+  test('falls back to original session and retries mapping after lazy lookup failures', async () => {
+    const logs = [];
+    let calls = 0;
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+        session: {
+          get: async () => {
+            calls += 1;
+            if (calls === 1) {
+              throw new Error('temporary lookup timeout');
+            }
+
+            return {
+              data: {
+                id: 'ses_child_permission_retry',
+                directory: '/session/default-directory',
+                parentID: 'ses_parent_permission_retry',
+                title: 'retry-agent',
+              },
+            };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    const event = {
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_retry',
+        permissionID: 'perm-retry-1',
+      },
+    };
+
+    await runtime.handleEvent(event);
+    await runtime.handleEvent(event);
+
+    assert.strictEqual(sent.length, 2);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_child_permission_retry',
+      event,
+    });
+    assert.deepStrictEqual(sent[1].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_retry',
+      subagentSessionId: 'ses_child_permission_retry',
+      subagentName: 'retry-agent',
+      event,
+    });
+    const warnEntry = logs.find((item) => item?.body?.message === 'event.subagent_lookup_failed');
+    assert.ok(!!warnEntry);
+    assert.strictEqual(warnEntry.body.extra.toolSessionId, 'ses_child_permission_retry');
+  });
+
   test('does not emit duplicate tool_done when session.idle follows chat success', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -1030,6 +1308,48 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
+  });
+
+  test('child session.idle does not emit tool_done compat messages', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_idle_1',
+          parentID: 'ses_parent_idle_1',
+          title: 'idle-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'ses_child_idle_1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_idle_1',
+      subagentSessionId: 'ses_child_idle_1',
+      subagentName: 'idle-agent',
+      event: {
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_child_idle_1',
+        },
+      },
+    });
   });
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {
