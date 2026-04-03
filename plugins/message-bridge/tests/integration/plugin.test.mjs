@@ -4,7 +4,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MessageBridgePlugin, default as DefaultPlugin } from '../../src/index.ts';
+import {
+  MessageBridgePlugin,
+  default as DefaultPlugin,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/index.ts';
 import { __resetRuntimeForTests, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
@@ -83,6 +88,105 @@ describe('plugin contract', () => {
     assert.strictEqual(DefaultPlugin, MessageBridgePlugin);
   });
 
+  test('exports private status api helpers', () => {
+    assert.strictEqual(typeof getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'not_ready');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
+  test('binds private status api logs to client.app.log during plugin init', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client }));
+    const unsubscribe = subscribeMessageBridgeStatus(() => {});
+    const snapshot = getMessageBridgeStatus();
+    unsubscribe();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const changedLog = logs.find(
+      (entry) => entry?.message === 'status_api.changed' && entry?.extra?.toUnavailableReason === 'disabled',
+    );
+    const queryLog = logs.find(
+      (entry) =>
+        entry?.message === 'status_api.query'
+        && entry?.extra?.phase === snapshot.phase
+        && entry?.extra?.unavailableReason === snapshot.unavailableReason,
+    );
+    const subscribeLog = logs.find((entry) => entry?.message === 'status_api.subscribe');
+    const unsubscribeLog = logs.find((entry) => entry?.message === 'status_api.unsubscribe');
+
+    assert.ok(changedLog);
+    assert.strictEqual(changedLog.extra.toPhase, 'unavailable');
+    assert.ok(queryLog);
+    assert.strictEqual(queryLog.extra.phase, snapshot.phase);
+    assert.strictEqual(queryLog.extra.unavailableReason, snapshot.unavailableReason);
+    assert.ok(subscribeLog);
+    assert.strictEqual(subscribeLog.extra.listenerCount, 1);
+    assert.ok(unsubscribeLog);
+    assert.strictEqual(unsubscribeLog.extra.listenerCount, 0);
+  });
+
+  test('keeps existing private status api logger when later init client has no app.log', async () => {
+    const logs = [];
+    const loggingClient = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client: loggingClient }));
+    await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
+    const snapshot = getMessageBridgeStatus();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const queryLog = logs.find(
+      (entry) =>
+        entry?.message === 'status_api.query'
+        && entry?.extra?.phase === snapshot.phase
+        && entry?.extra?.unavailableReason === snapshot.unavailableReason,
+    );
+
+    assert.ok(queryLog);
+    assert.strictEqual(queryLog.extra.phase, snapshot.phase);
+    assert.strictEqual(queryLog.extra.unavailableReason, snapshot.unavailableReason);
+  });
+
+  test('stopRuntime resets status and notifies private status subscribers', async () => {
+    await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
+    const startedSnapshot = getMessageBridgeStatus();
+    assert.strictEqual(startedSnapshot.phase, 'unavailable');
+    assert.strictEqual(startedSnapshot.unavailableReason, 'disabled');
+
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push(snapshot);
+    });
+
+    stopRuntime();
+    unsubscribe();
+
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].phase, 'unavailable');
+    assert.strictEqual(seen[0].unavailableReason, 'not_ready');
+    assert.strictEqual(seen[0].willReconnect, false);
+  });
+
   test('PluginInput -> Hooks', async () => {
     const hooks = await MessageBridgePlugin(mockInput());
     assert.ok(hooks !== null && typeof hooks === 'object');
@@ -155,8 +259,9 @@ describe('plugin contract', () => {
     const seen = new Set();
     const hooks = [];
 
-    for (const [, fn] of Object.entries(mod)) {
+    for (const [name, fn] of Object.entries(mod)) {
       if (typeof fn !== 'function') continue;
+      if (name !== 'default' && name !== 'MessageBridgePlugin') continue;
       if (seen.has(fn)) continue;
       seen.add(fn);
       hooks.push(await fn(mockInput()));

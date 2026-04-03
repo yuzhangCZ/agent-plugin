@@ -66,7 +66,7 @@ async function readPackageVersion() {
 }
 
 describe('plugin distribution artifact', () => {
-  test('builds prod artifact without sourcemap and with default and named exports', async () => {
+  test('builds prod artifact without sourcemap and with plugin and status api exports', async () => {
     const pluginVersion = await readPackageVersion();
     execFileSync('node', ['./scripts/build.mjs'], {
       cwd: process.cwd(),
@@ -86,6 +86,8 @@ describe('plugin distribution artifact', () => {
 
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
+    assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
   });
 
@@ -135,6 +137,8 @@ describe('plugin distribution artifact', () => {
     const mod = await importArtifact('dev-exports');
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
+    assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
   });
 
@@ -196,7 +200,7 @@ describe('plugin distribution artifact', () => {
         process.execPath,
         [
           '-e',
-          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { console.log(typeof mod.default, typeof mod.MessageBridgePlugin, mod.default === mod.MessageBridgePlugin); })`,
+          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { console.log(typeof mod.default, typeof mod.MessageBridgePlugin, typeof mod.getMessageBridgeStatus, typeof mod.subscribeMessageBridgeStatus, mod.default === mod.MessageBridgePlugin); })`,
         ],
         {
           cwd: tempDir,
@@ -205,7 +209,7 @@ describe('plugin distribution artifact', () => {
         },
       ).toString().trim();
 
-      assert.strictEqual(stdout, 'function function true');
+      assert.strictEqual(stdout, 'function function function function true');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -2,6 +2,7 @@ import { BridgeRuntime } from './BridgeRuntime.js';
 import type { PluginInput } from './types.js';
 import { AppLogger } from './AppLogger.js';
 import { buildClientShapeSummary } from './clientShapeSummary.js';
+import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
 let runtime: BridgeRuntime | null = null;
@@ -72,12 +73,14 @@ export function stopRuntime(): void {
 
   if (!runtime) {
     lifecycleAbortController = null;
+    resetMessageBridgeStatus();
     return;
   }
 
   runtime.stop();
   runtime = null;
   lifecycleAbortController = null;
+  resetMessageBridgeStatus();
 }
 
 export function __resetRuntimeForTests(): void {

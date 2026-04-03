@@ -1,10 +1,10 @@
 # 协议契约
 
 **Version:** 2.3
-**Date:** 2026-03-30
+**Date:** 2026-03-31
 **Status:** Active
 **Owner:** message-bridge maintainers
-**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`
+**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`, `./private-status-api-contract.md`
 
 ## 1. 边界层
 
@@ -127,6 +127,13 @@ type QuestionReplyPayload = {
   type: 'status_query';
 }
 ```
+
+补充边界说明：
+
+- `status_query` 属于 gateway 外部协议
+- `status_response` 仍只承诺返回 `opencodeOnline:boolean`
+- 当前分支新增的私有状态 API 不属于协议契约，不会扩展 `status_response`
+- 如需读取 bridge 自身连接状态，应使用 `private-status-api-contract.md` 中定义的插件私有读取面
 
 ## 3. 上行事件契约
 

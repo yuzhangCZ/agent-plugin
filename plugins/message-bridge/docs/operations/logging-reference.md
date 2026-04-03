@@ -1,7 +1,7 @@
 # message-bridge 日志可观测性手册
 
-**Version:** 1.0  
-**Date:** 2026-03-07  
+**Version:** 1.2  
+**Date:** 2026-04-03  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../../src/runtime/AppLogger.ts`
@@ -189,7 +189,22 @@ sequenceDiagram
 | `runtime.singleton.initialized` | info | singleton 初始化完成 | - | `src/runtime/singleton.ts:38` |
 | `runtime.singleton.initialization_failed` | error | singleton 初始化失败 | `error`,`errorDetail`,`errorName`,`sourceErrorCode?` | `src/runtime/singleton.ts:43` |
 
-### 4.2 gateway.*
+### 4.2 status_api.*
+
+| message | level | 触发时机 | 关键 extra | 源码位置 |
+|---|---|---|---|---|
+| `status_api.query` | info | 调用 `getMessageBridgeStatus()` 读取当前快照 | `phase`,`connected`,`unavailableReason`,`willReconnect`,`lastReadyAt`,`updatedAt` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.subscribe` | info | 调用 `subscribeMessageBridgeStatus()` 建立订阅 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.unsubscribe` | info | 订阅解除且监听器成功移除 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.changed` | info | 私有状态语义发生变化并发布给订阅方 | `fromPhase`,`toPhase`,`fromConnected`,`toConnected`,`fromUnavailableReason`,`toUnavailableReason`,`fromWillReconnect`,`toWillReconnect`,`lastError` | `src/runtime/MessageBridgeStatusStore.ts` |
+
+说明：
+
+- `status_api.*` 只表示插件私有状态 API 的读取、订阅与状态变化，不等同于 `status_query/status_response` 协议链路
+- `status_api.changed` 仅在状态语义变化时输出；若只是 `updatedAt` 变化而语义不变，不会重复打印
+- 对于一次建链失败或一次连接关闭，若最终原因已知，`status_api.changed` 应直接输出最终可消费状态；不会先额外输出一个仅用于内部拼装原因的临时中间态
+
+### 4.3 gateway.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -218,7 +233,7 @@ sequenceDiagram
 | `gateway.state.changed` | info | runtime 监听到连接状态变化 | `state` | `src/runtime/BridgeRuntime.ts:99` |
 | `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
 
-### 4.3 event.*
+### 4.4 event.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -228,7 +243,7 @@ sequenceDiagram
 | `event.forwarding` | info | runtime 上行发送前 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
 | `event.forwarded` | debug | runtime 上行发送后 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
 
-### 4.4 compat.*
+### 4.5 compat.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -236,7 +251,7 @@ sequenceDiagram
 | `compat.tool_done.skipped_duplicate` | debug | compat 层抑制重复 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
 | `compat.tool_done.fallback_from_idle` | info | `session.idle` 触发兜底 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
 
-### 4.5 router.*
+### 4.6 router.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -246,7 +261,7 @@ sequenceDiagram
 | `router.route.invalid_payload` | warn | action 参数校验失败 | `action`,`error` | `src/action/ActionRouter.ts:50` |
 | `router.route.completed` | info | action 执行完成 | `action`,`success`,`errorCode?` | `src/action/ActionRouter.ts:62` |
 
-### 4.6 action.*
+### 4.7 action.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|

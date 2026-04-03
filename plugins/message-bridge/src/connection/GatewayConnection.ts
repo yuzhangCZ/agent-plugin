@@ -14,6 +14,8 @@ export interface GatewayConnectionEvents {
   stateChange: (state: ConnectionState) => void;
   message: (message: unknown) => void;
   error: (error: Error) => void;
+  registerRejected: (reason?: string) => void;
+  closed: (detail: GatewayConnectionCloseDetail) => void;
 }
 
 export interface GatewayConnection {
@@ -23,6 +25,17 @@ export interface GatewayConnection {
   isConnected(): boolean;
   getState(): ConnectionState;
   on<E extends keyof GatewayConnectionEvents>(event: E, listener: GatewayConnectionEvents[E]): this;
+}
+
+export interface GatewayConnectionCloseDetail {
+  opened: boolean;
+  manuallyDisconnected: boolean;
+  aborted: boolean;
+  rejected: boolean;
+  code?: number;
+  reason?: string;
+  wasClean?: boolean;
+  willReconnect: boolean;
 }
 
 export interface GatewaySendLogContext {
@@ -326,6 +339,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
         ws.onclose = (event?: CloseEvent) => {
           const rejected = isGatewayRejectedCloseCode(event?.code);
+          const willReconnect = opened && !this.manuallyDisconnected && !this.options.abortSignal?.aborted && !rejected;
           this.options.logger?.warn('gateway.close', {
             opened,
             manuallyDisconnected: this.manuallyDisconnected,
@@ -347,6 +361,16 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           }
           this.teardownTimers();
           this.setState('DISCONNECTED');
+          this.emit('closed', {
+            opened,
+            manuallyDisconnected: this.manuallyDisconnected,
+            aborted: !!this.options.abortSignal?.aborted,
+            rejected,
+            code: event?.code,
+            reason: event?.reason,
+            wasClean: event?.wasClean,
+            willReconnect,
+          });
 
           if (rejected) {
             this.options.logger?.warn('gateway.close.rejected', {
@@ -357,7 +381,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             return;
           }
 
-          if (opened && !this.manuallyDisconnected && !this.options.abortSignal?.aborted) {
+          if (willReconnect) {
             this.attemptReconnect();
           }
         };
@@ -640,6 +664,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
     const reason = typeof message.reason === 'string' ? message.reason : undefined;
     this.options.logger?.error('gateway.register.rejected', { reason });
+    this.emit('registerRejected', reason);
     this.manuallyDisconnected = true;
     if (this.ws) {
       this.ws.close();

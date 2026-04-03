@@ -5,6 +5,11 @@ import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 
 function createRuntimeClient(overrides = {}) {
@@ -157,6 +162,312 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('status api defaults to unavailable and not_ready before runtime start', () => {
+    __resetMessageBridgeStatusForTests();
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), {
+      connected: false,
+      phase: 'unavailable',
+      unavailableReason: 'not_ready',
+      willReconnect: false,
+      lastError: null,
+      updatedAt: getMessageBridgeStatus().updatedAt,
+      lastReadyAt: null,
+    });
+  });
+
+  test('start publishes disabled when config disables bridge', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'disabled');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
+  test('start publishes config_invalid when config resolution fails', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = new (class extends BridgeRuntime {
+      async resolveConfig() {
+        throw new Error('broken config');
+      }
+    })({
+      client: createRuntimeClient(),
+    });
+
+    await assert.rejects(runtime.start(), /broken config/);
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'broken config');
+  });
+
+  test('start publishes plugin_failure when startup prerequisites fail', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        global: undefined,
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              throw new Error('startup boom');
+            }
+            return { data: [] };
+          },
+          post: async () => ({ data: undefined }),
+        },
+      }),
+    });
+
+    await assert.rejects(runtime.start());
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
+  });
+
+  test('start publishes server_failure when gateway closes and will not reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RejectedCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 4403, reason: 'server closed', wasClean: true });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = RejectedCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'server closed');
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+        {
+          phase: 'unavailable',
+          unavailableReason: 'server_failure',
+          lastError: 'server closed',
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start keeps server_failure when close follows rejection', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RegisterRejectedWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RegisterRejectedWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.onmessage?.({
+              data: JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }),
+            });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.({ code: 4403, reason: 'device_conflict', wasClean: true });
+      }
+    }
+
+    globalThis.WebSocket = RegisterRejectedWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'device_conflict');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes network_failure when connect fails without rejection evidence', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class FailingHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 1006, reason: 'connect timeout', wasClean: false });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = FailingHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'gateway_websocket_closed_before_open');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes connecting once when gateway closes and will reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
+    const originalWebSocket = globalThis.WebSocket;
+    class ReconnectingCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = ReconnectingCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network jitter', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = ReconnectingCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'connecting');
+      assert.strictEqual(snapshot.unavailableReason, null);
+      assert.strictEqual(snapshot.willReconnect, true);
+      assert.strictEqual(snapshot.lastError, null);
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes server_failure when handshake closes with rejection evidence before open', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 4403, reason: 'auth rejected', wasClean: true });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = RejectedHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'auth rejected');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

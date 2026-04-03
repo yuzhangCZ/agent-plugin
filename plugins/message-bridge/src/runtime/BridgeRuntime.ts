@@ -43,13 +43,14 @@ import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
+import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
 import type { ReconnectConfig } from '../types/index.js';
-import { getErrorDetailsForLog } from '../utils/error.js';
+import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
@@ -106,6 +107,7 @@ export class BridgeRuntime {
   private readonly toolDoneCompat = new ToolDoneCompat();
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
+  private readonly statusAdapter: BridgeRuntimeStatusAdapter;
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -130,6 +132,7 @@ export class BridgeRuntime {
       this.opencodeSessionGatewayAdapter,
     );
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -189,9 +192,11 @@ export class BridgeRuntime {
         error: errorMessage,
         workspacePath: this.workspacePath,
       });
+      this.statusAdapter.publishConfigInvalid(errorMessage);
       throw error;
     }
     if (!config.enabled) {
+      this.statusAdapter.publishDisabled();
       this.logger.info('runtime.start.disabled_by_config');
       this.started = true;
       return;
@@ -205,7 +210,13 @@ export class BridgeRuntime {
       directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
     });
 
-    const startupValidation = await this.validateStartupPrerequisites();
+    let startupValidation;
+    try {
+      startupValidation = await this.validateStartupPrerequisites();
+    } catch (error) {
+      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      throw error;
+    }
     this.sdkClient = startupValidation.sdkClient;
     const agentId = this.stateManager.generateAndBindAgentId();
     this.eventFilter = new EventFilter(config.events.allowlist);
@@ -239,11 +250,18 @@ export class BridgeRuntime {
 
     connection.on('stateChange', (state) => {
       this.stateManager.setState(state);
+      this.statusAdapter.publishConnectionState(state);
       this.logger.info('gateway.state.changed', { state });
       if (state === 'CONNECTING') {
         const nextAgentId = this.stateManager.resetForReconnect();
         this.logger.info('runtime.agent.rebound', { agentId: nextAgentId });
       }
+    });
+    connection.on('registerRejected', (reason) => {
+      this.statusAdapter.publishServerFailure(reason ?? 'register rejected');
+    });
+    connection.on('closed', (detail) => {
+      this.statusAdapter.publishConnectionClosed(detail);
     });
 
     connection.on('message', (message) => {
@@ -267,7 +285,12 @@ export class BridgeRuntime {
       throw new Error('runtime_start_aborted');
     }
 
-    await connection.connect();
+    try {
+      await connection.connect();
+    } catch (error) {
+      this.statusAdapter.publishConnectFailure(getErrorMessage(error));
+      throw error;
+    }
     if (options.abortSignal?.aborted) {
       this.gatewayConnection.disconnect();
       this.gatewayConnection = null;
