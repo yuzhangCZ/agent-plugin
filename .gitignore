@@ -3,3 +3,4 @@ node_modules/
 logs/
 .tmp/
 plugins/message-bridge/release/
+.gstack/
