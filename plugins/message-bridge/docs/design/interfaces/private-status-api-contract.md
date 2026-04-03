@@ -1,7 +1,7 @@
 # 私有状态 API 契约
 
-**Version:** 1.1  
-**Date:** 2026-04-02  
+**Version:** 1.2  
+**Date:** 2026-04-03  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`, `../../operations/opencode-integration-guide.md`
@@ -54,6 +54,7 @@ function subscribeMessageBridgeStatus(
 - `getMessageBridgeStatus()` 返回当前最新快照，不抛异常
 - `subscribeMessageBridgeStatus()` 返回取消订阅函数
 - 若状态语义没有变化，订阅者不会收到重复通知
+- 对于一次建链失败或一次连接关闭，状态发布会尽量收敛为一次最终可消费的状态变化，不对外暴露仅用于内部拼装原因的临时中间态
 - 这两个接口的调用与状态变化会输出 `status_api.*` 日志，便于宿主排障
 
 ## 6. 状态模型
@@ -120,9 +121,15 @@ interface MessageBridgeStatusSnapshot {
 | 配置解析或校验失败 | `unavailable` | `config_invalid` | `false` | 启动前失败 |
 | 首次连接或自动重连中 | `connecting` | `null` | `true` | 尚未进入 `READY` |
 | 收到 `register_ok` | `ready` | `null` | `null` | 唯一可视为已连接的状态 |
-| 运行中断连且不会重连 | `unavailable` | `network_failure` 或 `server_failure` | `false` | 取决于是否存在明确拒绝证据 |
+| 运行中断连且不会重连 | `unavailable` | `network_failure` 或 `server_failure` | `false` | 直接发布最终不可用状态；取决于是否存在明确拒绝证据 |
 | register 被拒绝 | `unavailable` | `server_failure` | `false` | `register_rejected` 场景 |
 | 启动流程抛错 | `unavailable` | `plugin_failure` | `false` | runtime 启动失败 |
+
+关闭路径补充约束：
+
+- 当连接关闭后 runtime 仍会自动重连时，订阅方应直接收到 `connecting`
+- 当连接关闭后 runtime 明确不会自动重连时，订阅方应直接收到最终 `unavailable`
+- 连接关闭链路不应先对外发布一个临时 `network_failure`，再补发 `connecting` 或 `server_failure`
 
 ## 8. 为什么需要 `willReconnect`
 

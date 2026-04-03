@@ -38,11 +38,7 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(typeof ready.lastReadyAt, 'number');
 
     adapter.publishConnectionState('DISCONNECTED');
-    const disconnected = getMessageBridgeStatus();
-    assert.strictEqual(disconnected.connected, false);
-    assert.strictEqual(disconnected.phase, 'unavailable');
-    assert.strictEqual(disconnected.unavailableReason, 'network_failure');
-    assert.strictEqual(disconnected.willReconnect, false);
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 
   test('publishes disabled, config invalid, server failure and plugin failure states', () => {

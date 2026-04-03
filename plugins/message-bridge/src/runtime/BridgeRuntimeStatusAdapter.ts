@@ -113,17 +113,8 @@ export function createBridgeRuntimeStatusAdapter(
         return;
       }
 
-      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
-        return;
-      }
-
-      const updatedAt = now();
-      publish(createUnavailableStatus({
-        reason: 'network_failure',
-        lastError: null,
-        updatedAt,
-        lastReadyAt: current.lastReadyAt,
-      }));
+      // DISCONNECTED 只是底层连接状态，最终对外状态由 close/connect failure
+      // 统一收口，避免先发布 unavailable 中间态、再补最终原因。
     },
 
     publishConnectionClosed(detail: GatewayConnectionCloseDetail) {

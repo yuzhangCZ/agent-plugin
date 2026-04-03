@@ -1,7 +1,7 @@
 # message-bridge 日志可观测性手册
 
-**Version:** 1.1  
-**Date:** 2026-04-02  
+**Version:** 1.2  
+**Date:** 2026-04-03  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../../src/runtime/AppLogger.ts`
@@ -202,6 +202,7 @@ sequenceDiagram
 
 - `status_api.*` 只表示插件私有状态 API 的读取、订阅与状态变化，不等同于 `status_query/status_response` 协议链路
 - `status_api.changed` 仅在状态语义变化时输出；若只是 `updatedAt` 变化而语义不变，不会重复打印
+- 对于一次建链失败或一次连接关闭，若最终原因已知，`status_api.changed` 应直接输出最终可消费状态；不会先额外输出一个仅用于内部拼装原因的临时中间态
 
 ### 4.3 gateway.*
 

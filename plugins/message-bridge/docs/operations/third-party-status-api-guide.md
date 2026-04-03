@@ -1,7 +1,7 @@
 # 三方应用私有状态 API 接口说明
 
-**Version:** 1.2  
-**Date:** 2026-04-02  
+**Version:** 1.3  
+**Date:** 2026-04-03  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../README.md`, `../design/interfaces/private-status-api-contract.md`, `./opencode-integration-guide.md`
@@ -51,6 +51,7 @@ function subscribeMessageBridgeStatus(
 - `getMessageBridgeStatus()` 返回当前最新状态快照，不抛异常
 - `subscribeMessageBridgeStatus()` 用于订阅状态变化，返回取消订阅函数
 - 若状态语义没有变化，订阅者不会收到重复通知
+- 对于一次连接关闭或一次建链失败，插件会尽量直接发布最终状态；不会先发一个临时 `unavailable` 中间态，再补发最终原因
 - 这两个接口的调用与状态变化会输出 `status_api.*` 日志，便于宿主排障
 
 ## 5. 状态模型
@@ -94,6 +95,8 @@ interface MessageBridgeStatusSnapshot {
 - `phase='ready'`：表示 runtime 已进入 `READY`
 - `phase='connecting'`：表示首次连接或自动重连中
 - `phase='unavailable'`：表示当前不可用，需结合 `unavailableReason` 判断原因
+- 若连接关闭后 runtime 会自动恢复，订阅方应直接收到 `connecting`
+- 若连接关闭后 runtime 不会自动恢复，订阅方应直接收到最终 `unavailable` 状态，并带上最终原因
 
 ## 6. 最小使用示例
 

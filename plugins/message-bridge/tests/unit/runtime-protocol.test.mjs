@@ -5,7 +5,11 @@ import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
-import { __resetMessageBridgeStatusForTests, getMessageBridgeStatus } from '../../src/runtime/MessageBridgeStatusStore.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 
 function createRuntimeClient(overrides = {}) {
@@ -234,6 +238,14 @@ describe('runtime protocol strictness', () => {
 
   test('start publishes server_failure when gateway closes and will not reconnect', async () => {
     __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
     const originalWebSocket = globalThis.WebSocket;
     class RejectedCloseWebSocket {
       static OPEN = 1;
@@ -270,7 +282,20 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(snapshot.unavailableReason, 'server_failure');
       assert.strictEqual(snapshot.willReconnect, false);
       assert.strictEqual(snapshot.lastError, 'server closed');
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+        {
+          phase: 'unavailable',
+          unavailableReason: 'server_failure',
+          lastError: 'server closed',
+        },
+      ]);
     } finally {
+      unsubscribe();
       globalThis.WebSocket = originalWebSocket;
     }
   });
@@ -348,6 +373,65 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(snapshot.willReconnect, false);
       assert.strictEqual(snapshot.lastError, 'gateway_websocket_closed_before_open');
     } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes connecting once when gateway closes and will reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
+    const originalWebSocket = globalThis.WebSocket;
+    class ReconnectingCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = ReconnectingCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network jitter', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = ReconnectingCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'connecting');
+      assert.strictEqual(snapshot.unavailableReason, null);
+      assert.strictEqual(snapshot.willReconnect, true);
+      assert.strictEqual(snapshot.lastError, null);
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+      ]);
+    } finally {
+      unsubscribe();
       globalThis.WebSocket = originalWebSocket;
     }
   });
