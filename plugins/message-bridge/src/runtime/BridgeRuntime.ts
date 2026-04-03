@@ -888,6 +888,14 @@ export class BridgeRuntime {
     if (validation.ok) {
       return validation.value;
     }
+    if (this.isLegacyPermissionRepliedToolEvent(message)) {
+      logger.warn('runtime.upstream_validation_legacy_bypass', {
+        gatewayMessageId: logContext.gatewayMessageId,
+        toolSessionId: logContext.toolSessionId,
+        eventType: 'permission.replied',
+      });
+      return message;
+    }
     const violation = validation.error.violation;
 
     logger.error('runtime.upstream_validation_failed', {
@@ -903,5 +911,25 @@ export class BridgeRuntime {
       errorMessage: violation.message,
     });
     return null;
+  }
+
+  private isLegacyPermissionRepliedToolEvent(message: UpstreamMessage): boolean {
+    const rawMessage = asRecord(message);
+    if (!rawMessage || asString(rawMessage.type) !== UPSTREAM_MESSAGE_TYPE.TOOL_EVENT) {
+      return false;
+    }
+
+    const toolSessionId = asString(rawMessage.toolSessionId)?.trim();
+    if (!toolSessionId) {
+      return false;
+    }
+
+    const rawEvent = asRecord(rawMessage.event);
+    if (!rawEvent || asString(rawEvent.type) !== 'permission.replied') {
+      return false;
+    }
+
+    const rawProperties = asRecord(rawEvent.properties);
+    return !!asString(rawProperties?.sessionID)?.trim();
   }
 }

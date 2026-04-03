@@ -8,6 +8,7 @@ import {
   type MessageRole,
   type MessageUpdatedEvent,
   type PermissionAskedEvent,
+  type PermissionRepliedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
   type SessionErrorEvent,
@@ -49,6 +50,7 @@ type UpstreamExtraByType = {
   'session.error': undefined;
   'permission.updated': undefined;
   'permission.asked': undefined;
+  'permission.replied': undefined;
   'question.asked': undefined;
 };
 
@@ -363,7 +365,7 @@ function extractSessionErrorCommon(event: SessionErrorEvent): ExtractResult<Comm
 }
 
 function extractPermissionCommon(
-  event: PermissionUpdatedEvent | PermissionAskedEvent,
+  event: PermissionUpdatedEvent | PermissionAskedEvent | PermissionRepliedEvent,
 ): ExtractResult<CommonUpstreamFields> {
   const sessionResult = requireNonEmptyString(
     event.properties.sessionID,
@@ -399,6 +401,7 @@ export const UPSTREAM_EVENT_EXTRACTORS: {
   'session.error': { extractCommon: extractSessionErrorCommon, extractExtra: noExtra },
   'permission.updated': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
   'permission.asked': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
+  'permission.replied': { extractCommon: extractPermissionCommon, extractExtra: noExtra },
   'question.asked': { extractCommon: extractQuestionAskedCommon, extractExtra: noExtra },
 };
 
