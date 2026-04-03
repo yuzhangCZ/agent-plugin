@@ -6,6 +6,13 @@ import {
   StatusQueryResultData,
 } from '../types/index.js';
 import { ToolErrorClassifier } from '../error/ToolErrorClassifier.js';
+import {
+  TOOL_ERROR_REASON,
+  UPSTREAM_MESSAGE_TYPE,
+  type ToolErrorReason,
+  type UpstreamMessage,
+  validateUpstreamMessage,
+} from '../gateway-wire/transport.js';
 import { ChatAction } from '../action/ChatAction.js';
 import { CreateSessionAction } from '../action/CreateSessionAction.js';
 import { CloseSessionAction } from '../action/CloseSessionAction.js';
@@ -18,8 +25,8 @@ import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
 import { loadConfig } from '../config/index.js';
 import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
-import { DefaultGatewayConnection, GatewayConnection } from '../connection/GatewayConnection.js';
 import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
+import { DefaultGatewayConnection, GatewayConnection, type GatewaySendLogContext } from '../connection/GatewayConnection.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
@@ -30,8 +37,11 @@ import {
   type SessionStatusExtra,
 } from '../protocol/upstream/index.js';
 import {
-  normalizeDownstreamMessage,
-} from '../protocol/downstream/index.js';
+  DOWNSTREAM_MESSAGE_TYPE,
+  INVOKE_ACTION,
+  normalizeDownstream as normalizeDownstreamMessage,
+} from '../gateway-wire/downstream.js';
+import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
 import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
@@ -47,6 +57,7 @@ import {
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
 import type { ReconnectConfig } from '../types/index.js';
+import { asRecord, asString } from '../utils/type-guards.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
@@ -223,12 +234,12 @@ export class BridgeRuntime {
       abortSignal: options.abortSignal,
       authPayloadProvider,
       registerMessage: {
-        type: 'register',
+        type: UPSTREAM_MESSAGE_TYPE.REGISTER,
         deviceName: registerMetadata.deviceName,
-        macAddress: registerMetadata.macAddress,
         os: os.platform(),
         toolType: config.gateway.channel,
         toolVersion: registerMetadata.toolVersion,
+        ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
       },
       logger: this.logger.child({ component: 'gateway' }),
     });
@@ -287,6 +298,8 @@ export class BridgeRuntime {
   }
 
   async handleEvent(event: BridgeEvent): Promise<void> {
+    // 这里是宿主事件进入 gateway uplink 的唯一主链路：
+    // 先抽取可路由字段，再做投影，最后统一经过共享 validator，任何失败都 fail-closed。
     const extraction = extractUpstreamEvent(event, this.logger);
     if (!extraction.ok) {
       return;
@@ -316,16 +329,16 @@ export class BridgeRuntime {
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
     const transportEnvelope = {
-      type: 'tool_event',
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: normalized.common.toolSessionId,
       event: transportEvent,
     };
     const originalEnvelope = {
-      type: 'tool_event',
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: normalized.common.toolSessionId,
       event: normalized.raw,
     };
-    this.gatewayConnection.send(transportEnvelope, {
+    const transportLogContext: GatewaySendLogContext = {
       traceId: bridgeMessageId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: bridgeMessageId,
@@ -336,10 +349,19 @@ export class BridgeRuntime {
       toolCallId: eventFields.toolCallId ?? undefined,
       originalPayloadBytes: Buffer.byteLength(JSON.stringify(originalEnvelope), 'utf8'),
       transportPayloadBytes: Buffer.byteLength(JSON.stringify(transportEnvelope), 'utf8'),
-    });
+    };
+    const validatedEnvelope = this.validateUpstreamMessageOrLog(
+      transportEnvelope,
+      transportLogContext,
+      forwardingLogger,
+    );
+    if (!validatedEnvelope) {
+      return;
+    }
+    this.gatewayConnection.send(validatedEnvelope, transportLogContext);
     forwardingLogger.debug('event.forwarded');
 
-    if (normalized.common.eventType === 'session.idle') {
+    if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE) {
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
         logger: forwardingLogger,
@@ -393,7 +415,7 @@ export class BridgeRuntime {
 
       if (normalized.error.messageType === 'invoke') {
         const errorMessage =
-          normalized.error.action === 'create_session' && normalized.error.field === 'welinkSessionId'
+          normalized.error.action === INVOKE_ACTION.CREATE_SESSION && normalized.error.field === 'welinkSessionId'
             ? normalized.error.message
             : 'Invalid invoke payload shape';
         this.sendToolError(
@@ -412,7 +434,7 @@ export class BridgeRuntime {
     }
     const message = normalized.value;
 
-    if (message.type === 'status_query') {
+    if (message.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
       const statusLogger = this.createMessageLogger(
         { ...downstreamFields },
         traceId,
@@ -420,7 +442,7 @@ export class BridgeRuntime {
       statusLogger.info('runtime.status_query.received');
       const payload: StatusQueryPayload = {};
       const result = await this.actionRouter.route(
-        'status_query',
+        DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
         payload,
         this.buildActionContext(undefined, statusLogger),
       );
@@ -429,20 +451,30 @@ export class BridgeRuntime {
           logger: statusLogger,
           traceId,
           gatewayMessageId: downstreamFields.gatewayMessageId,
-          action: 'status_query',
+          action: DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
         });
         return;
       }
 
-      this.gatewayConnection.send({
-        type: 'status_response',
+      const statusResponse: UpstreamMessage = {
+        type: UPSTREAM_MESSAGE_TYPE.STATUS_RESPONSE,
         opencodeOnline: result.data.opencodeOnline,
-      }, {
+      };
+      const statusLogContext: GatewaySendLogContext = {
         traceId,
         runtimeTraceId: this.logger.getTraceId(),
         gatewayMessageId: downstreamFields.gatewayMessageId,
-        action: 'status_query',
-      });
+        action: DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
+      };
+      const validatedStatusResponse = this.validateUpstreamMessageOrLog(
+        statusResponse,
+        statusLogContext,
+        statusLogger,
+      );
+      if (!validatedStatusResponse) {
+        return;
+      }
+      this.gatewayConnection.send(validatedStatusResponse, statusLogContext);
       statusLogger.info('runtime.status_query.responded', {
         latencyMs: Date.now() - startedAt,
       });
@@ -477,7 +509,7 @@ export class BridgeRuntime {
 
     invokeLogger.info('runtime.invoke.received');
 
-    if (message.action === 'create_session') {
+    if (message.action === INVOKE_ACTION.CREATE_SESSION) {
       if (!welinkSessionId) {
         invokeLogger.warn('runtime.create_session.missing_welink_session_id');
       }
@@ -513,19 +545,29 @@ export class BridgeRuntime {
         return;
       }
 
-      this.gatewayConnection.send({
-        type: 'session_created',
-        welinkSessionId,
+      const sessionCreated: UpstreamMessage = {
+        type: UPSTREAM_MESSAGE_TYPE.SESSION_CREATED,
+        welinkSessionId: message.welinkSessionId,
         toolSessionId,
         session: result.data,
-      }, {
+      };
+      const sessionCreatedLogContext: GatewaySendLogContext = {
         traceId,
         runtimeTraceId: this.logger.getTraceId(),
         gatewayMessageId: downstreamFields.gatewayMessageId,
         welinkSessionId,
         toolSessionId,
         action: message.action,
-      });
+      };
+      const validatedSessionCreated = this.validateUpstreamMessageOrLog(
+        sessionCreated,
+        sessionCreatedLogContext,
+        invokeLogger,
+      );
+      if (!validatedSessionCreated) {
+        return;
+      }
+      this.gatewayConnection.send(validatedSessionCreated, sessionCreatedLogContext);
       invokeLogger.info('runtime.invoke.completed', {
         action: message.action,
         welinkSessionId,
@@ -668,7 +710,12 @@ export class BridgeRuntime {
     if (!extra) {
       return null;
     }
-    if (extra.kind === 'message.updated' || extra.kind === 'message.part.updated' || extra.kind === 'message.part.delta' || extra.kind === 'message.part.removed') {
+    if (
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_UPDATED ||
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED ||
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_DELTA ||
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_REMOVED
+    ) {
       return extra.messageId;
     }
     return null;
@@ -678,33 +725,37 @@ export class BridgeRuntime {
     if (!extra) {
       return null;
     }
-    if (extra.kind === 'message.part.updated' || extra.kind === 'message.part.delta' || extra.kind === 'message.part.removed') {
+    if (
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED ||
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_DELTA ||
+      extra.kind === TOOL_EVENT_TYPE.MESSAGE_PART_REMOVED
+    ) {
       return extra.partId;
     }
     return null;
   }
 
   private getRole(extra: NormalizedUpstreamEvent['extra']): string | null {
-    return extra && extra.kind === 'message.updated' ? extra.role : null;
+    return extra && extra.kind === TOOL_EVENT_TYPE.MESSAGE_UPDATED ? extra.role : null;
   }
 
   private getStatus(extra: NormalizedUpstreamEvent['extra']): string | null {
-    return extra && extra.kind === 'session.status' ? extra.status : null;
+    return extra && extra.kind === TOOL_EVENT_TYPE.SESSION_STATUS ? extra.status : null;
   }
 
   private extractDownstreamLogFields(raw: unknown): DownstreamLogFields {
-    if (!raw || typeof raw !== 'object') {
+    const message = asRecord(raw);
+    if (!message) {
       return {};
     }
-    const message = raw as Record<string, unknown>;
-    const payload = typeof message.payload === 'object' && message.payload ? (message.payload as Record<string, unknown>) : undefined;
+    const payload = asRecord(message.payload);
 
     return {
-      messageType: typeof message.type === 'string' ? message.type : undefined,
-      gatewayMessageId: typeof message.messageId === 'string' ? message.messageId : undefined,
-      action: typeof message.action === 'string' ? message.action : undefined,
-      welinkSessionId: typeof message.welinkSessionId === 'string' ? message.welinkSessionId : undefined,
-      toolSessionId: typeof payload?.toolSessionId === 'string' ? payload.toolSessionId : undefined,
+      messageType: asString(message.type),
+      gatewayMessageId: asString(message.messageId),
+      action: asString(message.action),
+      welinkSessionId: asString(message.welinkSessionId),
+      toolSessionId: asString(payload?.toolSessionId),
     };
   }
 
@@ -752,20 +803,30 @@ export class BridgeRuntime {
       sourceErrorCode: result.success ? undefined : result.errorEvidence?.sourceErrorCode,
     });
 
-    this.gatewayConnection.send({
-      type: 'tool_error',
+    const toolErrorMessage: UpstreamMessage = {
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
       welinkSessionId,
       toolSessionId: logOptions?.toolSessionId,
       error,
       reason,
-    }, {
+    };
+    const toolErrorLogContext: GatewaySendLogContext = {
       traceId: logOptions?.traceId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: logOptions?.gatewayMessageId,
       welinkSessionId,
       action: logOptions?.action,
       toolSessionId: logOptions?.toolSessionId,
-    });
+    };
+    const validatedToolError = this.validateUpstreamMessageOrLog(
+      toolErrorMessage,
+      toolErrorLogContext,
+      logger,
+    );
+    if (!validatedToolError) {
+      return;
+    }
+    this.gatewayConnection.send(validatedToolError, toolErrorLogContext);
   }
 
   private sendToolDone(
@@ -792,11 +853,12 @@ export class BridgeRuntime {
       action: logOptions?.action,
     });
 
-    this.gatewayConnection.send({
-      type: 'tool_done',
+    const toolDoneMessage: UpstreamMessage = {
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_DONE,
       toolSessionId,
       welinkSessionId,
-    }, {
+    };
+    const toolDoneLogContext: GatewaySendLogContext = {
       traceId: logOptions?.traceId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: logOptions?.gatewayMessageId,
@@ -804,6 +866,42 @@ export class BridgeRuntime {
       action: logOptions?.action,
       toolSessionId,
       source,
+    };
+    const validatedToolDone = this.validateUpstreamMessageOrLog(
+      toolDoneMessage,
+      toolDoneLogContext,
+      logger,
+    );
+    if (!validatedToolDone) {
+      return;
+    }
+    this.gatewayConnection.send(validatedToolDone, toolDoneLogContext);
+  }
+
+  private validateUpstreamMessageOrLog(
+    message: UpstreamMessage,
+    logContext: GatewaySendLogContext,
+    logger: BridgeLogger = this.logger,
+  ): UpstreamMessage | null {
+    // 运行时最终准入点：只有通过共享 wire 校验的消息才允许真正发往 gateway。
+    const validation = validateUpstreamMessage(message);
+    if (validation.ok) {
+      return validation.value;
+    }
+    const violation = validation.error.violation;
+
+    logger.error('runtime.upstream_validation_failed', {
+      gatewayMessageId: logContext.gatewayMessageId,
+      welinkSessionId: logContext.welinkSessionId,
+      toolSessionId: logContext.toolSessionId,
+      action: logContext.action,
+      eventType: violation.eventType ?? logContext.eventType,
+      messageType: message.type,
+      stage: violation.stage,
+      errorCode: violation.code,
+      field: violation.field,
+      errorMessage: violation.message,
     });
+    return null;
   }
 }

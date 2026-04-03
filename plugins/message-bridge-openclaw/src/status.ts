@@ -29,6 +29,8 @@ import {
   finishProbeConnect,
   getConnectionCoord,
 } from "./runtime/ConnectionCoordinator.js";
+import { asRecord } from "./utils/type-guards.js";
+import { UPSTREAM_MESSAGE_TYPE } from "./gateway-wire/transport.js";
 
 const HEARTBEAT_GRACE_MS = 5_000;
 const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
@@ -58,10 +60,6 @@ export type MessageBridgeAccountSnapshot = ChannelAccountSnapshot & {
 
 function elapsedMs(startedAt: number, now: () => number): number {
   return Math.max(0, now() - startedAt);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
 }
 
 function asMessageBridgeSnapshot(value: ChannelAccountSnapshot): MessageBridgeAccountSnapshot {
@@ -148,12 +146,12 @@ function createProbeConnection(account: MessageBridgeResolvedAccount, logger: Br
     debug: account.debug,
     authPayloadProvider: () => new DefaultAkSkAuth(account.auth.ak, account.auth.sk).generateAuthPayload(),
     registerMessage: {
-      type: "register",
+      type: UPSTREAM_MESSAGE_TYPE.REGISTER,
       deviceName: registerMetadata.deviceName,
-      macAddress: registerMetadata.macAddress,
       os: os.platform(),
       toolType: registerMetadata.toolType,
       toolVersion: registerMetadata.toolVersion,
+      ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
     },
     logger,
   });
@@ -532,7 +530,7 @@ export function collectMessageBridgeStatusIssues(
 
   for (const rawSnapshot of accounts) {
     const snapshot = asMessageBridgeSnapshot(rawSnapshot);
-    const probe = isRecord(snapshot.probe) ? snapshot.probe : null;
+    const probe = asRecord(snapshot.probe);
     const probeReason = getProbeReason(probe);
     const suppressDuplicateConnectionIssue =
       probe?.state === "rejected" &&

@@ -38,6 +38,7 @@
     }
   },
   "dependencies": {
+    "@agent-plugin/gateway-wire-v1": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {

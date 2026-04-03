@@ -8,6 +8,16 @@ importers:
 
   .: {}
 
+  packages/gateway-wire-v1:
+    dependencies:
+      zod:
+        specifier: ^4.1.8
+        version: 4.1.8
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
   packages/test-support:
     dependencies:
       ws:
@@ -15,6 +25,10 @@ importers:
         version: 8.19.0
 
   plugins/message-bridge:
+    dependencies:
+      '@agent-plugin/gateway-wire-v1':
+        specifier: workspace:*
+        version: link:../../packages/gateway-wire-v1
     devDependencies:
       '@agent-plugin/test-support':
         specifier: workspace:*
@@ -52,6 +66,9 @@ importers:
 
   plugins/message-bridge-openclaw:
     dependencies:
+      '@agent-plugin/gateway-wire-v1':
+        specifier: workspace:*
+        version: link:../../packages/gateway-wire-v1
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

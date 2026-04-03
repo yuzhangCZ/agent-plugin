@@ -39,7 +39,9 @@
     "verify:release": "pnpm run verify:core && pnpm run verify:env && pnpm run test:e2e:smoke && pnpm run verify:opencode-load",
     "verify:release:dry": "pnpm run verify:release"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@agent-plugin/gateway-wire-v1": "workspace:*"
+  },
   "devDependencies": {
     "@opencode-ai/plugin": "1.2.15",
     "@opencode-ai/sdk": "1.2.15",

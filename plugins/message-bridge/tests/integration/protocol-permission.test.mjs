@@ -80,7 +80,19 @@ describe('protocol permission-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
-        event: permissionAskedEvent,
+        event: {
+          type: 'permission.asked',
+          properties: {
+            id: 'perm_fixture_1',
+            sessionID: 'ses_permission_1',
+            messageID: 'msg_permission_1',
+            type: 'exec',
+            title: 'Run command',
+            metadata: {
+              command: 'ls',
+            },
+          },
+        },
       },
     ]);
 
@@ -140,7 +152,6 @@ describe('protocol permission-roundtrip', () => {
         welinkSessionId: 'wl-perm-invalid',
         toolSessionId: 'ses_permission_1',
         error: 'Invalid invoke payload shape',
-        reason: undefined,
       },
     ]);
   });

@@ -216,6 +216,53 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.throws(() => conn.send({ type: 'x' }));
   });
 
+  test('connect rejects invalid register control messages before sending', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: {
+        type: 'register',
+        deviceName: '   ',
+        macAddress: 'aa:bb:cc:dd:ee:ff',
+        os: 'darwin',
+        toolType: 'channel',
+        toolVersion: '1.0.0',
+      },
+      logger,
+    });
+
+    await assert.rejects(conn.connect(), /gateway_invalid_transport_message/);
+    assert.strictEqual(
+      entries.some((entry) => entry.message === 'gateway.send.rejected_invalid_protocol'),
+      true,
+    );
+    assert.deepStrictEqual(ScriptedWebSocket.instances[0]?.sent ?? [], []);
+  });
+
+  test('send rejects invalid heartbeat control messages', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await conn.connect();
+
+    assert.throws(
+      () =>
+        conn.send({
+          type: 'heartbeat',
+          timestamp: '',
+        }),
+      /gateway_invalid_transport_message/,
+    );
+    assert.strictEqual(
+      entries.some((entry) => entry.message === 'gateway.send.rejected_invalid_protocol'),
+      true,
+    );
+  });
+
   test('passes gateway auth via websocket subprotocol instead of query params', async () => {
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
@@ -262,7 +309,8 @@ describe('DefaultGatewayConnection coverage', () => {
 
     const ws = ScriptedWebSocket.instances[0];
     assert.strictEqual(conn.getState(), 'CONNECTED');
-    assert.ok(ws.sent.some(e => JSON.stringify(e) === JSON.stringify(registerMessage())));
+    const outboundRegister = ws.sent.find((entry) => entry.type === 'register');
+    assert.deepStrictEqual(outboundRegister, registerMessage());
     assert.throws(() => conn.send({ type: 'tool_event', payload: 1 }));
 
     ws.emitMessage(JSON.stringify({ type: 'invoke', action: 'chat', payload: { toolSessionId: 's-1', text: 'hi' } }));

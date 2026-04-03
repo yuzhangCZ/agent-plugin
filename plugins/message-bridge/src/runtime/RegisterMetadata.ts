@@ -4,10 +4,9 @@ import type { BridgeLogger } from './AppLogger.js';
 export interface RegisterMetadata {
   deviceName: string;
   toolVersion: string;
-  macAddress: string;
+  macAddress?: string;
 }
 
-const EMPTY_MAC_ADDRESS = '';
 const ZERO_MAC_ADDRESS = '00:00:00:00:00:00';
 const MAC_ADDRESS_PATTERN = /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
 
@@ -24,7 +23,7 @@ function isUsableMacAddress(macAddress: string | undefined): macAddress is strin
   return MAC_ADDRESS_PATTERN.test(normalized) && normalized !== ZERO_MAC_ADDRESS;
 }
 
-function resolveMacAddress(logger: BridgeLogger): string {
+function resolveMacAddress(logger: BridgeLogger): string | undefined {
   const interfaces = os.networkInterfaces();
   let interfaceCount = 0;
 
@@ -46,13 +45,14 @@ function resolveMacAddress(logger: BridgeLogger): string {
     platform: os.platform(),
     interfaceCount,
   });
-  return EMPTY_MAC_ADDRESS;
+  return undefined;
 }
 
 export function resolveRegisterMetadata(toolVersion: string, logger: BridgeLogger): RegisterMetadata {
+  const macAddress = resolveMacAddress(logger);
   return {
     deviceName: os.hostname(),
     toolVersion,
-    macAddress: resolveMacAddress(logger),
+    ...(macAddress ? { macAddress } : {}),
   };
 }

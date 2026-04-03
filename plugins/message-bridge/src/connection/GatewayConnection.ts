@@ -1,9 +1,15 @@
 import { EventEmitter } from 'events';
 import { ConnectionState, RECONNECT_JITTER, type ReconnectConfig } from '../types/index.js';
-import type { HeartbeatMessage, RegisterMessage } from '../contracts/transport-messages.js';
+import {
+  UPSTREAM_MESSAGE_TYPE,
+  validateUpstreamMessage,
+  type HeartbeatMessage,
+  type RegisterMessage,
+} from '../contracts/transport-messages.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import type { AkSkAuthPayload } from './AkSkAuth.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import { asRecord } from '../utils/type-guards.js';
 import {
   DefaultReconnectPolicy,
   type ReconnectClock,
@@ -83,6 +89,39 @@ interface RegisterRejectedMessage {
   reason?: string;
 }
 
+function validateControlMessage(
+  message: unknown,
+  logger?: BridgeLogger,
+): RegisterMessage | HeartbeatMessage {
+  const validation = validateUpstreamMessage(message);
+  if (validation.ok && (
+    validation.value.type === UPSTREAM_MESSAGE_TYPE.REGISTER ||
+    validation.value.type === UPSTREAM_MESSAGE_TYPE.HEARTBEAT
+  )) {
+    return validation.value;
+  }
+
+  const violation = validation.ok
+    ? {
+        stage: 'transport',
+        code: 'unsupported_message',
+        field: 'type',
+        message: `Unsupported control message type: ${String((message as { type?: unknown })?.type ?? 'unknown')}`,
+      }
+    : validation.error.violation;
+
+  logger?.error('gateway.send.rejected_invalid_protocol', {
+    messageType: message && typeof message === 'object' && 'type' in (message as { type?: unknown })
+      ? String((message as { type?: unknown }).type ?? 'unknown')
+      : 'unknown',
+    stage: violation.stage,
+    errorCode: violation.code,
+    field: violation.field,
+    errorMessage: violation.message,
+  });
+  throw new Error('gateway_invalid_transport_message');
+}
+
 function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
   try {
@@ -134,35 +173,32 @@ function formatRawPayload(payload: unknown): string {
   return json === undefined ? String(payload) : json;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
-
 function extractWebSocketErrorDetails(event: unknown): Record<string, unknown> {
   const details: Record<string, unknown> = {};
+  const record = asRecord(event);
 
-  if (!isRecord(event)) {
+  if (!record) {
     return {
       ...getErrorDetailsForLog(event),
     };
   }
 
   const baseError =
-    event.error !== undefined && event.error !== event
-      ? getErrorDetailsForLog(event.error)
+    record.error !== undefined && record.error !== event
+      ? getErrorDetailsForLog(record.error)
       : getErrorDetailsForLog(event);
   Object.assign(details, baseError);
 
-  if (typeof event.type === 'string') {
-    details.eventType = event.type;
+  if (typeof record.type === 'string') {
+    details.eventType = record.type;
   }
 
-  if (!details.errorDetail && typeof event.message === 'string' && event.message.trim()) {
-    details.errorDetail = event.message;
+  if (!details.errorDetail && typeof record.message === 'string' && record.message.trim()) {
+    details.errorDetail = record.message;
   }
 
-  const target = event.target;
-  if (isRecord(target) && typeof target.readyState === 'number') {
+  const target = asRecord(record.target);
+  if (target && typeof target.readyState === 'number') {
     details.readyState = target.readyState;
   }
 
@@ -182,10 +218,11 @@ function buildAuthSubprotocol(payload: AkSkAuthPayload): string {
 }
 
 function isGatewayControlMessage(message: unknown): message is GatewayControlMessage {
-  if (!isRecord(message) || typeof message.type !== 'string') {
+  const record = asRecord(message);
+  if (!record || typeof record.type !== 'string') {
     return false;
   }
-  return message.type === 'register_ok' || message.type === 'register_rejected';
+  return record.type === 'register_ok' || record.type === 'register_rejected';
 }
 
 function isGatewayRejectedCloseCode(code: number | undefined): boolean {
@@ -315,13 +352,27 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           this.logRawFrame('onOpen', event);
           this.options.logger?.info('gateway.open');
           this.setState('CONNECTED');
-
-          this.send(this.options.registerMessage);
-          this.options.logger?.info('gateway.register.sent', {
-            toolType: this.options.registerMessage.toolType,
-            toolVersion: this.options.registerMessage.toolVersion,
-          });
-          finalizeResolve();
+          try {
+            this.send(this.options.registerMessage);
+            this.options.logger?.info('gateway.register.sent', {
+              toolType: this.options.registerMessage.toolType,
+              toolVersion: this.options.registerMessage.toolVersion,
+            });
+            finalizeResolve();
+          } catch (error) {
+            this.options.logger?.error('gateway.register.failed', {
+              error: getErrorMessage(error),
+              ...getErrorDetailsForLog(error),
+            });
+            this.teardownTimers();
+            ws.onmessage = null;
+            ws.onclose = null;
+            ws.onerror = null;
+            this.ws?.close();
+            this.ws = null;
+            this.setState('DISCONNECTED');
+            finalizeReject(error instanceof Error ? error : new Error(getErrorMessage(error)));
+          }
         };
 
         ws.onclose = (event?: CloseEvent) => {
@@ -428,7 +479,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       message && typeof message === 'object' && 'type' in (message as { type?: unknown })
         ? String((message as { type?: unknown }).type ?? '')
         : 'unknown';
-    const isControlMessage = messageType === 'register' || messageType === 'heartbeat';
+    const isControlMessage =
+      messageType === UPSTREAM_MESSAGE_TYPE.REGISTER || messageType === UPSTREAM_MESSAGE_TYPE.HEARTBEAT;
 
     if (this.state !== 'READY' && !isControlMessage) {
       this.options.logger?.warn('gateway.send.rejected_not_ready', {
@@ -437,7 +489,10 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       });
       throw new Error('Gateway connection is not ready. Cannot send business message.');
     }
-    const serialized = JSON.stringify(message);
+    const normalizedMessage = isControlMessage
+      ? validateControlMessage(message, this.options.logger)
+      : message;
+    const serialized = JSON.stringify(normalizedMessage);
     const payloadBytes = Buffer.byteLength(serialized, 'utf8');
     this.lastMessageSummary = {
       direction: 'sent',
@@ -491,11 +546,18 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       }
 
       const heartbeat: HeartbeatMessage = {
-        type: 'heartbeat',
+        type: UPSTREAM_MESSAGE_TYPE.HEARTBEAT,
         timestamp: new Date().toISOString(),
       };
-      this.ws.send(JSON.stringify(heartbeat));
-      this.options.logger?.debug('gateway.heartbeat.sent');
+      try {
+        this.send(heartbeat);
+        this.options.logger?.debug('gateway.heartbeat.sent');
+      } catch (error) {
+        this.options.logger?.error('gateway.heartbeat.failed', {
+          error: getErrorMessage(error),
+          ...getErrorDetailsForLog(error),
+        });
+      }
     }, heartbeatIntervalMs);
   }
 
@@ -604,10 +666,11 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
   }
 
   private extractGatewayMessageId(message: unknown): string | undefined {
-    if (!isRecord(message)) {
+    const record = asRecord(message);
+    if (!record) {
       return undefined;
     }
-    return typeof message.messageId === 'string' ? message.messageId : undefined;
+    return typeof record.messageId === 'string' ? record.messageId : undefined;
   }
 
   private recordOutboundSummary(summary: OutboundMessageSummary): void {
