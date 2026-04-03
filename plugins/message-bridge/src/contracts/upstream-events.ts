@@ -3,6 +3,7 @@ import type {
   EventMessagePartUpdated,
   EventMessageUpdated,
   EventPermissionUpdated,
+  EventSessionCreated,
   EventSessionError,
   EventSessionIdle,
   EventSessionStatus,
@@ -20,6 +21,7 @@ export const SUPPORTED_UPSTREAM_EVENT_TYPES = [
   'message.part.updated',
   'message.part.delta',
   'message.part.removed',
+  'session.created',
   'session.status',
   'session.idle',
   'session.updated',
@@ -36,6 +38,7 @@ export type MessageUpdatedEvent = EventMessageUpdated;
 export type MessagePartUpdatedEvent = EventMessagePartUpdated;
 export type MessagePartDeltaEvent = EventMessagePartDelta;
 export type MessagePartRemovedEvent = EventMessagePartRemoved;
+export type SessionCreatedEvent = EventSessionCreated;
 export type SessionStatusEvent = EventSessionStatus;
 export type SessionIdleEvent = EventSessionIdle;
 export type SessionUpdatedEvent = EventSessionUpdated;
@@ -50,6 +53,7 @@ export type SupportedUpstreamEvent =
   | EventMessagePartUpdated
   | EventMessagePartDelta
   | EventMessagePartRemoved
+  | EventSessionCreated
   | EventSessionStatus
   | EventSessionIdle
   | EventSessionUpdated
@@ -67,4 +71,17 @@ export function isSupportedUpstreamEventType(value: string): value is SupportedU
   return SUPPORTED_UPSTREAM_EVENT_TYPE_SET.has(value);
 }
 
-export const DEFAULT_EVENT_ALLOWLIST = [...SUPPORTED_UPSTREAM_EVENT_TYPES] as const;
+export const DEFAULT_EVENT_ALLOWLIST = [
+  'message.updated',
+  'message.part.updated',
+  'message.part.delta',
+  'message.part.removed',
+  'session.status',
+  'session.idle',
+  'session.updated',
+  'session.error',
+  'permission.updated',
+  'permission.asked',
+  'permission.replied',
+  'question.asked',
+] as const;

@@ -998,6 +998,118 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-1');
   });
 
+  test('session.created primes child mapping outside the allowlist and rewrites later child events to parent envelope', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_permission_1',
+          parentID: 'ses_parent_permission_1',
+          title: 'research-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_1',
+        permissionID: 'perm-child-1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_1',
+      subagentSessionId: 'ses_child_permission_1',
+      subagentName: 'research-agent',
+      event: {
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'ses_child_permission_1',
+          permissionID: 'perm-child-1',
+        },
+      },
+    });
+    assert.strictEqual(sent[0].context.toolSessionId, 'ses_parent_permission_1');
+  });
+
+  test('falls back to original session and retries mapping after lazy lookup failures', async () => {
+    const logs = [];
+    let calls = 0;
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+        session: {
+          get: async () => {
+            calls += 1;
+            if (calls === 1) {
+              throw new Error('temporary lookup timeout');
+            }
+
+            return {
+              data: {
+                id: 'ses_child_permission_retry',
+                directory: '/session/default-directory',
+                parentID: 'ses_parent_permission_retry',
+                title: 'retry-agent',
+              },
+            };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    const event = {
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_retry',
+        permissionID: 'perm-retry-1',
+      },
+    };
+
+    await runtime.handleEvent(event);
+    await runtime.handleEvent(event);
+
+    assert.strictEqual(sent.length, 2);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_child_permission_retry',
+      event,
+    });
+    assert.deepStrictEqual(sent[1].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_retry',
+      subagentSessionId: 'ses_child_permission_retry',
+      subagentName: 'retry-agent',
+      event,
+    });
+    const warnEntry = logs.find((item) => item?.body?.message === 'event.subagent_lookup_failed');
+    assert.ok(!!warnEntry);
+    assert.strictEqual(warnEntry.body.extra.toolSessionId, 'ses_child_permission_retry');
+  });
+
   test('does not emit duplicate tool_done when session.idle follows chat success', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -1030,6 +1142,48 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
+  });
+
+  test('child session.idle does not emit tool_done compat messages', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_idle_1',
+          parentID: 'ses_parent_idle_1',
+          title: 'idle-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'ses_child_idle_1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_idle_1',
+      subagentSessionId: 'ses_child_idle_1',
+      subagentName: 'idle-agent',
+      event: {
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_child_idle_1',
+        },
+      },
+    });
   });
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {
