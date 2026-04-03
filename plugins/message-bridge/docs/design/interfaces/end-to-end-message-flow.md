@@ -587,6 +587,7 @@ type NormalizedUpstreamEvent = {
    - `session.error`
    - `permission.updated`
    - `permission.asked`
+   - `permission.replied`
    - `question.asked`
 
 ### 6.3 B4 下行：bridge 调用 SDK
@@ -696,6 +697,7 @@ type NormalizedUpstreamEvent = {
 | `session.status` | `toolSessionId=properties.sessionID` | `status` |
 | `session.idle` | `toolSessionId=properties.sessionID` | 无 |
 | `permission.asked` | `toolSessionId=properties.sessionID` | 无 |
+| `permission.replied` | `toolSessionId=properties.sessionID` | 无 |
 | `question.asked` | `toolSessionId=properties.sessionID` | 无 |
 
 #### 6.4.3 输出数据：发回 B3 的业务对象
@@ -897,6 +899,7 @@ type NormalizedUpstreamEvent = {
 | `session.error` | `properties.sessionID` | `tool_event` | `type:'session_error'` `welinkSessionId` `toolSessionId` `event` | `type:'session.error'` `detail` |
 | `permission.updated` | `properties.sessionID` | `tool_event` | `type:'permission.updated'` `welinkSessionId` `toolSessionId` `event` | `type:'permission.updated'` |
 | `permission.asked` | `properties.sessionID` `properties.id` `properties.title` `properties.metadata` | `tool_event` | `type:'permission.asked'` `welinkSessionId` `toolSessionId` `permissionId` `title` `metadata` | `type:'permission.request'` `permissionId` `title` `metadata` |
+| `permission.replied` | `properties.sessionID` `properties.requestID` `properties.reply` | `tool_event` | `type:'permission.replied'` `toolSessionId` `event` | `type:'permission.replied'` `requestID` `reply` |
 | `question.asked` | `properties.sessionID` `properties.questions` `properties.tool.callID` | `tool_event` | `type:'question.asked'` `welinkSessionId` `toolSessionId` `questions` `toolCallId` | `type:'question.request'` `questions` `toolCallId` |
 
 #### 6.6.6 推荐 UI 消费语义
