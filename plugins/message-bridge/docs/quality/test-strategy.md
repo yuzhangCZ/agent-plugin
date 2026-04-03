@@ -1514,6 +1514,7 @@ export class MockOpenCodeSDK {
       "session.error",
       "permission.updated",
       "permission.asked",
+      "permission.replied",
       "question.asked"
     ]
   }

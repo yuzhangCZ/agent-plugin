@@ -105,6 +105,7 @@ OpenCode 事件
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 ## 4. 下行流

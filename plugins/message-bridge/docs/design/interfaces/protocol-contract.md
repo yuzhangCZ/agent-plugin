@@ -142,6 +142,7 @@ type QuestionReplyPayload = {
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 默认 allowlist 与上述列表完全一致。

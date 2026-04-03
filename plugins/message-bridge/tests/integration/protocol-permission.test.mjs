@@ -55,6 +55,30 @@ async function loadFixture(fileName) {
 }
 
 describe('protocol permission-roundtrip', () => {
+  test('forwards permission.replied as tool_event', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['permission.replied']);
+    runtime.stateManager.setState('READY');
+
+    const permissionRepliedEvent = await loadFixture('permission.replied.json');
+    await runtime.handleEvent(permissionRepliedEvent);
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_permission_1',
+        event: permissionRepliedEvent,
+      },
+    ]);
+  });
+
   test('forwards permission.asked as tool_event and routes permission_reply to SDK', async () => {
     const permissionCalls = [];
     const runtime = new BridgeRuntime({
