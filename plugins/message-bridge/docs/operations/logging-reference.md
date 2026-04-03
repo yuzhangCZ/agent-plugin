@@ -193,15 +193,15 @@ sequenceDiagram
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
-| `status_api.query` | info | 调用 `getMessageBridgeStatus()` | `phase`,`connected`,`unavailableReason`,`willReconnect`,`lastReadyAt`,`updatedAt` | `src/runtime/MessageBridgeStatusStore.ts` |
-| `status_api.subscribe` | info | 调用 `subscribeMessageBridgeStatus()` 并成功注册监听器 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
-| `status_api.unsubscribe` | info | 取消订阅函数成功移除监听器 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
-| `status_api.changed` | info | 私有状态语义发生变化并完成发布 | `fromPhase`,`toPhase`,`fromConnected`,`toConnected`,`fromUnavailableReason`,`toUnavailableReason`,`fromWillReconnect`,`toWillReconnect`,`lastError` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.query` | info | 调用 `getMessageBridgeStatus()` 读取当前快照 | `phase`,`connected`,`unavailableReason`,`willReconnect`,`lastReadyAt`,`updatedAt` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.subscribe` | info | 调用 `subscribeMessageBridgeStatus()` 建立订阅 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.unsubscribe` | info | 订阅解除且监听器成功移除 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.changed` | info | 私有状态语义发生变化并发布给订阅方 | `fromPhase`,`toPhase`,`fromConnected`,`toConnected`,`fromUnavailableReason`,`toUnavailableReason`,`fromWillReconnect`,`toWillReconnect`,`lastError` | `src/runtime/MessageBridgeStatusStore.ts` |
 
-补充说明：
+说明：
 
-- `status_api.*` 只表示插件进程内私有状态 API 的调用与状态变化
-- 它与 `runtime.status_query.received/responded` 严格区分；后者只表示 gateway 协议 `status_query/status_response`
+- `status_api.*` 只表示插件私有状态 API 的读取、订阅与状态变化，不等同于 `status_query/status_response` 协议链路
+- `status_api.changed` 仅在状态语义变化时输出；若只是 `updatedAt` 变化而语义不变，不会重复打印
 
 ### 4.3 gateway.*
 

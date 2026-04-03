@@ -187,7 +187,7 @@ export class BridgeRuntime {
         bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
-      const errorMessage = getErrorMessage(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error('runtime.config.loading_failed', {
         error: errorMessage,
         workspacePath: this.workspacePath,
@@ -196,8 +196,8 @@ export class BridgeRuntime {
       throw error;
     }
     if (!config.enabled) {
-      this.logger.info('runtime.start.disabled_by_config');
       this.statusAdapter.publishDisabled();
+      this.logger.info('runtime.start.disabled_by_config');
       this.started = true;
       return;
     }
@@ -210,7 +210,13 @@ export class BridgeRuntime {
       directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
     });
 
-    const startupValidation = await this.validateStartupPrerequisites();
+    let startupValidation;
+    try {
+      startupValidation = await this.validateStartupPrerequisites();
+    } catch (error) {
+      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      throw error;
+    }
     this.sdkClient = startupValidation.sdkClient;
     const agentId = this.stateManager.generateAndBindAgentId();
     this.eventFilter = new EventFilter(config.events.allowlist);
@@ -252,7 +258,7 @@ export class BridgeRuntime {
       }
     });
     connection.on('registerRejected', (reason) => {
-      this.statusAdapter.publishRegisterRejected(reason);
+      this.statusAdapter.publishServerFailure(reason ?? 'register rejected');
     });
     connection.on('closed', (detail) => {
       this.statusAdapter.publishConnectionClosed(detail);
@@ -279,13 +285,10 @@ export class BridgeRuntime {
       throw new Error('runtime_start_aborted');
     }
 
-    this.statusAdapter.publishConnecting();
-
     try {
       await connection.connect();
     } catch (error) {
-      const errorMessage = getErrorMessage(error);
-      this.statusAdapter.publishStartupFailed(errorMessage);
+      this.statusAdapter.publishConnectFailure(getErrorMessage(error));
       throw error;
     }
     if (options.abortSignal?.aborted) {
@@ -672,8 +675,6 @@ export class BridgeRuntime {
     try {
       return await validateBridgeStartup(this.rawClient, this.sdkClient, this.missingSdkCapabilities);
     } catch (error) {
-      const errorMessage = getErrorMessage(error);
-      this.statusAdapter.publishStartupFailed(errorMessage);
       if (isBridgeStartupError(error)) {
         this.logStartupFailure(error);
       }

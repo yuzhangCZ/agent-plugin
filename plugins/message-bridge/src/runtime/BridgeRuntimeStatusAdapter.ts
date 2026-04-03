@@ -14,8 +14,9 @@ export interface BridgeRuntimeStatusAdapter {
   publishConnecting(): void;
   publishDisabled(): void;
   publishConfigInvalid(errorMessage: string): void;
-  publishStartupFailed(errorMessage: string): void;
-  publishRegisterRejected(reason?: string): void;
+  publishPluginFailure(errorMessage: string): void;
+  publishServerFailure(errorMessage?: string): void;
+  publishConnectFailure(errorMessage: string): void;
   publishConnectionState(state: ConnectionState): void;
   publishConnectionClosed(detail: GatewayConnectionCloseDetail): void;
 }
@@ -60,23 +61,38 @@ export function createBridgeRuntimeStatusAdapter(
       }));
     },
 
-    publishStartupFailed(errorMessage: string) {
+    publishPluginFailure(errorMessage: string) {
       const current = read();
       const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: 'startup_failed',
+        reason: 'plugin_failure',
         lastError: errorMessage,
         updatedAt,
         lastReadyAt: current.lastReadyAt,
       }));
     },
 
-    publishRegisterRejected(reason?: string) {
+    publishServerFailure(errorMessage?: string) {
       const current = read();
       const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: 'register_rejected',
-        lastError: reason ?? 'register rejected',
+        reason: 'server_failure',
+        lastError: errorMessage ?? 'server failure',
+        updatedAt,
+        lastReadyAt: current.lastReadyAt,
+      }));
+    },
+
+    publishConnectFailure(errorMessage: string) {
+      const current = read();
+      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
+        return;
+      }
+
+      const updatedAt = now();
+      publish(createUnavailableStatus({
+        reason: 'network_failure',
+        lastError: errorMessage,
         updatedAt,
         lastReadyAt: current.lastReadyAt,
       }));
@@ -97,13 +113,13 @@ export function createBridgeRuntimeStatusAdapter(
         return;
       }
 
-      if (current.phase === 'unavailable' && current.unavailableReason === 'register_rejected') {
+      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
         return;
       }
 
       const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: 'disconnected',
+        reason: 'network_failure',
         lastError: null,
         updatedAt,
         lastReadyAt: current.lastReadyAt,
@@ -119,17 +135,21 @@ export function createBridgeRuntimeStatusAdapter(
         return;
       }
 
-      if (!detail.opened || detail.manuallyDisconnected || detail.aborted) {
+      if (detail.manuallyDisconnected || detail.aborted) {
         return;
       }
 
-      if (current.phase === 'unavailable' && current.unavailableReason === 'register_rejected') {
+      if (!detail.opened && !detail.rejected) {
+        return;
+      }
+
+      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
         return;
       }
 
       const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: detail.rejected ? 'server_disconnected' : 'disconnected',
+        reason: detail.rejected ? 'server_failure' : 'network_failure',
         lastError: detail.reason ?? null,
         updatedAt,
         lastReadyAt: current.lastReadyAt,

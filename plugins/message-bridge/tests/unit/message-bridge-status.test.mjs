@@ -41,7 +41,7 @@ describe('message bridge status helpers', () => {
 
   test('createUnavailableStatus returns a valid unavailable snapshot', () => {
     const snapshot = createUnavailableStatus({
-      reason: 'register_rejected',
+      reason: 'server_failure',
       lastError: 'device_conflict',
       updatedAt: 15,
       lastReadyAt: 12,
@@ -51,7 +51,7 @@ describe('message bridge status helpers', () => {
     assert.deepStrictEqual(snapshot, {
       connected: false,
       phase: 'unavailable',
-      unavailableReason: 'register_rejected',
+      unavailableReason: 'server_failure',
       willReconnect: false,
       lastError: 'device_conflict',
       updatedAt: 15,

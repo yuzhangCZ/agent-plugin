@@ -64,13 +64,12 @@ function subscribeMessageBridgeStatus(
 type MessageBridgePhase = 'connecting' | 'ready' | 'unavailable';
 
 type MessageBridgeUnavailableReason =
-  | 'uninitialized'
+  | 'not_ready'
   | 'disabled'
   | 'config_invalid'
-  | 'disconnected'
-  | 'server_disconnected'
-  | 'register_rejected'
-  | 'startup_failed';
+  | 'plugin_failure'
+  | 'server_failure'
+  | 'network_failure';
 
 interface MessageBridgeStatusSnapshot {
   connected: boolean;
@@ -89,7 +88,7 @@ interface MessageBridgeStatusSnapshot {
 |---|---|---|---|---|
 | `connected` | `boolean` | `false` | 否 | 当前是否已经完成 gateway `READY` |
 | `phase` | `'connecting' \| 'ready' \| 'unavailable'` | `'unavailable'` | 否 | 对 UI 暴露的主状态分类 |
-| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | `'uninitialized'` | 否 | 当前不可用时的原因；非 `unavailable` 状态为 `null` |
+| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | `'not_ready'` | 否 | 当前不可用时的原因；非 `unavailable` 状态为 `null` |
 | `willReconnect` | `boolean \| null` | `false` | 否 | 当前状态下是否会自动恢复；`ready` 为 `null` |
 | `lastError` | `string \| null` | `null` | 否 | 最近一次可诊断错误文案 |
 | `updatedAt` | `number` | `Date.now()` | 否 | 最近一次语义变化时间戳，单位毫秒 |
@@ -116,14 +115,14 @@ interface MessageBridgeStatusSnapshot {
 
 | 运行时场景 | `phase` | `unavailableReason` | `willReconnect` | 说明 |
 |---|---|---|---|---|
-| runtime 尚未创建 | `unavailable` | `uninitialized` | `false` | 默认初始态 |
+| runtime 尚未创建 | `unavailable` | `not_ready` | `false` | 默认初始态 |
 | 配置显式禁用 | `unavailable` | `disabled` | `false` | `enabled=false` |
 | 配置解析或校验失败 | `unavailable` | `config_invalid` | `false` | 启动前失败 |
 | 首次连接或自动重连中 | `connecting` | `null` | `true` | 尚未进入 `READY` |
 | 收到 `register_ok` | `ready` | `null` | `null` | 唯一可视为已连接的状态 |
-| 运行中断连且不会重连 | `unavailable` | `disconnected` 或 `server_disconnected` | `false` | 见下节 |
-| register 被拒绝 | `unavailable` | `register_rejected` | `false` | `register_rejected` 场景 |
-| 启动流程抛错 | `unavailable` | `startup_failed` | `false` | runtime 启动失败 |
+| 运行中断连且不会重连 | `unavailable` | `network_failure` 或 `server_failure` | `false` | 取决于是否存在明确拒绝证据 |
+| register 被拒绝 | `unavailable` | `server_failure` | `false` | `register_rejected` 场景 |
+| 启动流程抛错 | `unavailable` | `plugin_failure` | `false` | runtime 启动失败 |
 
 ## 8. 为什么需要 `willReconnect`
 
@@ -134,9 +133,9 @@ interface MessageBridgeStatusSnapshot {
 
 若把这两层语义都压进 `reason`，枚举会膨胀成：
 
-- `network_disconnected_reconnecting`
-- `server_disconnected_no_reconnect`
-- `register_rejected_no_reconnect`
+- `network_failure_reconnecting`
+- `server_failure_no_reconnect`
+- `server_rejected_no_reconnect`
 
 这会让一个字段同时承担“原因”和“后续动作”两个职责。  
 当前实现将其拆分为：
@@ -152,7 +151,7 @@ interface MessageBridgeStatusSnapshot {
 {
   "connected": false,
   "phase": "unavailable",
-  "unavailableReason": "server_disconnected",
+  "unavailableReason": "server_failure",
   "willReconnect": false,
   "lastError": "gateway closed the connection",
   "updatedAt": 1711814400000,

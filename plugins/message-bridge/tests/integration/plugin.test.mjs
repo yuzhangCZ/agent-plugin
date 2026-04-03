@@ -95,7 +95,7 @@ describe('plugin contract', () => {
     const snapshot = getMessageBridgeStatus();
     assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
-    assert.strictEqual(snapshot.unavailableReason, 'uninitialized');
+    assert.strictEqual(snapshot.unavailableReason, 'not_ready');
     assert.strictEqual(snapshot.willReconnect, false);
   });
 
@@ -183,7 +183,7 @@ describe('plugin contract', () => {
 
     assert.strictEqual(seen.length, 1);
     assert.strictEqual(seen[0].phase, 'unavailable');
-    assert.strictEqual(seen[0].unavailableReason, 'uninitialized');
+    assert.strictEqual(seen[0].unavailableReason, 'not_ready');
     assert.strictEqual(seen[0].willReconnect, false);
   });
 

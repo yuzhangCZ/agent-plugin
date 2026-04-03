@@ -1,13 +1,12 @@
 export type MessageBridgePhase = 'connecting' | 'ready' | 'unavailable';
 
 export type MessageBridgeUnavailableReason =
-  | 'uninitialized'
+  | 'not_ready'
   | 'disabled'
   | 'config_invalid'
-  | 'disconnected'
-  | 'server_disconnected'
-  | 'register_rejected'
-  | 'startup_failed';
+  | 'plugin_failure'
+  | 'server_failure'
+  | 'network_failure';
 
 export interface MessageBridgeStatusSnapshot {
   connected: boolean;
@@ -39,7 +38,7 @@ export function createDefaultMessageBridgeStatusSnapshot(now: () => number = Dat
   return {
     connected: false,
     phase: 'unavailable',
-    unavailableReason: 'uninitialized',
+    unavailableReason: 'not_ready',
     willReconnect: false,
     lastError: null,
     updatedAt: now(),

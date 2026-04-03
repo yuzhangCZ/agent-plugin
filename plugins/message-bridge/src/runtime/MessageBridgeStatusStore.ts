@@ -104,5 +104,6 @@ export function resetMessageBridgeStatus(): MessageBridgeStatusSnapshot {
 export function __resetMessageBridgeStatusForTests(): MessageBridgeStatusSnapshot {
   listeners.clear();
   logger = null;
+  snapshot = createDefaultMessageBridgeStatusSnapshot(() => 0);
   return resetMessageBridgeStatus();
 }

@@ -181,7 +181,7 @@ bridge 发往 gateway 的消息类型：
 
 - `ready` 表示 runtime 已收到 `register_ok`
 - `connecting` 表示首连或自动重连中
-- `unavailable + server_disconnected + willReconnect=false` 可表达“服务端主动断开，且当前不会重连”
+- `unavailable + server_failure + willReconnect=false` 可表达“服务端拒绝或已断开，且当前不会重连”
 
 详细契约见 `design/interfaces/private-status-api-contract.md`。
 

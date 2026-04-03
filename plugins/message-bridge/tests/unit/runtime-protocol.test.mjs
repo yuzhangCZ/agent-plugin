@@ -158,13 +158,13 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
-  test('status api defaults to unavailable and uninitialized before runtime start', () => {
+  test('status api defaults to unavailable and not_ready before runtime start', () => {
     __resetMessageBridgeStatusForTests();
 
     assert.deepStrictEqual(getMessageBridgeStatus(), {
       connected: false,
       phase: 'unavailable',
-      unavailableReason: 'uninitialized',
+      unavailableReason: 'not_ready',
       willReconnect: false,
       lastError: null,
       updatedAt: getMessageBridgeStatus().updatedAt,
@@ -205,7 +205,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(snapshot.lastError, 'broken config');
   });
 
-  test('start publishes startup_failed when startup prerequisites fail', async () => {
+  test('start publishes plugin_failure when startup prerequisites fail', async () => {
     __resetMessageBridgeStatusForTests();
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
       client: createRuntimeClient({
@@ -227,12 +227,12 @@ describe('runtime protocol strictness', () => {
     const snapshot = getMessageBridgeStatus();
     assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
-    assert.strictEqual(snapshot.unavailableReason, 'startup_failed');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
     assert.strictEqual(snapshot.willReconnect, false);
     assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
   });
 
-  test('start publishes server_disconnected when gateway closes and will not reconnect', async () => {
+  test('start publishes server_failure when gateway closes and will not reconnect', async () => {
     __resetMessageBridgeStatusForTests();
     const originalWebSocket = globalThis.WebSocket;
     class RejectedCloseWebSocket {
@@ -267,7 +267,7 @@ describe('runtime protocol strictness', () => {
 
       const snapshot = getMessageBridgeStatus();
       assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'server_disconnected');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
       assert.strictEqual(snapshot.willReconnect, false);
       assert.strictEqual(snapshot.lastError, 'server closed');
     } finally {
@@ -275,7 +275,7 @@ describe('runtime protocol strictness', () => {
     }
   });
 
-  test('start keeps register_rejected when close follows rejection', async () => {
+  test('start keeps server_failure when close follows rejection', async () => {
     __resetMessageBridgeStatusForTests();
     const originalWebSocket = globalThis.WebSocket;
     class RegisterRejectedWebSocket {
@@ -312,9 +312,73 @@ describe('runtime protocol strictness', () => {
 
       const snapshot = getMessageBridgeStatus();
       assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'register_rejected');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
       assert.strictEqual(snapshot.willReconnect, false);
       assert.strictEqual(snapshot.lastError, 'device_conflict');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes network_failure when connect fails without rejection evidence', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class FailingHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 1006, reason: 'connect timeout', wasClean: false });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = FailingHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'gateway_websocket_closed_before_open');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes server_failure when handshake closes with rejection evidence before open', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 4403, reason: 'auth rejected', wasClean: true });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = RejectedHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'auth rejected');
     } finally {
       globalThis.WebSocket = originalWebSocket;
     }

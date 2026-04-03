@@ -164,7 +164,7 @@ const unsubscribe = subscribeMessageBridgeStatus((nextSnapshot) => {
 - `phase='ready'`：显示“已连接”
 - `phase='connecting'`：显示“连接中”
 - `phase='unavailable'`：显示“不可用”
-- `unavailableReason='server_disconnected'` 且 `willReconnect=false`：可提示“服务端已断开连接，当前不会自动重连”
+- `unavailableReason='server_failure'` 且 `willReconnect=false`：可提示“服务端拒绝或已断开连接，当前不会自动重连”
 
 边界说明：
 

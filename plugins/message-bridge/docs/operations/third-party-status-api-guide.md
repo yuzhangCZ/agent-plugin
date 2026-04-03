@@ -59,13 +59,12 @@ function subscribeMessageBridgeStatus(
 type MessageBridgePhase = 'connecting' | 'ready' | 'unavailable';
 
 type MessageBridgeUnavailableReason =
-  | 'uninitialized'
+  | 'not_ready'
   | 'disabled'
   | 'config_invalid'
-  | 'disconnected'
-  | 'server_disconnected'
-  | 'register_rejected'
-  | 'startup_failed';
+  | 'plugin_failure'
+  | 'server_failure'
+  | 'network_failure';
 
 interface MessageBridgeStatusSnapshot {
   connected: boolean;
@@ -84,7 +83,7 @@ interface MessageBridgeStatusSnapshot {
 |---|---|---|---|
 | `connected` | `boolean` | `true` / `false` | 是否已连接成功；仅当 `phase='ready'` 时为 `true` |
 | `phase` | `MessageBridgePhase` | `'connecting'` / `'ready'` / `'unavailable'` | 对外暴露的主状态分类，用于区分连接中、已连接和不可用 |
-| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | `'uninitialized'` / `'disabled'` / `'config_invalid'` / `'disconnected'` / `'server_disconnected'` / `'register_rejected'` / `'startup_failed'` / `null` | 当前不可用时的原因；非 `unavailable` 状态为 `null` |
+| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | `'not_ready'` / `'disabled'` / `'config_invalid'` / `'plugin_failure'` / `'server_failure'` / `'network_failure'` / `null` | 当前不可用时的原因；非 `unavailable` 状态为 `null` |
 | `willReconnect` | `boolean \| null` | `true` / `false` / `null` | 当前状态下是否会自动恢复；`ready` 时为 `null` |
 | `lastError` | `string \| null` | 错误文本或 `null` | 最近一次可诊断错误文本 |
 | `updatedAt` | `number` | 毫秒时间戳 | 最近一次状态语义变化时间戳，单位毫秒 |

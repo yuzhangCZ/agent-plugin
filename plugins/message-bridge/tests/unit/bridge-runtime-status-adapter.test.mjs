@@ -41,11 +41,11 @@ describe('bridge runtime status adapter', () => {
     const disconnected = getMessageBridgeStatus();
     assert.strictEqual(disconnected.connected, false);
     assert.strictEqual(disconnected.phase, 'unavailable');
-    assert.strictEqual(disconnected.unavailableReason, 'disconnected');
+    assert.strictEqual(disconnected.unavailableReason, 'network_failure');
     assert.strictEqual(disconnected.willReconnect, false);
   });
 
-  test('publishes disabled, config invalid, rejected and startup failed states', () => {
+  test('publishes disabled, config invalid, server failure and plugin failure states', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
     adapter.publishDisabled();
@@ -58,20 +58,20 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(configInvalid.willReconnect, false);
     assert.strictEqual(configInvalid.lastError, 'invalid config');
 
-    adapter.publishRegisterRejected('device_conflict');
+    adapter.publishServerFailure('device_conflict');
     const rejected = getMessageBridgeStatus();
-    assert.strictEqual(rejected.unavailableReason, 'register_rejected');
+    assert.strictEqual(rejected.unavailableReason, 'server_failure');
     assert.strictEqual(rejected.willReconnect, false);
     assert.strictEqual(rejected.lastError, 'device_conflict');
 
-    adapter.publishStartupFailed('startup boom');
+    adapter.publishPluginFailure('startup boom');
     const failed = getMessageBridgeStatus();
-    assert.strictEqual(failed.unavailableReason, 'startup_failed');
+    assert.strictEqual(failed.unavailableReason, 'plugin_failure');
     assert.strictEqual(failed.willReconnect, false);
     assert.strictEqual(failed.lastError, 'startup boom');
   });
 
-  test('publishes server_disconnected when server closes without reconnect', () => {
+  test('publishes server_failure when server closes without reconnect', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
     adapter.publishConnectionState('READY');
@@ -88,9 +88,42 @@ describe('bridge runtime status adapter', () => {
 
     const closed = getMessageBridgeStatus();
     assert.strictEqual(closed.phase, 'unavailable');
-    assert.strictEqual(closed.unavailableReason, 'server_disconnected');
+    assert.strictEqual(closed.unavailableReason, 'server_failure');
     assert.strictEqual(closed.willReconnect, false);
     assert.strictEqual(closed.lastError, 'server shutdown');
+  });
+
+  test('publishes server_failure when handshake is rejected before open', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnectionClosed({
+      opened: false,
+      manuallyDisconnected: false,
+      aborted: false,
+      rejected: true,
+      code: 4403,
+      reason: 'auth rejected',
+      wasClean: true,
+      willReconnect: false,
+    });
+
+    const closed = getMessageBridgeStatus();
+    assert.strictEqual(closed.phase, 'unavailable');
+    assert.strictEqual(closed.unavailableReason, 'server_failure');
+    assert.strictEqual(closed.willReconnect, false);
+    assert.strictEqual(closed.lastError, 'auth rejected');
+  });
+
+  test('publishes network_failure when connect fails without rejection evidence', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnectFailure('connect timeout');
+
+    const failed = getMessageBridgeStatus();
+    assert.strictEqual(failed.phase, 'unavailable');
+    assert.strictEqual(failed.unavailableReason, 'network_failure');
+    assert.strictEqual(failed.willReconnect, false);
+    assert.strictEqual(failed.lastError, 'connect timeout');
   });
 
   test('publishes connecting when connection closes but runtime will reconnect', () => {

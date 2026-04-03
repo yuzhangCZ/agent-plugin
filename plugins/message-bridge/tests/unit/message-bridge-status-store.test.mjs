@@ -30,12 +30,12 @@ describe('message bridge status store', () => {
     __resetMessageBridgeStatusForTests();
   });
 
-  test('defaults to unavailable and uninitialized', () => {
+  test('defaults to unavailable and not_ready', () => {
     const snapshot = getMessageBridgeStatus();
 
     assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
-    assert.strictEqual(snapshot.unavailableReason, 'uninitialized');
+    assert.strictEqual(snapshot.unavailableReason, 'not_ready');
     assert.strictEqual(snapshot.willReconnect, false);
     assert.strictEqual(snapshot.lastError, null);
     assert.strictEqual(snapshot.lastReadyAt, null);
@@ -151,7 +151,7 @@ describe('message bridge status store', () => {
     assert.strictEqual(changedLogs[0].extra.toPhase, 'connecting');
     assert.strictEqual(changedLogs[0].extra.fromConnected, false);
     assert.strictEqual(changedLogs[0].extra.toConnected, false);
-    assert.strictEqual(changedLogs[0].extra.fromUnavailableReason, 'uninitialized');
+    assert.strictEqual(changedLogs[0].extra.fromUnavailableReason, 'not_ready');
     assert.strictEqual(changedLogs[0].extra.toUnavailableReason, null);
     assert.strictEqual(changedLogs[0].extra.fromWillReconnect, false);
     assert.strictEqual(changedLogs[0].extra.toWillReconnect, true);
@@ -199,7 +199,7 @@ describe('message bridge status store', () => {
 
     assert.strictEqual(seen.length, 2);
     assert.strictEqual(seen[1].phase, 'unavailable');
-    assert.strictEqual(seen[1].unavailableReason, 'uninitialized');
+    assert.strictEqual(seen[1].unavailableReason, 'not_ready');
     assert.strictEqual(seen[1].willReconnect, false);
     assert.deepStrictEqual(resetSnapshot, seen[1]);
   });
