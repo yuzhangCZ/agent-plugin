@@ -82,5 +82,6 @@ export const DEFAULT_EVENT_ALLOWLIST = [
   'session.error',
   'permission.updated',
   'permission.asked',
+  'permission.replied',
   'question.asked',
 ] as const;
