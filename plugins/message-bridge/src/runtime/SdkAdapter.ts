@@ -55,7 +55,7 @@ function buildLegacyCreateOptions(parameters?: {
   directory?: string;
   parentID?: string;
   title?: string;
-  permission?: Record<string, unknown>;
+  permission?: Array<Record<string, unknown>>;
 }): Record<string, unknown> {
   if (!parameters) {
     return {};

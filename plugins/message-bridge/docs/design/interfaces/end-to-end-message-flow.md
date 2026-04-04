@@ -1,7 +1,7 @@
 # OpenCode 全链路接口与报文分层说明
 
-**Version:** 1.2  
-**Date:** 2026-03-30  
+**Version:** 1.3  
+**Date:** 2026-04-04  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/BridgeRuntime.ts`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
@@ -608,7 +608,7 @@ type NormalizedUpstreamEvent = {
 
 | action | SDK/raw API 输出请求 |
 |---|---|
-| `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory` |
+| `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory`；当 `title` 命中 `^im-group` 时附加 `permission` deny 列表（含 `playwright*`） |
 | `chat` | 按 SDK 正式参数传递 `sessionID` 与消息体，并在该调用中复用 `effectiveDirectory` |
 | `close_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
 | `abort_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
@@ -956,7 +956,7 @@ sequenceDiagram
   SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'create_session', payload:{ title? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { messageId, welinkSessionId, action:'create_session', payload }
   BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
-  BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory? })
+  BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory?, permission? })
   SDK-->>BRIDGE: B4 返回值\n{ sessionId, ... }
   BRIDGE->>GW: B3 上行输出\nsession_created { welinkSessionId, toolSessionId, session }
   GW->>SKILL: B2 上行结果\n{ welinkSessionId, toolSessionId, type:'session_created' }
@@ -968,6 +968,7 @@ sequenceDiagram
 - `directory` 不应只在 `create_session` 单点考虑
 - 当 `BRIDGE_DIRECTORY` 能力落地后，bridge 将先统一决策 `effectiveDirectory`
 - 相关下行 SDK 调用将复用同一目录上下文
+- 当 `title` 命中 `^im-group` 时，bridge 会在 `session.create` 注入 deny 权限列表（含 `playwright*`）
 
 ### 8.2 `chat -> tool_done + tool_event`
 

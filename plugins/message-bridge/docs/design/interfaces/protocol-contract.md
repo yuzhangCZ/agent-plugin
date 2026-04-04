@@ -1,7 +1,7 @@
 # 协议契约
 
-**Version:** 2.3
-**Date:** 2026-03-31
+**Version:** 2.4
+**Date:** 2026-04-04
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`, `./private-status-api-contract.md`
@@ -117,6 +117,29 @@ type QuestionReplyPayload = {
 
 - bridge 类型定义与归一化逻辑已经与 `title?: string` 对齐
 - 其余更宽的历史引用都应视为历史残留，而不是当前协议
+
+### 2.1.2 `create_session` 的 IM 群权限注入规则
+
+在 `create_session.payload.title` 命中 IM 群前缀时，bridge 会在调用 `session.create` 时附加权限 deny 列表：
+
+- 命中条件：`title` 以 `im-group` 开头（正则：`/^im-group/`）
+- 注入字段：`permission: Array<{ permission, pattern, action }>`
+- 注入策略：`pattern='*'`，`action='deny'`
+- 覆盖项：
+  - `bash`
+  - `read`
+  - `glob`
+  - `grep`
+  - `edit`
+  - `write`
+  - `task`
+  - `webfetch`
+  - `myAgentWebFetch`
+  - `meeting*`
+  - `knowledge*`
+  - `playwright*`
+
+非 IM 群会话不会附加 `permission` 字段（而不是传 `permission: undefined`）。
 
 ### 2.2 `status_query`
 
