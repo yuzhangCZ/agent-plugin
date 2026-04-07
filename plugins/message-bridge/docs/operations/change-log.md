@@ -6,6 +6,12 @@
 **Owner:** message-bridge maintainers  
 **Related:** `../migration/path-mapping.md`, `../README.md`
 
+## 2026-04-07
+
+### Added
+
+- `operations/single-init-latch-archive.md`：归档“单进程仅一次初始化尝试（首次尝试后阻断，`stopRuntime` 可重置）”方案，包含背景、决策、状态机、边界与验证口径。
+
 ## 2026-03-11
 
 ### Added
