@@ -13,7 +13,7 @@ type RuntimeInitState = 'never' | 'initializing' | 'succeeded' | 'failed_latched
 let initState: RuntimeInitState = 'never';
 let latchedInitError: Error | null = null;
 
-export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime> {
+export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime | null> {
   const logger = new AppLogger(input.client, { component: 'singleton' });
   if (runtime) {
     logger.debug('runtime.singleton.reuse_existing');
@@ -30,7 +30,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
       initState,
       latchedError: latchedInitError ? getErrorMessage(latchedInitError) : null,
     });
-    throw new Error('runtime_init_blocked_after_first_attempt');
+    return null;
   }
 
   logger.info('runtime.singleton.init_first_attempt_started');

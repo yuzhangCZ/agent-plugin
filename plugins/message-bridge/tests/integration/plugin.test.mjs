@@ -334,6 +334,8 @@ describe('plugin contract', () => {
       assert.strictEqual(websocketCtorCalls, 1);
       const blockedLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt');
       assert.strictEqual(blockedLogs.length, 1);
+      const initFailureLogsAfterBlocked = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
+      assert.strictEqual(initFailureLogsAfterBlocked.length, 1);
 
       stopRuntime();
       const degradedHooksC = await MessageBridgePlugin(isolatedInputB);
