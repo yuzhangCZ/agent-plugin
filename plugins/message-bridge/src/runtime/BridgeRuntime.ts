@@ -6,6 +6,7 @@ import {
   StatusQueryResultData,
 } from '../types/index.js';
 import { ToolErrorClassifier } from '../error/ToolErrorClassifier.js';
+import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import { ChatAction } from '../action/ChatAction.js';
 import { CreateSessionAction } from '../action/CreateSessionAction.js';
 import { CloseSessionAction } from '../action/CloseSessionAction.js';
@@ -108,6 +109,13 @@ export class BridgeRuntime {
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
+  private sessionDirectoryPolicyContext: {
+    channel?: string;
+    bridgeDirectoryConfigured: boolean;
+  } = {
+    channel: TOOL_TYPE_OPENX,
+    bridgeDirectoryConfigured: true,
+  };
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -121,7 +129,10 @@ export class BridgeRuntime {
       process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
       () => this.logger,
     );
-    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
+    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
+      () => this.sdkClient,
+      () => this.sessionDirectoryPolicyContext,
+    );
     this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
       this.bridgeChannelPort,
       this.assiantDirectoryMappingPort,
@@ -184,6 +195,7 @@ export class BridgeRuntime {
         config_version: config.config_version,
         enabled: config.enabled,
         gateway_url: config.gateway.url,
+        gateway_channel: config.gateway.channel,
         bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
@@ -203,11 +215,17 @@ export class BridgeRuntime {
     }
 
     this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.sessionDirectoryPolicyContext = {
+      channel: config.gateway.channel,
+      bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
+    };
     this.logger.info('runtime.directory.resolved', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
       effectiveDirectory: this.effectiveDirectory,
       directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
+      sessionDirectoryPolicyChannel: this.sessionDirectoryPolicyContext.channel,
+      sessionDirectoryPolicyBridgeDirectoryConfigured: this.sessionDirectoryPolicyContext.bridgeDirectoryConfigured,
     });
 
     let startupValidation;
