@@ -412,8 +412,9 @@ describe('runtime protocol strictness', () => {
 
     globalThis.WebSocket = ReconnectingCloseWebSocket;
 
+    let runtime = null;
     try {
-      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+      runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
 
       await runtime.start();
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -431,6 +432,8 @@ describe('runtime protocol strictness', () => {
         },
       ]);
     } finally {
+      runtime?.stop();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       unsubscribe();
       globalThis.WebSocket = originalWebSocket;
     }
