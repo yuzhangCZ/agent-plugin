@@ -1,7 +1,7 @@
 # OpenCode 全链路接口与报文分层说明
 
-**Version:** 1.3  
-**Date:** 2026-04-04  
+**Version:** 1.4  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/BridgeRuntime.ts`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
@@ -483,6 +483,7 @@ type NormalizedDownstreamMessage =
 `reason` 约束：
 
 - `chat` 执行前先调用 `session.get`；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
+- OpenX 兼容路径：当 `gateway.channel==='openx' && bridgeDirectory` 缺省时，`chat` 省略 `directory` 且不执行前置 `session.get`。
 - 仅当 `chat` 前置 `session.get` 命中 `NotFoundError` 时，返回 `"session_not_found"`。
 - 其余 action 失败路径，或 `session.get` 的非 NotFound 异常，不返回 `session_not_found`，避免 gateway 误判会话缺失。
 
@@ -609,11 +610,11 @@ type NormalizedUpstreamEvent = {
 | action | SDK/raw API 输出请求 |
 |---|---|
 | `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory`；当 `title` 命中 `^im-group` 时附加 `permission` deny 列表（含 `playwright*`） |
-| `chat` | 按 SDK 正式参数传递 `sessionID` 与消息体，并在该调用中复用 `effectiveDirectory` |
-| `close_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
-| `abort_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
-| `permission_reply` | 通过 bridge 当前 permission reply 映射传递响应，并在该调用中复用 `effectiveDirectory` |
-| `question_reply` | 在问题查询与回复链路中统一复用 `effectiveDirectory` |
+| `chat` | 默认路径按 `session.get -> session.prompt` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` 并直接调用 `session.prompt` |
+| `close_session` | 默认路径按 `session.get -> session.delete` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `abort_session` | 默认路径按 `session.get -> session.abort` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `permission_reply` | 默认路径按 `session.get -> postSessionIdPermissionsPermissionId` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `question_reply` | 默认路径按 `session.get -> GET /question -> POST /question/{requestID}/reply` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
 | `status_query` | `app.health()` |
 
 `chat` 的 B4 输出样例：

@@ -1,7 +1,7 @@
 # message-bridge 日志可观测性手册
 
-**Version:** 1.2  
-**Date:** 2026-04-03  
+**Version:** 1.3  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../../src/runtime/AppLogger.ts`
@@ -292,6 +292,16 @@ sequenceDiagram
 | `action.status_query.started` | debug | status_query 执行开始 | `sessionId`,`state` | `src/action/StatusQueryAction.ts:49` |
 | `action.status_query.exception` | error | status_query 抛异常 | `error`,`errorCode?` | `src/action/StatusQueryAction.ts:70` |
 | `action.status_query.finished` | debug | status_query 结束（finally） | `latencyMs` | `src/action/StatusQueryAction.ts:82` |
+
+### 4.8 session_directory.*
+
+| message | level | 触发时机 | 关键 extra | 源码位置 |
+|---|---|---|---|---|
+| `session_directory.policy.openx.directory_omitted` | info | `openx` 且 `bridgeDirectory` 缺省时，session-scoped 调用跳过目录回查并省略 `directory` | `toolSessionId`,`hasAgent?` | `src/adapter/OpencodeSessionGatewayAdapter.ts` |
+| `session_directory.session_get.directory_resolved` | debug | `session.get` 成功并提取到目录 | `toolSessionId`,`directory` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.directory_missing` | warn | `session.get` 成功但未返回可用目录 | `toolSessionId` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.not_found` | warn | `session.get` 命中 `NotFoundError` | `toolSessionId`,`errorDetail`,`errorName` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.failed` | warn | `session.get` 返回/抛出非 NotFound 错误 | `toolSessionId`,`errorDetail`,`errorName` | `src/adapter/SessionDirectoryResolver.ts` |
 
 ## 5. 排障指引（推荐顺序）
 
