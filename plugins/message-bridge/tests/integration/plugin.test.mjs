@@ -387,7 +387,24 @@ describe('plugin contract', () => {
       }),
     );
     assert.strictEqual(typeof hooksA.event, 'function');
-    assert.notStrictEqual(getRuntime(), null);
+    const runtimeAfterA = getRuntime();
+    assert.notStrictEqual(runtimeAfterA, null);
+
+    const hooksBlocked = await MessageBridgePlugin(
+      mockInput({
+        client,
+        directory: '/tmp/workspace-success-b',
+        worktree: '/tmp/workspace-success-b',
+      }),
+    );
+    assert.strictEqual(typeof hooksBlocked.event, 'function');
+    assert.strictEqual(getRuntime(), runtimeAfterA);
+
+    const blockedLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt');
+    assert.strictEqual(blockedLogs.length, 0);
+
+    const startLogsBeforeStop = logs.filter((entry) => entry?.message === 'runtime.start.requested');
+    assert.strictEqual(startLogsBeforeStop.length, 1);
 
     stopRuntime();
     assert.strictEqual(getRuntime(), null);
@@ -402,8 +419,8 @@ describe('plugin contract', () => {
     assert.strictEqual(typeof hooksB.event, 'function');
     assert.notStrictEqual(getRuntime(), null);
 
-    const startLogs = logs.filter((entry) => entry?.message === 'runtime.start.requested');
-    assert.strictEqual(startLogs.length, 2);
+    const startLogsAfterReset = logs.filter((entry) => entry?.message === 'runtime.start.requested');
+    assert.strictEqual(startLogsAfterReset.length, 2);
   });
 
   test('runtime event failures are non-fatal and logged by plugin boundary', async () => {
