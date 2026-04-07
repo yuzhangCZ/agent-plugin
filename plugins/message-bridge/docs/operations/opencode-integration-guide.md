@@ -1,7 +1,7 @@
 # Message-Bridge OpenCode 集成指导
 
-**Version:** 1.9  
-**Date:** 2026-04-01  
+**Version:** 1.10  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `../design/interfaces/private-status-api-contract.md`, `./third-party-status-api-guide.md`, `./npm-publish-guide.md`
@@ -38,7 +38,7 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 | `sk` | `BRIDGE_AUTH_SK` | 是 | 插件鉴权 SK |
 | `channel` | `BRIDGE_GATEWAY_CHANNEL` | 是 | 填写应用别名，用于标识当前接入应用 |
 | `gateway.url` | `BRIDGE_GATEWAY_URL` | 否 | 生产环境通常不需要配置；切换到 UAT 等非生产环境时再显式填写 |
-| `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文 |
+| `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文；若 `channel=openx` 且缺省，session-scoped 调用将走“省略 directory”的兼容路径 |
 
 如果应用希望把 bridge 用户级配置与原生 OpenCode 隔离，还需要显式设置：
 

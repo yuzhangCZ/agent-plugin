@@ -21,6 +21,15 @@
 3. `close_session` 映射 `session.delete`；新增 `abort_session` 映射 `session.abort`。
 4. `question_reply` 走 question API（`GET /question` + `POST /question/{requestID}/reply`），不再走 `session.prompt`。
 
+### 1.2 协议对齐更正（2026-04-07）
+
+当前实现新增 OpenX 通道目录兼容策略：
+
+1. `effectiveDirectory` 语义保持不变：`BRIDGE_DIRECTORY > input.worktree || input.directory > undefined`。
+2. 当 `gateway.channel === 'openx'` 且 `BRIDGE_DIRECTORY` 未配置时，`chat/abort_session/close_session/permission_reply/question_reply` 不再透传 `directory`，并跳过前置 `session.get` 目录回查。
+3. 非上述条件下，session-scoped action 仍按既有路径回查并透传目录。
+4. `create_session` 的目录决策链路不受本次策略影响。
+
 ## 二、目标与范围
 ### 2.1 目标
 1. 实现 OpenCode 原生插件与 `ai-gateway` 的稳定桥接。
@@ -198,7 +207,8 @@
 实现约束：
 2. `BRIDGE_DIRECTORY` 只影响 SDK 请求目录上下文，不影响插件配置文件查找路径。  
 3. 目录优先级为：`BRIDGE_DIRECTORY > input.worktree || input.directory > undefined`。  
-4. 目录决策应统一沉淀为 `effectiveDirectory`，并复用于相关下行 SDK 调用，而不是只在 `create_session` 单点生效。  
+4. 目录决策应统一沉淀为 `effectiveDirectory`；`create_session` 与默认 session-scoped 调用复用该上下文。  
+5. OpenX 兼容例外：当 `gateway.channel === 'openx'` 且 `BRIDGE_DIRECTORY` 缺省时，session-scoped 调用允许省略 `directory`。  
 5. `create_session.payload` 的正式字段依据 UI -> skill-server -> gateway 追溯收敛为 `title?: string`。  
 
 ## 六、非功能需求（NFR）
@@ -227,7 +237,8 @@
 - `StatusResponse = { type: 'status_response', opencodeOnline: boolean }`
 - `tool_error = { type, welinkSessionId?, toolSessionId?, error, reason? }`
 - `tool_error.reason` 当前仅定义：`session_not_found`（仅当 `chat` 前置 `session.get` 可证实会话不存在时上报）
-- `chat` 执行时，`session.get` 属于必选前置探测能力；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续执行 `session.prompt`
+- `chat` 默认执行路径中，`session.get` 作为前置探测能力；若探测失败，bridge 直接返回 `tool_error`，不再继续执行 `session.prompt`
+- OpenX 兼容例外：`gateway.channel==='openx' && BRIDGE_DIRECTORY` 缺省时，`chat` 不执行前置 `session.get` 探测
 
 错误码最小集：
 - `GATEWAY_UNREACHABLE`
