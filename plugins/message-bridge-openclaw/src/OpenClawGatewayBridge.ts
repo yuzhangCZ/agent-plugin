@@ -9,20 +9,35 @@ import {
 import type {
   DownstreamMessage,
   InvokeMessage,
-} from "./contracts/downstream.js";
+} from "./gateway-wire/downstream.js";
+import { DOWNSTREAM_MESSAGE_TYPE, INVOKE_ACTION } from "./gateway-wire/downstream.js";
+import {
+  MESSAGE_PART_FIELD,
+  MESSAGE_PART_TYPE,
+  SESSION_STATUS_TYPE,
+  TOOL_EVENT_TYPE,
+  TOOL_PART_STATUS,
+  type GatewayMessagePartDeltaEvent,
+  type GatewayMessagePartUpdatedEvent,
+  type GatewayMessageUpdatedEvent,
+  type GatewaySessionErrorEvent,
+  type GatewaySessionIdleEvent,
+  type GatewaySessionStatusEvent,
+} from "./gateway-wire/tool-event.js";
 import type {
   SessionCreatedMessage,
   StatusResponseMessage,
   ToolDoneMessage,
   ToolErrorMessage,
   ToolEventMessage,
-} from "./contracts/transport.js";
-import { TOOL_ERROR_REASON } from "./contracts/transport.js";
+  UpstreamMessage,
+} from "./gateway-wire/transport.js";
+import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
 import type { GatewayConnection } from "./connection/GatewayConnection.js";
 import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
 import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
-import { normalizeDownstreamMessage } from "./protocol/downstream.js";
+import { normalizeDownstream as normalizeDownstreamMessage } from "./gateway-wire/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
 import { resolveEffectiveReplyConfig, type StreamingSource } from "./resolveEffectiveReplyConfig.js";
 import {
@@ -34,6 +49,7 @@ import {
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
+import { asRecord, asString, asTrimmedString } from "./utils/type-guards.js";
 
 export interface OpenClawGatewayBridgeOptions {
   account: MessageBridgeResolvedAccount;
@@ -59,14 +75,6 @@ type SubagentRuntime = PluginRuntime & {
   };
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
 function logDebug(logger: BridgeLogger, message: string, meta?: Record<string, unknown>): void {
   if (logger.debug) {
     logger.debug(message, meta);
@@ -91,16 +99,17 @@ interface UpstreamSendContext {
 }
 
 function extractDownstreamLogFields(raw: unknown): DownstreamLogFields {
-  if (!isRecord(raw)) {
+  const message = asRecord(raw);
+  if (!message) {
     return {};
   }
-  const payload = isRecord(raw.payload) ? raw.payload : undefined;
+  const payload = asRecord(message.payload);
   return {
-    messageType: asString(raw.type),
-    action: asString(raw.action),
-    welinkSessionId: asString(raw.welinkSessionId),
-    toolSessionId: asString(payload?.toolSessionId),
-    gatewayMessageId: asString(raw.messageId),
+    messageType: asTrimmedString(message.type),
+    action: asTrimmedString(message.action),
+    welinkSessionId: asTrimmedString(message.welinkSessionId),
+    toolSessionId: asTrimmedString(payload?.toolSessionId),
+    gatewayMessageId: asTrimmedString(message.messageId),
   };
 }
 
@@ -114,7 +123,7 @@ function getInvokeToolSessionId(message: InvokeMessage): string | undefined {
 function extractAssistantText(messages: unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (!isRecord(message) || message.role !== "assistant") {
+    if (!asRecord(message) || message.role !== "assistant") {
       continue;
     }
 
@@ -125,7 +134,7 @@ function extractAssistantText(messages: unknown[]): string {
     if (Array.isArray(message.content)) {
       const chunks = message.content
         .map((part) => {
-          if (!isRecord(part)) {
+          if (!asRecord(part)) {
             return "";
           }
           if (part.type === "text" && typeof part.text === "string") {
@@ -146,30 +155,30 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
-function buildBusyEvent(sessionKey: string): Record<string, unknown> {
+function buildBusyEvent(sessionKey: string): GatewaySessionStatusEvent {
   return {
-    type: "session.status",
+    type: TOOL_EVENT_TYPE.SESSION_STATUS,
     properties: {
       sessionID: sessionKey,
       status: {
-        type: "busy",
+        type: SESSION_STATUS_TYPE.BUSY,
       },
     },
   };
 }
 
-function buildIdleEvent(sessionKey: string): Record<string, unknown> {
+function buildIdleEvent(sessionKey: string): GatewaySessionIdleEvent {
   return {
-    type: "session.idle",
+    type: TOOL_EVENT_TYPE.SESSION_IDLE,
     properties: {
       sessionID: sessionKey,
     },
   };
 }
 
-function buildSessionErrorEvent(sessionKey: string, error: string): Record<string, unknown> {
+function buildSessionErrorEvent(sessionKey: string, error: string): GatewaySessionErrorEvent {
   return {
-    type: "session.error",
+    type: TOOL_EVENT_TYPE.SESSION_ERROR,
     properties: {
       sessionID: sessionKey,
       error: {
@@ -207,7 +216,7 @@ interface ToolPartState {
   partId: string;
   messageId: string;
   sessionKey: string;
-  status: "running" | "completed" | "error";
+  status: (typeof TOOL_PART_STATUS)[keyof typeof TOOL_PART_STATUS];
   output?: string;
   error?: string;
   title?: string;
@@ -236,9 +245,9 @@ function createSelectedModelState(): SelectedModelState {
   };
 }
 
-function buildAssistantMessageUpdated(sessionKey: string, messageId: string): Record<string, unknown> {
+function buildAssistantMessageUpdated(sessionKey: string, messageId: string): GatewayMessageUpdatedEvent {
   return {
-    type: "message.updated",
+    type: TOOL_EVENT_TYPE.MESSAGE_UPDATED,
     properties: {
       info: {
         id: messageId,
@@ -258,16 +267,16 @@ function buildAssistantPartUpdated(
   partId: string,
   text: string,
   delta?: string,
-): Record<string, unknown> {
+): GatewayMessagePartUpdatedEvent {
   return {
-    type: "message.part.updated",
+    type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
     properties: {
       ...(delta !== undefined ? { delta } : {}),
       part: {
         id: partId,
         sessionID: sessionKey,
         messageID: messageId,
-        type: "text",
+        type: MESSAGE_PART_TYPE.TEXT,
         text,
       },
     },
@@ -279,14 +288,14 @@ function buildAssistantPartDelta(
   messageId: string,
   partId: string,
   delta: string,
-): Record<string, unknown> {
+): GatewayMessagePartDeltaEvent {
   return {
-    type: "message.part.delta",
+    type: TOOL_EVENT_TYPE.MESSAGE_PART_DELTA,
     properties: {
       sessionID: sessionKey,
       messageID: messageId,
       partID: partId,
-      field: "text",
+      field: MESSAGE_PART_FIELD.TEXT,
       delta,
     },
   };
@@ -294,15 +303,15 @@ function buildAssistantPartDelta(
 
 function buildToolPartUpdated(
   state: ToolPartState,
-): Record<string, unknown> {
+): GatewayMessagePartUpdatedEvent {
   return {
-    type: "message.part.updated",
+    type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
     properties: {
       part: {
         id: state.partId,
         sessionID: state.sessionKey,
         messageID: state.messageId,
-        type: "tool",
+        type: MESSAGE_PART_TYPE.TOOL,
         tool: state.toolName,
         callID: state.toolCallId,
         state: {
@@ -317,7 +326,7 @@ function buildToolPartUpdated(
 }
 
 function extractToolResultTitle(meta: unknown, toolName: string): string | undefined {
-  if (!isRecord(meta)) {
+  if (!asRecord(meta)) {
     return undefined;
   }
 
@@ -378,12 +387,12 @@ export class OpenClawGatewayBridge {
         authPayloadProvider: () =>
           new DefaultAkSkAuth(options.account.auth.ak, options.account.auth.sk).generateAuthPayload(),
         registerMessage: {
-          type: "register",
+          type: UPSTREAM_MESSAGE_TYPE.REGISTER,
           deviceName: this.registerMetadata.deviceName,
-          macAddress: this.registerMetadata.macAddress,
           os: os.platform(),
           toolType: this.registerMetadata.toolType,
           toolVersion: this.registerMetadata.toolVersion,
+          ...(this.registerMetadata.macAddress ? { macAddress: this.registerMetadata.macAddress } : {}),
         },
         logger: options.logger,
       });
@@ -526,7 +535,7 @@ export class OpenClawGatewayBridge {
         errorMessage: normalized.error.message,
       });
       this.sendToolError({
-        type: "tool_error",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
         welinkSessionId: fields.welinkSessionId,
         toolSessionId: fields.toolSessionId,
         error: normalized.error.message,
@@ -539,16 +548,19 @@ export class OpenClawGatewayBridge {
       return;
     }
 
-    if (normalized.value.type === "status_query") {
+    if (normalized.value.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
       this.options.logger.info("runtime.status_query.received", fields as Record<string, unknown>);
       const message: StatusResponseMessage = {
-        type: "status_response",
+        type: UPSTREAM_MESSAGE_TYPE.STATUS_RESPONSE,
         opencodeOnline: this.running && this.connection.isConnected(),
       };
-      this.connection.send(message, {
+      const sent = this.sendValidatedUpstreamMessage(message, {
         gatewayMessageId: fields.gatewayMessageId,
-        action: "status_query",
+        action: DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
       });
+      if (!sent) {
+        return;
+      }
       this.options.logger.info("runtime.status_query.responded", {
         ...fields,
         latencyMs: Date.now() - startedAt,
@@ -594,28 +606,28 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): Promise<{ success: boolean; reason?: string }> {
     switch (message.action) {
-      case "chat":
+      case INVOKE_ACTION.CHAT:
         if (await this.handleChat(message, context)) {
           return { success: true };
         }
         return { success: false, reason: "chat_failed" };
-      case "create_session":
+      case INVOKE_ACTION.CREATE_SESSION:
         if (await this.handleCreateSession(message, context)) {
           return { success: true };
         }
         return { success: false, reason: "create_session_failed" };
-      case "close_session":
+      case INVOKE_ACTION.CLOSE_SESSION:
         if (await this.handleCloseSession(message, context)) {
           return { success: true };
         }
         return { success: false, reason: "close_session_failed" };
-      case "abort_session":
+      case INVOKE_ACTION.ABORT_SESSION:
         if (await this.handleAbortSession(message, context)) {
           return { success: true };
         }
         return { success: false, reason: "abort_session_failed" };
-      case "permission_reply":
-      case "question_reply":
+      case INVOKE_ACTION.PERMISSION_REPLY:
+      case INVOKE_ACTION.QUESTION_REPLY:
         this.sendUnsupported(message.action, message.payload.toolSessionId, message.welinkSessionId, context);
         return { success: false, reason: `unsupported_action:${message.action}` };
     }
@@ -675,7 +687,7 @@ export class OpenClawGatewayBridge {
       pendingToolResultTarget: null,
     });
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: record.toolSessionId,
       event: buildBusyEvent(record.sessionKey),
     }, context);
@@ -832,7 +844,7 @@ export class OpenClawGatewayBridge {
           return;
         }
         const payload =
-          isRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
+          asRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
 
         if (info.kind === "tool") {
           const activeSession = this.activeToolSessions.get(record.sessionKey);
@@ -982,12 +994,12 @@ export class OpenClawGatewayBridge {
         finalText,
       });
       this.sendToolEvent({
-        type: "tool_event",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId: record.toolSessionId,
         event: buildIdleEvent(record.sessionKey),
       }, context);
       this.sendToolDone({
-        type: "tool_done",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_DONE,
         toolSessionId: record.toolSessionId,
         welinkSessionId: context.welinkSessionId,
       }, context);
@@ -1020,12 +1032,12 @@ export class OpenClawGatewayBridge {
       extra: lastErrorExtra,
     });
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: record.toolSessionId,
       event: buildSessionErrorEvent(record.sessionKey, finalErrorMessage),
     }, context);
     this.sendToolError({
-      type: "tool_error",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
       toolSessionId: record.toolSessionId,
       welinkSessionId: context.welinkSessionId,
       error: finalErrorMessage,
@@ -1114,12 +1126,12 @@ export class OpenClawGatewayBridge {
         },
       });
       this.sendToolEvent({
-        type: "tool_event",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId: record.toolSessionId,
         event: buildIdleEvent(record.sessionKey),
       }, context);
       this.sendToolDone({
-        type: "tool_done",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_DONE,
         toolSessionId: record.toolSessionId,
         welinkSessionId: context.welinkSessionId,
       }, context);
@@ -1157,19 +1169,19 @@ export class OpenClawGatewayBridge {
     const toolSessionId = requestedSessionId && requestedSessionId.length > 0 ? requestedSessionId : randomUUID();
     const record = this.sessionRegistry.ensure(toolSessionId, message.welinkSessionId);
     const response: SessionCreatedMessage = {
-      type: "session_created",
+      type: UPSTREAM_MESSAGE_TYPE.SESSION_CREATED,
       welinkSessionId: message.welinkSessionId,
       toolSessionId: record.toolSessionId,
       session: {
         sessionId: record.toolSessionId,
       },
     };
-    this.connection.send(response, {
+    const sent = this.sendValidatedUpstreamMessage(response, {
       ...context,
       toolSessionId: record.toolSessionId,
       welinkSessionId: message.welinkSessionId,
     });
-    return true;
+    return sent;
   }
 
   private async handleCloseSession(
@@ -1179,7 +1191,7 @@ export class OpenClawGatewayBridge {
     const record = this.sessionRegistry.get(message.payload.toolSessionId);
     if (!record) {
       this.sendToolError({
-        type: "tool_error",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
         error: "unknown_tool_session",
@@ -1198,7 +1210,7 @@ export class OpenClawGatewayBridge {
       this.clearSessionTermination(record);
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sendToolError({
-        type: "tool_error",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
         error: errorMessage,
@@ -1214,7 +1226,7 @@ export class OpenClawGatewayBridge {
     const record = this.sessionRegistry.get(message.payload.toolSessionId);
     if (!record) {
       this.sendToolError({
-        type: "tool_error",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
         error: "unknown_tool_session",
@@ -1227,7 +1239,7 @@ export class OpenClawGatewayBridge {
     try {
       this.clearActiveToolSession(record.sessionKey);
       this.sendToolDone({
-        type: "tool_done",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_DONE,
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
       }, context);
@@ -1236,7 +1248,7 @@ export class OpenClawGatewayBridge {
       this.clearSessionTermination(record);
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sendToolError({
-        type: "tool_error",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
         error: errorMessage,
@@ -1252,7 +1264,7 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): void {
     this.sendToolError({
-      type: "tool_error",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
       toolSessionId,
       welinkSessionId,
       error: `unsupported_in_openclaw_v1:${action}`,
@@ -1270,24 +1282,66 @@ export class OpenClawGatewayBridge {
 
   private buildChatEventContext(toolSessionId: string): UpstreamSendContext {
     return {
-      action: "chat",
+      action: INVOKE_ACTION.CHAT,
       toolSessionId,
     };
   }
 
   private sendToolEvent(message: ToolEventMessage, context?: UpstreamSendContext): void {
     const sendContext = this.buildSendContext(message, context);
+    const event = asRecord(message.event);
+    const eventType = asTrimmedString(event?.type);
     logDebug(this.options.logger, "runtime.tool_event.sending", {
       gatewayMessageId: sendContext.gatewayMessageId,
       action: sendContext.action,
       welinkSessionId: sendContext.welinkSessionId,
       toolSessionId: sendContext.toolSessionId,
-      eventType: isRecord(message.event) ? asString(message.event.type) : undefined,
+      eventType,
     });
-    this.connection.send(message, {
-      ...sendContext,
-      eventType: isRecord(message.event) ? asString(message.event.type) : undefined,
+    try {
+      this.sendValidatedUpstreamMessage(message, {
+        ...sendContext,
+        eventType,
+      });
+    } catch {
+      this.options.logger.warn("runtime.tool_event.skipped_no_connection", {
+        gatewayMessageId: sendContext.gatewayMessageId,
+        action: sendContext.action,
+        welinkSessionId: sendContext.welinkSessionId,
+        toolSessionId: sendContext.toolSessionId,
+        eventType,
+      });
+    }
+  }
+
+  private sendValidatedUpstreamMessage(
+    message: UpstreamMessage,
+    context?: UpstreamSendContext & { eventType?: string },
+  ): boolean {
+    // openclaw 侧的统一发送出口。所有候选上行消息必须先通过共享协议校验，失败直接 fail-closed。
+    const validation = validateUpstreamMessage(message);
+    if (!validation.ok) {
+      const violation = validation.error.violation;
+      this.options.logger.error("runtime.upstream_validation_failed", {
+        gatewayMessageId: context?.gatewayMessageId,
+        action: context?.action,
+        welinkSessionId: context?.welinkSessionId,
+        toolSessionId: context?.toolSessionId,
+        eventType: violation.eventType ?? context?.eventType,
+        messageType: message.type,
+        stage: violation.stage,
+        errorCode: violation.code,
+        field: violation.field,
+        errorMessage: violation.message,
+      });
+      return false;
+    }
+
+    this.connection.send(validation.value, {
+      ...context,
+      eventType: context?.eventType,
     });
+    return true;
   }
 
   private sendToolDone(message: ToolDoneMessage, context?: UpstreamSendContext): void {
@@ -1299,7 +1353,7 @@ export class OpenClawGatewayBridge {
       toolSessionId: sendContext.toolSessionId,
     });
     try {
-      this.connection.send(message, sendContext);
+      this.sendValidatedUpstreamMessage(message, sendContext);
     } catch {
       this.options.logger.warn("runtime.tool_done.skipped_no_connection", {
         gatewayMessageId: sendContext.gatewayMessageId,
@@ -1321,7 +1375,7 @@ export class OpenClawGatewayBridge {
       reason: message.reason,
     });
     try {
-      this.connection.send(message, sendContext);
+      this.sendValidatedUpstreamMessage(message, sendContext);
     } catch {
       this.options.logger.warn("runtime.tool_error.skipped_no_connection", {
         gatewayMessageId: sendContext.gatewayMessageId,
@@ -1343,7 +1397,7 @@ export class OpenClawGatewayBridge {
     if (state.accumulatedText === chunk) {
       this.ensureAssistantMessageStarted(toolSessionId, state, context);
       this.sendToolEvent({
-        type: "tool_event",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId,
         event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, chunk, chunk),
       }, context);
@@ -1351,7 +1405,7 @@ export class OpenClawGatewayBridge {
     }
 
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId,
       event: buildAssistantPartDelta(state.sessionKey, state.messageId, state.partId, chunk),
     }, context);
@@ -1367,7 +1421,7 @@ export class OpenClawGatewayBridge {
     }
 
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId,
       event: buildAssistantMessageUpdated(state.sessionKey, state.messageId),
     }, context);
@@ -1383,14 +1437,14 @@ export class OpenClawGatewayBridge {
     if (state.seeded) {
       if (state.accumulatedText.length === 0) {
         this.sendToolEvent({
-          type: "tool_event",
+          type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
           toolSessionId,
           event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, text),
         }, context);
         return;
       }
       this.sendToolEvent({
-        type: "tool_event",
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId,
         event: buildAssistantPartUpdated(
           state.sessionKey,
@@ -1403,12 +1457,12 @@ export class OpenClawGatewayBridge {
     }
 
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId,
       event: buildAssistantMessageUpdated(state.sessionKey, state.messageId),
     }, context);
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId,
       event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, text),
     }, context);
@@ -1420,7 +1474,7 @@ export class OpenClawGatewayBridge {
       return;
     }
     this.sendToolEvent({
-      type: "tool_event",
+      type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId,
       event: buildToolPartUpdated(toolState),
     }, context);
@@ -1470,7 +1524,7 @@ export class OpenClawGatewayBridge {
   }
 
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
-    if (evt.stream !== "tool" || !isRecord(evt.data)) {
+    if (evt.stream !== MESSAGE_PART_TYPE.TOOL || !asRecord(evt.data)) {
       return;
     }
 
@@ -1492,7 +1546,7 @@ export class OpenClawGatewayBridge {
     }
 
     const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
-    const toolName = typeof evt.data.name === "string" && evt.data.name.length > 0 ? evt.data.name : "tool";
+    const toolName = typeof evt.data.name === "string" && evt.data.name.length > 0 ? evt.data.name : MESSAGE_PART_TYPE.TOOL;
     const toolCallId =
       typeof evt.data.toolCallId === "string" && evt.data.toolCallId.length > 0
         ? evt.data.toolCallId
@@ -1509,7 +1563,7 @@ export class OpenClawGatewayBridge {
         partId: `tool_${randomUUID()}`,
         messageId: activeSession.assistantStream.messageId,
         sessionKey,
-        status: "running",
+        status: TOOL_PART_STATUS.RUNNING,
       };
       activeSession.toolStates.set(toolCallId, nextToolState);
       toolState = nextToolState;
@@ -1519,14 +1573,14 @@ export class OpenClawGatewayBridge {
     toolState.title = extractToolResultTitle(evt.data.meta, toolName) ?? toolState.title;
 
     if (phase === "start" || phase === "update") {
-      toolState.status = "running";
+      toolState.status = TOOL_PART_STATUS.RUNNING;
       this.emitToolPartUpdate(activeSession.toolSessionId, toolState, context);
       return;
     }
 
     if (phase === "result") {
       const isError = evt.data.isError === true;
-      toolState.status = isError ? "error" : "completed";
+      toolState.status = isError ? TOOL_PART_STATUS.ERROR : TOOL_PART_STATUS.COMPLETED;
       toolState.error = isError ? `tool_${toolName}_failed` : undefined;
       activeSession.pendingToolResultTarget = toolCallId;
       this.emitToolPartUpdate(activeSession.toolSessionId, toolState, context);

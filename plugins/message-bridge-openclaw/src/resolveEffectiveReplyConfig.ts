@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { asRecord } from "./utils/type-guards.js";
 
 export type StreamingSource = "default_on" | "explicit_on" | "explicit_off";
 
@@ -22,37 +23,33 @@ interface ResolveEffectiveReplyConfigResult {
   malformedConfigPaths: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
 export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffectiveReplyConfigResult {
   const malformedConfigPaths: string[] = [];
-  const root: Record<string, unknown> = isRecord(config) ? config : {};
+  const root: Record<string, unknown> = asRecord(config) ?? {};
 
   const agentsRaw = root["agents"];
-  if (agentsRaw !== undefined && !isRecord(agentsRaw)) {
+  if (agentsRaw !== undefined && !asRecord(agentsRaw)) {
     malformedConfigPaths.push("agents");
   }
-  const agents: Record<string, unknown> = isRecord(agentsRaw) ? agentsRaw : {};
+  const agents: Record<string, unknown> = asRecord(agentsRaw) ?? {};
 
   const defaultsRaw = agents["defaults"];
-  if (defaultsRaw !== undefined && !isRecord(defaultsRaw)) {
+  if (defaultsRaw !== undefined && !asRecord(defaultsRaw)) {
     malformedConfigPaths.push("agents.defaults");
   }
-  const defaults: Record<string, unknown> = isRecord(defaultsRaw) ? defaultsRaw : {};
+  const defaults: Record<string, unknown> = asRecord(defaultsRaw) ?? {};
 
   const channelsRaw = root["channels"];
-  if (channelsRaw !== undefined && !isRecord(channelsRaw)) {
+  if (channelsRaw !== undefined && !asRecord(channelsRaw)) {
     malformedConfigPaths.push("channels");
   }
-  const channels: Record<string, unknown> = isRecord(channelsRaw) ? channelsRaw : {};
+  const channels: Record<string, unknown> = asRecord(channelsRaw) ?? {};
 
   const messageBridgeRaw = channels["message-bridge"];
-  if (messageBridgeRaw !== undefined && !isRecord(messageBridgeRaw)) {
+  if (messageBridgeRaw !== undefined && !asRecord(messageBridgeRaw)) {
     malformedConfigPaths.push("channels.message-bridge");
   }
-  const messageBridge: Record<string, unknown> = isRecord(messageBridgeRaw) ? messageBridgeRaw : {};
+  const messageBridge: Record<string, unknown> = asRecord(messageBridgeRaw) ?? {};
 
   const streamingRaw = messageBridge["streaming"];
   let streamingEnabled = true;

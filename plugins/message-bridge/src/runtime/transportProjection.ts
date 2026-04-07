@@ -1,16 +1,6 @@
 import type { BridgeEvent } from './types.js';
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' ? value : undefined;
-}
+import { asNumber, asRecord, asString } from '../utils/type-guards.js';
+import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
 
 function getMessageUpdatedInfo(raw: BridgeEvent): Record<string, unknown> | null {
   const properties = asRecord(raw.properties);
@@ -75,10 +65,9 @@ export function buildTransportEvent(normalized: {
   common: { eventType: string };
   raw: BridgeEvent;
 }): BridgeEvent {
-  if (normalized.common.eventType !== 'message.updated') {
+  if (normalized.common.eventType !== TOOL_EVENT_TYPE.MESSAGE_UPDATED) {
     return normalized.raw;
   }
 
   return projectMessageUpdatedEvent(normalized.raw);
 }
-

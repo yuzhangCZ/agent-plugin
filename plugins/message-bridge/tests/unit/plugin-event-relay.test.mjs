@@ -47,6 +47,9 @@ describe('event uplink via hook boundary', () => {
           id: 'msg-1',
           sessionID: 'tool-1',
           role: 'user',
+          time: {
+            created: 1710000000000,
+          },
         },
       },
     });
@@ -135,5 +138,77 @@ describe('event uplink via hook boundary', () => {
     assert.strictEqual(sent.length, 0);
     const warnEntry = logs.find((item) => item?.body?.message === 'event.extraction_failed');
     assert.ok(!!warnEntry);
+  });
+
+  test('shared upstream validator blocks malformed projected events before forwarding', async () => {
+    const logs = [];
+    const runtime = new BridgeRuntime({
+      client: {
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+      },
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.eventFilter = new EventFilter(['question.asked']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'question.asked',
+      properties: {
+        sessionID: 'tool-question-invalid',
+        questions: [
+          {
+            question: 123,
+          },
+        ],
+      },
+    });
+
+    assert.strictEqual(sent.length, 0);
+    const validationFailure = logs.find((item) => item?.body?.message === 'runtime.upstream_validation_failed');
+    assert.ok(validationFailure);
+    assert.strictEqual(validationFailure.body.extra.errorCode, 'missing_required_field');
+    assert.strictEqual(validationFailure.body.extra.field, 'properties.questions[].question');
+  });
+
+  test('message.updated projection no longer fabricates required fields before shared validation', async () => {
+    const logs = [];
+    const runtime = new BridgeRuntime({
+      client: {
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+      },
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.eventFilter = new EventFilter(['message.updated']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'msg-missing-time',
+          sessionID: 'tool-missing-time',
+          role: 'assistant',
+        },
+      },
+    });
+
+    assert.strictEqual(sent.length, 0);
+    const validationFailure = logs.find((item) => item?.body?.message === 'runtime.upstream_validation_failed');
+    assert.ok(validationFailure);
+    assert.strictEqual(validationFailure.body.extra.field, 'properties.info.time');
   });
 });

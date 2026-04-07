@@ -175,7 +175,6 @@ describe('protocol question-roundtrip', () => {
         welinkSessionId: 'wl-question-ambiguous',
         toolSessionId: 'ses_question_1',
         error: 'Unable to resolve a unique pending question request for toolSessionId=ses_question_1',
-        reason: undefined,
       },
     ]);
   });
@@ -226,7 +225,6 @@ describe('protocol question-roundtrip', () => {
         welinkSessionId: 'wl-question-miss',
         toolSessionId: 'ses_question_1',
         error: 'Unable to resolve pending question request for toolSessionId=ses_question_1, toolCallId=call_question_1',
-        reason: undefined,
       },
     ]);
   });

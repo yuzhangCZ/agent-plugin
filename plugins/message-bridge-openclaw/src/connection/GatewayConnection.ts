@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { BridgeLogger } from "../types.js";
 import type { AkSkAuthPayload } from "./AkSkAuth.js";
-import type { RegisterMessage } from "../contracts/transport.js";
+import { UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage, type HeartbeatMessage, type RegisterMessage } from "../contracts/transport.js";
+import { asBoolean, asNumber, asRecord, asString } from "../utils/type-guards.js";
 
 export type ConnectionState = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "READY";
 
@@ -56,18 +57,6 @@ type GatewayCloseEventLike = Partial<CloseEvent> & {
   wasClean?: unknown;
 };
 
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 function logDebug(logger: BridgeLogger, message: string, meta?: Record<string, unknown>): void {
   if (logger.debug) {
     logger.debug(message, meta);
@@ -76,12 +65,43 @@ function logDebug(logger: BridgeLogger, message: string, meta?: Record<string, u
   logger.info(message, meta);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+function validateControlMessage(
+  message: unknown,
+  logger: BridgeLogger,
+): RegisterMessage | HeartbeatMessage {
+  const validation = validateUpstreamMessage(message);
+  if (
+    validation.ok &&
+    (validation.value.type === UPSTREAM_MESSAGE_TYPE.REGISTER || validation.value.type === UPSTREAM_MESSAGE_TYPE.HEARTBEAT)
+  ) {
+    return validation.value;
+  }
+
+  const violation = validation.ok
+    ? {
+        stage: "transport",
+        code: "unsupported_message",
+        field: "type",
+        message: `Unsupported control message type: ${String((message as { type?: unknown })?.type ?? "unknown")}`,
+      }
+    : validation.error.violation;
+
+  logger.error("gateway.send.rejected_invalid_protocol", {
+    messageType:
+      message && typeof message === "object" && "type" in (message as { type?: unknown })
+        ? String((message as { type?: unknown }).type ?? "unknown")
+        : "unknown",
+    stage: violation.stage,
+    errorCode: violation.code,
+    field: violation.field,
+    errorMessage: violation.message,
+  });
+  throw new Error("gateway_invalid_transport_message");
 }
 
 function isGatewayControlMessage(value: unknown): value is GatewayControlMessage {
-  return isRecord(value) && (value.type === "register_ok" || value.type === "register_rejected");
+  const record = asRecord(value);
+  return !!record && (record.type === "register_ok" || record.type === "register_rejected");
 }
 
 function isGatewayRejectedCloseCode(code: unknown): boolean {
@@ -89,44 +109,52 @@ function isGatewayRejectedCloseCode(code: unknown): boolean {
 }
 
 function extractGatewayMessageId(value: unknown): string | undefined {
-  if (!isRecord(value)) {
+  const record = asRecord(value);
+  if (!record) {
     return undefined;
   }
-  return typeof value.messageId === "string" ? value.messageId : undefined;
+  return asString(record.messageId);
 }
 
 function extractMessageAction(value: unknown): string | undefined {
-  if (!isRecord(value)) {
+  const record = asRecord(value);
+  if (!record) {
     return undefined;
   }
-  return typeof value.action === "string" ? value.action : undefined;
+  return asString(record.action);
 }
 
 function extractWelinkSessionId(value: unknown): string | undefined {
-  if (!isRecord(value)) {
+  const record = asRecord(value);
+  if (!record) {
     return undefined;
   }
-  return typeof value.welinkSessionId === "string" ? value.welinkSessionId : undefined;
+  return asString(record.welinkSessionId);
 }
 
 function extractToolSessionId(value: unknown): string | undefined {
-  if (!isRecord(value)) {
+  const record = asRecord(value);
+  if (!record) {
     return undefined;
   }
-  if (typeof value.toolSessionId === "string") {
-    return value.toolSessionId;
+  const toolSessionId = asString(record.toolSessionId);
+  if (toolSessionId) {
+    return toolSessionId;
   }
-  if (!isRecord(value.payload)) {
+  const payload = asRecord(record.payload);
+  if (!payload) {
     return undefined;
   }
-  return typeof value.payload.toolSessionId === "string" ? value.payload.toolSessionId : undefined;
+  return asString(payload.toolSessionId);
 }
 
 function extractEventType(value: unknown): string | undefined {
-  if (!isRecord(value) || !isRecord(value.event)) {
+  const record = asRecord(value);
+  const event = asRecord(record?.event);
+  if (!record || !event) {
     return undefined;
   }
-  return typeof value.event.type === "string" ? value.event.type : undefined;
+  return asString(event.type);
 }
 
 function encodeBase64Url(value: string): string {
@@ -261,9 +289,23 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
         this.logRawFrame("onOpen", event);
         this.options.logger.info("gateway.open", { url: this.options.url });
         this.setState("CONNECTED");
-        this.options.logger.info("gateway.register.sent");
-        this.send(this.options.registerMessage);
-        finalizeResolve();
+        try {
+          this.send(this.options.registerMessage);
+          this.options.logger.info("gateway.register.sent");
+          finalizeResolve();
+        } catch (error) {
+          this.options.logger.error("gateway.register.failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          this.stopHeartbeat();
+          ws.onmessage = null;
+          ws.onclose = null;
+          ws.onerror = null;
+          this.ws?.close();
+          this.ws = null;
+          this.setState("DISCONNECTED");
+          finalizeReject(error instanceof Error ? error : new Error(String(error)));
+        }
       };
 
       ws.onmessage = async (event) => {
@@ -284,8 +326,9 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           return;
         }
 
+        const parsedMessage = asRecord(parsed);
         logDebug(this.options.logger, "gateway.message.received", {
-          messageType: isRecord(parsed) && typeof parsed.type === "string" ? parsed.type : undefined,
+          messageType: asString(parsedMessage?.type),
           frameBytes: Buffer.byteLength(data, "utf8"),
           gatewayMessageId: extractGatewayMessageId(parsed),
           action: extractMessageAction(parsed),
@@ -314,7 +357,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
         if (this.state !== "READY") {
           logDebug(this.options.logger, "gateway.message.received_not_ready", {
-            messageType: isRecord(parsed) && typeof parsed.type === "string" ? parsed.type : undefined,
+            messageType: asString(parsedMessage?.type),
             state: this.state,
           });
           return;
@@ -386,8 +429,10 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("gateway_not_connected");
     }
-    const messageType = isRecord(message) && typeof message.type === "string" ? message.type : undefined;
-    const isControlMessage = messageType === "register" || messageType === "heartbeat";
+    const messageRecord = asRecord(message);
+    const messageType = asString(messageRecord?.type);
+    const isControlMessage =
+      messageType === UPSTREAM_MESSAGE_TYPE.REGISTER || messageType === UPSTREAM_MESSAGE_TYPE.HEARTBEAT;
     if (this.state !== "READY" && !isControlMessage) {
       this.options.logger.warn("gateway.send.rejected_not_ready", {
         state: this.state,
@@ -395,7 +440,10 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       });
       throw new Error("Gateway connection is not ready. Cannot send business message.");
     }
-    const serialized = JSON.stringify(message);
+    const normalizedMessage = isControlMessage
+      ? validateControlMessage(message, this.options.logger)
+      : message;
+    const serialized = JSON.stringify(normalizedMessage);
     if (this.options.debug) {
       this.options.logger.info(`「sendMessage」===>「${serialized}」`);
     }
@@ -410,7 +458,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     });
     this.ws.send(serialized);
     this.emit("outbound", message);
-    if (isRecord(message) && message.type === "heartbeat") {
+    if (messageRecord && messageRecord.type === UPSTREAM_MESSAGE_TYPE.HEARTBEAT) {
       this.emit("heartbeat", message);
     }
   }
@@ -429,10 +477,17 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         return;
       }
-      this.send({
-        type: "heartbeat",
+      const heartbeat: HeartbeatMessage = {
+        type: UPSTREAM_MESSAGE_TYPE.HEARTBEAT,
         timestamp: new Date().toISOString(),
-      });
+      };
+      try {
+        this.send(heartbeat);
+      } catch (error) {
+        this.options.logger.error("gateway.heartbeat.failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }, this.options.heartbeatIntervalMs);
   }
 

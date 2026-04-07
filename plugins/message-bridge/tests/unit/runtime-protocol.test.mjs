@@ -774,7 +774,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((createCalls).length, 0);
     assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, '   ');
+    assert.strictEqual(sent[0].welinkSessionId, undefined);
     assert.strictEqual(sent[0].error, 'welinkSessionId is required');
   });
 
@@ -942,6 +942,7 @@ describe('runtime protocol strictness', () => {
           messageID: 'op-msg-1',
           id: 'part-1',
           type: 'text',
+          text: '你好，bridge',
         },
       },
     });
@@ -1331,7 +1332,7 @@ describe('runtime protocol strictness', () => {
     }
   });
 
-  test('runtime.start sends empty macAddress when no usable interface is available', async () => {
+  test('runtime.start omits macAddress when no usable interface is available', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-register-empty-mac-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     process.env.HOME = fakeHome;
@@ -1416,7 +1417,7 @@ describe('runtime protocol strictness', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       const ws = RegisterCaptureWebSocket.instances[0];
-      assert.strictEqual(ws.sent[0].macAddress, '');
+      assert.strictEqual('macAddress' in ws.sent[0], false);
 
       runtime.stop();
     } finally {

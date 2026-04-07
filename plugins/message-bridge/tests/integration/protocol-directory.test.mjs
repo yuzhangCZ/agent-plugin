@@ -188,9 +188,6 @@ describe('protocol directory-context integration', () => {
       toolSessionId: 'dir-session-1',
       session: {
         sessionId: 'dir-session-1',
-        session: {
-          id: 'dir-session-1',
-        },
       },
     });
     assert.strictEqual(sent[1].type, 'tool_done');

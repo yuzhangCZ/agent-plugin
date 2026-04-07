@@ -55,10 +55,10 @@ function createConnection(logs, options = {}) {
     reconnectExponential: true,
     heartbeatIntervalMs: 30000,
     debug: options.debug ?? false,
-    registerMessage: {
+    registerMessage: options.registerMessage ?? {
       type: "register",
       deviceName: "dev",
-      macAddress: "",
+      macAddress: "aa:bb:cc:dd:ee:ff",
       os: "darwin",
       toolType: "openx",
       toolVersion: "1.0.0",
@@ -354,6 +354,101 @@ test("send rejects business messages before READY but allows heartbeat", async (
         timestamp: "2026-03-17T00:00:00.000Z",
       }),
     );
+  } finally {
+    conn?.disconnect();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("connect rejects invalid register control messages before sending", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  let conn = null;
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    conn = createConnection(logs, {
+      registerMessage: {
+        type: "register",
+        deviceName: "   ",
+        macAddress: "aa:bb:cc:dd:ee:ff",
+        os: "darwin",
+        toolType: "openclaw",
+        toolVersion: "1.0.0",
+      },
+    });
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+
+    await assert.rejects(connecting, /gateway_invalid_transport_message/);
+    assert.equal(logs.error.some((entry) => entry.message === "gateway.send.rejected_invalid_protocol"), true);
+    assert.equal(ws.sent.length, 0);
+  } finally {
+    conn?.disconnect();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("connect accepts register control messages without macAddress", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  let conn = null;
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    conn = createConnection(logs, {
+      registerMessage: {
+        type: "register",
+        deviceName: "dev",
+        os: "darwin",
+        toolType: "openclaw",
+        toolVersion: "1.0.0",
+      },
+    });
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+    await connecting;
+
+    assert.deepEqual(JSON.parse(ws.sent[0]), {
+      type: "register",
+      deviceName: "dev",
+      os: "darwin",
+      toolType: "openclaw",
+      toolVersion: "1.0.0",
+    });
+  } finally {
+    conn?.disconnect();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("send rejects invalid heartbeat control messages", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  let conn = null;
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    conn = createConnection(logs);
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+    await connecting;
+
+    assert.throws(
+      () =>
+        conn.send({
+          type: "heartbeat",
+          timestamp: "",
+        }),
+      /gateway_invalid_transport_message/,
+    );
+    assert.equal(logs.error.some((entry) => entry.message === "gateway.send.rejected_invalid_protocol"), true);
   } finally {
     conn?.disconnect();
     globalThis.WebSocket = originalWebSocket;

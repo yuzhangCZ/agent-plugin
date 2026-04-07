@@ -11,7 +11,7 @@ export interface RegisterMetadata {
   deviceName: string;
   toolType: string;
   toolVersion: string;
-  macAddress: string;
+  macAddress?: string;
 }
 
 export interface RegisterMetadataDeps {
@@ -20,7 +20,6 @@ export interface RegisterMetadataDeps {
   toolVersion?: string;
 }
 
-const EMPTY_MAC_ADDRESS = "";
 const UNKNOWN_TOOL_VERSION = "unknown";
 const ZERO_MAC_ADDRESS = "00:00:00:00:00:00";
 const MAC_ADDRESS_PATTERN = /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
@@ -38,7 +37,7 @@ function isUsableMacAddress(macAddress: string | undefined): macAddress is strin
   return MAC_ADDRESS_PATTERN.test(normalized) && normalized !== ZERO_MAC_ADDRESS;
 }
 
-function resolveMacAddress(logger: BridgeLogger, networkInterfaces: typeof os.networkInterfaces): string {
+function resolveMacAddress(logger: BridgeLogger, networkInterfaces: typeof os.networkInterfaces): string | undefined {
   const interfaces = networkInterfaces();
   let interfaceCount = 0;
 
@@ -60,7 +59,7 @@ function resolveMacAddress(logger: BridgeLogger, networkInterfaces: typeof os.ne
     platform: os.platform(),
     interfaceCount,
   });
-  return EMPTY_MAC_ADDRESS;
+  return undefined;
 }
 
 function resolvePackageVersion(logger: BridgeLogger): string {
@@ -98,11 +97,12 @@ export function resolveRegisterMetadata(
   logger: BridgeLogger,
   deps: RegisterMetadataDeps = {},
 ): RegisterMetadata {
+  const macAddress = resolveMacAddress(logger, deps.networkInterfaces ?? os.networkInterfaces);
   return {
     deviceName: deps.hostname?.() ?? os.hostname(),
     toolType: MESSAGE_BRIDGE_TOOL_TYPE,
     toolVersion: deps.toolVersion?.trim() || resolvePackageVersion(logger),
-    macAddress: resolveMacAddress(logger, deps.networkInterfaces ?? os.networkInterfaces),
+    ...(macAddress ? { macAddress } : {}),
   };
 }
 

@@ -1,17 +1,16 @@
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
+import { asRecord } from '../utils/type-guards.js';
 
 function listKeys(value: unknown): string[] {
-  return isRecord(value) ? Object.keys(value).sort() : [];
+  const record = asRecord(value);
+  return record ? Object.keys(record).sort() : [];
 }
 
 export function buildClientShapeSummary(client: unknown): Record<string, unknown> {
-  const root = isRecord(client) ? client : undefined;
-  const global = isRecord(root?.global) ? root.global : undefined;
-  const app = isRecord(root?.app) ? root.app : undefined;
-  const session = isRecord(root?.session) ? root.session : undefined;
-  const rawClient = isRecord(root?._client) ? root._client : undefined;
+  const root = asRecord(client) ?? undefined;
+  const global = asRecord(root?.global) ?? undefined;
+  const app = asRecord(root?.app) ?? undefined;
+  const session = asRecord(root?.session) ?? undefined;
+  const rawClient = asRecord(root?._client) ?? undefined;
 
   return {
     clientTopLevelKeys: listKeys(root),
