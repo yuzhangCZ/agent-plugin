@@ -13,6 +13,14 @@ export const MessageBridgePlugin: Plugin = async (input) => {
   const logger = new AppLogger(input.client, { component: 'plugin' });
   try {
     const runtime = await getOrCreateRuntime(input);
+    if (!runtime) {
+      logger.info('plugin.init.blocked_reinit_noop', {
+        workspacePath: input.worktree || input.directory,
+      });
+      return {
+        event: async () => {},
+      };
+    }
 
     return {
       event: async ({ event }) => {
