@@ -8,6 +8,16 @@ importers:
 
   .: {}
 
+  packages/gateway-client:
+    dependencies:
+      '@agent-plugin/gateway-wire-v1':
+        specifier: workspace:*
+        version: link:../gateway-wire-v1
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
   packages/gateway-wire-v1:
     dependencies:
       zod:
@@ -25,11 +35,13 @@ importers:
         version: 8.19.0
 
   plugins/message-bridge:
-    dependencies:
+    devDependencies:
+      '@agent-plugin/gateway-client':
+        specifier: workspace:*
+        version: link:../../packages/gateway-client
       '@agent-plugin/gateway-wire-v1':
         specifier: workspace:*
         version: link:../../packages/gateway-wire-v1
-    devDependencies:
       '@agent-plugin/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -73,6 +85,9 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
     devDependencies:
+      '@agent-plugin/gateway-client':
+        specifier: workspace:*
+        version: link:../../packages/gateway-client
       '@agent-plugin/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support

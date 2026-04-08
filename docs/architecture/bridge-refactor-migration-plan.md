@@ -140,6 +140,8 @@
 - 共享 `gateway-client`
 - 统一的建链、鉴权、心跳、重连、READY gating
 - 统一的 typed send/receive 与 transport error/state events
+- 由 composition root 显式装配的统一 reconnect preset，`openclaw` 与 `opencode` 对齐
+- 迁移期 `legacy` 兼容入口，供两个插件先通过薄 re-export 接入
 
 ### Exit Criteria
 
@@ -147,6 +149,8 @@
 - `gateway-client` 不暴露 `onInvoke()`、`onStatusQuery()` 这类 bridge 语义 API
 - READY 前业务消息不会被误处理
 - 连接状态机外部行为不漂移
+- `openclaw` 不保留旧本地 reconnect 兼容逻辑，统一使用共享 client 的 preset
+- `message-bridge` 发布包仍保持零运行时依赖
 
 ### 保持不变行为
 

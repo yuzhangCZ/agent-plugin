@@ -50,10 +50,13 @@ class FakeWebSocket {
 function createConnection(logs, options = {}) {
   const conn = new DefaultGatewayConnection({
     url: "ws://localhost:8081/ws/agent",
-    reconnectBaseMs: 1,
-    reconnectMaxMs: 4,
-    reconnectExponential: true,
+    reconnect: {
+      baseMs: 1,
+      maxMs: 4,
+      exponential: true,
+    },
     heartbeatIntervalMs: 30000,
+    clock: options.clock,
     debug: options.debug ?? false,
     registerMessage: options.registerMessage ?? {
       type: "register",
@@ -209,6 +212,43 @@ test("gateway.close logs reconnectPlanned=true on unexpected close", async (t) =
     timers.restore();
   }
   t.diagnostic("unexpected close logging validated");
+});
+
+test("gateway reconnect preset aligns with shared client and stops after maxElapsedMs", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const timers = installFakeTimeouts();
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  const clock = { nowMs: 0, now() { return this.nowMs; } };
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    const conn = createConnection(logs, { clock });
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+    await connecting;
+    ws.emitMessage({ type: "register_ok" });
+    await Promise.resolve();
+    ws.emitClose({ code: 1011, reason: "upstream reset", wasClean: false });
+
+    assert.equal(timers.scheduled.length, 1);
+    assert.equal(timers.scheduled[0].delay, 1);
+
+    clock.nowMs = 600001;
+    assert.equal(timers.runNext(), true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(FakeWebSocket.instances.length, 1);
+    assert.equal(
+      logs.warn.some((entry) => entry.message === "gateway.reconnect.exhausted"),
+      true,
+    );
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+    timers.restore();
+  }
 });
 
 test("gateway send/receive logs include message correlation fields", async (t) => {

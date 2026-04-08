@@ -1,0 +1,8 @@
+export const GATEWAY_CLIENT_STATE = {
+  DISCONNECTED: 'DISCONNECTED',
+  CONNECTING: 'CONNECTING',
+  CONNECTED: 'CONNECTED',
+  READY: 'READY',
+} as const;
+
+export type GatewayClientState = (typeof GATEWAY_CLIENT_STATE)[keyof typeof GATEWAY_CLIENT_STATE];

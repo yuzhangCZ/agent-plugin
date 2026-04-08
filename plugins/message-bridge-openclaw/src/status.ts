@@ -139,9 +139,11 @@ function createProbeConnection(account: MessageBridgeResolvedAccount, logger: Br
   warnUnknownToolType(logger, registerMetadata.toolType, account.accountId);
   return new DefaultGatewayConnection({
     url: account.gateway.url,
-    reconnectBaseMs: account.gateway.reconnect.baseMs,
-    reconnectMaxMs: account.gateway.reconnect.maxMs,
-    reconnectExponential: account.gateway.reconnect.exponential,
+    reconnect: {
+      baseMs: account.gateway.reconnect.baseMs,
+      maxMs: account.gateway.reconnect.maxMs,
+      exponential: account.gateway.reconnect.exponential,
+    },
     heartbeatIntervalMs: account.gateway.heartbeatIntervalMs,
     debug: account.debug,
     authPayloadProvider: () => new DefaultAkSkAuth(account.auth.ak, account.auth.sk).generateAuthPayload(),

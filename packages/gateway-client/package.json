@@ -1,0 +1,34 @@
+{
+  "name": "@agent-plugin/gateway-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./legacy": {
+      "types": "./src/legacy/connection-compat.ts",
+      "default": "./src/legacy/connection-compat.ts"
+    },
+    "./internal-auth": {
+      "types": "./src/auth/AkSkAuthProvider.ts",
+      "default": "./src/auth/AkSkAuthProvider.ts"
+    },
+    "./internal-factory": {
+      "types": "./src/factory/createGatewayClientForTesting.ts",
+      "default": "./src/factory/createGatewayClientForTesting.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@agent-plugin/gateway-wire-v1": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2"
+  }
+}

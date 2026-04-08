@@ -379,9 +379,11 @@ export class OpenClawGatewayBridge {
       options.connectionFactory?.(options.account, options.logger) ??
       new DefaultGatewayConnection({
         url: options.account.gateway.url,
-        reconnectBaseMs: options.account.gateway.reconnect.baseMs,
-        reconnectMaxMs: options.account.gateway.reconnect.maxMs,
-        reconnectExponential: options.account.gateway.reconnect.exponential,
+        reconnect: {
+          baseMs: options.account.gateway.reconnect.baseMs,
+          maxMs: options.account.gateway.reconnect.maxMs,
+          exponential: options.account.gateway.reconnect.exponential,
+        },
         heartbeatIntervalMs: options.account.gateway.heartbeatIntervalMs,
         debug: options.account.debug,
         authPayloadProvider: () =>

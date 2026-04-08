@@ -4,7 +4,7 @@
 **Date:** 2026-03-31  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
-**Related:** [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [message-bridge architecture overview](../../plugins/message-bridge/docs/architecture/overview.md), [OpenClaw protocol sequence](../../plugins/message-bridge-openclaw/docs/protocol-sequence.md), [test-layering.md](../testing/test-layering.md)
+**Related:** [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [gateway-wire-v1-architecture.md](./gateway-wire-v1-architecture.md), [gateway-client-architecture.md](./gateway-client-architecture.md), [message-bridge architecture overview](../../plugins/message-bridge/docs/architecture/overview.md), [OpenClaw protocol sequence](../../plugins/message-bridge-openclaw/docs/protocol-sequence.md), [test-layering.md](../testing/test-layering.md)
 
 ## Background
 
@@ -21,9 +21,10 @@
 
 1. 将当前 `ai-gateway` 外部协议冻结为 `gateway-wire-v1`，作为现阶段唯一兼容协议真源。
 2. 将连接、鉴权、心跳、重连、READY gating 等稳定基础设施收敛为 `gateway-client`。
-3. 第一阶段只处理重复的协议定义与连接实现，不提前冻结桥内部中立命令名。
-4. 后续通过 `bridge-mapper -> bridge-application -> host-adapter` 逐步完成内部语义解耦。
-5. 在 mapper / application 引入前，身份语义、capability 决策、compat policy 继续留在插件现有 orchestrator 中。
+3. `message-bridge-openclaw` 的连接语义与 `message-bridge` 对齐，`openclaw` 不保留额外兼容连接分支。
+4. 第一阶段只处理重复的协议定义与连接实现，不提前冻结桥内部中立命令名。
+5. 后续通过 `bridge-mapper -> bridge-application -> host-adapter` 逐步完成内部语义解耦。
+6. 在 mapper / application 引入前，身份语义、capability 决策、compat policy 继续留在插件现有 orchestrator 中。
 
 ## Non-Goals
 
@@ -107,7 +108,7 @@ host-plugin
 - `host-adapter` 是宿主实现层。
 - `host-plugin` 是插件入口与装配层。
 
-本轮只冻结第一阶段实际落地的两层：`gateway-wire-v1` 与 `gateway-client`。
+本轮只冻结第一阶段实际落地的两层：`gateway-wire-v1` 与 `gateway-client`。其中 `gateway-client` 当前已经以共享包和 `legacy` 兼容入口形式接入两个插件。
 
 ## Layer Responsibilities
 

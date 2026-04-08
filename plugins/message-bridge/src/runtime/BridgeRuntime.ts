@@ -28,6 +28,7 @@ import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
 import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
 import { DefaultGatewayConnection, GatewayConnection, type GatewaySendLogContext } from '../connection/GatewayConnection.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
+import { createGatewayClientForTesting } from '@agent-plugin/gateway-client/internal-factory';
 import { EventFilter } from '../event/EventFilter.js';
 import {
   extractUpstreamEvent,
@@ -149,7 +150,13 @@ export class BridgeRuntime {
     return new DefaultReconnectPolicy(reconnect);
   }
 
-  protected createGatewayConnection(options: ConstructorParameters<typeof DefaultGatewayConnection>[0]): GatewayConnection {
+  protected createGatewayConnection(
+    options: ConstructorParameters<typeof DefaultGatewayConnection>[0],
+    overrides?: { reconnectPolicy?: ReconnectPolicy },
+  ): GatewayConnection {
+    if (overrides?.reconnectPolicy) {
+      return createGatewayClientForTesting(options, { reconnectPolicy: overrides.reconnectPolicy });
+    }
     return new DefaultGatewayConnection(options);
   }
 
@@ -225,24 +232,26 @@ export class BridgeRuntime {
     const authPayloadProvider = () => auth.generateAuthPayload();
     const reconnectPolicy = this.createReconnectPolicy(config.gateway.reconnect);
 
-    const connection = this.createGatewayConnection({
-      url: config.gateway.url,
-      debug: effectiveDebug,
-      reconnect: config.gateway.reconnect,
-      reconnectPolicy,
-      heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
-      abortSignal: options.abortSignal,
-      authPayloadProvider,
-      registerMessage: {
-        type: UPSTREAM_MESSAGE_TYPE.REGISTER,
-        deviceName: registerMetadata.deviceName,
-        os: os.platform(),
-        toolType: config.gateway.channel,
-        toolVersion: registerMetadata.toolVersion,
-        ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
+    const connection = this.createGatewayConnection(
+      {
+        url: config.gateway.url,
+        debug: effectiveDebug,
+        reconnect: config.gateway.reconnect,
+        heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
+        abortSignal: options.abortSignal,
+        authPayloadProvider,
+        registerMessage: {
+          type: UPSTREAM_MESSAGE_TYPE.REGISTER,
+          deviceName: registerMetadata.deviceName,
+          os: os.platform(),
+          toolType: config.gateway.channel,
+          toolVersion: registerMetadata.toolVersion,
+          ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
+        },
+        logger: this.logger.child({ component: 'gateway' }),
       },
-      logger: this.logger.child({ component: 'gateway' }),
-    });
+      { reconnectPolicy },
+    );
 
     connection.on('stateChange', (state) => {
       this.stateManager.setState(state);
