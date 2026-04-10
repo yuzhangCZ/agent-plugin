@@ -1,4 +1,3 @@
-import os from "node:os";
 import {
   buildBaseAccountStatusSnapshot,
   buildProbeChannelStatusSummary,
@@ -7,7 +6,7 @@ import {
   type ChannelStatusIssue,
 } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { createAkSkAuthProvider, createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
+import { createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,
@@ -29,7 +28,7 @@ import {
   getConnectionCoord,
 } from "./runtime/ConnectionCoordinator.js";
 import { asRecord } from "./utils/type-guards.js";
-import { UPSTREAM_MESSAGE_TYPE } from "./gateway-wire/transport.js";
+import { buildGatewayClientConfig } from "./gateway-client.js";
 
 const HEARTBEAT_GRACE_MS = 5_000;
 const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
@@ -136,26 +135,7 @@ function isRuntimeHealthy(
 function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayClient {
   const registerMetadata = resolveRegisterMetadata(logger);
   warnUnknownToolType(logger, registerMetadata.toolType, account.accountId);
-  return createGatewayClient({
-    url: account.gateway.url,
-    reconnect: {
-      baseMs: account.gateway.reconnect.baseMs,
-      maxMs: account.gateway.reconnect.maxMs,
-      exponential: account.gateway.reconnect.exponential,
-    },
-    heartbeatIntervalMs: account.gateway.heartbeatIntervalMs,
-    debug: account.debug,
-    authPayloadProvider: () => createAkSkAuthProvider(account.auth.ak, account.auth.sk).generateAuthPayload(),
-    registerMessage: {
-      type: UPSTREAM_MESSAGE_TYPE.REGISTER,
-      deviceName: registerMetadata.deviceName,
-      os: os.platform(),
-      toolType: registerMetadata.toolType,
-      toolVersion: registerMetadata.toolVersion,
-      ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
-    },
-    logger,
-  });
+  return createGatewayClient(buildGatewayClientConfig(account, logger, registerMetadata));
 }
 
 export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSnapshot {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { GATEWAY_CLIENT_STATE, type GatewayClientState } from '@agent-plugin/gateway-client';
 
 export interface BridgeConfig {
   enabled: boolean;
@@ -66,10 +67,6 @@ export interface EventConfig {
   allowlist: string[];
 }
 
-export const CONNECTION_STATES = ['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'READY'] as const;
-
-export type ConnectionState = typeof CONNECTION_STATES[number];
-
 export const ERROR_CODES = [
   'GATEWAY_UNREACHABLE',
   'SDK_TIMEOUT',
@@ -81,13 +78,13 @@ export const ERROR_CODES = [
 
 export type ErrorCode = typeof ERROR_CODES[number];
 
-export function stateToErrorCode(state: ConnectionState): ErrorCode {
+export function stateToErrorCode(state: GatewayClientState): ErrorCode {
   switch (state) {
-    case CONNECTION_STATES[0]:
-    case CONNECTION_STATES[1]:
+    case GATEWAY_CLIENT_STATE.DISCONNECTED:
+    case GATEWAY_CLIENT_STATE.CONNECTING:
       return 'GATEWAY_UNREACHABLE';
-    case CONNECTION_STATES[2]:
-    case CONNECTION_STATES[3]:
+    case GATEWAY_CLIENT_STATE.CONNECTED:
+    case GATEWAY_CLIENT_STATE.READY:
       return 'AGENT_NOT_READY';
   }
 }

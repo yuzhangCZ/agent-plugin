@@ -1,4 +1,5 @@
-import type { ConnectionState, ErrorCode } from './common.js';
+import type { GatewayClientState } from '@agent-plugin/gateway-client';
+import type { ErrorCode } from './common.js';
 import type {
   ActionName,
   ActionPayloadByName,
@@ -11,7 +12,7 @@ import type { ToolErrorEvidence } from '../utils/error.js';
 export interface ActionContext {
   client: OpencodeClient;
   hostClient: HostClientLike;
-  connectionState: ConnectionState;
+  connectionState: GatewayClientState;
   agentId: string;
   welinkSessionId?: string;
   // 兼容字段：仅 create_session 的目录决策链路消费，其他 action 不应透传。

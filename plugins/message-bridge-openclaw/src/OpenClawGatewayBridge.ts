@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import os from "node:os";
 import {
   createReplyPrefixOptions,
   normalizeOutboundReplyPayload,
@@ -34,7 +33,6 @@ import type {
 } from "./gateway-wire/transport.js";
 import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
 import {
-  createAkSkAuthProvider,
   createGatewayClient,
   type GatewayClient,
 } from "@agent-plugin/gateway-client";
@@ -52,6 +50,7 @@ import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } f
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import { asRecord, asString, asTrimmedString } from "./utils/type-guards.js";
+import { buildGatewayClientConfig } from "./gateway-client.js";
 
 export interface OpenClawGatewayBridgeOptions {
   account: MessageBridgeResolvedAccount;
@@ -379,27 +378,7 @@ export class OpenClawGatewayBridge {
     this.sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
     this.connection =
       options.connectionFactory?.(options.account, options.logger) ??
-      createGatewayClient({
-        url: options.account.gateway.url,
-        reconnect: {
-          baseMs: options.account.gateway.reconnect.baseMs,
-          maxMs: options.account.gateway.reconnect.maxMs,
-          exponential: options.account.gateway.reconnect.exponential,
-        },
-        heartbeatIntervalMs: options.account.gateway.heartbeatIntervalMs,
-        debug: options.account.debug,
-        authPayloadProvider: () =>
-          createAkSkAuthProvider(options.account.auth.ak, options.account.auth.sk).generateAuthPayload(),
-        registerMessage: {
-          type: UPSTREAM_MESSAGE_TYPE.REGISTER,
-          deviceName: this.registerMetadata.deviceName,
-          os: os.platform(),
-          toolType: this.registerMetadata.toolType,
-          toolVersion: this.registerMetadata.toolVersion,
-          ...(this.registerMetadata.macAddress ? { macAddress: this.registerMetadata.macAddress } : {}),
-        },
-        logger: options.logger,
-      });
+      createGatewayClient(buildGatewayClientConfig(options.account, options.logger, this.registerMetadata));
 
     this.status = {
       accountId: options.account.accountId,

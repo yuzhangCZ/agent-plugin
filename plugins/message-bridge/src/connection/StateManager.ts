@@ -1,17 +1,18 @@
 import { randomUUID } from 'crypto';
-import { AGENT_ID_PREFIX, ConnectionState } from '../types/index.js';
+import type { GatewayClientState } from '@agent-plugin/gateway-client';
+import { AGENT_ID_PREFIX } from '../types/index.js';
 
 export interface StateManager {
   isReady(): boolean;
   getAgentId(): string | null;
-  getState(): ConnectionState;
-  setState(state: ConnectionState): void;
+  getState(): GatewayClientState;
+  setState(state: GatewayClientState): void;
   generateAndBindAgentId(): string;
   resetForReconnect(): string;
 }
 
 export class DefaultStateManager implements StateManager {
-  private state: ConnectionState = 'DISCONNECTED';
+  private state: GatewayClientState = 'DISCONNECTED';
   private agentId: string | null = null;
 
   isReady(): boolean {
@@ -22,11 +23,11 @@ export class DefaultStateManager implements StateManager {
     return this.agentId;
   }
 
-  getState(): ConnectionState {
+  getState(): GatewayClientState {
     return this.state;
   }
 
-  setState(state: ConnectionState): void {
+  setState(state: GatewayClientState): void {
     this.state = state;
   }
 

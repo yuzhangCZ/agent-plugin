@@ -1,8 +1,9 @@
-export interface MessageBridgeReconnectConfig {
-  baseMs: number;
-  maxMs: number;
-  exponential: boolean;
-}
+import type { GatewayReconnectConfig } from "@agent-plugin/gateway-client";
+
+export type MessageBridgeReconnectConfig = Pick<
+  GatewayReconnectConfig,
+  "baseMs" | "maxMs" | "exponential"
+>;
 
 export interface MessageBridgeGatewayConfig {
   url: string;
