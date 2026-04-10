@@ -19,6 +19,10 @@ function isControlSendType(messageType: string): boolean {
   return messageType === REGISTER_MESSAGE_TYPE || messageType === HEARTBEAT_MESSAGE_TYPE;
 }
 
+/**
+ * 统一发送出口。
+ * @remarks 在这里执行连接态校验、协议校验、日志采样与事件回传。
+ */
 export class OutboundSender {
   private readonly transport: GatewayTransport;
   private readonly wireCodec: GatewayWireCodec;

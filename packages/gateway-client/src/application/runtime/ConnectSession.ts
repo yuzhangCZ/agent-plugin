@@ -22,6 +22,10 @@ function isGatewayRejectedCloseCode(code: unknown): boolean {
   return typeof code === 'number' && Number.isFinite(code) && GATEWAY_REJECTION_CLOSE_CODES.has(code);
 }
 
+/**
+ * 单次连接会话编排器。
+ * @remarks connect/open/close/error 的关键决策与日志在此集中收口。
+ */
 export class ConnectSession {
   private readonly transport: GatewayTransport;
   private readonly outboundSender: OutboundSender;
@@ -146,6 +150,8 @@ export class ConnectSession {
           onClose: (event) => {
             const close = event as GatewayCloseEventLike | undefined;
             const rejected = isGatewayRejectedCloseCode(close?.code);
+            // reconnectPlanned 必须与 composition root 已解析的 reconnectEnabled 保持一致，
+            // 这样 close 日志、调度前置判断和真正的重连策略才不会漂移。
             const reconnectPlanned =
               opened
               && !this.state.isManuallyDisconnected()

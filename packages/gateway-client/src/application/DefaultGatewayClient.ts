@@ -7,7 +7,10 @@ import type { GatewaySendContext } from '../domain/send-context.ts';
 import type { GatewayClientState } from '../domain/state.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from './GatewayClientRuntime.ts';
 
-// DefaultGatewayClient 只承担 facade 职责：对外暴露 API，并把 runtime 决策桥接成事件。
+/**
+ * 默认 facade 实现。
+ * @remarks 对外暴露 API，并将 runtime 决策桥接为事件。
+ */
 export class DefaultGatewayClient extends EventEmitter implements GatewayClient {
   private readonly runtime: GatewayClientRuntime;
 

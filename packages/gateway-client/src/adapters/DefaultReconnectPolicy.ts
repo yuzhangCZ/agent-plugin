@@ -13,6 +13,9 @@ const DEFAULT_CLOCK: ReconnectClock = {
   now: () => Date.now(),
 };
 
+/**
+ * 默认重连策略实现，负责退避与重连窗口判断。
+ */
 export class DefaultReconnectPolicy implements ReconnectPolicy {
   private attempt = 0;
   private windowStartedAt: number | null = null;

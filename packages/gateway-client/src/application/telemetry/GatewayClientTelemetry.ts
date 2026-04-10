@@ -40,7 +40,10 @@ function logDebug(logger: GatewayLogger | undefined, message: string, meta?: Rec
   logger.info?.(message, meta);
 }
 
-// GatewayClientTelemetry 统一封装日志与摘要采样，避免 runtime 主流程堆满观测细节。
+/**
+ * 运行时观测聚合器。
+ * @remarks 统一封装原始帧日志、发送摘要采样与 close/reconnect 告警。
+ */
 export class GatewayClientTelemetry {
   private readonly logger?: GatewayLogger;
   private readonly debug: boolean;
@@ -57,11 +60,13 @@ export class GatewayClientTelemetry {
     this.recentOutboundSummaries.length = 0;
   }
 
+  // 原始帧日志只在 debug 模式开启，用于排查 transport 问题，不作为业务观测的稳定输入。
   logRawFrame(eventName: 'onOpen' | 'onMessage' | 'onError', payload: unknown): void {
     if (!this.debug || !this.logger) return;
     this.logger.info?.(`「${eventName}」===>「${formatRawPayload(payload)}」`);
   }
 
+  // markReceived 负责把入站报文折叠成稳定日志字段与 close 摘要来源。
   markReceived(message: unknown, frameBytes: number): { messageType: string; gatewayMessageId?: string } {
     const messageType = getMessageType(message);
     const gatewayMessageId = extractGatewayMessageId(message);
@@ -82,6 +87,7 @@ export class GatewayClientTelemetry {
     return { messageType, gatewayMessageId };
   }
 
+  // markSent 是统一发送日志出口；大包告警、trace 字段补齐和 close 摘要采样都在这里收口。
   markSent(
     message: unknown,
     payloadBytes: number,
@@ -150,6 +156,7 @@ export class GatewayClientTelemetry {
     });
   }
 
+  // logReconnectExhausted 只记录“单轮自动重连窗口耗尽”的统一告警，避免策略层各自落不同文案。
   logReconnectExhausted(elapsedMs: number, maxElapsedMs: number): void {
     this.logger?.warn?.('gateway.reconnect.exhausted', { elapsedMs, maxElapsedMs });
   }

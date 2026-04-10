@@ -6,6 +6,9 @@ import type { AkSkAuthPayload } from '../ports/GatewayAuthProvider.ts';
 export type { AkSkAuthPayload } from '../ports/GatewayAuthProvider.ts';
 export type { GatewayAuthProvider } from '../ports/GatewayAuthProvider.ts';
 
+/**
+ * 默认 AK/SK 鉴权实现。
+ */
 export class DefaultAkSkAuth implements GatewayAuthProvider {
   private readonly accessKey: string;
   private readonly secretKey: string;
@@ -31,10 +34,16 @@ export class DefaultAkSkAuth implements GatewayAuthProvider {
   }
 }
 
+/**
+ * 创建 AK/SK 鉴权提供器。
+ */
 export function createAkSkAuthProvider(accessKey: string, secretKey: string): GatewayAuthProvider {
   return new DefaultAkSkAuth(accessKey, secretKey);
 }
 
+/**
+ * 将鉴权载荷编码为 websocket subprotocol 字符串。
+ */
 export function buildAuthSubprotocol(payload: AkSkAuthPayload): string {
   return `auth.${Buffer.from(JSON.stringify(payload), 'utf8')
     .toString('base64')

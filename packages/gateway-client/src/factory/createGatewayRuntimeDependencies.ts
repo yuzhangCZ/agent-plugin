@@ -27,7 +27,12 @@ function resolveStandardReconnectPreset(options: GatewayClientOptions): Required
   };
 }
 
-// createGatewayRuntimeDependencies 是统一 composition root，负责装配 runtime 依赖。
+/**
+ * gateway-client 的统一依赖装配入口。
+ * @remarks 在 composition root 解析默认策略，确保 runtime 只消费稳定依赖，不再持有隐式默认值。
+ * @param options 网关客户端完整配置与覆写项。
+ * @returns 运行时编排所需的依赖对象。
+ */
 export function createGatewayRuntimeDependencies(options: GatewayClientOptions): GatewayClientRuntimeDependencies {
   const wireCodec = options.wireCodec ?? new GatewayWireV1CodecAdapter();
   const reconnectPreset = resolveStandardReconnectPreset(options);

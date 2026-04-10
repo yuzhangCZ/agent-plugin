@@ -1,5 +1,8 @@
 import type { ReconnectScheduler } from '../ports/ReconnectScheduler.ts';
 
+/**
+ * 基于 `setTimeout` 的重连调度实现。
+ */
 export class TimeoutReconnectScheduler implements ReconnectScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
 

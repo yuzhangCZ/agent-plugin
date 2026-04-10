@@ -12,6 +12,9 @@ import type {
 import type { GatewayClientTelemetry } from '../telemetry/GatewayClientTelemetry.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 
+/**
+ * runtime 到 facade 的唯一事件出口。
+ */
 export interface GatewayRuntimeSink {
   emitStateChange(state: GatewayClientState): void;
   emitInbound(message: GatewayInboundFrame): void;
@@ -21,6 +24,9 @@ export interface GatewayRuntimeSink {
   emitError(error: GatewayClientError): void;
 }
 
+/**
+ * 跨协作对象共享的运行时上下文。
+ */
 export interface GatewayRuntimeContext {
   options: GatewayClientOptions;
   logger?: GatewayLogger;
@@ -32,6 +38,9 @@ export interface GatewayRuntimeContext {
   authSubprotocolBuilder: (payload: AkSkAuthPayload) => string;
 }
 
+/**
+ * 协作对象访问状态机的最小写口。
+ */
 export interface GatewayRuntimeStatePort {
   getState(): GatewayClientState;
   setState(next: GatewayClientState): void;

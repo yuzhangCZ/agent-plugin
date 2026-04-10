@@ -10,6 +10,9 @@ export type GatewayClientErrorCode =
   | 'GATEWAY_UNEXPECTED_CLOSE'
   | 'GATEWAY_PROTOCOL_VIOLATION';
 
+/**
+ * gateway-client 对外暴露的标准错误结构。
+ */
 export interface GatewayClientErrorShape {
   readonly code: GatewayClientErrorCode;
   readonly category: GatewayClientErrorCategory;

@@ -8,6 +8,9 @@ import {
 
 import type { GatewayWireCodec } from '../ports/GatewayWireCodec.ts';
 
+/**
+ * gateway-wire-v1 的编解码适配实现。
+ */
 export class GatewayWireV1CodecAdapter implements GatewayWireCodec {
   normalizeDownstream(raw: unknown): { ok: true; value: DownstreamMessage } | { ok: false; error: WireContractViolation } {
     return normalizeDownstream(raw);

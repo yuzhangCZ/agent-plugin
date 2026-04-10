@@ -18,6 +18,9 @@ import { OutboundSender } from './runtime/OutboundSender.ts';
 import { ReconnectOrchestrator } from './runtime/ReconnectOrchestrator.ts';
 import type { AkSkAuthPayload } from '../ports/GatewayAuthProvider.ts';
 
+/**
+ * GatewayClientRuntime 需要的依赖集合。
+ */
 export interface GatewayClientRuntimeDependencies {
   transport: GatewayTransport;
   heartbeatScheduler: HeartbeatScheduler;
@@ -30,7 +33,10 @@ export interface GatewayClientRuntimeDependencies {
   authSubprotocolBuilder: (payload: AkSkAuthPayload) => string;
 }
 
-// GatewayClientRuntime 是唯一运行时编排器，只协调状态机与协作对象。
+/**
+ * 运行时主编排器。
+ * @remarks 只协调状态机与协作对象，不承载具体协议或 transport 细节。
+ */
 export class GatewayClientRuntime implements GatewayRuntimeStatePort {
   private readonly options: GatewayClientOptions;
   private readonly transport: GatewayTransport;

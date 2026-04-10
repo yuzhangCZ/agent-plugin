@@ -8,6 +8,9 @@ import type {
   GatewayOutboundMessage,
 } from './GatewayClientMessages.ts';
 
+/**
+ * GatewayClient 对外事件契约。
+ */
 export interface GatewayClientEvents {
   stateChange: (state: GatewayClientState) => void;
   message: (message: GatewayBusinessMessage) => void;

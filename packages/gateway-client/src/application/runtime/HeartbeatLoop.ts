@@ -7,6 +7,9 @@ import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapp
 
 const HEARTBEAT_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[3];
 
+/**
+ * 心跳循环编排器，负责 READY 后的周期心跳发送。
+ */
 export class HeartbeatLoop {
   private readonly scheduler: HeartbeatScheduler;
   private readonly sender: OutboundSender;

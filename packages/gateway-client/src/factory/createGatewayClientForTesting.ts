@@ -4,6 +4,10 @@ import type { GatewayClientConfig } from '../ports/GatewayClientConfig.ts';
 import type { GatewayClientOverrides } from '../ports/GatewayClientOverrides.ts';
 import { createGatewayRuntimeDependencies } from './createGatewayRuntimeDependencies.ts';
 
+/**
+ * 创建可注入测试替身依赖的 GatewayClient。
+ * @remarks 仅测试场景使用，用于覆写重连、编解码与 transport 依赖。
+ */
 export function createGatewayClientForTesting(
   config: GatewayClientConfig,
   overrides: GatewayClientOverrides = {},

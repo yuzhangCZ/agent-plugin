@@ -1,4 +1,7 @@
-// ReconnectScheduler 统一管理重连调度，避免 runtime 直接依赖全局 timer API。
+/**
+ * 重连调度端口。
+ * @remarks 统一承载 schedule/cancel，避免重连逻辑与计时器实现耦合。
+ */
 export interface ReconnectScheduler {
   schedule(task: () => Promise<void> | void, delayMs: number): void;
   cancel(): void;

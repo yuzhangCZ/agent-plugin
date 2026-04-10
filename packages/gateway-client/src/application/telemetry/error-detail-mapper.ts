@@ -4,10 +4,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
 
+/**
+ * 将未知错误对象归一化为可日志化的 message。
+ */
 export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * 将未知错误对象归一化为结构化 detail 字段。
+ */
 export function getErrorDetails(error: unknown): Record<string, unknown> {
   if (error instanceof GatewayClientError) {
     return {
@@ -36,6 +42,9 @@ export function getErrorDetails(error: unknown): Record<string, unknown> {
   return { errorDetail: String(error) };
 }
 
+/**
+ * 提取 WebSocket error event 的结构化细节。
+ */
 export function extractWebSocketErrorDetails(event: unknown): Record<string, unknown> {
   const record = isRecord(event) ? event : undefined;
   if (!record) return getErrorDetails(event);

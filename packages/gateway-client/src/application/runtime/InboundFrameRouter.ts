@@ -21,6 +21,9 @@ function logDebug(logger: GatewayRuntimeContext['logger'], message: string, meta
   logger.info?.(message, meta);
 }
 
+/**
+ * 入站帧路由器，负责控制帧与业务帧分流及 READY gating。
+ */
 export class InboundFrameRouter {
   private readonly controlMessageHandler: ControlMessageHandler;
   private readonly businessMessageHandler: BusinessMessageHandler;

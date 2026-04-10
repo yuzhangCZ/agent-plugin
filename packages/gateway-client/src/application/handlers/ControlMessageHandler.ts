@@ -12,7 +12,10 @@ export type ControlMessageCommand =
   | { kind: 'rejected'; error: GatewayClientError }
   | { kind: 'error'; error: GatewayClientError };
 
-// ControlMessageHandler 只负责解析 control frame 并返回领域决策，不直接触碰 transport 或事件总线。
+/**
+ * control frame 处理器。
+ * @remarks 统一执行 fail-closed 校验并返回结构化决策。
+ */
 export class ControlMessageHandler {
   private readonly wireCodec: GatewayWireCodec;
 
@@ -21,6 +24,7 @@ export class ControlMessageHandler {
   }
 
   handle(message: unknown, state: GatewayClientState, manuallyDisconnected: boolean): ControlMessageCommand {
+    // fail-closed：control frame 一旦校验失败，统一返回结构化协议错误，由上层决定如何记日志和发事件。
     if (manuallyDisconnected) {
       return { kind: 'noop' };
     }

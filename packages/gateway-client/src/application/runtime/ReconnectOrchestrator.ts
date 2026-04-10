@@ -3,6 +3,9 @@ import type { ReconnectScheduler } from '../../ports/ReconnectScheduler.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapper.ts';
 
+/**
+ * 重连编排器，负责策略决策、调度触发与失败续退避。
+ */
 export class ReconnectOrchestrator {
   private readonly scheduler: ReconnectScheduler;
   private readonly policy: ReconnectPolicy;

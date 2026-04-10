@@ -1,9 +1,15 @@
 import type { GatewayTransport, GatewayTransportOpenOptions } from '../ports/GatewayTransport.ts';
 
+/**
+ * WebSocket transport 构造参数。
+ */
 export interface WebSocketGatewayTransportOptions {
   webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
 }
 
+/**
+ * 基于浏览器 WebSocket 的 transport 适配实现。
+ */
 export class WebSocketGatewayTransport implements GatewayTransport {
   private readonly webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
   private socket: WebSocket | null = null;

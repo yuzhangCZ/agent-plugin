@@ -15,10 +15,16 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
+/**
+ * 安全序列化任意值，避免循环引用导致日志崩溃。
+ */
 export function safeStringify(value: unknown): string {
   return safeJsonStringify(value);
 }
 
+/**
+ * 将原始帧载荷格式化为可读日志字符串。
+ */
 export function formatRawPayload(payload: unknown): string {
   if (typeof payload === 'string') return payload;
   if (payload === null || payload === undefined) return '';
