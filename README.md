@@ -6,6 +6,7 @@ Monorepo for `message-bridge` and `message-bridge-openclaw`.
 
 - `agent-plugin` is the primary development repository for the two plugins.
 - `opencode-CUI` is referenced as an integration fixture via submodule.
+- the `integration/opencode-cui` submodule tracks `main` by default.
 - Migration phase keeps external plugin identity, config keys, install paths, and protocol shapes unchanged.
 - Shared package extraction and naming unification are deferred until after migration freeze.
 
@@ -32,6 +33,9 @@ GitHub Actions validates:
 - `pnpm verify:integration:fixture`
 
 The heavier OpenClaw runtime smoke remains a manual or dedicated-environment gate.
+Release verification is maintained as command-driven local validation
+(`pnpm run verify:release` / `pnpm run verify:release:dry`)
+rather than a plugin-local workflow file.
 
 A dedicated manual workflow is available at `.github/workflows/integration-smoke.yml`.
 
