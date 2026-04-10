@@ -35,9 +35,9 @@ import type {
 import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
 import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
 import {
-  DefaultGatewayConnection,
-  type GatewayConnection,
-} from "@agent-plugin/gateway-client/legacy";
+  createGatewayClient,
+  type GatewayClient,
+} from "@agent-plugin/gateway-client";
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
 import { normalizeDownstream as normalizeDownstreamMessage } from "./gateway-wire/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
@@ -60,7 +60,7 @@ export interface OpenClawGatewayBridgeOptions {
   runtime: PluginRuntime;
   setStatus: (status: MessageBridgeStatusSnapshot) => void;
   registerMetadata?: RegisterMetadata;
-  connectionFactory?: (account: MessageBridgeResolvedAccount, logger: BridgeLogger) => GatewayConnection;
+  connectionFactory?: (account: MessageBridgeResolvedAccount, logger: BridgeLogger) => GatewayClient;
 }
 
 type SubagentRuntime = PluginRuntime & {
@@ -347,7 +347,7 @@ function extractToolResultTitle(meta: unknown, toolName: string): string | undef
 
 export class OpenClawGatewayBridge {
   private readonly sessionRegistry: SessionRegistry;
-  private readonly connection: GatewayConnection;
+  private readonly connection: GatewayClient;
   private readonly runtime: PluginRuntime;
   private readonly registerMetadata: RegisterMetadata;
   private readonly activeToolSessions = new Map<
@@ -379,7 +379,7 @@ export class OpenClawGatewayBridge {
     this.sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
     this.connection =
       options.connectionFactory?.(options.account, options.logger) ??
-      new DefaultGatewayConnection({
+      createGatewayClient({
         url: options.account.gateway.url,
         reconnect: {
           baseMs: options.account.gateway.reconnect.baseMs,

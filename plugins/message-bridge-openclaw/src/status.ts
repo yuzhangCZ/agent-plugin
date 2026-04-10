@@ -8,7 +8,7 @@ import {
 } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
-import { DefaultGatewayConnection, type GatewayConnection } from "@agent-plugin/gateway-client/legacy";
+import { createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,
@@ -41,7 +41,7 @@ const silentLogger: BridgeLogger = {
   error() {},
 };
 
-type ProbeConnectionFactory = (account: MessageBridgeResolvedAccount) => GatewayConnection;
+type ProbeConnectionFactory = (account: MessageBridgeResolvedAccount) => GatewayClient;
 
 export type MessageBridgeAccountSnapshot = ChannelAccountSnapshot & {
   connected: boolean;
@@ -134,10 +134,10 @@ function isRuntimeHealthy(
   return nowAt - runtime.lastHeartbeatAt <= heartbeatThresholdMs;
 }
 
-function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayConnection {
+function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayClient {
   const registerMetadata = resolveRegisterMetadata(logger);
   warnUnknownToolType(logger, registerMetadata.toolType, account.accountId);
-  return new DefaultGatewayConnection({
+  return createGatewayClient({
     url: account.gateway.url,
     reconnect: {
       baseMs: account.gateway.reconnect.baseMs,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DefaultGatewayConnection } from "@agent-plugin/gateway-client/legacy";
+import { createGatewayClient } from "@agent-plugin/gateway-client";
 
 class FakeWebSocket {
   static OPEN = 1;
@@ -48,7 +48,7 @@ class FakeWebSocket {
 }
 
 function createConnection(logs, options = {}) {
-  const conn = new DefaultGatewayConnection({
+  const conn = createGatewayClient({
     url: "ws://localhost:8081/ws/agent",
     reconnect: {
       baseMs: 1,

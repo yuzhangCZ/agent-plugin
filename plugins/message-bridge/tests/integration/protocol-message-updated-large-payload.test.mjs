@@ -4,7 +4,7 @@ import http from 'node:http';
 
 import { WebSocketServer } from 'ws';
 
-import { DefaultGatewayConnection } from '@agent-plugin/gateway-client/legacy';
+import { createGatewayClient } from '@agent-plugin/gateway-client';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/message.updated.large-summary.fixture.mjs';
@@ -95,7 +95,7 @@ async function createConnectedHarness({ maxPayload } = {}) {
   const gateway = await createGatewayServer({ maxPayload });
   const { entries, logger } = createGatewayLogger();
   const runtime = new BridgeRuntime({ client: {} });
-  const connection = new DefaultGatewayConnection({
+  const connection = createGatewayClient({
     url: `ws://127.0.0.1:${gateway.port}/ws/agent`,
     debug: true,
     registerMessage: {

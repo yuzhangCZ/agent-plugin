@@ -1,7 +1,7 @@
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultGatewayConnection } from '@agent-plugin/gateway-client/legacy';
+import { createGatewayClient } from '@agent-plugin/gateway-client';
 
 class ScriptedWebSocket {
   static OPEN = 1;
@@ -191,7 +191,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('rejects on aborted signal before connect', async () => {
     const controller = new AbortController();
     controller.abort();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       abortSignal: controller.signal,
       registerMessage: registerMessage(),
@@ -201,7 +201,7 @@ describe('DefaultGatewayConnection coverage', () => {
   });
 
   test('connect/disconnect lifecycle and send guard', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       heartbeatIntervalMs: 5,
       registerMessage: registerMessage(),
@@ -218,7 +218,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('connect rejects invalid register control messages before sending', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: {
         type: 'register',
@@ -241,7 +241,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('send rejects invalid heartbeat control messages', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -264,7 +264,7 @@ describe('DefaultGatewayConnection coverage', () => {
   });
 
   test('passes gateway auth via websocket subprotocol instead of query params', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       authPayloadProvider: () => ({
         ak: 'test-ak-001',
@@ -298,7 +298,7 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({ autoRegisterOk: false });
     const states = [];
     const messages = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
@@ -329,7 +329,7 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({ autoRegisterOk: false });
     const { logger, entries } = createLoggerRecorder();
     const states = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -376,7 +376,7 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     };
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnectPolicy,
       registerMessage: registerMessage(),
@@ -391,14 +391,14 @@ describe('DefaultGatewayConnection coverage', () => {
   });
 
   test('rejects on invalid url and websocket error', async () => {
-    const badUrl = new DefaultGatewayConnection({
+    const badUrl = createGatewayClient({
       url: 'not-a-valid-url',
       registerMessage: registerMessage(),
     });
     await assert.rejects(badUrl.connect());
 
     ScriptedWebSocket.scripts.push({ errorOnOpen: true });
-    const errorConn = new DefaultGatewayConnection({
+    const errorConn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
@@ -411,7 +411,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('logs websocket error details when the runtime provides them', async () => {
     const errorLogs = [];
     ScriptedWebSocket.scripts.push({ errorOnOpen: true });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger: {
@@ -457,7 +457,7 @@ describe('DefaultGatewayConnection coverage', () => {
         target: { readyState: 0 },
       },
     });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger: {
@@ -497,7 +497,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('reconnects after opened connection closes unexpectedly', async () => {
     ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 }, { open: true });
     const states = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
@@ -520,7 +520,7 @@ describe('DefaultGatewayConnection coverage', () => {
         closeReason: `rejected-${closeCode}`,
         wasClean: true,
       });
-      const conn = new DefaultGatewayConnection({
+      const conn = createGatewayClient({
         url: 'ws://localhost:8081/ws/agent',
         reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
         registerMessage: registerMessage(),
@@ -548,7 +548,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('does not reconnect when aborted after open', async () => {
     const controller = new AbortController();
     ScriptedWebSocket.scripts.push({ open: true });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       abortSignal: controller.signal,
@@ -564,7 +564,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('parses downstream messages and ignores non-json', async () => {
     const messages = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
@@ -585,7 +585,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs payload bytes and message ids when sending', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -638,7 +638,7 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     });
 
-    const connectFailingConn = new DefaultGatewayConnection({
+    const connectFailingConn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: true,
       registerMessage: registerMessage(),
@@ -647,7 +647,7 @@ describe('DefaultGatewayConnection coverage', () => {
     connectFailingConn.on('error', () => {});
     await assert.rejects(connectFailingConn.connect());
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: true,
       registerMessage: registerMessage(),
@@ -681,7 +681,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('does not emit raw websocket frame logs when debug is disabled', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: false,
       registerMessage: registerMessage(),
@@ -703,7 +703,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs frame bytes and gatewayMessageId for received frames', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -735,7 +735,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs minimal last-message summary on close', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -788,7 +788,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('keeps only the latest three outbound message summaries in close logs', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -838,7 +838,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('warns when outbound payload exceeds the large payload threshold', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -869,7 +869,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('excludes control messages from recent outbound summaries', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -909,7 +909,7 @@ describe('DefaultGatewayConnection coverage', () => {
       { closeAfterOpenMs: 0, closeCode: 1009, closeReason: 'too-big', wasClean: false },
       { open: true },
     );
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
@@ -981,7 +981,7 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     };
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnectPolicy,
       registerMessage: registerMessage(),
@@ -1000,7 +1000,7 @@ describe('DefaultGatewayConnection coverage', () => {
     const { logger, entries } = createLoggerRecorder();
     ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 20, maxMs: 20, jitter: 'none', maxElapsedMs: 5 }),
       registerMessage: registerMessage(),

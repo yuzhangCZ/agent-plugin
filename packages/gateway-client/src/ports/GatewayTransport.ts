@@ -15,8 +15,12 @@ export interface GatewayTransportOpenOptions {
  * @remarks 该接口仅承担连接与原始帧收发职责。
  */
 export interface GatewayTransport {
+  /** 打开底层连接并绑定回调。 */
   open(options: GatewayTransportOpenOptions): void;
+  /** 关闭底层连接。 */
   close(): void;
+  /** 发送已序列化字符串帧。 */
   send(payload: string): void;
+  /** 判断底层连接是否处于 open 状态。 */
   isOpen(): boolean;
 }

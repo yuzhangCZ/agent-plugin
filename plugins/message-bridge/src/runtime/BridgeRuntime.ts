@@ -25,10 +25,11 @@ import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
 import { DefaultAkSkAuth } from '@agent-plugin/gateway-client/internal-auth';
 import {
-  DefaultGatewayConnection,
-  type GatewayConnection,
-  type GatewaySendLogContext,
-} from '@agent-plugin/gateway-client/legacy';
+  createGatewayClient,
+  type GatewayClient,
+  type GatewayClientConfig,
+  type GatewaySendContext as GatewaySendLogContext,
+} from '@agent-plugin/gateway-client';
 import { createGatewayClientForTesting } from '@agent-plugin/gateway-client/internal-factory';
 import { loadConfig } from '../config/index.js';
 import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
@@ -106,7 +107,7 @@ export class BridgeRuntime {
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
 
-  private gatewayConnection: GatewayConnection | null = null;
+  private gatewayConnection: GatewayClient | null = null;
   private eventFilter: EventFilter | null = null;
   private started = false;
   private readonly rawClient: HostClientLike;
@@ -155,13 +156,13 @@ export class BridgeRuntime {
   }
 
   protected createGatewayConnection(
-    options: ConstructorParameters<typeof DefaultGatewayConnection>[0],
+    options: GatewayClientConfig,
     overrides?: { reconnectPolicy?: ReconnectPolicy },
-  ): GatewayConnection {
+  ): GatewayClient {
     if (overrides?.reconnectPolicy) {
       return createGatewayClientForTesting(options, { reconnectPolicy: overrides.reconnectPolicy });
     }
-    return new DefaultGatewayConnection(options);
+    return createGatewayClient(options);
   }
 
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
