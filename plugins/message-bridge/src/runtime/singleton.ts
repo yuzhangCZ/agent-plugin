@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { BridgeRuntime } from './BridgeRuntime.js';
 import type { PluginInput } from './types.js';
 import { AppLogger } from './AppLogger.js';
@@ -12,9 +13,33 @@ let generation = 0;
 type RuntimeInitState = 'never' | 'initializing' | 'succeeded' | 'failed_latched';
 let initState: RuntimeInitState = 'never';
 let latchedInitError: Error | null = null;
+let currentRuntimeTraceId: string | null = null;
+
+function ensureCurrentRuntimeTraceId(): string {
+  if (!currentRuntimeTraceId) {
+    currentRuntimeTraceId = randomUUID();
+  }
+  return currentRuntimeTraceId;
+}
+
+function clearCurrentRuntimeTraceId(): void {
+  currentRuntimeTraceId = null;
+}
+
+export function getCurrentRuntimeTraceId(): string | null {
+  return currentRuntimeTraceId;
+}
 
 export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime | null> {
-  const logger = new AppLogger(input.client, { component: 'singleton' });
+  if (!runtime && !initializing && initState === 'never') {
+    ensureCurrentRuntimeTraceId();
+  }
+
+  const logger = new AppLogger(
+    input.client,
+    { component: 'singleton' },
+    currentRuntimeTraceId ?? undefined,
+  );
   if (runtime) {
     logger.debug('runtime.singleton.reuse_existing');
     return runtime;
@@ -40,6 +65,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
     workspacePath: input.worktree || input.directory,
     hostDirectory: input.worktree || input.directory,
     client: input.client,
+    runtimeTraceId: ensureCurrentRuntimeTraceId(),
   });
   const token = ++generation;
   lifecycleAbortController = new AbortController();
@@ -99,6 +125,7 @@ export function stopRuntime(): void {
     initState = 'never';
     latchedInitError = null;
     resetMessageBridgeStatus();
+    clearCurrentRuntimeTraceId();
     return;
   }
 
@@ -108,6 +135,7 @@ export function stopRuntime(): void {
   initState = 'never';
   latchedInitError = null;
   resetMessageBridgeStatus();
+  clearCurrentRuntimeTraceId();
 }
 
 export function __resetRuntimeForTests(): void {

@@ -57,6 +57,7 @@ export interface BridgeRuntimeOptions {
   workspacePath?: string;
   hostDirectory?: string;
   client: unknown;
+  runtimeTraceId?: string;
 }
 
 export interface BridgeRuntimeStartOptions {
@@ -122,7 +123,7 @@ export class BridgeRuntime {
     this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
+    this.logger = new AppLogger(this.rawClient, { component: 'runtime' }, options.runtimeTraceId);
     this.sdkClient = createSdkAdapter(options.client);
     this.bridgeChannelPort = new EnvBridgeChannelAdapter();
     this.assiantDirectoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
