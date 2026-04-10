@@ -29,17 +29,3 @@ test('public api negative type fixture rejects importing overrides from stable e
     },
   );
 });
-
-test('legacy api negative type fixture rejects internal override fields', async () => {
-  await assert.rejects(
-    execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.legacy-negative.json'], {
-      cwd: packageRoot,
-    }),
-    (error) => {
-      const output = typeof error === 'object' && error
-        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
-        : '';
-      return output.includes('webSocketFactory');
-    },
-  );
-});

@@ -8,10 +8,6 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./legacy": {
-      "types": "./src/legacy/connection-compat.ts",
-      "default": "./src/legacy/connection-compat.ts"
-    },
     "./internal-auth": {
       "types": "./src/auth/AkSkAuthProvider.ts",
       "default": "./src/auth/AkSkAuthProvider.ts"
