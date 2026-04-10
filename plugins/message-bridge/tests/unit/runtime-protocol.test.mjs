@@ -1968,4 +1968,35 @@ describe('runtime protocol strictness', () => {
       await rm(fakeHome, { recursive: true, force: true });
     }
   });
+
+  test('runtime.start does not inject custom reconnect policy override into gateway client factory', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+    const calls = [];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return createResolvedConfig();
+        }
+
+        createGatewayConnection(options) {
+          calls.push({ options });
+          return super.createGatewayConnection(options);
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      runtime.stop();
+
+      assert.strictEqual(calls.length, 1);
+      assert.deepStrictEqual(calls[0].options.reconnect, createResolvedConfig().gateway.reconnect);
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
 });

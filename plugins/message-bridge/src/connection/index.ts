@@ -3,13 +3,8 @@ export interface ConnectionManager {
   disconnect(): Promise<void>;
 }
 
-export {
-  DefaultAkSkAuth,
-  type AkSkAuthPayload,
-  type GatewayAuthProvider as AkSkAuth,
-} from '@agent-plugin/gateway-client/internal-auth';
-
-export { StateManager, DefaultStateManager } from './StateManager.js';
+export { DefaultStateManager } from './StateManager.js';
+export type { StateManager } from './StateManager.js';
 
 export {
   createGatewayClient,
@@ -20,19 +15,3 @@ export {
   type GatewayClientState as ConnectionState,
   type GatewaySendContext as GatewaySendLogContext,
 } from '@agent-plugin/gateway-client';
-
-export type {
-  GatewayClient as GatewayConnection,
-  GatewayClientConfig as GatewayConnectionOptions,
-  GatewayClientEvents as GatewayConnectionEvents,
-} from '@agent-plugin/gateway-client';
-
-export { DefaultReconnectPolicy } from './ReconnectPolicy.js';
-export type {
-  ReconnectPolicy,
-  ReconnectPolicyDependencies,
-  ReconnectClock,
-  ReconnectDecision,
-  ReconnectExhaustedDecision,
-  ReconnectScheduledDecision,
-} from './ReconnectPolicy.js';

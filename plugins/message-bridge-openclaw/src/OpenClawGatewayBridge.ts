@@ -33,8 +33,8 @@ import type {
   UpstreamMessage,
 } from "./gateway-wire/transport.js";
 import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
-import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
 import {
+  createAkSkAuthProvider,
   createGatewayClient,
   type GatewayClient,
 } from "@agent-plugin/gateway-client";
@@ -389,7 +389,7 @@ export class OpenClawGatewayBridge {
         heartbeatIntervalMs: options.account.gateway.heartbeatIntervalMs,
         debug: options.account.debug,
         authPayloadProvider: () =>
-          new DefaultAkSkAuth(options.account.auth.ak, options.account.auth.sk).generateAuthPayload(),
+          createAkSkAuthProvider(options.account.auth.ak, options.account.auth.sk).generateAuthPayload(),
         registerMessage: {
           type: UPSTREAM_MESSAGE_TYPE.REGISTER,
           deviceName: this.registerMetadata.deviceName,

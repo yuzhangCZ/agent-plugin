@@ -7,8 +7,7 @@ import {
   type ChannelStatusIssue,
 } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
-import { createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
+import { createAkSkAuthProvider, createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,
@@ -146,7 +145,7 @@ function createProbeConnection(account: MessageBridgeResolvedAccount, logger: Br
     },
     heartbeatIntervalMs: account.gateway.heartbeatIntervalMs,
     debug: account.debug,
-    authPayloadProvider: () => new DefaultAkSkAuth(account.auth.ak, account.auth.sk).generateAuthPayload(),
+    authPayloadProvider: () => createAkSkAuthProvider(account.auth.ak, account.auth.sk).generateAuthPayload(),
     registerMessage: {
       type: UPSTREAM_MESSAGE_TYPE.REGISTER,
       deviceName: registerMetadata.deviceName,

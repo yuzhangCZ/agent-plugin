@@ -23,16 +23,14 @@ import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
-import { DefaultAkSkAuth } from '@agent-plugin/gateway-client/internal-auth';
 import {
+  createAkSkAuthProvider,
   createGatewayClient,
   type GatewayClient,
   type GatewayClientConfig,
   type GatewaySendContext as GatewaySendLogContext,
 } from '@agent-plugin/gateway-client';
-import { createGatewayClientForTesting } from '@agent-plugin/gateway-client/internal-factory';
 import { loadConfig } from '../config/index.js';
-import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
@@ -62,7 +60,6 @@ import {
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
-import type { ReconnectConfig } from '../types/index.js';
 import { asRecord, asString } from '../utils/type-guards.js';
 
 export interface BridgeRuntimeOptions {
@@ -151,17 +148,7 @@ export class BridgeRuntime {
     return loadConfig(this.workspacePath, this.logger);
   }
 
-  protected createReconnectPolicy(reconnect: ReconnectConfig): ReconnectPolicy {
-    return new DefaultReconnectPolicy(reconnect);
-  }
-
-  protected createGatewayConnection(
-    options: GatewayClientConfig,
-    overrides?: { reconnectPolicy?: ReconnectPolicy },
-  ): GatewayClient {
-    if (overrides?.reconnectPolicy) {
-      return createGatewayClientForTesting(options, { reconnectPolicy: overrides.reconnectPolicy });
-    }
+  protected createGatewayConnection(options: GatewayClientConfig): GatewayClient {
     return createGatewayClient(options);
   }
 
@@ -233,9 +220,8 @@ export class BridgeRuntime {
       workspacePath: this.workspacePath,
     });
 
-    const auth = new DefaultAkSkAuth(config.auth.ak, config.auth.sk);
-    const authPayloadProvider = () => auth.generateAuthPayload();
-    const reconnectPolicy = this.createReconnectPolicy(config.gateway.reconnect);
+    const authProvider = createAkSkAuthProvider(config.auth.ak, config.auth.sk);
+    const authPayloadProvider = () => authProvider.generateAuthPayload();
 
     const connection = this.createGatewayConnection(
       {
@@ -255,7 +241,6 @@ export class BridgeRuntime {
         },
         logger: this.logger.child({ component: 'gateway' }),
       },
-      { reconnectPolicy },
     );
 
     connection.on('stateChange', (state) => {

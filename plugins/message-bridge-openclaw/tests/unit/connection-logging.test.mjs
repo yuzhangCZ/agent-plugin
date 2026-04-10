@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createGatewayClient } from "@agent-plugin/gateway-client";
+import { createAkSkAuthProvider, createGatewayClient } from "@agent-plugin/gateway-client";
 
 class FakeWebSocket {
   static OPEN = 1;
   static CONNECTING = 0;
   static instances = [];
 
-  constructor(url) {
+  constructor(url, protocols) {
     this.url = url;
+    this.protocols = protocols;
     this.readyState = FakeWebSocket.CONNECTING;
     this.sent = [];
     this.onopen = null;
@@ -46,6 +47,47 @@ class FakeWebSocket {
     this.onclose?.(payload);
   }
 }
+
+test("auth payload provider is encoded into websocket subprotocol", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  try {
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket;
+    const authProvider = createAkSkAuthProvider("ak-openclaw", "sk-openclaw");
+    const conn = createGatewayClient({
+      url: "ws://localhost:8081/ws/agent",
+      authPayloadProvider: () => authProvider.generateAuthPayload(),
+      registerMessage: {
+        type: "register",
+        deviceName: "dev",
+        macAddress: "aa:bb:cc:dd:ee:ff",
+        os: "darwin",
+        toolType: "openx",
+        toolVersion: "1.0.0",
+      },
+    });
+
+    const connecting = conn.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.emitOpen();
+    await connecting;
+    ws.emitMessage({ type: "register_ok" });
+    await Promise.resolve();
+
+    assert.equal(Array.isArray(ws.protocols), true);
+    assert.equal(ws.protocols.length, 1);
+    assert.equal(ws.protocols[0].startsWith("auth."), true);
+    const decoded = JSON.parse(Buffer.from(ws.protocols[0].slice("auth.".length), "base64url").toString("utf8"));
+    assert.equal(decoded.ak, "ak-openclaw");
+    assert.equal(typeof decoded.ts, "string");
+    assert.equal(typeof decoded.nonce, "string");
+    assert.equal(typeof decoded.sign, "string");
+
+    conn.disconnect();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
 
 function createConnection(logs, options = {}) {
   const conn = createGatewayClient({
