@@ -2,7 +2,7 @@ import { createHmac } from 'crypto';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultAkSkAuth } from '../../src/connection/AkSkAuth.ts';
+import { DefaultAkSkAuth } from '@agent-plugin/gateway-client/internal-auth';
 
 describe('DefaultAkSkAuth', () => {
   test('generates gateway-compatible auth payload', () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DefaultGatewayConnection } from "../../src/connection/GatewayConnection.ts";
+import { DefaultGatewayConnection } from "@agent-plugin/gateway-client/legacy";
 
 class FakeWebSocket {
   static OPEN = 1;

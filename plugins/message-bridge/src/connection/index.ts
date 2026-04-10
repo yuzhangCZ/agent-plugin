@@ -3,7 +3,11 @@ export interface ConnectionManager {
   disconnect(): Promise<void>;
 }
 
-export { AkSkAuth, DefaultAkSkAuth } from './AkSkAuth.js';
+export {
+  DefaultAkSkAuth,
+  type AkSkAuthPayload,
+  type GatewayAuthProvider as AkSkAuth,
+} from '@agent-plugin/gateway-client/internal-auth';
 
 export { StateManager, DefaultStateManager } from './StateManager.js';
 
@@ -12,7 +16,10 @@ export {
   DefaultGatewayConnection,
   GatewayConnectionOptions,
   GatewayConnectionEvents,
-} from './GatewayConnection.js';
+  GatewayClientError,
+  type ConnectionState,
+  type GatewaySendLogContext,
+} from '@agent-plugin/gateway-client/legacy';
 
 export { DefaultReconnectPolicy } from './ReconnectPolicy.js';
 export type {

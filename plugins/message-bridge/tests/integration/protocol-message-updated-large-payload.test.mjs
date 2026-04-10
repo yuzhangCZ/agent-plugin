@@ -4,7 +4,7 @@ import http from 'node:http';
 
 import { WebSocketServer } from 'ws';
 
-import { DefaultGatewayConnection } from '../../src/connection/GatewayConnection.ts';
+import { DefaultGatewayConnection } from '@agent-plugin/gateway-client/legacy';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/message.updated.large-summary.fixture.mjs';

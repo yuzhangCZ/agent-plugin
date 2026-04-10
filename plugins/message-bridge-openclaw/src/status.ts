@@ -7,8 +7,8 @@ import {
   type ChannelStatusIssue,
 } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
-import { DefaultGatewayConnection, type GatewayConnection } from "./connection/GatewayConnection.js";
+import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
+import { DefaultGatewayConnection, type GatewayConnection } from "@agent-plugin/gateway-client/legacy";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,

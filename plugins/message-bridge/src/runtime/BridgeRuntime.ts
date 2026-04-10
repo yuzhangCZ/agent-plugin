@@ -23,12 +23,16 @@ import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
-import { loadConfig } from '../config/index.js';
-import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
-import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
-import { DefaultGatewayConnection, GatewayConnection, type GatewaySendLogContext } from '../connection/GatewayConnection.js';
-import { DefaultStateManager } from '../connection/StateManager.js';
+import { DefaultAkSkAuth } from '@agent-plugin/gateway-client/internal-auth';
+import {
+  DefaultGatewayConnection,
+  type GatewayConnection,
+  type GatewaySendLogContext,
+} from '@agent-plugin/gateway-client/legacy';
 import { createGatewayClientForTesting } from '@agent-plugin/gateway-client/internal-factory';
+import { loadConfig } from '../config/index.js';
+import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
+import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
   extractUpstreamEvent,

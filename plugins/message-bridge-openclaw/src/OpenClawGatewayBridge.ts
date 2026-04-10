@@ -33,10 +33,12 @@ import type {
   UpstreamMessage,
 } from "./gateway-wire/transport.js";
 import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
+import { DefaultAkSkAuth } from "@agent-plugin/gateway-client/internal-auth";
+import {
+  DefaultGatewayConnection,
+  type GatewayConnection,
+} from "@agent-plugin/gateway-client/legacy";
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
-import type { GatewayConnection } from "./connection/GatewayConnection.js";
-import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
-import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
 import { normalizeDownstream as normalizeDownstreamMessage } from "./gateway-wire/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
 import { resolveEffectiveReplyConfig, type StreamingSource } from "./resolveEffectiveReplyConfig.js";
