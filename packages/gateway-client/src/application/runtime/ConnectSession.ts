@@ -128,7 +128,7 @@ export class ConnectSession {
             this.context.logger?.info?.('gateway.open');
             this.state.setState('CONNECTED');
             try {
-              this.outboundSender.send(this.context.options.registerMessage);
+              this.outboundSender.sendInternalControl(this.context.options.registerMessage);
               this.context.logger?.info?.('gateway.register.sent', {
                 toolType: this.context.options.registerMessage.toolType,
                 toolVersion: this.context.options.registerMessage.toolVersion,

@@ -1,8 +1,14 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES } from '@agent-plugin/gateway-wire-v1';
+import {
+  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+} from '@agent-plugin/gateway-wire-v1';
 
+import { InboundFrameDecoder } from '../protocol/InboundFrameDecoder.ts';
+import { InboundProtocolAdapter } from '../protocol/InboundProtocolAdapter.ts';
 import type { BusinessMessageHandler } from '../handlers/BusinessMessageHandler.ts';
 import type { ControlMessageHandler } from '../handlers/ControlMessageHandler.ts';
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
+import type { GatewayInboundFrame } from '../../ports/GatewayClientMessages.ts';
+import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { HeartbeatLoop } from './HeartbeatLoop.ts';
 import { ReconnectOrchestrator } from './ReconnectOrchestrator.ts';
@@ -25,6 +31,8 @@ function logDebug(logger: GatewayRuntimeContext['logger'], message: string, meta
  * 入站帧路由器，负责控制帧与业务帧分流及 READY gating。
  */
 export class InboundFrameRouter {
+  private readonly inboundFrameDecoder: InboundFrameDecoder;
+  private readonly inboundProtocolAdapter: InboundProtocolAdapter;
   private readonly controlMessageHandler: ControlMessageHandler;
   private readonly businessMessageHandler: BusinessMessageHandler;
   private readonly transport: GatewayTransport;
@@ -34,6 +42,8 @@ export class InboundFrameRouter {
   private readonly state: GatewayRuntimeStatePort;
 
   constructor(
+    inboundFrameDecoder: InboundFrameDecoder,
+    inboundProtocolAdapter: InboundProtocolAdapter,
     controlMessageHandler: ControlMessageHandler,
     businessMessageHandler: BusinessMessageHandler,
     transport: GatewayTransport,
@@ -42,6 +52,8 @@ export class InboundFrameRouter {
     context: GatewayRuntimeContext,
     state: GatewayRuntimeStatePort,
   ) {
+    this.inboundFrameDecoder = inboundFrameDecoder;
+    this.inboundProtocolAdapter = inboundProtocolAdapter;
     this.controlMessageHandler = controlMessageHandler;
     this.businessMessageHandler = businessMessageHandler;
     this.transport = transport;
@@ -52,33 +64,32 @@ export class InboundFrameRouter {
   }
 
   async route(event: { data: string | ArrayBuffer | Blob | Uint8Array }): Promise<void> {
-    const text = await this.decodeMessageData(event.data);
-    if (text === null) {
+    this.context.telemetry.logRawFrame('onMessage', event.data);
+    const decoded = await this.inboundFrameDecoder.decode(event.data);
+    if (decoded.kind !== 'parsed') {
+      this.context.sink.emitInbound(decoded);
       return;
     }
-    const frameBytes = Buffer.byteLength(text, 'utf8');
-    this.context.telemetry.logRawFrame('onMessage', text);
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      this.context.logger?.debug?.('gateway.message.ignored_non_json', {
-        payloadLength: text.length,
-        frameBytes,
-      });
-      return;
-    }
-
+    const frameBytes = Buffer.byteLength(decoded.rawText, 'utf8');
+    const parsed = decoded.value;
     const { messageType, gatewayMessageId } = this.context.telemetry.markReceived(parsed, frameBytes);
-    this.context.sink.emitInbound(parsed);
+    const inboundFrame = this.inboundProtocolAdapter.adapt(parsed);
+    this.context.sink.emitInbound(inboundFrame);
 
     if (messageType === REGISTER_OK_MESSAGE_TYPE || messageType === REGISTER_REJECTED_MESSAGE_TYPE) {
-      this.handleControlMessage(parsed);
+      if (inboundFrame.kind === 'control') {
+        this.handleControlMessage(inboundFrame);
+      } else if (inboundFrame.kind === 'invalid') {
+        this.failClosedOnInvalidControlFrame(inboundFrame);
+      }
       return;
     }
 
-    const command = this.businessMessageHandler.handle(parsed, this.state.getState());
+    if (inboundFrame.kind !== 'business') {
+      return;
+    }
+
+    const command = this.businessMessageHandler.handle(inboundFrame.message, this.state.getState());
     if (command.kind === 'ignored-not-ready') {
       logDebug(this.context.logger, 'gateway.message.received_not_ready', {
         state: this.state.getState(),
@@ -91,8 +102,30 @@ export class InboundFrameRouter {
     this.context.sink.emitMessage(command.message);
   }
 
-  private handleControlMessage(message: unknown): void {
-    const command = this.controlMessageHandler.handle(message, this.state.getState(), this.state.isManuallyDisconnected());
+  private failClosedOnInvalidControlFrame(inboundFrame: GatewayInboundFrame & { kind: 'invalid' }): void {
+    const error = new GatewayClientError({
+      code: 'GATEWAY_PROTOCOL_VIOLATION',
+      category: 'protocol',
+      retryable: false,
+      message: inboundFrame.violation.violation.message,
+      details: { ...inboundFrame.violation.violation },
+      cause: inboundFrame.violation,
+    });
+    this.context.logger?.error?.('gateway.control.validation_failed', {
+      ...error.details,
+    });
+    // control frame 协议违约直接 fail-closed，避免握手停在半连接状态。
+    this.state.setManuallyDisconnected(true);
+    this.transport.close();
+    this.context.sink.emitError(error);
+  }
+
+  private handleControlMessage(inboundFrame: GatewayInboundFrame & { kind: 'control' }): void {
+    const command = this.controlMessageHandler.handle(
+      inboundFrame.message,
+      this.state.getState(),
+      this.state.isManuallyDisconnected(),
+    );
 
     if (command.kind === 'noop') {
       if (this.state.getState() === 'READY') {
@@ -122,13 +155,5 @@ export class InboundFrameRouter {
       ...command.error.details,
     });
     this.context.sink.emitError(command.error);
-  }
-
-  private async decodeMessageData(data: string | Blob | ArrayBuffer | ArrayBufferView): Promise<string | null> {
-    if (typeof data === 'string') return data;
-    if (data instanceof Blob) return await data.text();
-    if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
-    if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('utf8');
-    return null;
   }
 }

@@ -298,10 +298,14 @@ test("gateway send/receive logs include message correlation fields", async (t) =
   const timers = installFakeTimeouts();
   const logs = { debug: [], info: [], warn: [], error: [] };
   let conn = null;
+  let receivedMessage = null;
   try {
     FakeWebSocket.instances = [];
     globalThis.WebSocket = FakeWebSocket;
     conn = createConnection(logs);
+    conn.on("message", (message) => {
+      receivedMessage = message;
+    });
 
     const connecting = conn.connect();
     const ws = FakeWebSocket.instances[0];
@@ -328,6 +332,15 @@ test("gateway send/receive logs include message correlation fields", async (t) =
         toolSessionId: "tool_send_1",
         event: {
           type: "message.part.updated",
+          properties: {
+            part: {
+              id: "prt_send_1",
+              sessionID: "tool_send_1",
+              messageID: "msg_send_1",
+              type: "text",
+              text: "hello",
+            },
+          },
         },
       },
       {
@@ -348,6 +361,10 @@ test("gateway send/receive logs include message correlation fields", async (t) =
     assert.equal(receivedLog.meta.action, "chat");
     assert.equal(receivedLog.meta.welinkSessionId, "wl_recv_1");
     assert.equal(receivedLog.meta.toolSessionId, "tool_recv_1");
+    assert.equal(receivedMessage.type, "invoke");
+    assert.equal(receivedMessage.action, "chat");
+    assert.equal(receivedMessage.payload.toolSessionId, "tool_recv_1");
+    assert.equal(receivedMessage.payload.text, "hello");
 
     const sendLog = logs.info.find(
       (entry) => entry.message === "gateway.send" && entry.meta.gatewayMessageId === "gw_msg_send_1",
@@ -402,7 +419,7 @@ test("downstream business messages are ignored before READY", async () => {
   }
 });
 
-test("send rejects business messages before READY but allows heartbeat", async () => {
+test("send rejects business messages before READY and rejects heartbeat control messages", async () => {
   const originalWebSocket = globalThis.WebSocket;
   const logs = { debug: [], info: [], warn: [], error: [] };
   let conn = null;
@@ -421,7 +438,18 @@ test("send rejects business messages before READY but allows heartbeat", async (
         conn.send({
           type: "tool_event",
           toolSessionId: "tool_before_ready",
-          event: { type: "message.part.updated" },
+          event: {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "prt_before_ready",
+                sessionID: "tool_before_ready",
+                messageID: "msg_before_ready",
+                type: "text",
+                text: "hello",
+              },
+            },
+          },
         }),
       /not ready/i,
     );
@@ -430,11 +458,13 @@ test("send rejects business messages before READY but allows heartbeat", async (
       true,
     );
 
-    assert.doesNotThrow(() =>
-      conn.send({
-        type: "heartbeat",
-        timestamp: "2026-03-17T00:00:00.000Z",
-      }),
+    assert.throws(
+      () =>
+        conn.send({
+          type: "heartbeat",
+          timestamp: "2026-03-17T00:00:00.000Z",
+        }),
+      /gateway_invalid_message_type:heartbeat/,
     );
   } finally {
     conn?.disconnect();
@@ -464,8 +494,7 @@ test("connect rejects invalid register control messages before sending", async (
     const ws = FakeWebSocket.instances[0];
     ws.emitOpen();
 
-    await assert.rejects(connecting, /gateway_invalid_transport_message/);
-    assert.equal(logs.error.some((entry) => entry.message === "gateway.send.rejected_invalid_protocol"), true);
+    await assert.rejects(connecting, /deviceName is required/);
     assert.equal(ws.sent.length, 0);
   } finally {
     conn?.disconnect();
@@ -528,9 +557,8 @@ test("send rejects invalid heartbeat control messages", async () => {
           type: "heartbeat",
           timestamp: "",
         }),
-      /gateway_invalid_transport_message/,
+      /gateway_invalid_message_type:heartbeat/,
     );
-    assert.equal(logs.error.some((entry) => entry.message === "gateway.send.rejected_invalid_protocol"), true);
   } finally {
     conn?.disconnect();
     globalThis.WebSocket = originalWebSocket;
@@ -553,7 +581,22 @@ test("raw packet logs are disabled when debug=false", async () => {
     await connecting;
     ws.emitMessage({ type: "register_ok" });
     await Promise.resolve();
-    conn.send({ type: "heartbeat", timestamp: "2026-03-16T00:00:00.000Z" });
+    conn.send({
+      type: "tool_event",
+      toolSessionId: "tool_raw_disabled",
+      event: {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "prt_raw_disabled",
+            sessionID: "tool_raw_disabled",
+            messageID: "msg_raw_disabled",
+            type: "text",
+            text: "hello",
+          },
+        },
+      },
+    });
     ws.emitError();
 
     assert.equal(logs.info.some((entry) => entry.message.startsWith("「onOpen」===>")), false);
@@ -583,7 +626,22 @@ test("raw packet logs are readable and formatted when debug=true", async () => {
     ws.emitMessage({ type: "register_ok" });
     await Promise.resolve();
     ws.emitMessage('{"type":"invoke","messageId":"gw_msg_debug_1","payload":{"text":"hello"}}');
-    conn.send({ type: "heartbeat", timestamp: "2026-03-16T00:00:00.000Z" });
+    conn.send({
+      type: "tool_event",
+      toolSessionId: "tool_raw_debug",
+      event: {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "prt_raw_debug",
+            sessionID: "tool_raw_debug",
+            messageID: "msg_raw_debug",
+            type: "text",
+            text: "hello",
+          },
+        },
+      },
+    });
     ws.emitError({ type: "error_event", reason: "upstream" });
 
     const openLog = logs.info.find((entry) => entry.message.startsWith("「onOpen」===>"));
@@ -591,7 +649,7 @@ test("raw packet logs are readable and formatted when debug=true", async () => {
     const sendLog = logs.info.find(
       (entry) =>
         entry.message.startsWith("「sendMessage」===>") &&
-        entry.message.includes('"type":"heartbeat"'),
+        entry.message.includes('"type":"tool_event"'),
     );
     const errorLog = logs.info.find((entry) => entry.message.startsWith("「onError」===>"));
 
@@ -600,7 +658,10 @@ test("raw packet logs are readable and formatted when debug=true", async () => {
     assert.equal(onMessageLogs.length > 0, true);
     assert.equal(onMessageLogs.every((entry) => !entry.message.includes("[object Object]")), true);
     assert.equal(Boolean(sendLog), true);
-    assert.equal(sendLog.message, '「sendMessage」===>「{"type":"heartbeat","timestamp":"2026-03-16T00:00:00.000Z"}」');
+    assert.equal(
+      sendLog.message,
+      '「sendMessage」===>「{"type":"tool_event","toolSessionId":"tool_raw_debug","event":{"type":"message.part.updated","properties":{"part":{"id":"prt_raw_debug","sessionID":"tool_raw_debug","messageID":"msg_raw_debug","type":"text","text":"hello"}}}}」',
+    );
     assert.equal(Boolean(errorLog), true);
     assert.equal(errorLog.message, '「onError」===>「{"type":"error_event","reason":"upstream"}」');
   } finally {

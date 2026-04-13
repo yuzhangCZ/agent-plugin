@@ -117,6 +117,85 @@ function createLoggerRecorder() {
   return { logger, entries };
 }
 
+function createMessagePartUpdatedToolEventMessage({
+  toolSessionId,
+  messageId = 'op-msg-1',
+  partId = 'part-1',
+  text = 'hello',
+}) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: partId,
+          sessionID: toolSessionId,
+          messageID: messageId,
+          type: 'text',
+          text,
+        },
+      },
+    },
+  };
+}
+
+function createMessageUpdatedToolEventMessage({
+  toolSessionId,
+  messageId = 'msg-1',
+  finishReason,
+}) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: messageId,
+          sessionID: toolSessionId,
+          role: 'assistant',
+          time: { created: 1 },
+          ...(finishReason ? { finish: { reason: finishReason } } : {}),
+        },
+      },
+    },
+  };
+}
+
+function createSessionUpdatedToolEventMessage(toolSessionId) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      type: 'session.updated',
+      properties: {
+        sessionID: toolSessionId,
+        info: {
+          id: toolSessionId,
+        },
+      },
+    },
+  };
+}
+
+function createSessionStatusToolEventMessage(toolSessionId) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      type: 'session.status',
+      properties: {
+        sessionID: toolSessionId,
+        status: {
+          type: 'busy',
+        },
+      },
+    },
+  };
+}
+
 function waitForReady(conn, states, timeoutMs = 200) {
   if (conn.getState() === 'READY') {
     return Promise.resolve();
@@ -210,10 +289,10 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.strictEqual(conn.getState(), 'READY');
     assert.strictEqual(conn.isConnected(), true);
 
-    assert.doesNotThrow(() => conn.send({ type: 'x', payload: 1 }));
+    assert.doesNotThrow(() => conn.send({ type: 'tool_done', toolSessionId: 'tool-1', welinkSessionId: 'wl-1' }));
     conn.disconnect();
     assert.strictEqual(conn.getState(), 'DISCONNECTED');
-    assert.throws(() => conn.send({ type: 'x' }));
+    assert.throws(() => conn.send({ type: 'tool_done', toolSessionId: 'tool-1', welinkSessionId: 'wl-1' }), /gateway_not_connected/);
   });
 
   test('connect rejects invalid register control messages before sending', async () => {
@@ -231,11 +310,8 @@ describe('DefaultGatewayConnection coverage', () => {
       logger,
     });
 
-    await assert.rejects(conn.connect(), /gateway_invalid_transport_message/);
-    assert.strictEqual(
-      entries.some((entry) => entry.message === 'gateway.send.rejected_invalid_protocol'),
-      true,
-    );
+    await assert.rejects(conn.connect(), /deviceName is required/);
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.register.failed'), true);
     assert.deepStrictEqual(ScriptedWebSocket.instances[0]?.sent ?? [], []);
   });
 
@@ -255,11 +331,11 @@ describe('DefaultGatewayConnection coverage', () => {
           type: 'heartbeat',
           timestamp: '',
         }),
-      /gateway_invalid_transport_message/,
+      /gateway_invalid_message_type:heartbeat/,
     );
     assert.strictEqual(
-      entries.some((entry) => entry.message === 'gateway.send.rejected_invalid_protocol'),
-      true,
+      entries.some((entry) => entry.message === 'gateway.send' && entry.extra?.messageType === 'heartbeat'),
+      false,
     );
   });
 
@@ -562,16 +638,19 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
-  test('parses downstream messages and ignores non-json', async () => {
+  test('emits structured inbound frames and ignores invalid business payloads', async () => {
+    const inbound = [];
     const messages = [];
     const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
+    conn.on('inbound', (frame) => inbound.push(frame));
     conn.on('message', (msg) => messages.push(msg));
     await conn.connect();
 
     const ws = ScriptedWebSocket.instances[0];
+    ws.emitMessage('{"type":"status_query"}');
     ws.emitMessage('{"x":1}');
     ws.emitMessage(new Uint8Array([123, 34, 121, 34, 58, 50, 125])); // {"y":2}
     ws.emitMessage(Uint8Array.from([123, 34, 122, 34, 58, 51, 125]).buffer); // {"z":3}
@@ -579,7 +658,14 @@ describe('DefaultGatewayConnection coverage', () => {
     ws.emitMessage('not-json');
     await new Promise((r) => setTimeout(r, 10));
 
-    assert.deepStrictEqual(messages, [{ x: 1 }, { y: 2 }, { z: 3 }, { k: 4 }]);
+    assert.deepStrictEqual(messages, [{ type: 'status_query' }]);
+    assert.deepStrictEqual(
+      inbound.map((frame) => frame.kind),
+      ['control', 'business', 'invalid', 'decode_error', 'decode_error', 'decode_error', 'parse_error'],
+    );
+    assert.strictEqual(inbound[2].messageType, 'unknown');
+    assert.deepStrictEqual(inbound[2].rawPreview, { x: 1 });
+    assert.strictEqual(inbound.at(-1).rawPreview, 'not-json');
     conn.disconnect();
   });
 
@@ -593,12 +679,11 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
 
     conn.send(
-      {
-        type: 'tool_event',
-        sessionId: 'skill-1',
-        event: { type: 'message.part.updated' },
-        envelope: { messageId: 'bridge-1' },
-      },
+      createMessagePartUpdatedToolEventMessage({
+        toolSessionId: 'tool-1',
+        messageId: 'op-msg-1',
+        partId: 'part-1',
+      }),
       {
         traceId: 'bridge-1',
         runtimeTraceId: 'runtime-trace-1',
@@ -742,18 +827,17 @@ describe('DefaultGatewayConnection coverage', () => {
     });
     await conn.connect();
 
+    const lastMessage = createMessageUpdatedToolEventMessage({
+      toolSessionId: 'tool-last-1',
+      messageId: 'op-msg-last-1',
+    });
     conn.send(
-      {
-        type: 'tool_event',
-        sessionId: 'skill-1',
-        event: { type: 'message.updated' },
-        envelope: { messageId: 'bridge-last-1' },
-      },
+      lastMessage,
       {
         traceId: 'bridge-last-1',
         runtimeTraceId: 'runtime-trace-1',
         bridgeMessageId: 'bridge-last-1',
-        sessionId: 'skill-1',
+        toolSessionId: 'tool-last-1',
         eventType: 'message.updated',
         opencodeMessageId: 'op-msg-last-1',
       },
@@ -771,17 +855,9 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.deepStrictEqual(closeLog.extra.recentOutboundMessages, [
       {
         eventType: 'message.updated',
-        toolSessionId: undefined,
+        toolSessionId: 'tool-last-1',
         opencodeMessageId: 'op-msg-last-1',
-        payloadBytes: Buffer.byteLength(
-          JSON.stringify({
-            type: 'tool_event',
-            sessionId: 'skill-1',
-            event: { type: 'message.updated' },
-            envelope: { messageId: 'bridge-last-1' },
-          }),
-          'utf8',
-        ),
+        payloadBytes: Buffer.byteLength(JSON.stringify(lastMessage), 'utf8'),
       },
     ]);
   });
@@ -796,15 +872,19 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
 
     for (const [index, eventType] of ['message.updated', 'session.updated', 'session.status'].entries()) {
+      const toolSessionId = `tool-${index}`;
+      const message =
+        eventType === 'message.updated'
+          ? createMessageUpdatedToolEventMessage({ toolSessionId, messageId: `op-msg-${index}` })
+          : eventType === 'session.updated'
+            ? createSessionUpdatedToolEventMessage(toolSessionId)
+            : createSessionStatusToolEventMessage(toolSessionId);
       conn.send(
-        {
-          type: 'tool_event',
-          event: { type: eventType },
-        },
+        message,
         {
           traceId: `bridge-${index}`,
           gatewayMessageId: `bridge-${index}`,
-          toolSessionId: `tool-${index}`,
+          toolSessionId,
           eventType,
           opencodeMessageId: `op-msg-${index}`,
         },
@@ -819,19 +899,22 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'message.updated',
         toolSessionId: 'tool-0',
         opencodeMessageId: 'op-msg-0',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'message.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify(createMessageUpdatedToolEventMessage({ toolSessionId: 'tool-0', messageId: 'op-msg-0' })),
+          'utf8',
+        ),
       },
       {
         eventType: 'session.updated',
         toolSessionId: 'tool-1',
         opencodeMessageId: 'op-msg-1',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(JSON.stringify(createSessionUpdatedToolEventMessage('tool-1')), 'utf8'),
       },
       {
         eventType: 'session.status',
         toolSessionId: 'tool-2',
         opencodeMessageId: 'op-msg-2',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(JSON.stringify(createSessionStatusToolEventMessage('tool-2')), 'utf8'),
       },
     ]);
   });
@@ -848,7 +931,19 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.send(
       {
         type: 'tool_event',
-        event: { type: 'message.updated', content: 'x'.repeat(1024 * 1024) },
+        toolSessionId: 'tool-large',
+        event: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'msg-large',
+              sessionID: 'tool-large',
+              role: 'assistant',
+              time: { created: 1 },
+              finish: { reason: 'x'.repeat(1024 * 1024) },
+            },
+          },
+        },
       },
       {
         traceId: 'bridge-large',
@@ -879,7 +974,16 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.send(
       {
         type: 'tool_event',
-        event: { type: 'session.updated' },
+        toolSessionId: 'tool-business-1',
+        event: {
+          type: 'session.updated',
+          properties: {
+            sessionID: 'tool-business-1',
+            info: {
+              id: 'tool-business-1',
+            },
+          },
+        },
       },
       {
         gatewayMessageId: 'business-1',
@@ -897,7 +1001,22 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'session.updated',
         toolSessionId: 'tool-business-1',
         opencodeMessageId: 'op-msg-business-1',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify({
+            type: 'tool_event',
+            toolSessionId: 'tool-business-1',
+            event: {
+              type: 'session.updated',
+              properties: {
+                sessionID: 'tool-business-1',
+                info: {
+                  id: 'tool-business-1',
+                },
+              },
+            },
+          }),
+          'utf8',
+        ),
       },
     ]);
   });
@@ -920,7 +1039,21 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
     states.length = 0;
     conn.send(
-      { type: 'tool_event', event: { type: 'message.updated' } },
+      {
+        type: 'tool_event',
+        toolSessionId: 'tool-before',
+        event: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'msg-before',
+              sessionID: 'tool-before',
+              role: 'assistant',
+              time: { created: 1 },
+            },
+          },
+        },
+      },
       {
         gatewayMessageId: 'before-reconnect',
         toolSessionId: 'tool-before',
@@ -933,7 +1066,19 @@ describe('DefaultGatewayConnection coverage', () => {
     await waitForReady(conn, states);
 
     conn.send(
-      { type: 'tool_event', event: { type: 'session.status' } },
+      {
+        type: 'tool_event',
+        toolSessionId: 'tool-after',
+        event: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'tool-after',
+            status: {
+              type: 'busy',
+            },
+          },
+        },
+      },
       {
         gatewayMessageId: 'after-reconnect',
         toolSessionId: 'tool-after',
@@ -952,7 +1097,22 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'session.status',
         toolSessionId: 'tool-after',
         opencodeMessageId: 'op-msg-after',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify({
+            type: 'tool_event',
+            toolSessionId: 'tool-after',
+            event: {
+              type: 'session.status',
+              properties: {
+                sessionID: 'tool-after',
+                status: {
+                  type: 'busy',
+                },
+              },
+            },
+          }),
+          'utf8',
+        ),
       },
     ]);
   });

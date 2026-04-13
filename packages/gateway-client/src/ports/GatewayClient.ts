@@ -12,7 +12,10 @@ export interface GatewayClient {
   connect(): Promise<void>;
   /** 主动断开连接并停止重连与心跳。 */
   disconnect(): void;
-  /** 统一发送出口；业务消息会执行 READY gating 与协议校验。 */
+  /**
+   * 统一发送出口，只接受业务负载。
+   * @remarks 控制帧由运行时内部编排，外部调用方不应绕过 READY gating。
+   */
   send(message: GatewaySendPayload, logContext?: GatewaySendContext): void;
   /** 返回 transport 连接态。 */
   isConnected(): boolean;

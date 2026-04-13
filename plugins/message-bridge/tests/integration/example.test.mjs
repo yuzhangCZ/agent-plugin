@@ -97,7 +97,7 @@ describe('downlink -> uplink protocol', () => {
 
   test('invalid payload failure -> tool_error without code field', async () => {
     const { runtime, sent } = createRuntimeHarness({
-      routeResult: { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'bad payload' },
+      routeResult: { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'Invalid invoke payload shape' },
     });
 
     await runtime.handleDownstreamMessage({

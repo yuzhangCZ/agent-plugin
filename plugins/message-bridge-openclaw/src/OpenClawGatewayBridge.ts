@@ -5,11 +5,13 @@ import {
   type OpenClawConfig,
   type PluginRuntime,
 } from "openclaw/plugin-sdk";
+import type { GatewayBusinessMessage } from "@agent-plugin/gateway-client";
 import type {
   DownstreamMessage,
   InvokeMessage,
 } from "./gateway-wire/downstream.js";
 import { DOWNSTREAM_MESSAGE_TYPE, INVOKE_ACTION } from "./gateway-wire/downstream.js";
+import { normalizeLegacyCreateSessionPayload } from "./adapters/legacyCreateSessionAdapter.js";
 import {
   MESSAGE_PART_FIELD,
   MESSAGE_PART_TYPE,
@@ -37,7 +39,6 @@ import {
   type GatewayClient,
 } from "@agent-plugin/gateway-client";
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
-import { normalizeDownstream as normalizeDownstreamMessage } from "./gateway-wire/downstream.js";
 import { reconcileFinalText } from "./reconcileFinalText.js";
 import { resolveEffectiveReplyConfig, type StreamingSource } from "./resolveEffectiveReplyConfig.js";
 import {
@@ -428,7 +429,7 @@ export class OpenClawGatewayBridge {
       this.publishStatus();
     });
     this.connection.on("message", (message) => {
-      this.handleDownstreamMessage(message).catch((error) => {
+      this.handleDownstreamMessage(message as GatewayBusinessMessage).catch((error) => {
         this.options.logger.error("bridge.handle_downstream.failed", {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -500,38 +501,16 @@ export class OpenClawGatewayBridge {
     });
   }
 
-  async handleDownstreamMessage(raw: unknown): Promise<void> {
+  async handleDownstreamMessage(message: GatewayBusinessMessage): Promise<void> {
     if (!this.connection.isConnected()) {
       this.options.logger.warn("runtime.downstream_ignored_no_connection");
       return;
     }
     const startedAt = Date.now();
-    const fields = extractDownstreamLogFields(raw);
+    const fields = extractDownstreamLogFields(message);
     logDebug(this.options.logger, "runtime.downstream.received", fields as Record<string, unknown>);
-    const normalized = normalizeDownstreamMessage(raw, this.options.logger);
-    if (!normalized.ok) {
-      this.options.logger.warn("runtime.downstream_ignored_non_protocol", {
-        ...fields,
-        errorCode: normalized.error.code,
-        stage: normalized.error.stage,
-        field: normalized.error.field,
-        errorMessage: normalized.error.message,
-      });
-      this.sendToolError({
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
-        welinkSessionId: fields.welinkSessionId,
-        toolSessionId: fields.toolSessionId,
-        error: normalized.error.message,
-      }, {
-        gatewayMessageId: fields.gatewayMessageId,
-        action: fields.action,
-        welinkSessionId: fields.welinkSessionId,
-        toolSessionId: fields.toolSessionId,
-      });
-      return;
-    }
-
-    if (normalized.value.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
+    const adapted = this.applyCompatAdapter(message);
+    if (adapted.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
       this.options.logger.info("runtime.status_query.received", fields as Record<string, unknown>);
       const message: StatusResponseMessage = {
         type: UPSTREAM_MESSAGE_TYPE.STATUS_RESPONSE,
@@ -553,35 +532,47 @@ export class OpenClawGatewayBridge {
 
     this.options.logger.info("runtime.invoke.received", {
       ...fields,
-      action: normalized.value.action,
-      welinkSessionId: normalized.value.welinkSessionId,
-      toolSessionId: getInvokeToolSessionId(normalized.value),
+      action: adapted.action,
+      welinkSessionId: adapted.welinkSessionId,
+      toolSessionId: getInvokeToolSessionId(adapted),
     });
     const invokeContext: UpstreamSendContext = {
       gatewayMessageId: fields.gatewayMessageId,
-      action: normalized.value.action,
-      welinkSessionId: normalized.value.welinkSessionId,
-      toolSessionId: getInvokeToolSessionId(normalized.value),
+      action: adapted.action,
+      welinkSessionId: adapted.welinkSessionId,
+      toolSessionId: getInvokeToolSessionId(adapted),
     };
-    const invokeResult = await this.handleInvoke(normalized.value, invokeContext);
+    const invokeResult = await this.handleInvoke(adapted as InvokeMessage, invokeContext);
     if (invokeResult.success) {
       this.options.logger.info("runtime.invoke.completed", {
         ...fields,
-        action: normalized.value.action,
-        welinkSessionId: normalized.value.welinkSessionId,
-        toolSessionId: getInvokeToolSessionId(normalized.value),
+        action: adapted.action,
+        welinkSessionId: adapted.welinkSessionId,
+        toolSessionId: getInvokeToolSessionId(adapted),
         latencyMs: Date.now() - startedAt,
       });
       return;
     }
     this.options.logger.warn("runtime.invoke.failed", {
       ...fields,
-      action: normalized.value.action,
-      welinkSessionId: normalized.value.welinkSessionId,
-      toolSessionId: getInvokeToolSessionId(normalized.value),
+      action: adapted.action,
+      welinkSessionId: adapted.welinkSessionId,
+      toolSessionId: getInvokeToolSessionId(adapted),
       latencyMs: Date.now() - startedAt,
       reason: invokeResult.reason,
     });
+  }
+
+  private applyCompatAdapter(message: GatewayBusinessMessage): DownstreamMessage {
+    if (message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE || message.action !== INVOKE_ACTION.CREATE_SESSION) {
+      return message as DownstreamMessage;
+    }
+
+    const payload = normalizeLegacyCreateSessionPayload(message.rawPayload ?? message.payload).payload;
+    return {
+      ...message,
+      payload,
+    } as DownstreamMessage;
   }
 
   private async handleInvoke(

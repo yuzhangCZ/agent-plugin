@@ -174,6 +174,25 @@ function createGatewayConnectionMock(state = 'DISCONNECTED') {
 }
 
 describe('runtime protocol strictness', () => {
+  test('handleDownstreamMessage consumes typed gateway business message without local normalize', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    runtime.gatewayConnection = createGatewayConnectionMock('READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl_1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool_1', text: 'hello' },
+    });
+
+    assert.equal(
+      BridgeRuntime.prototype.handleDownstreamMessage.toString().includes('normalizeDownstreamMessage'),
+      false,
+    );
+  });
+
   test('gates invoke handling through gateway status view instead of local state manager', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

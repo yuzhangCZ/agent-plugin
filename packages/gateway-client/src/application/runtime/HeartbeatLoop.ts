@@ -39,7 +39,7 @@ export class HeartbeatLoop {
         timestamp: new Date().toISOString(),
       };
       try {
-        this.sender.send(heartbeat);
+        this.sender.sendInternalControl(heartbeat);
         this.context.logger?.debug?.('gateway.heartbeat.sent');
       } catch (error) {
         this.context.logger?.error?.('gateway.heartbeat.failed', {

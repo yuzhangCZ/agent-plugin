@@ -7,6 +7,8 @@ import {
   createGatewayClient,
   GatewayClientError,
 } from '../src/index.ts';
+import { DefaultOutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
+import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
 import { ControlMessageHandler } from '../src/application/handlers/ControlMessageHandler.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
@@ -48,6 +50,14 @@ class FakeWebSocket {
 
   emitMessage(message: unknown): void {
     this.onmessage?.({ data: JSON.stringify(message) });
+  }
+
+  emitRawMessage(data: string): void {
+    this.onmessage?.({ data });
+  }
+
+  emitBinaryMessage(data: ArrayBuffer): void {
+    this.onmessage?.({ data });
   }
 
   emitClose(event: { code: number; reason: string; wasClean: boolean }): void {
@@ -128,14 +138,49 @@ class FakeReconnectScheduler {
 class FakeHeartbeatScheduler {
   startCount = 0;
   stopCount = 0;
+  private task?: () => void;
 
-  start(): void {
+  start(task?: () => void): void {
     this.startCount += 1;
+    if (task) {
+      this.task = task;
+    }
   }
 
   stop(): void {
     this.stopCount += 1;
   }
+
+  trigger(): void {
+    this.task?.();
+  }
+}
+
+function createFakeSink() {
+  return {
+    emitStateChange() {},
+    emitInbound() {},
+    emitOutbound() {},
+    emitHeartbeat() {},
+    emitMessage() {},
+    emitError() {},
+  };
+}
+
+function buildFakeDependencies(overrides: Partial<GatewayClientRuntimeDependencies> = {}): GatewayClientRuntimeDependencies {
+  const wireCodec = overrides.wireCodec ?? new GatewayWireV1CodecAdapter();
+  return {
+    transport: overrides.transport ?? new FakeTransport(),
+    heartbeatScheduler: overrides.heartbeatScheduler ?? new FakeHeartbeatScheduler(),
+    reconnectScheduler: overrides.reconnectScheduler ?? new FakeReconnectScheduler(),
+    reconnectEnabled: overrides.reconnectEnabled ?? true,
+    reconnectPolicy: overrides.reconnectPolicy ?? new FakeReconnectPolicy(),
+    wireCodec,
+    outboundProtocolGate: overrides.outboundProtocolGate ?? new DefaultOutboundProtocolGate(wireCodec),
+    controlMessageHandler: overrides.controlMessageHandler ?? new ControlMessageHandler(),
+    businessMessageHandler: overrides.businessMessageHandler ?? new BusinessMessageHandler(),
+    authSubprotocolBuilder: overrides.authSubprotocolBuilder ?? (() => 'auth.test'),
+  };
 }
 
 class FakeReconnectPolicy {
@@ -188,6 +233,10 @@ class FakeTransport {
   emitOpen(): void {
     this.openState = true;
     this.handlers?.onOpen({});
+  }
+
+  emitMessage(message: unknown): void {
+    this.handlers?.onMessage({ data: JSON.stringify(message) });
   }
 
   emitClose(event: { code: number; reason: string; wasClean: boolean }): void {
@@ -271,12 +320,236 @@ test('connect sends register and enters READY only after register_ok', async () 
   ws.emitMessage({ type: 'register_ok' });
   await flushAsyncHandlers();
   assert.equal(client.getState(), 'READY');
-  assert.deepEqual(inbound.at(-1), { type: 'register_ok' });
+  assert.deepEqual(inbound.at(-1), {
+    kind: 'control',
+    messageType: 'register_ok',
+    message: { type: 'register_ok' },
+  });
   assert.deepEqual(states, ['CONNECTING', 'CONNECTED', 'READY']);
 
   ws.emitMessage({ type: 'status_query' });
   await flushAsyncHandlers();
   assert.deepEqual(messages[0], { type: 'status_query' });
+  assert.deepEqual(inbound.at(-1), {
+    kind: 'business',
+    messageType: 'status_query',
+    message: { type: 'status_query' },
+  });
+
+  client.disconnect();
+});
+
+test('non-json inbound text emits parse_error frame', async () => {
+  FakeWebSocket.instances = [];
+  const inbound: unknown[] = [];
+
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('inbound', (message) => inbound.push(message));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+
+  ws.emitRawMessage('{"bad":');
+  await flushAsyncHandlers();
+
+  assert.deepEqual(inbound.at(-1), {
+    kind: 'parse_error',
+    rawPreview: '{"bad":',
+  });
+
+  client.disconnect();
+});
+
+test('binary inbound frame emits decode_error frame', async () => {
+  FakeWebSocket.instances = [];
+  const inbound: unknown[] = [];
+
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('inbound', (message) => inbound.push(message));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+
+  const payload = new TextEncoder().encode('{"type":"status_query"}').buffer;
+  ws.emitBinaryMessage(payload);
+  await flushAsyncHandlers();
+
+  assert.deepEqual(inbound.at(-1), {
+    kind: 'decode_error',
+    reason: 'unsupported_binary_frame',
+  });
+
+  client.disconnect();
+});
+
+test('invalid downstream inbound frame is not emitted as business', async () => {
+  FakeWebSocket.instances = [];
+  const inbound: unknown[] = [];
+  const messages: unknown[] = [];
+
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('inbound', (message) => inbound.push(message));
+  client.on('message', (message) => messages.push(message));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+  ws.emitMessage({ type: 'register_ok' });
+  await flushAsyncHandlers();
+
+  ws.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-1',
+    },
+  });
+  await flushAsyncHandlers();
+
+  const lastInbound = inbound.at(-1) as { kind?: string; messageType?: string; rawPreview?: unknown } | undefined;
+  assert.equal(lastInbound?.kind, 'invalid');
+  assert.equal(lastInbound?.messageType, 'invoke');
+  assert.deepEqual(lastInbound?.rawPreview, {
+    type: 'invoke',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-1',
+    },
+  });
+  assert.equal(messages.length, 0);
+
+  client.disconnect();
+});
+
+test('invalid control frame emits protocol error instead of being silently ignored', async () => {
+  FakeWebSocket.instances = [];
+  const inbound: unknown[] = [];
+  const errors: GatewayClientError[] = [];
+  const fallbackCodec = new GatewayWireV1CodecAdapter();
+
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    wireCodec: {
+      normalizeDownstream(raw) {
+        return fallbackCodec.normalizeDownstream(raw);
+      },
+      validateTransportMessage(raw) {
+        if (
+          raw &&
+          typeof raw === 'object' &&
+          'type' in raw &&
+          (raw as { type?: unknown }).type === 'register_rejected'
+        ) {
+          return {
+            ok: false as const,
+            error: {
+              violation: {
+                stage: 'transport',
+                code: 'invalid_payload',
+                field: 'reason',
+                message: 'register_rejected reason is invalid',
+                messageType: 'register_rejected',
+              },
+            },
+          };
+        }
+        return fallbackCodec.validateTransportMessage(raw);
+      },
+    },
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('inbound', (message) => inbound.push(message));
+  client.on('error', (error) => errors.push(error as GatewayClientError));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+
+  ws.emitMessage({ type: 'register_rejected', reason: 'bad-aksk' });
+  await flushAsyncHandlers();
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
+  assert.equal(errors[0]!.retryable, false);
+  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal((inbound.at(-1) as { kind?: string })?.kind, 'invalid');
+  assert.equal((inbound.at(-1) as { messageType?: string })?.messageType, 'register_rejected');
+  assert.deepEqual((inbound.at(-1) as { rawPreview?: unknown })?.rawPreview, {
+    type: 'register_rejected',
+    reason: 'bad-aksk',
+  });
+
+  client.disconnect();
+});
+
+test('business message preserves rawPayload for plugin-private compat after shared normalization', async () => {
+  FakeWebSocket.instances = [];
+  const messages: Array<Record<string, unknown>> = [];
+
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('message', (message) => messages.push(message as Record<string, unknown>));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+  ws.emitMessage({ type: 'register_ok' });
+  await flushAsyncHandlers();
+
+  ws.emitMessage({
+    type: 'invoke',
+    action: 'create_session',
+    welinkSessionId: 'wl_legacy',
+    payload: {
+      sessionId: 'session-123',
+      metadata: { title: 'hello' },
+    },
+  });
+  await flushAsyncHandlers();
+
+  assert.deepEqual(messages.at(-1), {
+    type: 'invoke',
+    action: 'create_session',
+    welinkSessionId: 'wl_legacy',
+    payload: {},
+    rawPayload: {
+      sessionId: 'session-123',
+      metadata: { title: 'hello' },
+    },
+  });
 
   client.disconnect();
 });
@@ -430,6 +703,51 @@ test('send guards surface structured not-connected and not-ready errors', async 
   client.disconnect();
 });
 
+test('public send rejects heartbeat while internal heartbeat still reaches transport through one gate', async () => {
+  const transport = new FakeTransport();
+  const runtime = new GatewayClientRuntime(
+    { url: 'ws://localhost:8081/ws/agent', registerMessage: registerMessage() },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  assert.throws(() => runtime.send({ type: 'heartbeat' } as never), /GATEWAY_PROTOCOL_VIOLATION|type/i);
+});
+
+test('internal register and heartbeat use the same outbound validation gate', async () => {
+  const gateCalls: string[] = [];
+  const transport = new FakeTransport();
+  const heartbeatScheduler = new FakeHeartbeatScheduler();
+  const runtime = new GatewayClientRuntime(
+    { url: 'ws://localhost:8081/ws/agent', registerMessage: registerMessage() },
+    buildFakeDependencies({
+      transport,
+      heartbeatScheduler,
+      outboundProtocolGate: {
+        validateBusiness(message) {
+          gateCalls.push(`business:${message.type}`);
+          return message;
+        },
+        validateControl(message) {
+          gateCalls.push(`control:${message.type}`);
+          return message;
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  await connecting;
+  transport.emitMessage({ type: 'register_ok' });
+  await flushAsyncHandlers();
+  heartbeatScheduler.trigger();
+
+  assert.ok(gateCalls.includes('control:register'));
+  assert.ok(gateCalls.includes('control:heartbeat'));
+});
+
 test('close logging follows resolved reconnectEnabled instead of raw reconnect config', async () => {
   const transport = new FakeTransport();
   const heartbeatScheduler = new FakeHeartbeatScheduler();
@@ -456,7 +774,15 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
       reconnectEnabled: false,
       reconnectPolicy: new FakeReconnectPolicy(),
       wireCodec,
-      controlMessageHandler: new ControlMessageHandler(wireCodec),
+      outboundProtocolGate: {
+        validateBusiness(message) {
+          return message;
+        },
+        validateControl(message) {
+          return message;
+        },
+      },
+      controlMessageHandler: new ControlMessageHandler(),
       businessMessageHandler: new BusinessMessageHandler(),
       authSubprotocolBuilder: () => 'auth.test',
     } satisfies GatewayClientRuntimeDependencies,

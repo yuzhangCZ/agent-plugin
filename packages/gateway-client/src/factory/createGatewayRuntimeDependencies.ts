@@ -8,6 +8,7 @@ import { TimeoutReconnectScheduler } from '../adapters/TimeoutReconnectScheduler
 import { ControlMessageHandler } from '../application/handlers/ControlMessageHandler.ts';
 import { BusinessMessageHandler } from '../application/handlers/BusinessMessageHandler.ts';
 import type { GatewayClientRuntimeDependencies } from '../application/GatewayClientRuntime.ts';
+import { DefaultOutboundProtocolGate } from '../application/protocol/OutboundProtocolGate.ts';
 import { GATEWAY_RECONNECT_JITTER, type GatewayReconnectConfig } from '../domain/reconnect.ts';
 
 const DEFAULT_RECONNECT_CONFIG: Required<GatewayReconnectConfig> = {
@@ -48,7 +49,8 @@ export function createGatewayRuntimeDependencies(options: GatewayClientOptions):
     reconnectEnabled: reconnectPreset.enabled,
     reconnectPolicy,
     wireCodec,
-    controlMessageHandler: new ControlMessageHandler(wireCodec),
+    outboundProtocolGate: new DefaultOutboundProtocolGate(wireCodec),
+    controlMessageHandler: new ControlMessageHandler(),
     businessMessageHandler: new BusinessMessageHandler(),
     authSubprotocolBuilder: buildAuthSubprotocol,
   };

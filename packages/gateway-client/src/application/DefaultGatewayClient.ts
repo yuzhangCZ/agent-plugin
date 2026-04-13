@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { GatewayClient } from '../ports/GatewayClient.ts';
 import type { GatewayClientEvents } from '../ports/GatewayClientEvents.ts';
 import type { GatewayClientOptions } from '../ports/GatewayClientOptions.ts';
+import type { GatewaySendPayload } from '../ports/GatewayClientMessages.ts';
 import type { GatewaySendContext } from '../domain/send-context.ts';
 import {
   createGatewayClientStatus,
@@ -47,7 +48,7 @@ export class DefaultGatewayClient extends EventEmitter implements GatewayClient 
     this.runtime.disconnect();
   }
 
-  send(message: unknown, logContext?: GatewaySendContext): void {
+  send(message: GatewaySendPayload, logContext?: GatewaySendContext): void {
     this.runtime.send(message, logContext);
   }
 

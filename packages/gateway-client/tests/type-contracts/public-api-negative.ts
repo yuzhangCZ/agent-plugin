@@ -1,3 +1,7 @@
-import type { GatewayClientOverrides } from '../../src/index.ts';
+import type { GatewaySendPayload } from '../../src/index.ts';
 
-const _overrides: GatewayClientOverrides = {};
+const invalidControl: GatewaySendPayload = {
+  type: 'heartbeat',
+};
+
+void invalidControl;

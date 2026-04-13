@@ -7,8 +7,12 @@ import type { GatewayWireCodec } from '../ports/GatewayWireCodec.ts';
 import type { GatewaySendContext } from '../domain/send-context.ts';
 import type { GatewayClientState } from '../domain/state.ts';
 import { GATEWAY_CLIENT_STATE } from '../domain/state.ts';
+import type { GatewaySendPayload } from '../ports/GatewayClientMessages.ts';
 import { BusinessMessageHandler } from './handlers/BusinessMessageHandler.ts';
 import { ControlMessageHandler } from './handlers/ControlMessageHandler.ts';
+import { InboundFrameDecoder } from './protocol/InboundFrameDecoder.ts';
+import { InboundProtocolAdapter } from './protocol/InboundProtocolAdapter.ts';
+import type { OutboundProtocolGate } from './protocol/OutboundProtocolGate.ts';
 import { GatewayClientTelemetry } from './telemetry/GatewayClientTelemetry.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeSink, GatewayRuntimeStatePort } from './runtime/GatewayRuntimeContracts.ts';
 import { ConnectSession } from './runtime/ConnectSession.ts';
@@ -28,6 +32,7 @@ export interface GatewayClientRuntimeDependencies {
   reconnectEnabled: boolean;
   reconnectPolicy: ReconnectPolicy;
   wireCodec: GatewayWireCodec;
+  outboundProtocolGate: OutboundProtocolGate;
   controlMessageHandler: ControlMessageHandler;
   businessMessageHandler: BusinessMessageHandler;
   authSubprotocolBuilder: (payload: AkSkAuthPayload) => string;
@@ -65,7 +70,7 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
 
     this.outboundSender = new OutboundSender(
       dependencies.transport,
-      dependencies.wireCodec,
+      dependencies.outboundProtocolGate,
       this.context,
       this,
     );
@@ -83,6 +88,8 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       dependencies.reconnectEnabled,
     );
     this.inboundFrameRouter = new InboundFrameRouter(
+      new InboundFrameDecoder(),
+      new InboundProtocolAdapter(dependencies.wireCodec),
       dependencies.controlMessageHandler,
       dependencies.businessMessageHandler,
       dependencies.transport,
@@ -144,7 +151,7 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
     this.setState(GATEWAY_CLIENT_STATE.DISCONNECTED);
   }
 
-  send(message: unknown, logContext?: GatewaySendContext): void {
+  send(message: GatewaySendPayload, logContext?: GatewaySendContext): void {
     this.outboundSender.send(message, logContext);
   }
 }

@@ -16,9 +16,9 @@ export interface GatewayClientEvents {
   stateChange: (state: GatewayClientState) => void;
   /** 业务层可消费消息事件（已通过 READY gating）。 */
   message: (message: GatewayBusinessMessage) => void;
-  /** 原始入站帧观测事件。 */
+  /** 结构化入站帧观测事件。 */
   inbound: (message: GatewayInboundFrame) => void;
-  /** 原始出站帧观测事件。 */
+  /** 原始出站帧观测事件，包含业务负载与内部控制帧。 */
   outbound: (message: GatewayOutboundMessage) => void;
   /** 本端心跳发送观测事件。 */
   heartbeat: (message: HeartbeatMessage) => void;
