@@ -214,7 +214,7 @@ sequenceDiagram
 | `gateway.open` | info | WebSocket onopen | - | `src/connection/GatewayConnection.ts:115` |
 | `gateway.register.sent` | info | register 消息发送后 | `toolType`,`toolVersion` | `src/connection/GatewayConnection.ts:119` |
 | `gateway.ready` | info | 状态切到 READY | - | `src/connection/GatewayConnection.ts:124` |
-| `gateway.close` | warn | WebSocket onclose | `opened`,`manuallyDisconnected`,`aborted`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
+| `gateway.close` | warn | WebSocket onclose | `opened`,`manuallyDisconnected`,`aborted`,`reconnectEligible`,`reconnectDecisionReason`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
 | `gateway.error` | error | WebSocket onerror | `error`,`errorDetail`,`errorName?`,`errorType?`,`eventType?`,`readyState?` | `src/connection/GatewayConnection.ts:148` |
 | `gateway.connect.failed` | error | connect 抛异常（URL/构造等） | `error`,`errorDetail`,`errorName?`,`sourceErrorCode?` | `src/connection/GatewayConnection.ts:162` |
 | `gateway.disconnect.requested` | info | 主动 disconnect | `state` | `src/connection/GatewayConnection.ts:171` |
@@ -224,7 +224,7 @@ sequenceDiagram
 | `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
 | `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
 | `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
-| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs` | `src/connection/GatewayConnection.ts` |
+| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs`,`reconnectEligible`,`reconnectDecisionReason` | `src/connection/GatewayConnection.ts` |
 | `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
 | `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
 | `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
@@ -234,6 +234,20 @@ sequenceDiagram
 | `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
 
 ### 4.4 event.*
+
+`gateway.close.extra.reconnectDecisionReason` 固定枚举值：
+
+- `manual_disconnect`
+- `aborted`
+- `gateway_rejected`
+- `initial_connect_non_retryable`
+- `close_code_retryable`
+- `close_code_non_retryable`
+- `close_code_missing`
+
+`gateway.reconnect.exhausted.extra.reconnectDecisionReason` 固定为：
+
+- `reconnect_window_exhausted`
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
