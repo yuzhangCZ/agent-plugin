@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
@@ -65,7 +66,7 @@ describe('protocol permission-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['permission.replied']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const permissionRepliedEvent = await loadFixture('permission.replied.json');
     await runtime.handleEvent(permissionRepliedEvent);
@@ -95,7 +96,7 @@ describe('protocol permission-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const permissionAskedEvent = await loadFixture('permission.asked.json');
     await runtime.handleEvent(permissionAskedEvent);
@@ -157,7 +158,7 @@ describe('protocol permission-roundtrip', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',

@@ -15,7 +15,6 @@ function readyContext(client, overrides = {}) {
     client,
     hostClient: overrides.hostClient ?? client,
     connectionState: 'READY',
-    agentId: 'agent-1',
     sessionId: 'ctx-session',
     effectiveDirectory: overrides.effectiveDirectory,
     ...overrides,

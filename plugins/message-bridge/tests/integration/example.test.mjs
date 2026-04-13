@@ -17,6 +17,7 @@ import {
 import { createMessageRecorder } from '@agent-plugin/test-support/transport';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient() {
   return {
@@ -53,7 +54,7 @@ function createRuntimeHarness({ state = 'READY', routeResult } = {}) {
   runtime.gatewayConnection = {
     send: recorder.send,
   };
-  runtime.stateManager.setState(state);
+  setRuntimeGatewayState(runtime, state);
   runtime.actionRouter = {
     route: async () => routeResult ?? { success: true, data: { ok: true } },
   };

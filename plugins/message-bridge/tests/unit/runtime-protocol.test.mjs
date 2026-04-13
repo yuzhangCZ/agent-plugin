@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient(overrides = {}) {
   const base = {
@@ -156,7 +157,51 @@ function createRegisterCaptureWebSocket() {
   };
 }
 
+function createGatewayConnectionMock(state = 'DISCONNECTED') {
+  let currentState = state;
+  return {
+    send: () => undefined,
+    disconnect: () => undefined,
+    getState: () => currentState,
+    getStatus: () => ({
+      isReady: () => currentState === 'READY',
+    }),
+    setState: (next) => {
+      currentState = next;
+    },
+    on: () => undefined,
+  };
+}
+
 describe('runtime protocol strictness', () => {
+  test('gates invoke handling through gateway status view instead of local state manager', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    let routeCalls = 0;
+    const connection = createGatewayConnectionMock('CONNECTING');
+    connection.send = (msg) => sent.push(msg);
+    runtime.gatewayConnection = connection;
+    runtime.actionRouter = {
+      route: async () => {
+        routeCalls += 1;
+        return { success: true, data: { sessionId: 'unexpected' } };
+      },
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-chat',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-not-ready', text: 'hello' },
+    });
+
+    assert.strictEqual(routeCalls, 0);
+    assert.deepStrictEqual(sent, []);
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -171,7 +216,7 @@ describe('runtime protocol strictness', () => {
         return { success: true, data: { sessionId: 'unexpected' } };
       },
     };
-    runtime.stateManager.setState('CONNECTING');
+    setRuntimeGatewayState(runtime, 'CONNECTING');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -197,7 +242,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -221,7 +266,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -258,7 +303,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -286,7 +331,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -318,7 +363,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -350,7 +395,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -390,7 +435,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -420,7 +465,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -465,7 +510,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -520,7 +565,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -549,7 +594,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -595,7 +640,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -632,7 +677,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -657,7 +702,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -682,7 +727,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -703,7 +748,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'status_query',
@@ -732,7 +777,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -762,7 +807,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -796,7 +841,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -820,7 +865,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -931,7 +976,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['message.part.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'message.part.updated',
@@ -983,7 +1028,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.idle',
@@ -1013,7 +1058,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1054,7 +1099,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const invokeTask = runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1095,7 +1140,7 @@ describe('runtime protocol strictness', () => {
     const sent = [];
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1141,7 +1186,7 @@ describe('runtime protocol strictness', () => {
 
     runtime.effectiveDirectory = '/env/bridge-root';
     runtime.gatewayConnection = { send: () => {} };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1723,7 +1768,7 @@ describe('runtime protocol strictness', () => {
     });
 
     runtime.gatewayConnection = { send: () => {} };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',

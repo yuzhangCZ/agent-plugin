@@ -18,7 +18,6 @@ export function createEnvelope(overrides = {}) {
     messageId: crypto.randomUUID(),
     timestamp: Date.now(),
     source: 'message-bridge',
-    agentId: overrides.agentId || 'bridge-test-001',
     sessionId: overrides.sessionId || null,
     sequenceNumber: overrides.sequenceNumber || 1,
     sequenceScope: overrides.sequenceScope || 'session',
@@ -255,7 +254,6 @@ export function sanitizeLog(data) {
 export function compareEnvelopes(env1, env2) {
   const keysToCompare = [
     'version',
-    'agentId',
     'sessionId',
     'sequenceNumber',
     'sequenceScope'

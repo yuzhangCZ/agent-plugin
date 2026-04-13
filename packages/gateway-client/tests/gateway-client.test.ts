@@ -281,6 +281,37 @@ test('connect sends register and enters READY only after register_ok', async () 
   client.disconnect();
 });
 
+test('getStatus derives readiness from the current state snapshot', async () => {
+  FakeWebSocket.instances = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal(client.getStatus().isReady(), false);
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await connecting;
+
+  assert.equal(client.getState(), 'CONNECTED');
+  assert.equal(client.getStatus().isReady(), false);
+
+  ws.emitMessage({ type: 'register_ok' });
+  await flushAsyncHandlers();
+
+  assert.equal(client.getState(), 'READY');
+  assert.equal(client.getStatus().isReady(), true);
+
+  client.disconnect();
+  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal(client.getStatus().isReady(), false);
+});
+
 test('default reconnect preset exhausts after maxElapsedMs and does not reconnect forever', async () => {
   FakeWebSocket.instances = [];
   const logs = {

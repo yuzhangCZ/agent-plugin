@@ -111,12 +111,9 @@ async function createConnectedHarness({ maxPayload } = {}) {
 
   runtime.gatewayConnection = connection;
   runtime.eventFilter = new EventFilter(['message.updated']);
-  connection.on('stateChange', (state) => {
-    runtime.stateManager.setState(state);
-  });
 
   await connection.connect();
-  await waitFor(() => connection.getState() === 'READY');
+  await waitFor(() => connection.getStatus().isReady());
 
   return {
     runtime,

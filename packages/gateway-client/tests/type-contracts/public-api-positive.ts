@@ -37,3 +37,4 @@ client.on('outbound', (_message: GatewayOutboundMessage) => {});
 const payload: GatewaySendPayload = { type: 'tool_done', toolSessionId: 'tool-1' };
 const _errorCode: GatewayClientErrorCode = 'GATEWAY_NOT_READY';
 client.send(payload);
+client.getStatus().isReady();

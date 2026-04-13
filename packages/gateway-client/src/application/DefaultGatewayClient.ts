@@ -4,7 +4,11 @@ import type { GatewayClient } from '../ports/GatewayClient.ts';
 import type { GatewayClientEvents } from '../ports/GatewayClientEvents.ts';
 import type { GatewayClientOptions } from '../ports/GatewayClientOptions.ts';
 import type { GatewaySendContext } from '../domain/send-context.ts';
-import type { GatewayClientState } from '../domain/state.ts';
+import {
+  createGatewayClientStatus,
+  type GatewayClientState,
+  type GatewayClientStatus,
+} from '../domain/state.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from './GatewayClientRuntime.ts';
 
 /**
@@ -53,5 +57,9 @@ export class DefaultGatewayClient extends EventEmitter implements GatewayClient 
 
   getState(): GatewayClientState {
     return this.runtime.getState();
+  }
+
+  getStatus(): GatewayClientStatus {
+    return createGatewayClientStatus(this.getState());
   }
 }

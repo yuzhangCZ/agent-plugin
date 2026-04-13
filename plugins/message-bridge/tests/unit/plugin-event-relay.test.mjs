@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/message.updated.large-summary.fixture.mjs';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 describe('event uplink via hook boundary', () => {
   test('unsupported upstream events fail closed before forwarding', async () => {
@@ -22,7 +23,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({ type: 'session.created' });
     await new Promise((r) => setTimeout(r, 10));
@@ -38,7 +39,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg, ctx) => sent.push({ msg, ctx }) };
     runtime.eventFilter = new EventFilter(['message.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'message.updated',
@@ -70,7 +71,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg, ctx) => sent.push({ msg, ctx }) };
     runtime.eventFilter = new EventFilter(['message.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent(event);
 
@@ -123,7 +124,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['message.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'message.updated',
@@ -156,7 +157,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['question.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'question.asked',
@@ -193,7 +194,7 @@ describe('event uplink via hook boundary', () => {
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['message.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'message.updated',

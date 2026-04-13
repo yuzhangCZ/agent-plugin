@@ -112,3 +112,40 @@ export class MockGatewayServer {
 export function createMockGateway(options = {}) {
   return new MockGatewayServer(options);
 }
+
+export function createGatewayConnectionStub(state = 'DISCONNECTED', overrides = {}) {
+  let currentState = state;
+
+  return {
+    send: () => undefined,
+    disconnect: () => undefined,
+    getState: () => currentState,
+    getStatus: () => ({
+      isReady: () => currentState === 'READY',
+    }),
+    setState: (next) => {
+      currentState = next;
+    },
+    on: () => undefined,
+    ...overrides,
+  };
+}
+
+export function setRuntimeGatewayState(runtime, state) {
+  if (!runtime.gatewayConnection) {
+    runtime.gatewayConnection = createGatewayConnectionStub(state);
+    return runtime.gatewayConnection;
+  }
+
+  if (typeof runtime.gatewayConnection.setState === 'function') {
+    runtime.gatewayConnection.setState(state);
+    return runtime.gatewayConnection;
+  }
+
+  runtime.gatewayConnection = createGatewayConnectionStub(state, runtime.gatewayConnection);
+  return runtime.gatewayConnection;
+}
+
+export function getRuntimeGatewayState(runtime) {
+  return runtime.gatewayConnection?.getState?.();
+}

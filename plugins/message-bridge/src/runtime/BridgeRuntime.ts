@@ -31,7 +31,6 @@ import {
   type GatewaySendContext as GatewaySendLogContext,
 } from '@agent-plugin/gateway-client';
 import { loadConfig } from '../config/index.js';
-import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
   extractUpstreamEvent,
@@ -94,7 +93,6 @@ interface DownstreamLogFields {
 
 export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
-  private readonly stateManager = new DefaultStateManager();
   private readonly registry = new DefaultActionRegistry();
   private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
   private readonly bridgeChannelPort: EnvBridgeChannelAdapter;
@@ -213,7 +211,6 @@ export class BridgeRuntime {
 
     const startupValidation = await this.validateStartupPrerequisites();
     this.sdkClient = startupValidation.sdkClient;
-    const agentId = this.stateManager.generateAndBindAgentId();
     this.eventFilter = new EventFilter(config.events.allowlist);
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
     warnUnknownToolType(this.logger, 'runtime.register.tool_type.unknown', config.gateway.channel, {
@@ -244,12 +241,7 @@ export class BridgeRuntime {
     );
 
     connection.on('stateChange', (state) => {
-      this.stateManager.setState(state);
       this.logger.info('gateway.state.changed', { state });
-      if (state === 'CONNECTING') {
-        const nextAgentId = this.stateManager.resetForReconnect();
-        this.logger.info('runtime.agent.rebound', { agentId: nextAgentId });
-      }
     });
 
     connection.on('message', (message) => {
@@ -282,7 +274,7 @@ export class BridgeRuntime {
     }
 
     this.started = true;
-    this.logger.info('runtime.start.completed', { agentId: this.stateManager.getAgentId() });
+    this.logger.info('runtime.start.completed');
   }
 
   stop(): void {
@@ -310,9 +302,10 @@ export class BridgeRuntime {
     const eventLogger = this.createMessageLogger(eventFields, eventTraceId);
     eventLogger.debug('event.received');
 
-    if (!this.stateManager.isReady() || !this.gatewayConnection || !this.eventFilter) {
+    const connection = this.gatewayConnection;
+    if (!connection || !connection.getStatus().isReady() || !this.eventFilter) {
       eventLogger.debug('event.ignored_not_ready', {
-        state: this.stateManager.getState(),
+        state: connection?.getState(),
       });
       return;
     }
@@ -357,7 +350,7 @@ export class BridgeRuntime {
     if (!validatedEnvelope) {
       return;
     }
-    this.gatewayConnection.send(validatedEnvelope, transportLogContext);
+    connection.send(validatedEnvelope, transportLogContext);
     forwardingLogger.debug('event.forwarded');
 
     if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE) {
@@ -443,7 +436,7 @@ export class BridgeRuntime {
       const result = await this.actionRouter.route(
         DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
         payload,
-        this.buildActionContext(undefined, statusLogger),
+        this.buildActionContext(this.gatewayConnection, undefined, statusLogger),
       );
       if (!result.success) {
         this.sendToolError(result, undefined, {
@@ -499,9 +492,9 @@ export class BridgeRuntime {
       traceId,
     );
 
-    if (!this.stateManager.isReady()) {
+    if (!this.gatewayConnection.getStatus().isReady()) {
       invokeLogger.warn('runtime.invoke.ignored_not_ready', {
-        state: this.stateManager.getState(),
+        state: this.gatewayConnection.getState(),
       });
       return;
     }
@@ -516,7 +509,7 @@ export class BridgeRuntime {
       const result = await this.actionRouter.route(
         message.action,
         message.payload,
-        this.buildActionContext(welinkSessionId, invokeLogger),
+        this.buildActionContext(this.gatewayConnection, welinkSessionId, invokeLogger),
       );
 
       if (!result.success) {
@@ -583,7 +576,7 @@ export class BridgeRuntime {
     const result = await this.actionRouter.route(
       message.action,
       message.payload,
-      this.buildActionContext(welinkSessionId, invokeLogger),
+      this.buildActionContext(this.gatewayConnection, welinkSessionId, invokeLogger),
     );
 
     if (!result.success) {
@@ -623,22 +616,27 @@ export class BridgeRuntime {
     }
   }
 
-  private buildActionContext(welinkSessionId?: string, logger: BridgeLogger = this.logger) {
+  private buildActionContext(
+    connection: GatewayClient | null,
+    welinkSessionId?: string,
+    logger: BridgeLogger = this.logger,
+  ) {
     if (!this.sdkClient) {
       throw new Error('runtime.sdk_client_unavailable');
+    }
+    if (!connection) {
+      throw new Error('runtime.gateway_connection_unavailable');
     }
 
     return {
       client: this.sdkClient,
       hostClient: this.rawClient,
-      connectionState: this.stateManager.getState(),
-      agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
+      connectionState: connection.getState(),
       welinkSessionId,
       effectiveDirectory: this.effectiveDirectory,
       assiantDirectoryMappingConfigured: this.assiantDirectoryMappingPort.isConfigured(),
       logger: logger.child({
         component: 'action',
-        agentId: this.stateManager.getAgentId() ?? 'unknown-agent',
         welinkSessionId,
       }),
     };

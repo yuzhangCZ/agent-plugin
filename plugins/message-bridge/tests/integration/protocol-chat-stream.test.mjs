@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
@@ -65,7 +66,7 @@ describe('protocol chat-stream', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['message.part.delta', 'message.part.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const deltaEvent = await loadFixture('message.part.delta.json');
     const updatedEvent = await loadFixture('message.part.updated.text.json');
@@ -96,7 +97,7 @@ describe('protocol chat-stream', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',

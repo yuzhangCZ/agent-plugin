@@ -1,5 +1,5 @@
 import type { GatewaySendContext } from '../domain/send-context.ts';
-import type { GatewayClientState } from '../domain/state.ts';
+import type { GatewayClientState, GatewayClientStatus } from '../domain/state.ts';
 import type { GatewaySendPayload } from './GatewayClientMessages.ts';
 import type { GatewayClientEvents } from './GatewayClientEvents.ts';
 
@@ -18,6 +18,8 @@ export interface GatewayClient {
   isConnected(): boolean;
   /** 返回状态机状态。 */
   getState(): GatewayClientState;
+  /** 返回当前状态快照的语义视图。 */
+  getStatus(): GatewayClientStatus;
   /** 订阅 facade 事件。 */
   on<E extends keyof GatewayClientEvents>(event: E, listener: GatewayClientEvents[E]): this;
 }

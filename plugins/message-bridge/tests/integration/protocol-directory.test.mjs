@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { getRuntimeGatewayState, setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient(overrides = {}) {
   const base = {
@@ -89,7 +90,7 @@ function createRegisterCaptureWebSocket() {
 
 async function waitForReady(runtime, timeoutMs = 250) {
   const startedAt = Date.now();
-  while (runtime.stateManager.getState() !== 'READY') {
+  while (getRuntimeGatewayState(runtime) !== 'READY') {
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error(`runtime did not become READY within ${timeoutMs}ms`);
     }
@@ -138,7 +139,7 @@ describe('protocol directory-context integration', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -257,7 +258,7 @@ describe('protocol directory-context integration', () => {
     runtime.gatewayConnection = {
       send: () => {},
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -582,7 +583,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -723,7 +724,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -907,7 +908,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -1034,7 +1035,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -1112,7 +1113,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',

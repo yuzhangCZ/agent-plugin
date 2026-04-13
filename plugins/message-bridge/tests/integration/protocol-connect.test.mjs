@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient() {
   return {
@@ -41,7 +42,7 @@ describe('protocol status-query', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({ type: 'status_query' });
 

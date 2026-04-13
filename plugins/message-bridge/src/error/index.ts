@@ -12,7 +12,6 @@ export class BridgeError extends Error {
 
 export function buildToolError(
   error: string,
-  _agentId: string,
   welinkSessionId?: string,
   toolSessionId?: string,
   _sequenceNumber?: number,

@@ -9,7 +9,6 @@ describe('DefaultActionRouter coverage', () => {
   const context = {
     client: {},
     connectionState: 'READY',
-    agentId: 'agent-1',
     sessionId: 's1',
   };
 
@@ -33,13 +32,13 @@ describe('DefaultActionRouter coverage', () => {
     const registry = new DefaultActionRegistry();
     registry.register({
       name: 'x',
-      execute: async (_payload, ctx) => ({ success: true, data: { id: ctx.agentId } }),
+      execute: async () => ({ success: true, data: { id: 'static-id' } }),
     });
     router.setRegistry(registry);
 
     const ok = await router.route('x', { p: 1 }, context);
     assert.strictEqual(ok.success, true);
-    assert.strictEqual(ok.data.id, 'agent-1');
+    assert.strictEqual(ok.data.id, 'static-id');
   });
 });
 
