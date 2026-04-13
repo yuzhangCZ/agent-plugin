@@ -1,9 +1,9 @@
-import os from "node:os";
 import {
+  buildGatewayRegisterMessage,
   createAkSkAuthProvider,
   type GatewayClientConfig,
 } from "@agent-plugin/gateway-client";
-import { UPSTREAM_MESSAGE_TYPE } from "./gateway-wire/transport.js";
+import os from "node:os";
 import type { RegisterMetadata } from "./runtime/RegisterMetadata.js";
 import type { BridgeLogger, MessageBridgeResolvedAccount } from "./types.js";
 
@@ -25,14 +25,13 @@ export function buildGatewayClientConfig(
     heartbeatIntervalMs: account.gateway.heartbeatIntervalMs,
     debug: account.debug,
     authPayloadProvider: () => createAkSkAuthProvider(account.auth.ak, account.auth.sk).generateAuthPayload(),
-    registerMessage: {
-      type: UPSTREAM_MESSAGE_TYPE.REGISTER,
+    registerMessage: buildGatewayRegisterMessage({
       deviceName: registerMetadata.deviceName,
       os: os.platform(),
       toolType: registerMetadata.toolType,
       toolVersion: registerMetadata.toolVersion,
-      ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
-    },
+      macAddress: registerMetadata.macAddress,
+    }),
     logger,
   };
 }

@@ -24,6 +24,7 @@ import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
 import {
+  buildGatewayRegisterMessage,
   createAkSkAuthProvider,
   createGatewayClient,
   type GatewayClient,
@@ -220,25 +221,22 @@ export class BridgeRuntime {
     const authProvider = createAkSkAuthProvider(config.auth.ak, config.auth.sk);
     const authPayloadProvider = () => authProvider.generateAuthPayload();
 
-    const connection = this.createGatewayConnection(
-      {
-        url: config.gateway.url,
-        debug: effectiveDebug,
-        reconnect: config.gateway.reconnect,
-        heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
-        abortSignal: options.abortSignal,
-        authPayloadProvider,
-        registerMessage: {
-          type: UPSTREAM_MESSAGE_TYPE.REGISTER,
-          deviceName: registerMetadata.deviceName,
-          os: os.platform(),
-          toolType: config.gateway.channel,
-          toolVersion: registerMetadata.toolVersion,
-          ...(registerMetadata.macAddress ? { macAddress: registerMetadata.macAddress } : {}),
-        },
-        logger: this.logger.child({ component: 'gateway' }),
-      },
-    );
+    const connection = this.createGatewayConnection({
+      url: config.gateway.url,
+      debug: effectiveDebug,
+      reconnect: config.gateway.reconnect,
+      heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
+      abortSignal: options.abortSignal,
+      authPayloadProvider,
+      registerMessage: buildGatewayRegisterMessage({
+        deviceName: registerMetadata.deviceName,
+        os: os.platform(),
+        toolType: config.gateway.channel,
+        toolVersion: registerMetadata.toolVersion,
+        macAddress: registerMetadata.macAddress,
+      }),
+      logger: this.logger.child({ component: 'gateway' }),
+    });
 
     connection.on('stateChange', (state) => {
       this.logger.info('gateway.state.changed', { state });

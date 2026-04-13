@@ -1,4 +1,5 @@
 import {
+  buildGatewayRegisterMessage,
   createGatewayClient,
   createAkSkAuthProvider,
   type GatewayBusinessMessage,
@@ -10,17 +11,17 @@ import {
 } from '../../src/index.ts';
 
 const authProvider = createAkSkAuthProvider('ak', 'sk');
+const registerMessage = buildGatewayRegisterMessage({
+  deviceName: 'dev',
+  os: 'darwin',
+  toolType: 'opencode',
+  toolVersion: '1.0.0',
+});
 
 const config: GatewayClientConfig = {
   url: 'ws://localhost:8081/ws/agent',
   authPayloadProvider: () => authProvider.generateAuthPayload(),
-  registerMessage: {
-    type: 'register',
-    deviceName: 'dev',
-    os: 'darwin',
-    toolType: 'opencode',
-    toolVersion: '1.0.0',
-  },
+  registerMessage,
   reconnect: {
     baseMs: 1000,
     maxMs: 30000,

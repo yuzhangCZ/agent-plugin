@@ -29,3 +29,17 @@ test('public api negative type fixture rejects importing overrides from stable e
     },
   );
 });
+
+test('public api negative type fixture rejects importing config assembly helper from stable entry', async () => {
+  await assert.rejects(
+    execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-assemble.json'], {
+      cwd: packageRoot,
+    }),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('assembleGatewayClientConfig');
+    },
+  );
+});
