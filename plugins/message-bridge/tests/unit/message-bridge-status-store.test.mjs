@@ -103,6 +103,21 @@ describe('message bridge status store', () => {
     assert.strictEqual(queryLogs[0].extra.updatedAt, snapshot.updatedAt);
   });
 
+  test('writes null trace fields when runtime lifecycle trace is unavailable', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs), {
+      runtimeTraceIdProvider: () => null,
+    });
+
+    getMessageBridgeStatus();
+    await flushLogs();
+
+    const queryLogs = logs.filter((entry) => entry?.message === 'status_api.query');
+    assert.strictEqual(queryLogs.length, 1);
+    assert.strictEqual(queryLogs[0].extra.runtimeTraceId, null);
+    assert.strictEqual(queryLogs[0].extra.traceId, null);
+  });
+
   test('logs subscribe and unsubscribe with listener count', async () => {
     const logs = [];
     configureMessageBridgeStatusLogger(createLoggingClient(logs));

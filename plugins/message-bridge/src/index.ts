@@ -1,4 +1,4 @@
-import { getOrCreateRuntime } from './runtime/singleton.js';
+import { getCurrentRuntimeTraceId, getOrCreateRuntime } from './runtime/singleton.js';
 import {
   configureMessageBridgeStatusLogger,
   getMessageBridgeStatus,
@@ -9,10 +9,16 @@ import type { Plugin } from './runtime/types.js';
 import { getErrorDetailsForLog, getErrorMessage } from './utils/error.js';
 
 export const MessageBridgePlugin: Plugin = async (input) => {
-  configureMessageBridgeStatusLogger(input.client);
-  const logger = new AppLogger(input.client, { component: 'plugin' });
+  configureMessageBridgeStatusLogger(input.client, {
+    runtimeTraceIdProvider: getCurrentRuntimeTraceId,
+  });
   try {
     const runtime = await getOrCreateRuntime(input);
+    const logger = new AppLogger(
+      input.client,
+      { component: 'plugin' },
+      getCurrentRuntimeTraceId() ?? undefined,
+    );
     if (!runtime) {
       logger.info('plugin.init.blocked_reinit_noop', {
         workspacePath: input.worktree || input.directory,
@@ -36,6 +42,11 @@ export const MessageBridgePlugin: Plugin = async (input) => {
       },
     };
   } catch (error) {
+    const logger = new AppLogger(
+      input.client,
+      { component: 'plugin' },
+      getCurrentRuntimeTraceId() ?? undefined,
+    );
     logger.error('plugin.init.failed_non_fatal', {
       workspacePath: input.worktree || input.directory,
       error: getErrorMessage(error),

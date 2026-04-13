@@ -8,10 +8,14 @@ import {
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 
 type MessageBridgeStatusListener = (snapshot: MessageBridgeStatusSnapshot) => void;
+interface MessageBridgeStatusLoggerOptions {
+  runtimeTraceIdProvider?: () => string | null;
+}
 
 let snapshot = createDefaultMessageBridgeStatusSnapshot();
 const listeners = new Set<MessageBridgeStatusListener>();
 let logger: BridgeLogger | null = null;
+let runtimeTraceIdProvider: (() => string | null) | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -31,10 +35,19 @@ function cloneCurrentSnapshot(): MessageBridgeStatusSnapshot {
 }
 
 function logStatusApi(message: string, extra?: Record<string, unknown>): void {
-  logger?.info(message, extra);
+  const runtimeTraceId = runtimeTraceIdProvider?.() ?? null;
+  const traceOverrides = {
+    runtimeTraceId,
+    traceId: runtimeTraceId,
+  };
+  logger?.info(message, {
+    ...(extra ?? {}),
+    ...traceOverrides,
+  });
 }
 
-export function configureMessageBridgeStatusLogger(client: unknown): void {
+export function configureMessageBridgeStatusLogger(client: unknown, options: MessageBridgeStatusLoggerOptions = {}): void {
+  runtimeTraceIdProvider = options.runtimeTraceIdProvider ?? runtimeTraceIdProvider;
   if (!hasAppLog(client)) {
     return;
   }
@@ -104,6 +117,7 @@ export function resetMessageBridgeStatus(): MessageBridgeStatusSnapshot {
 export function __resetMessageBridgeStatusForTests(): MessageBridgeStatusSnapshot {
   listeners.clear();
   logger = null;
+  runtimeTraceIdProvider = null;
   snapshot = createDefaultMessageBridgeStatusSnapshot(() => 0);
   return resetMessageBridgeStatus();
 }

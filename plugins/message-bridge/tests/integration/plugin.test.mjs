@@ -139,6 +139,40 @@ describe('plugin contract', () => {
     assert.strictEqual(unsubscribeLog.extra.listenerCount, 0);
   });
 
+  test('uses one runtimeTraceId across status_api, singleton, and runtime logs in one init', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client }));
+    getMessageBridgeStatus();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const statusLog = logs.find((entry) => entry?.message === 'status_api.changed');
+    const singletonLog = logs.find((entry) => entry?.message === 'runtime.singleton.init_first_attempt_started');
+    const runtimeLog = logs.find((entry) => entry?.message === 'runtime.start.requested');
+
+    assert.ok(statusLog);
+    assert.ok(singletonLog);
+    assert.ok(runtimeLog);
+
+    const statusTraceId = statusLog.extra.runtimeTraceId;
+    const singletonTraceId = singletonLog.extra.runtimeTraceId;
+    const runtimeTraceId = runtimeLog.extra.runtimeTraceId;
+
+    assert.strictEqual(typeof statusTraceId, 'string');
+    assert.strictEqual(typeof singletonTraceId, 'string');
+    assert.strictEqual(typeof runtimeTraceId, 'string');
+    assert.strictEqual(statusTraceId, singletonTraceId);
+    assert.strictEqual(singletonTraceId, runtimeTraceId);
+  });
+
   test('keeps existing private status api logger when later init client has no app.log', async () => {
     const logs = [];
     const loggingClient = createPluginClient({
@@ -334,6 +368,10 @@ describe('plugin contract', () => {
       assert.strictEqual(websocketCtorCalls, 1);
       const blockedLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt');
       assert.strictEqual(blockedLogs.length, 1);
+      assert.strictEqual(
+        blockedLogs[0].extra.runtimeTraceId,
+        initFailureLogs[0].extra.runtimeTraceId,
+      );
       const initFailureLogsAfterBlocked = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
       assert.strictEqual(initFailureLogsAfterBlocked.length, 1);
 
@@ -407,6 +445,12 @@ describe('plugin contract', () => {
 
     const startLogsBeforeStop = logs.filter((entry) => entry?.message === 'runtime.start.requested');
     assert.strictEqual(startLogsBeforeStop.length, 1);
+    const reuseLogsBeforeStop = logs.filter((entry) => entry?.message === 'runtime.singleton.reuse_existing');
+    assert.strictEqual(reuseLogsBeforeStop.length, 1);
+    assert.strictEqual(
+      reuseLogsBeforeStop[0].extra.runtimeTraceId,
+      startLogsBeforeStop[0].extra.runtimeTraceId,
+    );
 
     stopRuntime();
     assert.strictEqual(getRuntime(), null);
@@ -423,6 +467,10 @@ describe('plugin contract', () => {
 
     const startLogsAfterReset = logs.filter((entry) => entry?.message === 'runtime.start.requested');
     assert.strictEqual(startLogsAfterReset.length, 2);
+    assert.notStrictEqual(
+      startLogsAfterReset[1].extra.runtimeTraceId,
+      startLogsAfterReset[0].extra.runtimeTraceId,
+    );
   });
 
   test('runtime event failures are non-fatal and logged by plugin boundary', async () => {
@@ -506,6 +554,7 @@ describe('plugin contract', () => {
     process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
 
     let websocketCtorCalls = 0;
+    const logs = [];
     const originalWebSocket = globalThis.WebSocket;
     class SlowOpenWebSocket {
       static OPEN = 1;
@@ -526,7 +575,14 @@ describe('plugin contract', () => {
     globalThis.WebSocket = SlowOpenWebSocket;
 
     try {
-      const client = createPluginClient();
+      const client = createPluginClient({
+        app: {
+          log: async (options) => {
+            logs.push(options?.body);
+            return true;
+          },
+        },
+      });
       const inputA = mockInput({
         client,
         directory: '/tmp/workspace-a',
@@ -540,6 +596,11 @@ describe('plugin contract', () => {
       await Promise.all([getOrCreateRuntime(inputA), getOrCreateRuntime(inputB)]);
       assert.strictEqual(websocketCtorCalls, 1);
       assert.notStrictEqual(getRuntime(), null);
+      const initLog = logs.find((entry) => entry?.message === 'runtime.singleton.init_first_attempt_started');
+      const waitingLog = logs.find((entry) => entry?.message === 'runtime.singleton.await_initializing');
+      assert.ok(initLog);
+      assert.ok(waitingLog);
+      assert.strictEqual(waitingLog.extra.runtimeTraceId, initLog.extra.runtimeTraceId);
     } finally {
       globalThis.WebSocket = originalWebSocket;
       delete process.env.BRIDGE_AUTH_AK;
