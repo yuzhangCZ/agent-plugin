@@ -308,20 +308,8 @@ function spawnForwarded(openclaw, args, failureCode, cwd = process.cwd()) {
     const child = spawn(invocation.command, invocation.args, {
       cwd,
       env: process.env,
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: "inherit",
       shell: false,
-    });
-
-    let combined = "";
-    child.stdout?.on("data", (chunk) => {
-      const text = chunk.toString();
-      combined += text;
-      process.stdout.write(text);
-    });
-    child.stderr?.on("data", (chunk) => {
-      const text = chunk.toString();
-      combined += text;
-      process.stderr.write(text);
     });
     child.on("error", (error) => {
       if (error.code === "ENOENT") {
@@ -332,7 +320,7 @@ function spawnForwarded(openclaw, args, failureCode, cwd = process.cwd()) {
     });
     child.on("exit", (code) => {
       if (code === 0) {
-        resolve({ combined });
+        resolve({});
         return;
       }
       reject(

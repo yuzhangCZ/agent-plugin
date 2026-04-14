@@ -83,6 +83,10 @@ function buildWindowsCmdCommand(command, args) {
   return [command, ...args].map(quoteWindowsCmdValue).join(" ");
 }
 
+function wrapWindowsCmdForCmdExe(command) {
+  return `"${command}"`;
+}
+
 function quotePosixShellValue(value) {
   return `'${String(value ?? "").replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -99,7 +103,7 @@ export function buildOpenClawInvocation({ resolvedCommand, executionMode, args =
   if (executionMode === OPENCLAW_EXECUTION_MODE_WINDOWS_CMD) {
     return {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", buildWindowsCmdCommand(resolvedCommand, args)],
+      args: ["/d", "/s", "/c", wrapWindowsCmdForCmdExe(buildWindowsCmdCommand(resolvedCommand, args))],
     };
   }
 

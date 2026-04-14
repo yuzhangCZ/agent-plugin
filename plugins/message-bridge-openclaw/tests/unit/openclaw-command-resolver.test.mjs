@@ -173,7 +173,7 @@ test("显式 OPENCLAW_BIN 不走 which/where，但 .cmd 仍走 cmd.exe 模式", 
 
   assert.deepEqual(calls, [[
     "cmd.exe",
-    ["/d", "/s", "/c", "\"D:\\devtool\\nodejs\\openclaw.cmd\" \"--version\""],
+    ["/d", "/s", "/c", "\"\"D:\\devtool\\nodejs\\openclaw.cmd\" \"--version\"\""],
   ]]);
   assert.equal(result.resolvedCommand, "D:\\devtool\\nodejs\\openclaw.cmd");
   assert.equal(result.executionMode, OPENCLAW_EXECUTION_MODE_WINDOWS_CMD);
@@ -245,6 +245,6 @@ test("buildOpenClawInvocation 为 .cmd 生成显式 cmd.exe 调用", () => {
   assert.deepEqual(invocation.args.slice(0, 3), ["/d", "/s", "/c"]);
   assert.equal(
     invocation.args[3],
-    "\"D:\\devtool\\nodejs\\openclaw.cmd\" \"channels\" \"add\" \"--name\" \"Primary bridge\"",
+    "\"\"D:\\devtool\\nodejs\\openclaw.cmd\" \"channels\" \"add\" \"--name\" \"Primary bridge\"\"",
   );
 });

@@ -29,6 +29,7 @@ const args = process.argv.slice(2);
 const logFile = process.env.FAKE_OPENCLAW_LOG;
 const failStep = process.env.FAKE_OPENCLAW_FAIL_STEP || "";
 const pluginInfo = process.env.FAKE_OPENCLAW_PLUGIN_INFO || JSON.stringify({ id: "skill-openclaw-plugin", channelIds: ["message-bridge"] });
+const installOutputHex = process.env.FAKE_OPENCLAW_INSTALL_OUTPUT_HEX || "";
 appendFileSync(logFile, JSON.stringify(args) + "\\n");
 
 if (args[0] === "--version") {
@@ -40,7 +41,11 @@ const filtered = args[0] === "--dev" ? args.slice(1) : args;
 const step = filtered.slice(0, 2).join(" ");
 
 if (step === "plugins install") {
-  process.stdout.write("Downloading package...\\n");
+  if (installOutputHex) {
+    process.stdout.write(Buffer.from(installOutputHex, "hex"));
+  } else {
+    process.stdout.write("Downloading package...\\n");
+  }
   if (failStep === "plugins-install") {
     process.stderr.write("install failed\\n");
     process.exit(11);
@@ -144,7 +149,7 @@ if (parsed.length === 0) {
 
 const result = spawnSync(parsed[0], parsed.slice(1), {
   env: process.env,
-  encoding: "utf8",
+  encoding: "buffer",
   stdio: "pipe",
 });
 
@@ -204,6 +209,27 @@ function runInstaller({ cwd, home, openclawBin = "", extraArgs = [], extraEnv = 
   return spawnSync(process.execPath, cliArgs, {
     cwd,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      XDG_CONFIG_HOME: path.join(home, ".config"),
+      PATH: prependPath || process.env.PATH,
+      ...extraEnv,
+    },
+  });
+}
+
+function runInstallerRaw({ cwd, home, openclawBin = "", extraArgs = [], extraEnv = {}, prependPath = "" }) {
+  const cliArgs = [scriptPath];
+  if (openclawBin) {
+    cliArgs.push("--openclaw-bin", openclawBin);
+  }
+  cliArgs.push(...extraArgs);
+
+  return spawnSync(process.execPath, cliArgs, {
+    cwd,
+    encoding: "buffer",
     env: {
       ...process.env,
       HOME: home,
@@ -393,6 +419,44 @@ test("installer stops immediately when plugin install fails", async () => {
       ["--version"],
       ["plugins", "install", "@wecode/skill-openclaw-plugin"],
     ]);
+  });
+});
+
+test("installer on win32 preserves non-utf8 install output bytes without re-decoding", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    const tempDir = path.join(dir, "temp");
+    await mkdir(tempDir, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const shimHarness = await createWin32ShimHarness(dir, fakeOpenclaw, {
+      includeBareOpenclaw: false,
+    });
+
+    const result = runInstallerRaw({
+      cwd: process.cwd(),
+      home,
+      extraArgs: [
+        "--url",
+        "ws://127.0.0.1:8081/ws/agent",
+        "--token",
+        "ak-test",
+        "--password",
+        "sk-test",
+      ],
+      prependPath: shimHarness.prependPath,
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        FAKE_OPENCLAW_INSTALL_OUTPUT_HEX: "b2e2cad40a",
+        NODE_OPTIONS: shimHarness.nodeOptions,
+        TEMP: tempDir,
+        TMP: tempDir,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr?.toString("utf8"));
+    assert.ok(Buffer.isBuffer(result.stdout));
+    assert.notEqual(result.stdout.indexOf(Buffer.from("b2e2cad40a", "hex")), -1);
   });
 });
 
