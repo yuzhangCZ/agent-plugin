@@ -120,11 +120,14 @@ npx --yes \
 
 - `npx --registry ...` 负责让首次执行时能从私仓下载 helper 自身
 - helper 会固定写入 `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`，不支持通过命令参数覆盖
-- 命令会先检查 `openclaw --version`
+- helper 会先通过 `which openclaw` / `where.exe openclaw` 检测宿主命令是否存在
+- 命令会参考 `openclaw-weixin-cli` 的实现，通过 shell 执行 `openclaw --version`
+- 当候选为 `openclaw.cmd` 时，helper 会通过 `cmd.exe /d /s /c` 显式执行后续 OpenClaw CLI 命令
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令默认执行 `openclaw gateway restart`
 - 如果确实不希望自动重启，显式追加 `--no-restart`
 - 如果私仓需要认证，执行前要保证 npm 认证环境已可用
+- 如果 Windows 环境自动回退后仍失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`
 
 ## 4. 手动复制 bundle
 

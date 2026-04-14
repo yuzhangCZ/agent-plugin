@@ -68,12 +68,14 @@ npx --yes \
 - 调用 `openclaw channels add --channel message-bridge ...`
 - 默认执行 `openclaw gateway restart`
 
+如果 Windows 环境里自动回退后仍然失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`。
+
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
 关键约束：
 
 - 不要把 `node_modules/` 复制到 `extensions/skill-openclaw-plugin`
-- 插件运行时必须使用宿主 OpenClaw 提供的 `plugin-sdk`
+- 插件运行时必须使用宿主 OpenClaw 提供的 `plugin-sdk` 公开子入口
 - 如果插件目录里出现 `node_modules/openclaw`，可能会和宿主 `openclaw --version` 解析到的版本冲突
 
 ## V1 scope
@@ -109,7 +111,7 @@ Upgrade path:
 
 Current validated environment:
 
-- OpenClaw `2026.3.11`
+- OpenClaw `2026.3.31`
 - local `ai-gateway`
 - Redis on `127.0.0.1:6379`
 - MariaDB on `127.0.0.1:3306`

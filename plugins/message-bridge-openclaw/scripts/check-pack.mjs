@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 const rootDir = process.cwd();
 const bundleDir = join(rootDir, "bundle");
 const packDir = join(rootDir, ".tmp", "pack-check");
+const npmHomeDir = join(packDir, "home");
+const npmCacheDir = join(packDir, ".npm-cache");
+const npmLogsDir = join(packDir, ".npm-logs");
 
 async function readPackedManifest(tgzPath) {
   const extractedDir = await mkdtemp(join(tmpdir(), "openclaw-pack-"));
@@ -25,10 +28,19 @@ async function readPackedManifest(tgzPath) {
 async function main() {
   await rm(packDir, { recursive: true, force: true });
   await mkdir(packDir, { recursive: true });
+  await mkdir(npmHomeDir, { recursive: true });
+  await mkdir(npmCacheDir, { recursive: true });
+  await mkdir(npmLogsDir, { recursive: true });
 
   execFileSync("npm", ["pack", "--pack-destination", packDir], {
     cwd: bundleDir,
     stdio: "pipe",
+    env: {
+      ...process.env,
+      HOME: npmHomeDir,
+      npm_config_cache: npmCacheDir,
+      npm_config_logs_dir: npmLogsDir,
+    },
   });
 
   const tgzName = (await readdir(packDir)).find((name) => name.endsWith(".tgz"));

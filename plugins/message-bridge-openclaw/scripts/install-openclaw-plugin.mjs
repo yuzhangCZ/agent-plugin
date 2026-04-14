@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildOpenClawInvocation, resolveOpenClawCommandSpec } from "./openclaw-command-resolver.mjs";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
 const PLUGIN_ID = "skill-openclaw-plugin";
@@ -169,15 +170,6 @@ function assertVersionSatisfies(actualVersion, range) {
   }
 }
 
-function resolveOpenClawCommand({ cliOpenclawBin = "", env = process.env } = {}) {
-  const explicitCommand = String(cliOpenclawBin ?? "").trim() || String(env.OPENCLAW_BIN ?? "").trim();
-  if (explicitCommand) {
-    return explicitCommand;
-  }
-
-  return "openclaw";
-}
-
 function runCommandSync(command, args, {
   cwd,
   env = process.env,
@@ -195,16 +187,21 @@ async function preflightOpenClaw({
   openclawBin = "",
   requiredRange,
   env = process.env,
+  platform = process.platform,
   runSync = runCommandSync,
 } = {}) {
-  const command = resolveOpenClawCommand({
+  const resolved = resolveOpenClawCommandSpec({
     cliOpenclawBin: openclawBin,
     env,
+    platform,
+    runSync,
   });
-  const result = runSync(command, ["--version"], {
-    env,
-    encoding: "utf8",
-  });
+  const command = resolved.resolvedCommand;
+  const result = resolved.versionResult;
+
+  if (resolved.usedPathLookup && platform === "win32" && command !== "openclaw") {
+    writeStdout(formatStep(`Windows 环境通过 where.exe 检测到 openclaw shim，后续将使用 ${command}`));
+  }
 
   if (result.error) {
     if (result.error.code === "ENOENT") {
@@ -229,7 +226,15 @@ async function preflightOpenClaw({
 
   const version = (result.stdout || result.stderr || "").trim();
   assertVersionSatisfies(version, requiredRange);
-  return { openclawBin: command, version };
+  return {
+    openclawBin: command,
+    executionMode: resolved.executionMode,
+    version,
+  };
+}
+
+function formatDisplayCommand(openclaw, args) {
+  return `${openclaw.openclawBin} ${args.join(" ")}`.trim();
 }
 
 function parseArgs(argv) {
@@ -292,9 +297,15 @@ function writeStderr(message) {
   process.stderr.write(`${message}\n`);
 }
 
-function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
+function spawnForwarded(openclaw, args, failureCode, cwd = process.cwd()) {
+  const invocation = buildOpenClawInvocation({
+    resolvedCommand: openclaw.openclawBin,
+    executionMode: openclaw.executionMode,
+    args,
+  });
+
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
       env: process.env,
       stdio: ["inherit", "pipe", "pipe"],
@@ -314,7 +325,7 @@ function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
     });
     child.on("error", (error) => {
       if (error.code === "ENOENT") {
-        reject(createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${cmd}`));
+        reject(createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${openclaw.openclawBin}`));
         return;
       }
       reject(createInstallerError(failureCode, error.message));
@@ -327,15 +338,20 @@ function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
       reject(
         createInstallerError(
           failureCode,
-          `${cmd} ${args.join(" ")} failed with code ${code}`,
+          `${formatDisplayCommand(openclaw, args)} failed with code ${code}`,
         ),
       );
     });
   });
 }
 
-function execJson(cmd, args, failureCode, cwd = process.cwd()) {
-  const result = runCommandSync(cmd, args, {
+function execJson(openclaw, args, failureCode, cwd = process.cwd()) {
+  const invocation = buildOpenClawInvocation({
+    resolvedCommand: openclaw.openclawBin,
+    executionMode: openclaw.executionMode,
+    args,
+  });
+  const result = runCommandSync(invocation.command, invocation.args, {
     cwd,
     env: process.env,
     encoding: "utf8",
@@ -343,7 +359,7 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
 
   if (result.error) {
     if (result.error.code === "ENOENT") {
-      throw createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${cmd}`);
+      throw createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${openclaw.openclawBin}`);
     }
     throw createInstallerError(failureCode, result.error.message);
   }
@@ -352,7 +368,7 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
     const detail = (result.stderr || result.stdout || "").trim();
     throw createInstallerError(
       failureCode,
-      `${cmd} ${args.join(" ")} failed with code ${result.status}${detail ? `: ${detail}` : ""}`,
+      `${formatDisplayCommand(openclaw, args)} failed with code ${result.status}${detail ? `: ${detail}` : ""}`,
     );
   }
 
@@ -361,7 +377,9 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
   } catch (error) {
     throw createInstallerError(
       failureCode,
-      `Failed to parse JSON from ${cmd} ${args.join(" ")}: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to parse JSON from ${formatDisplayCommand(openclaw, args)}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
 }
@@ -399,7 +417,7 @@ async function runInstaller({
 
   writeStdout(formatStep(`正在通过 OpenClaw 安装 ${PLUGIN_LABEL} 插件`));
   await spawnForwarded(
-    openclaw.openclawBin,
+    openclaw,
     [...openclawArgsPrefix, "plugins", "install", PACKAGE_NAME],
     "PLUGIN_INSTALL_FAILED",
     cwd,
@@ -407,7 +425,7 @@ async function runInstaller({
 
   writeStdout(formatStep(`${PLUGIN_LABEL} 插件安装命令执行完成，正在校验安装结果`));
   const pluginInfo = execJson(
-    openclaw.openclawBin,
+    openclaw,
     [...openclawArgsPrefix, "plugins", "info", PLUGIN_ID, "--json"],
     "PLUGIN_INSTALL_VERIFICATION_FAILED",
     cwd,
@@ -438,12 +456,12 @@ async function runInstaller({
         ...(args.name ? ["--name", args.name] : []),
       ]
     : [...openclawArgsPrefix, "channels", "add", "--channel", CHANNEL_ID];
-  await spawnForwarded(openclaw.openclawBin, channelArgs, "CHANNEL_ADD_FAILED", cwd);
+  await spawnForwarded(openclaw, channelArgs, "CHANNEL_ADD_FAILED", cwd);
 
   if (!args.noRestart) {
     writeStdout(formatStep("正在重启 OpenClaw gateway"));
     await spawnForwarded(
-      openclaw.openclawBin,
+      openclaw,
       [...openclawArgsPrefix, "gateway", "restart"],
       "GATEWAY_RESTART_FAILED",
       cwd,
