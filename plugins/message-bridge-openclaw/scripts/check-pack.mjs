@@ -68,7 +68,7 @@ async function main() {
   assert.equal(manifest.name, "@wecode/skill-openclaw-plugin", "pack check failed: unexpected package name");
   assert.equal(manifest.main, "index.js", "pack check failed: main must point to bundle root");
   assert.equal(
-    manifest.bin?.["message-bridge-openclaw-install"],
+    manifest.bin,
     "./install.mjs",
     "pack check failed: bin must point to install.mjs",
   );

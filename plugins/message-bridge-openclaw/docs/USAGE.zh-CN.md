@@ -110,7 +110,6 @@ npx --yes \
   --registry https://your-private-registry.example.com/ \
   --package @wecode/skill-openclaw-plugin \
   message-bridge-openclaw-install \
-  --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -120,6 +119,7 @@ npx --yes \
 说明：
 
 - `npx --registry ...` 负责让首次执行时能从私仓下载 helper 自身
+- helper 会固定写入 `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`，不支持通过命令参数覆盖
 - 命令会先检查 `openclaw --version`
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令默认执行 `openclaw gateway restart`

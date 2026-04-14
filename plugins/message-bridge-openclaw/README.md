@@ -53,7 +53,6 @@ npx --yes \
   --registry https://your-private-registry.example.com/ \
   --package @wecode/skill-openclaw-plugin \
   message-bridge-openclaw-install \
-  --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -63,7 +62,7 @@ npx --yes \
 安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
 
 - 检查 `openclaw` 是否已安装且版本满足 `>=2026.3.11`
-- 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
+- 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`
 - 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
 - 调用 `openclaw channels add --channel message-bridge ...`
@@ -284,7 +283,6 @@ npx --yes \
   --registry https://your-private-registry.example.com/ \
   --package @wecode/skill-openclaw-plugin \
   message-bridge-openclaw-install \
-  --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -294,8 +292,8 @@ npx --yes \
 Behavior:
 
 - `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
+- the helper always writes `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`, aligned with `message-bridge`
 - checks `openclaw --version` against the package `peerDependencies.openclaw`
-- writes or updates `@wecode:registry=...` in the resolved user `.npmrc`
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
 - runs `openclaw channels add --channel message-bridge ...`

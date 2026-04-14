@@ -117,8 +117,6 @@ test("installer runs preflight, install, verify, configure, and restart with non
       openclawBin: fakeOpenclaw,
       extraArgs: [
         "--dev",
-        "--registry",
-        "https://npm.example.com",
         "--url",
         "ws://127.0.0.1:8081/ws/agent",
         "--token",
@@ -158,7 +156,7 @@ test("installer runs preflight, install, verify, configure, and restart with non
     ]);
 
     const npmrc = await readFile(path.join(home, ".npmrc"), "utf8");
-    assert.ok(npmrc.includes("@wecode:registry=https://npm.example.com"));
+    assert.ok(npmrc.includes("@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"));
     assert.ok(result.stdout.includes("[skill-openclaw-plugin] 正在检查 OpenClaw 环境"));
     assert.ok(result.stdout.includes("正在通过 OpenClaw 安装 skill-openclaw-plugin 插件"));
     assert.ok(result.stdout.includes("Downloading package..."));
@@ -167,7 +165,7 @@ test("installer runs preflight, install, verify, configure, and restart with non
   });
 });
 
-test("installer overrides existing scoped registry when --registry is provided", async () => {
+test("installer rewrites existing scoped registry to the fixed default registry", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
@@ -179,8 +177,6 @@ test("installer overrides existing scoped registry when --registry is provided",
       home,
       openclawBin: fakeOpenclaw,
       extraArgs: [
-        "--registry",
-        "https://new.registry/",
         "--url",
         "ws://127.0.0.1:8081/ws/agent",
         "--token",
@@ -195,7 +191,7 @@ test("installer overrides existing scoped registry when --registry is provided",
 
     assert.equal(result.status, 0, result.stderr);
     const npmrc = await readFile(path.join(home, ".npmrc"), "utf8");
-    assert.ok(npmrc.includes("@wecode:registry=https://new.registry/"));
+    assert.ok(npmrc.includes("@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"));
     assert.ok(!npmrc.includes("@wecode:registry=https://old.registry/"));
   });
 });
@@ -209,7 +205,7 @@ test("installer falls back to interactive channels add when non-interactive args
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: ["--registry", "https://npm.example.com", "--url", "ws://127.0.0.1:8081/ws/agent"],
+      extraArgs: ["--url", "ws://127.0.0.1:8081/ws/agent"],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
       },
@@ -231,8 +227,6 @@ test("installer skips restart only when --no-restart is passed", async () => {
       home,
       openclawBin: fakeOpenclaw,
       extraArgs: [
-        "--registry",
-        "https://npm.example.com",
         "--url",
         "ws://127.0.0.1:8081/ws/agent",
         "--token",
@@ -261,7 +255,7 @@ test("installer stops immediately when plugin install fails", async () => {
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: ["--registry", "https://npm.example.com"],
+      extraArgs: [],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_FAIL_STEP: "plugins-install",
@@ -293,7 +287,7 @@ test("installer stops when plugin verification fails", async () => {
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: ["--registry", "https://npm.example.com"],
+      extraArgs: [],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_PLUGIN_INFO: JSON.stringify({ id: "wrong", channelIds: [] }),
@@ -321,8 +315,6 @@ test("installer stops when channels add fails", async () => {
       home,
       openclawBin: fakeOpenclaw,
       extraArgs: [
-        "--registry",
-        "https://npm.example.com",
         "--url",
         "ws://127.0.0.1:8081/ws/agent",
         "--token",
@@ -353,8 +345,6 @@ test("installer stops when gateway restart fails", async () => {
       home,
       openclawBin: fakeOpenclaw,
       extraArgs: [
-        "--registry",
-        "https://npm.example.com",
         "--url",
         "ws://127.0.0.1:8081/ws/agent",
         "--token",

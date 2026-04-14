@@ -12,6 +12,7 @@ const PLUGIN_ID = "skill-openclaw-plugin";
 const PLUGIN_LABEL = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
+const DEFAULT_SCOPE_REGISTRY = "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/";
 
 function createInstallerError(code, message) {
   const error = new Error(message);
@@ -32,7 +33,7 @@ function normalizeCliPath(candidatePath) {
   return path.resolve(candidatePath).replace(/\\/g, "/");
 }
 
-export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
+function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
   if (!argvEntry) {
     return false;
   }
@@ -42,7 +43,7 @@ export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
   return importMetaPath === argvPath;
 }
 
-export function resolvePackageRoot(importMetaUrl = import.meta.url) {
+function resolvePackageRoot(importMetaUrl = import.meta.url) {
   const scriptPath = fileURLToPath(importMetaUrl);
   const scriptDir = path.dirname(scriptPath);
 
@@ -55,7 +56,7 @@ export function resolvePackageRoot(importMetaUrl = import.meta.url) {
   throw createInstallerError("INSTALLER_PACKAGE_ROOT_NOT_FOUND", `Unable to locate package.json for ${scriptPath}`);
 }
 
-export function resolveWindowsHomeDir(env = process.env) {
+function resolveWindowsHomeDir(env = process.env) {
   if (env.USERPROFILE) {
     return env.USERPROFILE;
   }
@@ -65,7 +66,7 @@ export function resolveWindowsHomeDir(env = process.env) {
   return homedir();
 }
 
-export function resolveUserNpmrcPath(env = process.env, platform = process.platform) {
+function resolveUserNpmrcPath(env = process.env, platform = process.platform) {
   if (env.NPM_CONFIG_USERCONFIG) {
     return env.NPM_CONFIG_USERCONFIG;
   }
@@ -77,7 +78,7 @@ export function resolveUserNpmrcPath(env = process.env, platform = process.platf
   return path.join(env.HOME || homedir(), ".npmrc");
 }
 
-export async function readOptionalTextFile(filePath) {
+async function readOptionalTextFile(filePath) {
   try {
     return await readFile(filePath, "utf8");
   } catch (error) {
@@ -88,7 +89,7 @@ export async function readOptionalTextFile(filePath) {
   }
 }
 
-export function readScopedRegistry(content) {
+function readScopedRegistry(content) {
   if (!content) {
     return "";
   }
@@ -97,38 +98,8 @@ export function readScopedRegistry(content) {
   return match?.[1]?.trim() ?? "";
 }
 
-export function resolveRegistryValue({
-  cliRegistry = "",
-  envRegistry = "",
-  npmrcContent = null,
-}) {
-  const normalizedCliRegistry = String(cliRegistry ?? "").trim();
-  if (normalizedCliRegistry) {
-    return normalizedCliRegistry;
-  }
-
-  const normalizedEnvRegistry = String(envRegistry ?? "").trim();
-  if (normalizedEnvRegistry) {
-    return normalizedEnvRegistry;
-  }
-
-  const existingRegistry = readScopedRegistry(npmrcContent);
-  if (existingRegistry) {
-    return existingRegistry;
-  }
-
-  throw createInstallerError(
-    "REGISTRY_NOT_CONFIGURED",
-    "Missing @wecode registry. Pass --registry, set WECODE_NPM_REGISTRY, or preconfigure ~/.npmrc.",
-  );
-}
-
-export function buildNextNpmrcContent(existingContent, registry) {
-  const normalizedRegistry = String(registry ?? "").trim();
-  if (!normalizedRegistry) {
-    throw createInstallerError("REGISTRY_NOT_CONFIGURED", "Registry value cannot be empty.");
-  }
-
+function buildNextNpmrcContent(existingContent) {
+  const normalizedRegistry = DEFAULT_SCOPE_REGISTRY;
   const existingRegistry = readScopedRegistry(existingContent);
   if (existingRegistry === normalizedRegistry) {
     return existingContent;
@@ -172,7 +143,7 @@ function compareVersion(a, b) {
   return 0;
 }
 
-export function assertVersionSatisfies(actualVersion, range) {
+function assertVersionSatisfies(actualVersion, range) {
   const normalizedRange = String(range ?? "").trim();
   if (!normalizedRange.startsWith(">=")) {
     throw createInstallerError(
@@ -198,7 +169,7 @@ export function assertVersionSatisfies(actualVersion, range) {
   }
 }
 
-export function resolveOpenClawCommand({ cliOpenclawBin = "", env = process.env } = {}) {
+function resolveOpenClawCommand({ cliOpenclawBin = "", env = process.env } = {}) {
   const explicitCommand = String(cliOpenclawBin ?? "").trim() || String(env.OPENCLAW_BIN ?? "").trim();
   if (explicitCommand) {
     return explicitCommand;
@@ -207,8 +178,31 @@ export function resolveOpenClawCommand({ cliOpenclawBin = "", env = process.env 
   return "openclaw";
 }
 
-export async function preflightOpenClaw({ openclawBin, requiredRange }) {
-  const result = spawnSync(openclawBin, ["--version"], {
+function runCommandSync(command, args, {
+  cwd,
+  env = process.env,
+  encoding = "utf8",
+} = {}) {
+  return spawnSync(command, args, {
+    cwd,
+    env,
+    encoding,
+    shell: false,
+  });
+}
+
+async function preflightOpenClaw({
+  openclawBin = "",
+  requiredRange,
+  env = process.env,
+  runSync = runCommandSync,
+} = {}) {
+  const command = resolveOpenClawCommand({
+    cliOpenclawBin: openclawBin,
+    env,
+  });
+  const result = runSync(command, ["--version"], {
+    env,
     encoding: "utf8",
   });
 
@@ -216,12 +210,12 @@ export async function preflightOpenClaw({ openclawBin, requiredRange }) {
     if (result.error.code === "ENOENT") {
       throw createInstallerError(
         "OPENCLAW_NOT_FOUND",
-        `OpenClaw command not found: ${openclawBin}. Please install OpenClaw first.`,
+        `OpenClaw command not found: ${command}. Please install OpenClaw first.`,
       );
     }
     throw createInstallerError(
       "OPENCLAW_NOT_FOUND",
-      `Failed to execute OpenClaw command ${openclawBin}: ${result.error.message}`,
+      `Failed to execute OpenClaw command ${command}: ${result.error.message}`,
     );
   }
 
@@ -229,20 +223,19 @@ export async function preflightOpenClaw({ openclawBin, requiredRange }) {
     const detail = (result.stderr || result.stdout || "").trim();
     throw createInstallerError(
       "OPENCLAW_NOT_FOUND",
-      `Failed to execute ${openclawBin} --version${detail ? `: ${detail}` : ""}`,
+      `Failed to execute ${command} --version${detail ? `: ${detail}` : ""}`,
     );
   }
 
   const version = (result.stdout || result.stderr || "").trim();
   assertVersionSatisfies(version, requiredRange);
-  return { openclawBin, version };
+  return { openclawBin: command, version };
 }
 
-export function parseArgs(argv) {
+function parseArgs(argv) {
   const parsed = {
     dev: false,
     noRestart: false,
-    registry: "",
     url: "",
     token: "",
     password: "",
@@ -258,10 +251,6 @@ export function parseArgs(argv) {
         break;
       case "--no-restart":
         parsed.noRestart = true;
-        break;
-      case "--registry":
-        parsed.registry = argv[index + 1] ?? "";
-        index += 1;
         break;
       case "--url":
         parsed.url = argv[index + 1] ?? "";
@@ -346,7 +335,7 @@ function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
 }
 
 function execJson(cmd, args, failureCode, cwd = process.cwd()) {
-  const result = spawnSync(cmd, args, {
+  const result = runCommandSync(cmd, args, {
     cwd,
     env: process.env,
     encoding: "utf8",
@@ -377,7 +366,7 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
   }
 }
 
-export async function runInstaller({
+async function runInstaller({
   argv = process.argv.slice(2),
   env = process.env,
   importMetaUrl = import.meta.url,
@@ -387,29 +376,24 @@ export async function runInstaller({
   const packageRoot = resolvePackageRoot(importMetaUrl);
   const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
   const requiredRange = packageJson.peerDependencies?.openclaw ?? ">=0.0.0";
-  const openclawBin = resolveOpenClawCommand({
-    cliOpenclawBin: args.openclawBin,
-    env,
-  });
   const npmrcPath = resolveUserNpmrcPath(env);
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
-  const registry = resolveRegistryValue({
-    cliRegistry: args.registry,
-    envRegistry: env.WECODE_NPM_REGISTRY,
-    npmrcContent: existingNpmrc,
-  });
 
   writeStdout(formatStep("正在检查 OpenClaw 环境"));
-  const openclaw = await preflightOpenClaw({ openclawBin, requiredRange });
+  const openclaw = await preflightOpenClaw({
+    openclawBin: args.openclawBin,
+    requiredRange,
+    env,
+  });
   writeStdout(formatStep(`已检测到 OpenClaw: ${openclaw.openclawBin} (${openclaw.version})`));
 
   writeStdout(formatStep("正在配置 @wecode 二方仓源"));
-  const nextNpmrc = buildNextNpmrcContent(existingNpmrc, registry);
+  const nextNpmrc = buildNextNpmrcContent(existingNpmrc);
   if (nextNpmrc !== existingNpmrc) {
     await writeFileAtomically(npmrcPath, nextNpmrc);
   }
   writeStdout(formatStep(`npm scope 配置文件: ${npmrcPath}`));
-  writeStdout(formatStep(`使用 registry: ${registry}`));
+  writeStdout(formatStep(`使用 registry: ${DEFAULT_SCOPE_REGISTRY}`));
 
   const openclawArgsPrefix = args.dev ? ["--dev"] : [];
 
