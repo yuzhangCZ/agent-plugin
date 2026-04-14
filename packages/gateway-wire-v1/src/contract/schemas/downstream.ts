@@ -24,7 +24,7 @@ export const chatPayloadSchema = z
   .object({
     toolSessionId: requiredTrimmedString,
     text: requiredTrimmedString,
-    assistantId: optionalLooseTrimmedString,
+    assistantId: optionalStrictTrimmedString,
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,

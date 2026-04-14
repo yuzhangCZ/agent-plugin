@@ -10,7 +10,6 @@ import {
   TOOL_ERROR_REASON,
   UPSTREAM_MESSAGE_TYPE,
   type ToolErrorReason,
-  type UpstreamMessage,
   validateUpstreamMessage,
 } from '../gateway-wire/transport.js';
 import { ChatAction } from '../action/ChatAction.js';
@@ -31,6 +30,7 @@ import {
   type GatewayClient,
   type GatewayClientConfig,
   type GatewaySendContext as GatewaySendLogContext,
+  type GatewaySendPayload,
 } from '@agent-plugin/gateway-client';
 import { loadConfig } from '../config/index.js';
 import { EventFilter } from '../event/EventFilter.js';
@@ -43,10 +43,12 @@ import {
 } from '../protocol/upstream/index.js';
 import {
   DOWNSTREAM_MESSAGE_TYPE,
-  INVOKE_ACTION,
 } from '../gateway-wire/downstream.js';
 import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
-import { isSupportedInvokeAction } from '../protocol/downstream/SupportedDownstreamMessages.js';
+import {
+  adaptGatewayBusinessMessage,
+  type DownstreamNormalizationError,
+} from '../protocol/downstream/index.js';
 import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
@@ -319,7 +321,7 @@ export class BridgeRuntime {
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
-    const transportEnvelope = {
+    const transportEnvelope: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: normalized.common.toolSessionId,
       event: transportEvent,
@@ -398,7 +400,23 @@ export class BridgeRuntime {
     const downstreamFields = this.extractDownstreamLogFields(message);
     const traceId = downstreamFields.gatewayMessageId ?? this.logger.getTraceId();
     const messageLogger = this.createMessageLogger(downstreamFields, traceId);
-    if (message.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
+    const adaptedMessage = adaptGatewayBusinessMessage(message, messageLogger);
+    if (!adaptedMessage.ok) {
+      this.sendToolError(
+        this.toDownstreamValidationFailure(adaptedMessage.error),
+        adaptedMessage.error.welinkSessionId ?? downstreamFields.welinkSessionId,
+        {
+          logger: messageLogger,
+          traceId,
+          gatewayMessageId: downstreamFields.gatewayMessageId,
+          action: adaptedMessage.error.action ?? downstreamFields.action,
+          toolSessionId: downstreamFields.toolSessionId,
+        },
+      );
+      return;
+    }
+
+    if (adaptedMessage.value.type === DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY) {
       const statusLogger = this.createMessageLogger(
         { ...downstreamFields },
         traceId,
@@ -420,7 +438,7 @@ export class BridgeRuntime {
         return;
       }
 
-      const statusResponse: UpstreamMessage = {
+      const statusResponse: GatewaySendPayload = {
         type: UPSTREAM_MESSAGE_TYPE.STATUS_RESPONSE,
         opencodeOnline: result.data.opencodeOnline,
       };
@@ -445,39 +463,18 @@ export class BridgeRuntime {
       return;
     }
 
-    if (!isSupportedInvokeAction(message.action)) {
-      messageLogger.warn('runtime.downstream_ignored_non_protocol', {
-        messageType: message.type,
-        hasWelinkSessionId: !!message.welinkSessionId,
-      });
-      this.sendToolError(
-        { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'Invalid invoke payload shape' },
-        message.welinkSessionId,
-        {
-          logger: messageLogger,
-          traceId,
-          gatewayMessageId: downstreamFields.gatewayMessageId,
-          action: downstreamFields.action,
-          toolSessionId: downstreamFields.toolSessionId,
-        },
-      );
-      return;
-    }
-
-    const welinkSessionId = message.welinkSessionId;
+    const invokeMessage = adaptedMessage.value;
+    const welinkSessionId = invokeMessage.welinkSessionId;
     const toolSessionId =
-      'payload' in message &&
-      message.payload &&
-      typeof message.payload === 'object' &&
-      'toolSessionId' in message.payload &&
-      typeof (message.payload as { toolSessionId?: unknown }).toolSessionId === 'string'
-        ? (message.payload as { toolSessionId: string }).toolSessionId
+      'toolSessionId' in invokeMessage.payload &&
+      typeof invokeMessage.payload.toolSessionId === 'string'
+        ? invokeMessage.payload.toolSessionId
         : undefined;
     const invokeLogger = this.createMessageLogger(
       {
         ...downstreamFields,
         welinkSessionId,
-        action: message.action,
+        action: invokeMessage.action,
         toolSessionId,
       },
       traceId,
@@ -492,25 +489,11 @@ export class BridgeRuntime {
 
     invokeLogger.info('runtime.invoke.received');
 
-    if (message.action === INVOKE_ACTION.CREATE_SESSION) {
-      const normalizedWelinkSessionId = asTrimmedString(message.welinkSessionId);
-      if (!normalizedWelinkSessionId) {
-        this.sendToolError(
-          { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'welinkSessionId is required' },
-          undefined,
-          {
-            logger: invokeLogger,
-            traceId,
-            gatewayMessageId: downstreamFields.gatewayMessageId,
-            action: message.action,
-          },
-        );
-        return;
-      }
-
+    if (invokeMessage.action === 'create_session') {
+      const normalizedWelinkSessionId = asTrimmedString(invokeMessage.welinkSessionId) ?? invokeMessage.welinkSessionId;
       const result = await this.actionRouter.route(
-        message.action,
-        message.payload,
+        invokeMessage.action,
+        invokeMessage.payload,
         this.buildActionContext(this.gatewayConnection, normalizedWelinkSessionId, invokeLogger),
       );
 
@@ -519,7 +502,7 @@ export class BridgeRuntime {
           logger: invokeLogger,
           traceId,
           gatewayMessageId: downstreamFields.gatewayMessageId,
-          action: message.action,
+          action: invokeMessage.action,
         });
         return;
       }
@@ -533,13 +516,13 @@ export class BridgeRuntime {
             logger: invokeLogger,
             traceId,
             gatewayMessageId: downstreamFields.gatewayMessageId,
-            action: message.action,
+            action: invokeMessage.action,
           },
         );
         return;
       }
 
-      const sessionCreated: UpstreamMessage = {
+      const sessionCreated: GatewaySendPayload = {
         type: UPSTREAM_MESSAGE_TYPE.SESSION_CREATED,
         welinkSessionId: normalizedWelinkSessionId,
         toolSessionId,
@@ -551,7 +534,7 @@ export class BridgeRuntime {
         gatewayMessageId: downstreamFields.gatewayMessageId,
         welinkSessionId: normalizedWelinkSessionId,
         toolSessionId,
-        action: message.action,
+        action: invokeMessage.action,
       };
       const validatedSessionCreated = this.validateUpstreamMessageOrLog(
         sessionCreated,
@@ -563,7 +546,7 @@ export class BridgeRuntime {
       }
       this.gatewayConnection.send(validatedSessionCreated, sessionCreatedLogContext);
       invokeLogger.info('runtime.invoke.completed', {
-        action: message.action,
+        action: invokeMessage.action,
         welinkSessionId: normalizedWelinkSessionId,
         toolSessionId,
         latencyMs: Date.now() - startedAt,
@@ -571,89 +554,40 @@ export class BridgeRuntime {
       return;
     }
 
-    if (message.action === INVOKE_ACTION.PERMISSION_REPLY) {
-      const response = message.payload.response;
-      if (response !== 'once' && response !== 'always' && response !== 'reject') {
-        this.sendToolError(
-          { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'Invalid invoke payload shape' },
-          welinkSessionId,
-          {
-            logger: invokeLogger,
-            traceId,
-            gatewayMessageId: downstreamFields.gatewayMessageId,
-            action: message.action,
-            toolSessionId,
-          },
-        );
-        return;
-      }
-    }
-
-    if (message.action === INVOKE_ACTION.QUESTION_REPLY) {
-      if (typeof message.payload.toolSessionId !== 'string' || !message.payload.toolSessionId.trim()) {
-        this.sendToolError(
-          { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'Invalid invoke payload shape' },
-          welinkSessionId,
-          {
-            logger: invokeLogger,
-            traceId,
-            gatewayMessageId: downstreamFields.gatewayMessageId,
-            action: message.action,
-            toolSessionId,
-          },
-        );
-        return;
-      }
-      if (typeof message.payload.answer !== 'string' || !message.payload.answer) {
-        this.sendToolError(
-          { success: false, errorCode: 'INVALID_PAYLOAD', errorMessage: 'Invalid invoke payload shape' },
-          welinkSessionId,
-          {
-            logger: invokeLogger,
-            traceId,
-            gatewayMessageId: downstreamFields.gatewayMessageId,
-            action: message.action,
-            toolSessionId,
-          },
-        );
-        return;
-      }
-    }
-
     this.toolDoneCompat.handleInvokeStarted({
-      action: message.action,
+      action: invokeMessage.action,
       toolSessionId,
     });
     const result = await this.actionRouter.route(
-      message.action,
-      message.payload,
+      invokeMessage.action,
+      invokeMessage.payload,
       this.buildActionContext(this.gatewayConnection, welinkSessionId, invokeLogger),
     );
 
     if (!result.success) {
       this.toolDoneCompat.handleInvokeFailed({
-        action: message.action,
+        action: invokeMessage.action,
         toolSessionId,
       });
       this.sendToolError(result, welinkSessionId, {
         logger: invokeLogger,
         traceId,
         gatewayMessageId: downstreamFields.gatewayMessageId,
-        action: message.action,
+        action: invokeMessage.action,
         toolSessionId,
       });
       return;
     }
 
     invokeLogger.info('runtime.invoke.completed', {
-      action: message.action,
+      action: invokeMessage.action,
       welinkSessionId,
       toolSessionId,
       latencyMs: Date.now() - startedAt,
     });
 
     const decision = this.toolDoneCompat.handleInvokeCompleted({
-      action: message.action,
+      action: invokeMessage.action,
       toolSessionId,
       logger: invokeLogger,
     });
@@ -662,9 +596,23 @@ export class BridgeRuntime {
         logger: invokeLogger,
         traceId,
         gatewayMessageId: downstreamFields.gatewayMessageId,
-        action: message.action,
+        action: invokeMessage.action,
       });
     }
+  }
+
+  private toDownstreamValidationFailure(error: DownstreamNormalizationError): ActionResult {
+    return {
+      success: false,
+      errorCode: 'INVALID_PAYLOAD',
+      errorMessage:
+        error.action === 'create_session' && error.field === 'welinkSessionId'
+          ? 'welinkSessionId is required'
+          : 'Invalid invoke payload shape',
+      errorEvidence: {
+        sourceErrorCode: error.code,
+      },
+    };
   }
 
   private buildActionContext(
@@ -851,7 +799,7 @@ export class BridgeRuntime {
       sourceErrorCode: result.success ? undefined : result.errorEvidence?.sourceErrorCode,
     });
 
-    const toolErrorMessage: UpstreamMessage = {
+    const toolErrorMessage: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_ERROR,
       welinkSessionId,
       toolSessionId: logOptions?.toolSessionId,
@@ -901,7 +849,7 @@ export class BridgeRuntime {
       action: logOptions?.action,
     });
 
-    const toolDoneMessage: UpstreamMessage = {
+    const toolDoneMessage: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_DONE,
       toolSessionId,
       welinkSessionId,
@@ -927,14 +875,14 @@ export class BridgeRuntime {
   }
 
   private validateUpstreamMessageOrLog(
-    message: UpstreamMessage,
+    message: GatewaySendPayload,
     logContext: GatewaySendLogContext,
     logger: BridgeLogger = this.logger,
-  ): UpstreamMessage | null {
+  ): GatewaySendPayload | null {
     // 运行时最终准入点：只有通过共享 wire 校验的消息才允许真正发往 gateway。
     const validation = validateUpstreamMessage(message);
     if (validation.ok) {
-      return validation.value;
+      return validation.value as GatewaySendPayload;
     }
     if (this.isLegacyPermissionRepliedToolEvent(message)) {
       logger.warn('runtime.upstream_validation_legacy_bypass', {
@@ -961,7 +909,7 @@ export class BridgeRuntime {
     return null;
   }
 
-  private isLegacyPermissionRepliedToolEvent(message: UpstreamMessage): boolean {
+  private isLegacyPermissionRepliedToolEvent(message: GatewaySendPayload): boolean {
     const rawMessage = asRecord(message);
     if (!rawMessage || asString(rawMessage.type) !== UPSTREAM_MESSAGE_TYPE.TOOL_EVENT) {
       return false;

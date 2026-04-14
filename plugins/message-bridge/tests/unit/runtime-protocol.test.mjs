@@ -174,21 +174,42 @@ function createGatewayConnectionMock(state = 'DISCONNECTED') {
 }
 
 describe('runtime protocol strictness', () => {
-  test('handleDownstreamMessage consumes typed gateway business message without local normalize', async () => {
+  test('handleDownstreamMessage logs one adapter failure and fails closed without extra runtime boundary warning', async () => {
+    const logEntries = [];
+    const sent = [];
     const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
     });
-    runtime.gatewayConnection = createGatewayConnectionMock('READY');
+    runtime.gatewayConnection = {
+      send: (msg) => sent.push(msg),
+    };
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
       welinkSessionId: 'wl_1',
-      action: 'chat',
-      payload: { toolSessionId: 'tool_1', text: 'hello' },
+      action: 'delete_session',
+      payload: {},
     });
+    await new Promise((resolve) => setImmediate(resolve));
 
-    assert.equal(
-      BridgeRuntime.prototype.handleDownstreamMessage.toString().includes('normalizeDownstreamMessage'),
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.deepStrictEqual(
+      logEntries
+        .filter((entry) => entry.message === 'downstream.normalization_failed')
+        .map((entry) => entry.message),
+      ['downstream.normalization_failed'],
+    );
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.downstream_rejected_plugin_boundary'),
       false,
     );
   });

@@ -5,7 +5,7 @@ import {
   type WireContractViolation,
 } from '@agent-plugin/gateway-wire-v1';
 
-import { asRecord, asTrimmedString, hasOwn, type PlainObject } from '../utils/type-guards.js';
+import { asRecord, asTrimmedString, type PlainObject } from '../utils/type-guards.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import type {
   DownstreamNormalizationError,
@@ -66,105 +66,6 @@ function toNormalizationError(error: WireContractViolation): DownstreamNormaliza
   };
 }
 
-function createCompatibilityError(params: {
-  code: DownstreamNormalizationError['code'];
-  field: string;
-  message: string;
-  messageType?: string;
-  action?: string;
-  welinkSessionId?: string;
-}): DownstreamNormalizationError {
-  return {
-    stage: params.messageType ? 'payload' : 'message',
-    code: params.code,
-    field: params.field,
-    message: params.message,
-    messageType: params.messageType,
-    action: params.action,
-    welinkSessionId: params.welinkSessionId,
-  };
-}
-
-function prevalidateCompatibility(raw: unknown): DownstreamNormalizationError | null {
-  const message = asRecord(raw);
-  if (!message || message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE) {
-    return null;
-  }
-
-  const action = asTrimmedString(message.action);
-  const welinkSessionId = asTrimmedString(message.welinkSessionId);
-  const payload = asRecord(message.payload);
-
-  if (action === undefined) {
-    return createCompatibilityError({
-      code: 'missing_required_field',
-      field: 'action',
-      message: 'action is required',
-      messageType: DOWNSTREAM_MESSAGE_TYPE.INVOKE,
-      welinkSessionId,
-    });
-  }
-
-  if (
-    (action === INVOKE_ACTION.CHAT || action === INVOKE_ACTION.CREATE_SESSION) &&
-    payload &&
-    hasOwn(payload, 'assistantId') &&
-    typeof payload.assistantId !== 'string'
-  ) {
-    return createCompatibilityError({
-      code: 'invalid_field_type',
-      field: 'payload.assistantId',
-      message: 'payload.assistantId must be a string',
-      messageType: DOWNSTREAM_MESSAGE_TYPE.INVOKE,
-      action,
-      welinkSessionId,
-    });
-  }
-
-  if (
-    action === INVOKE_ACTION.CREATE_SESSION &&
-    typeof message.welinkSessionId === 'string' &&
-    !message.welinkSessionId.trim()
-  ) {
-    return createCompatibilityError({
-      code: 'missing_required_field',
-      field: 'welinkSessionId',
-      message: 'welinkSessionId is required',
-      messageType: DOWNSTREAM_MESSAGE_TYPE.INVOKE,
-      action,
-      welinkSessionId: message.welinkSessionId,
-    });
-  }
-
-  return null;
-}
-
-function remapAssistantIdInput(raw: unknown): unknown {
-  const message = asRecord(raw);
-  if (!message || message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE) {
-    return raw;
-  }
-
-  const payload = asRecord(message.payload);
-  if (!payload) {
-    return raw;
-  }
-
-  if (!hasOwn(payload, 'assiantId')) {
-    return raw;
-  }
-
-  const { assiantId: _legacyAssistantId, ...restPayload } = payload;
-  return {
-    ...message,
-    payload: restPayload,
-  };
-}
-
-function remapAssistantIdOutput(message: NormalizedDownstreamMessage): NormalizedDownstreamMessage {
-  return message;
-}
-
 export function logDownstreamNormalizationFailure(
   logger: Pick<BridgeLogger, 'warn'>,
   raw: unknown,
@@ -186,15 +87,7 @@ export function normalizeDownstreamMessage(
   raw: unknown,
   logger?: Pick<BridgeLogger, 'warn'>,
 ): NormalizeResult<NormalizedDownstreamMessage> {
-  const compatibilityError = prevalidateCompatibility(raw);
-  if (compatibilityError) {
-    if (logger) {
-      logDownstreamNormalizationFailure(logger, raw, compatibilityError);
-    }
-    return { ok: false, error: compatibilityError };
-  }
-
-  const result = normalizeSharedDownstream(remapAssistantIdInput(raw));
+  const result = normalizeSharedDownstream(raw);
   if (!result.ok) {
     const error = toNormalizationError(result.error);
     if (logger) {
@@ -205,11 +98,10 @@ export function normalizeDownstreamMessage(
 
   return {
     ok: true,
-    value: remapAssistantIdOutput(
+    value:
       result.value.type === DOWNSTREAM_MESSAGE_TYPE.INVOKE && !('welinkSessionId' in result.value)
         ? { ...result.value, welinkSessionId: undefined }
         : (result.value as NormalizedDownstreamMessage),
-    ),
   };
 }
 

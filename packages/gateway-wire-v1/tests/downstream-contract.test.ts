@@ -225,6 +225,28 @@ test('normalizeDownstream rejects invalid permission_reply response values', () 
   });
 });
 
+test('normalizeDownstream rejects non-string chat assistantId', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      welinkSessionId: 'wl-chat-invalid-assistant',
+      payload: {
+        toolSessionId: 'tool-chat-invalid-assistant',
+        text: 'hello',
+        assistantId: 123,
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.assistantId',
+    messageType: 'invoke',
+    action: 'chat',
+  });
+});
+
 test('normalizeDownstream accepts question_reply without welinkSessionId through the public API', () => {
   const result = normalizeDownstream({
     type: 'invoke',
