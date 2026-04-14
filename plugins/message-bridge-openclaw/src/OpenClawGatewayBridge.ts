@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
+import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
+import { normalizeOutboundReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import {
-  createReplyPrefixOptions,
-  normalizeOutboundReplyPayload,
   type OpenClawConfig,
   type PluginRuntime,
 } from "openclaw/plugin-sdk";

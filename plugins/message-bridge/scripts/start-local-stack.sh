@@ -360,7 +360,7 @@ start_bg \
   "8081" \
   "${PID_DIR}/ai-gateway.pid" \
   "${LOG_DIR}/ai-gateway.log" \
-  "cd '${AI_GATEWAY_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_AI_GATEWAY_DB='${AI_DB}' SPRING_DATASOURCE_USERNAME='${DB_USER}' SPRING_DATASOURCE_PASSWORD='${DB_PASSWORD}' mvn spring-boot:run"
+  "cd '${AI_GATEWAY_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_AI_GATEWAY_DB='${AI_DB}' SPRING_DATASOURCE_USERNAME='${DB_USER}' SPRING_DATASOURCE_PASSWORD='${DB_PASSWORD}' mvn -Dmaven.test.skip=true spring-boot:run"
 
 echo "[3/4] Start skill-server"
 start_bg \
@@ -368,7 +368,7 @@ start_bg \
   "8082" \
   "${PID_DIR}/skill-server.pid" \
   "${LOG_DIR}/skill-server.log" \
-  "cd '${SKILL_SERVER_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_USERNAME='${DB_USER}' MYSQL_PASSWORD='${DB_PASSWORD}' MYSQL_SKILL_DB='${SKILL_DB}' mvn spring-boot:run"
+  "cd '${SKILL_SERVER_DIR}' && MYSQL_HOST='${DB_HOST}' MYSQL_PORT='${DB_PORT}' MYSQL_USERNAME='${DB_USER}' MYSQL_PASSWORD='${DB_PASSWORD}' MYSQL_SKILL_DB='${SKILL_DB}' mvn -Dmaven.test.skip=true spring-boot:run"
 
 echo "[4/4] Start skill-miniapp"
 start_bg \

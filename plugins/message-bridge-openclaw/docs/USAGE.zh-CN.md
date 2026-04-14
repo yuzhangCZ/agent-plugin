@@ -21,7 +21,7 @@
 
 运行时依赖约束：
 
-- 插件运行时使用宿主 OpenClaw 提供的 `plugin-sdk`
+- 插件运行时使用宿主 OpenClaw 提供的 `plugin-sdk` 公开子入口
 - 安装目录中不要复制 `node_modules/`
 - 尤其不要包含 `node_modules/openclaw`
 
@@ -64,11 +64,17 @@
 
 当前本地验证使用：
 
-- OpenClaw `2026.3.11`
+- OpenClaw `2026.3.24`
 - 网关地址：`ws://127.0.0.1:8081/ws/agent`
 - 测试凭据：
   - `ak`: `test-ak-openclaw-001`
   - `sk`: `test-sk-openclaw-001`
+
+版本边界说明：
+
+- 运行时宿主版本要求：`>=2026.3.24`
+- 私有 npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
+- `2026.3.31` 及更新版本会在安装阶段拦截当前产物中的 `install.mjs`
 
 OpenClaw profile 常见路径：
 

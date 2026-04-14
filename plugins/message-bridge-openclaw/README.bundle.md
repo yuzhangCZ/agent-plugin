@@ -27,9 +27,12 @@ The package does not ship `dist/`, docs, sourcemaps, or a bundled copy of
 
 ## Host Requirement
 
-- `openclaw >=2026.3.11`
+- `openclaw >=2026.3.24`
 
-The plugin relies on the host-provided `openclaw/plugin-sdk` at runtime.
+The plugin relies on host-provided `openclaw/plugin-sdk/*` public subpath exports at runtime.
+
+For the published npm helper install flow, the currently supported host window is
+`>=2026.3.24 <2026.3.31`.
 
 ## Local Validation
 

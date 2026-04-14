@@ -30,7 +30,7 @@
     "verify:release": "pnpm run verify:core && pnpm run verify:openclaw:env && pnpm run verify:openclaw:load && pnpm run test:runtime"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.3.11"
+    "openclaw": ">=2026.3.24"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -61,7 +61,7 @@
       "npmSpec": "@wecode/skill-openclaw-plugin",
       "localPath": "extensions/skill-openclaw-plugin",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.3.11"
+      "minHostVersion": ">=2026.3.24"
     }
   }
 }

@@ -20,7 +20,7 @@ async function withTempDir(fn) {
   }
 }
 
-async function createFakeOpenclaw({ version = "2026.3.11", exitCode = 0 } = {}) {
+async function createFakeOpenclaw({ version = "2026.3.24", exitCode = 0 } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "fake-openclaw-unit-"));
   const scriptPath = path.join(dir, "fake-openclaw.mjs");
   await writeFile(
@@ -48,7 +48,7 @@ test("preflightOpenClaw fails fast when command does not exist", async () => {
   await assert.rejects(
     preflightOpenClaw({
       openclawBin: path.join(tmpdir(), "missing-openclaw"),
-      requiredRange: ">=2026.3.11",
+      requiredRange: ">=2026.3.24 <2026.3.31",
     }),
     (error) => error?.code === "OPENCLAW_NOT_FOUND",
   );
@@ -60,7 +60,22 @@ test("preflightOpenClaw rejects versions below required range", async () => {
     await assert.rejects(
       preflightOpenClaw({
         openclawBin: fake.scriptPath,
-        requiredRange: ">=2026.3.11",
+        requiredRange: ">=2026.3.24 <2026.3.31",
+      }),
+      (error) => error?.code === "OPENCLAW_VERSION_UNSUPPORTED",
+    );
+  } finally {
+    await fake.cleanup();
+  }
+});
+
+test("preflightOpenClaw rejects versions above install-supported range", async () => {
+  const fake = await createFakeOpenclaw({ version: "2026.3.31" });
+  try {
+    await assert.rejects(
+      preflightOpenClaw({
+        openclawBin: fake.scriptPath,
+        requiredRange: ">=2026.3.24 <2026.3.31",
       }),
       (error) => error?.code === "OPENCLAW_VERSION_UNSUPPORTED",
     );
