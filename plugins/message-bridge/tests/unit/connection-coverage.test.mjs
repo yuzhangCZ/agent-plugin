@@ -1,7 +1,10 @@
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultGatewayConnection } from '../../src/connection/GatewayConnection.ts';
+import {
+  DefaultGatewayConnection,
+  evaluateReconnect,
+} from '../../src/connection/GatewayConnection.ts';
 
 class ScriptedWebSocket {
   static OPEN = 1;
@@ -20,6 +23,16 @@ class ScriptedWebSocket {
     setTimeout(() => {
       if (this.script.errorOnOpen) {
         this.onerror?.(this.script.errorEvent ?? new Error('socket error'));
+        if (this.script.closeAfterErrorMs !== undefined) {
+          setTimeout(() => {
+            this.readyState = ScriptedWebSocket.CLOSED;
+            this.onclose?.(this.script.closeEvent ?? {
+              code: this.script.closeCode,
+              reason: this.script.closeReason,
+              wasClean: this.script.wasClean,
+            });
+          }, this.script.closeAfterErrorMs);
+        }
         return;
       }
       if (this.script.closeBeforeOpen) {
@@ -188,6 +201,106 @@ describe('DefaultGatewayConnection coverage', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
+  test('evaluateReconnect applies reason priority and retryable close-code policy', () => {
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: true,
+        aborted: true,
+        rejected: true,
+        closeCode: 1006,
+      }),
+      {
+        eligible: false,
+        reason: 'manual_disconnect',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: false,
+        aborted: true,
+        rejected: true,
+        closeCode: 1006,
+      }),
+      {
+        eligible: false,
+        reason: 'aborted',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: false,
+        aborted: false,
+        rejected: true,
+        closeCode: 4403,
+      }),
+      {
+        eligible: false,
+        reason: 'gateway_rejected',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: false,
+        aborted: false,
+        rejected: false,
+        closeCode: undefined,
+      }),
+      {
+        eligible: false,
+        reason: 'close_code_missing',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: false,
+        aborted: false,
+        rejected: false,
+        closeCode: 1009,
+      }),
+      {
+        eligible: false,
+        reason: 'close_code_non_retryable',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: false,
+        manuallyDisconnected: false,
+        aborted: false,
+        rejected: false,
+        closeCode: 1006,
+      }),
+      {
+        eligible: false,
+        reason: 'close_code_non_retryable',
+      },
+    );
+
+    assert.deepStrictEqual(
+      evaluateReconnect({
+        opened: true,
+        manuallyDisconnected: false,
+        aborted: false,
+        rejected: false,
+        closeCode: 1012,
+      }),
+      {
+        eligible: true,
+        reason: 'close_code_retryable',
+      },
+    );
+  });
+
   test('rejects on aborted signal before connect', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -349,7 +462,7 @@ describe('DefaultGatewayConnection coverage', () => {
     });
     await assert.rejects(badUrl.connect());
 
-    ScriptedWebSocket.scripts.push({ errorOnOpen: true });
+    ScriptedWebSocket.scripts.push({ errorOnOpen: true, closeAfterErrorMs: 0 });
     const errorConn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
@@ -362,7 +475,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs websocket error details when the runtime provides them', async () => {
     const errorLogs = [];
-    ScriptedWebSocket.scripts.push({ errorOnOpen: true });
+    ScriptedWebSocket.scripts.push({ errorOnOpen: true, closeAfterErrorMs: 0 });
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
@@ -403,6 +516,7 @@ describe('DefaultGatewayConnection coverage', () => {
     const errorLogs = [];
     ScriptedWebSocket.scripts.push({
       errorOnOpen: true,
+      closeAfterErrorMs: 0,
       errorEvent: {
         type: 'error',
         message: 'socket error',
@@ -446,8 +560,39 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
+  test('onerror only records the error and waits for onclose to decide reconnect', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push({
+      errorOnOpen: true,
+      closeAfterErrorMs: 0,
+      closeCode: 1006,
+      closeReason: 'handshake-error',
+      wasClean: false,
+    });
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
+      registerMessage: registerMessage(),
+      logger,
+    });
+    conn.on('error', () => {});
+
+    await assert.rejects(conn.connect(), /gateway_websocket_closed_before_open/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+    const closeLog = entries.find((entry) => entry.message === 'gateway.close');
+    assert.notStrictEqual(closeLog, undefined);
+    assert.strictEqual(closeLog.extra.reconnectEligible, false);
+    assert.strictEqual(closeLog.extra.reconnectDecisionReason, 'close_code_non_retryable');
+    conn.disconnect();
+  });
+
   test('reconnects after opened connection closes unexpectedly', async () => {
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 }, { open: true });
+    ScriptedWebSocket.scripts.push(
+      { closeAfterOpenMs: 0, closeCode: 1006, closeReason: 'network-jitter', wasClean: false },
+      { open: true },
+    );
     const states = [];
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',
@@ -583,6 +728,7 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({
       autoRegisterOk: false,
       errorOnOpen: true,
+      closeAfterErrorMs: 0,
       errorEvent: {
         type: 'error',
         message: 'socket error',
@@ -858,7 +1004,7 @@ describe('DefaultGatewayConnection coverage', () => {
     const { logger, entries } = createLoggerRecorder();
     const states = [];
     ScriptedWebSocket.scripts.push(
-      { closeAfterOpenMs: 0, closeCode: 1009, closeReason: 'too-big', wasClean: false },
+      { closeAfterOpenMs: 0, closeCode: 1006, closeReason: 'network-jitter', wasClean: false },
       { open: true },
     );
     const conn = new DefaultGatewayConnection({
@@ -909,27 +1055,49 @@ describe('DefaultGatewayConnection coverage', () => {
     ]);
   });
 
+  test('marks retryable close logs with reconnect decision fields', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const states = [];
+    ScriptedWebSocket.scripts.push(
+      { closeAfterOpenMs: 0, closeCode: 1012, closeReason: 'server-restart', wasClean: true },
+      { open: true },
+    );
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
+      registerMessage: registerMessage(),
+      logger,
+    });
+    conn.on('stateChange', (state) => states.push(state));
+
+    await conn.connect();
+    states.length = 0;
+    await waitForState(conn, states, 'DISCONNECTED');
+    await waitForReady(conn, states);
+
+    const closeLog = entries.find((entry) => entry.message === 'gateway.close');
+    assert.notStrictEqual(closeLog, undefined);
+    assert.strictEqual(closeLog.extra.reconnectEligible, true);
+    assert.strictEqual(closeLog.extra.reconnectDecisionReason, 'close_code_retryable');
+    conn.disconnect();
+  });
+
   test('logs reconnect exhaustion and stops before opening a new socket', async () => {
     const { logger, entries } = createLoggerRecorder();
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0, closeCode: 1012, closeReason: 'server-restart', wasClean: false });
 
     const reconnectPolicy = {
       reset() {},
       startWindow() {},
       scheduleNextAttempt() {
         return {
-          ok: true,
-          attempt: 1,
-          delayMs: 0,
-          elapsedMs: 0,
-        };
-      },
-      getExhaustedDecision() {
-        return {
           ok: false,
           elapsedMs: 10,
           maxElapsedMs: 10,
         };
+      },
+      getExhaustedDecision() {
+        return null;
       },
     };
 
@@ -945,12 +1113,16 @@ describe('DefaultGatewayConnection coverage', () => {
 
     assert.strictEqual(ScriptedWebSocket.instances.length, 1);
     assert.ok(entries.some((entry) => entry.message === 'gateway.reconnect.exhausted'));
+    const closeLog = entries.find((entry) => entry.message === 'gateway.close');
+    assert.notStrictEqual(closeLog, undefined);
+    assert.strictEqual(closeLog.extra.reconnectEligible, false);
+    assert.strictEqual(closeLog.extra.reconnectDecisionReason, 'reconnect_window_exhausted');
     conn.disconnect();
   });
 
   test('stops immediately when the next retry would exceed the remaining reconnect budget', async () => {
     const { logger, entries } = createLoggerRecorder();
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0, closeCode: 1006, closeReason: 'budget-limit', wasClean: false });
 
     const conn = new DefaultGatewayConnection({
       url: 'ws://localhost:8081/ws/agent',

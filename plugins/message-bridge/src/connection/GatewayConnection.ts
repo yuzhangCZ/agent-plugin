@@ -8,6 +8,7 @@ import {
   DefaultReconnectPolicy,
   type ReconnectClock,
   type ReconnectPolicy,
+  type ReconnectScheduledDecision,
 } from './ReconnectPolicy.js';
 
 export interface GatewayConnectionEvents {
@@ -35,6 +36,8 @@ export interface GatewayConnectionCloseDetail {
   code?: number;
   reason?: string;
   wasClean?: boolean;
+  reconnectEligible: boolean;
+  reconnectDecisionReason: ReconnectDecisionReason;
   willReconnect: boolean;
 }
 
@@ -86,6 +89,29 @@ export interface GatewayConnectionOptions {
 type WsMessageEvent = { data: string | ArrayBuffer | Blob | Uint8Array };
 type GatewayControlMessage = RegisterOkMessage | RegisterRejectedMessage;
 const GATEWAY_REJECTION_CLOSE_CODES = new Set([4403, 4408, 4409]);
+const RETRYABLE_CLOSE_CODES = new Set([1006, 1012, 1013]);
+
+export type ReconnectDecisionReason =
+  | 'manual_disconnect'
+  | 'aborted'
+  | 'gateway_rejected'
+  | 'close_code_retryable'
+  | 'close_code_non_retryable'
+  | 'close_code_missing'
+  | 'reconnect_window_exhausted';
+
+export interface ReconnectEvaluationInput {
+  opened: boolean;
+  manuallyDisconnected: boolean;
+  aborted: boolean;
+  rejected: boolean;
+  closeCode?: number;
+}
+
+interface ReconnectEvaluationResult {
+  eligible: boolean;
+  reason: ReconnectDecisionReason;
+}
 
 interface RegisterOkMessage {
   type: 'register_ok';
@@ -203,6 +229,38 @@ function isGatewayControlMessage(message: unknown): message is GatewayControlMes
 
 function isGatewayRejectedCloseCode(code: number | undefined): boolean {
   return typeof code === 'number' && GATEWAY_REJECTION_CLOSE_CODES.has(code);
+}
+
+function isRetryableCloseCode(code: number | undefined): boolean {
+  return typeof code === 'number' && RETRYABLE_CLOSE_CODES.has(code);
+}
+
+export function evaluateReconnect(input: ReconnectEvaluationInput): ReconnectEvaluationResult {
+  if (input.manuallyDisconnected) {
+    return { eligible: false, reason: 'manual_disconnect' };
+  }
+
+  if (input.aborted) {
+    return { eligible: false, reason: 'aborted' };
+  }
+
+  if (input.rejected) {
+    return { eligible: false, reason: 'gateway_rejected' };
+  }
+
+  if (input.closeCode === undefined) {
+    return { eligible: false, reason: 'close_code_missing' };
+  }
+
+  if (!input.opened) {
+    return { eligible: false, reason: 'close_code_non_retryable' };
+  }
+
+  if (!isRetryableCloseCode(input.closeCode)) {
+    return { eligible: false, reason: 'close_code_non_retryable' };
+  }
+
+  return { eligible: true, reason: 'close_code_retryable' };
 }
 
 const LARGE_PAYLOAD_WARN_THRESHOLD_BYTES = 1024 * 1024;
@@ -339,7 +397,12 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
         ws.onclose = (event?: CloseEvent) => {
           const rejected = isGatewayRejectedCloseCode(event?.code);
-          const willReconnect = opened && !this.manuallyDisconnected && !this.options.abortSignal?.aborted && !rejected;
+          const reconnectEvaluation = this.getReconnectEvaluation({
+            opened,
+            rejected,
+            closeCode: event?.code,
+          });
+          const willReconnect = reconnectEvaluation.eligible;
           this.options.logger?.warn('gateway.close', {
             opened,
             manuallyDisconnected: this.manuallyDisconnected,
@@ -348,6 +411,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             code: event?.code,
             reason: event?.reason,
             wasClean: event?.wasClean,
+            reconnectEligible: reconnectEvaluation.eligible,
+            reconnectDecisionReason: reconnectEvaluation.reason,
             lastMessageDirection: this.lastMessageSummary?.direction,
             lastMessageType: this.lastMessageSummary?.messageType,
             lastMessageId: this.lastMessageSummary?.messageId,
@@ -369,6 +434,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             code: event?.code,
             reason: event?.reason,
             wasClean: event?.wasClean,
+            reconnectEligible: reconnectEvaluation.eligible,
+            reconnectDecisionReason: reconnectEvaluation.reason,
             willReconnect,
           });
 
@@ -381,8 +448,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             return;
           }
 
-          if (willReconnect) {
-            this.attemptReconnect();
+          if (reconnectEvaluation.scheduledDecision) {
+            this.scheduleReconnect(reconnectEvaluation.scheduledDecision);
           }
         };
 
@@ -396,10 +463,6 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             ...errorDetails,
           });
           this.emit('error', error);
-          if (this.state !== 'DISCONNECTED') {
-            this.setState('DISCONNECTED');
-          }
-          finalizeReject(error);
         };
 
         ws.onmessage = (event: MessageEvent) => {
@@ -530,17 +593,10 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     }
   }
 
-  private attemptReconnect(): void {
-    if (this.options.abortSignal?.aborted) {
+  private scheduleReconnect(reconnectDecision: ReconnectScheduledDecision): void {
+    if (this.reconnectTimer !== null) {
       return;
     }
-
-    const reconnectDecision = this.reconnectPolicy.scheduleNextAttempt();
-    if (!reconnectDecision.ok) {
-      this.logReconnectExhausted(reconnectDecision.elapsedMs, reconnectDecision.maxElapsedMs);
-      return;
-    }
-
     this.options.logger?.warn('gateway.reconnect.scheduled', {
       attempt: reconnectDecision.attempt,
       delayMs: reconnectDecision.delayMs,
@@ -548,13 +604,8 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     });
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       if (this.manuallyDisconnected || this.options.abortSignal?.aborted) {
-        return;
-      }
-
-      const exhaustedDecision = this.reconnectPolicy.getExhaustedDecision();
-      if (exhaustedDecision) {
-        this.logReconnectExhausted(exhaustedDecision.elapsedMs, exhaustedDecision.maxElapsedMs);
         return;
       }
 
@@ -569,9 +620,6 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           error: getErrorMessage(error),
           ...getErrorDetailsForLog(error),
         });
-        if (!this.manuallyDisconnected) {
-          this.attemptReconnect();
-        }
       }
     }, reconnectDecision.delayMs);
   }
@@ -646,6 +694,42 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       elapsedMs,
       maxElapsedMs,
     });
+  }
+
+  private getReconnectEvaluation(
+    input: {
+      opened: boolean;
+      rejected: boolean;
+      closeCode?: number;
+    },
+  ): ReconnectEvaluationResult & { scheduledDecision?: ReconnectScheduledDecision } {
+    const reconnectEvaluation = evaluateReconnect({
+      ...input,
+      manuallyDisconnected: this.manuallyDisconnected,
+      aborted: !!this.options.abortSignal?.aborted,
+    });
+
+    if (!reconnectEvaluation.eligible) {
+      return reconnectEvaluation;
+    }
+
+    if (this.reconnectTimer !== null) {
+      return reconnectEvaluation;
+    }
+
+    const reconnectDecision = this.reconnectPolicy.scheduleNextAttempt();
+    if (!reconnectDecision.ok) {
+      this.logReconnectExhausted(reconnectDecision.elapsedMs, reconnectDecision.maxElapsedMs);
+      return {
+        eligible: false,
+        reason: 'reconnect_window_exhausted',
+      };
+    }
+
+    return {
+      ...reconnectEvaluation,
+      scheduledDecision: reconnectDecision,
+    };
   }
 
   private handleControlMessage(message: GatewayControlMessage): void {

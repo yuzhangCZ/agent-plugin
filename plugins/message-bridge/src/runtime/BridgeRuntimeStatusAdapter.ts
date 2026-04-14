@@ -120,27 +120,33 @@ export function createBridgeRuntimeStatusAdapter(
     publishConnectionClosed(detail: GatewayConnectionCloseDetail) {
       const current = read();
 
-      if (detail.willReconnect) {
+      if (detail.reconnectEligible) {
         const updatedAt = now();
         publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
         return;
       }
 
-      if (detail.manuallyDisconnected || detail.aborted) {
+      if (
+        detail.reconnectDecisionReason === 'manual_disconnect' ||
+        detail.reconnectDecisionReason === 'aborted'
+      ) {
         return;
       }
 
-      if (!detail.opened && !detail.rejected) {
+      if (!detail.opened && detail.reconnectDecisionReason !== 'gateway_rejected') {
         return;
       }
 
-      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
+      const unavailableReason =
+        detail.reconnectDecisionReason === 'gateway_rejected' ? 'server_failure' : 'network_failure';
+
+      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure' && unavailableReason !== 'server_failure') {
         return;
       }
 
       const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: detail.rejected ? 'server_failure' : 'network_failure',
+        reason: unavailableReason,
         lastError: detail.reason ?? null,
         updatedAt,
         lastReadyAt: current.lastReadyAt,

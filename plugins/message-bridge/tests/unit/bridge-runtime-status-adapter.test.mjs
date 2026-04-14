@@ -79,6 +79,8 @@ describe('bridge runtime status adapter', () => {
       code: 4403,
       reason: 'server shutdown',
       wasClean: true,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'gateway_rejected',
       willReconnect: false,
     });
 
@@ -100,6 +102,8 @@ describe('bridge runtime status adapter', () => {
       code: 4403,
       reason: 'auth rejected',
       wasClean: true,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'gateway_rejected',
       willReconnect: false,
     });
 
@@ -134,6 +138,8 @@ describe('bridge runtime status adapter', () => {
       code: 1006,
       reason: 'network jitter',
       wasClean: false,
+      reconnectEligible: true,
+      reconnectDecisionReason: 'close_code_retryable',
       willReconnect: true,
     });
 
@@ -143,5 +149,84 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(reconnecting.unavailableReason, null);
     assert.strictEqual(reconnecting.willReconnect, true);
     assert.strictEqual(reconnecting.lastError, null);
+  });
+
+  test('publishes network_failure for close_code_missing and reconnect_window_exhausted', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnectionState('READY');
+    adapter.publishConnectionClosed({
+      opened: true,
+      manuallyDisconnected: false,
+      aborted: false,
+      rejected: false,
+      code: undefined,
+      reason: 'socket disappeared',
+      wasClean: false,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'close_code_missing',
+      willReconnect: false,
+    });
+
+    const missingCode = getMessageBridgeStatus();
+    assert.strictEqual(missingCode.phase, 'unavailable');
+    assert.strictEqual(missingCode.unavailableReason, 'network_failure');
+    assert.strictEqual(missingCode.willReconnect, false);
+    assert.strictEqual(missingCode.lastError, 'socket disappeared');
+
+    adapter.publishConnectionState('READY');
+    adapter.publishConnectionClosed({
+      opened: true,
+      manuallyDisconnected: false,
+      aborted: false,
+      rejected: false,
+      code: 1012,
+      reason: 'budget exhausted',
+      wasClean: false,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'reconnect_window_exhausted',
+      willReconnect: false,
+    });
+
+    const exhausted = getMessageBridgeStatus();
+    assert.strictEqual(exhausted.phase, 'unavailable');
+    assert.strictEqual(exhausted.unavailableReason, 'network_failure');
+    assert.strictEqual(exhausted.willReconnect, false);
+    assert.strictEqual(exhausted.lastError, 'budget exhausted');
+  });
+
+  test('ignores manual_disconnect and aborted close reasons', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnectionState('READY');
+    const ready = getMessageBridgeStatus();
+
+    adapter.publishConnectionClosed({
+      opened: true,
+      manuallyDisconnected: true,
+      aborted: false,
+      rejected: false,
+      code: 1000,
+      reason: 'manual close',
+      wasClean: true,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'manual_disconnect',
+      willReconnect: false,
+    });
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+
+    adapter.publishConnectionClosed({
+      opened: true,
+      manuallyDisconnected: false,
+      aborted: true,
+      rejected: false,
+      code: 1000,
+      reason: 'abort close',
+      wasClean: true,
+      reconnectEligible: false,
+      reconnectDecisionReason: 'aborted',
+      willReconnect: false,
+    });
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 });

@@ -1,7 +1,7 @@
 # message-bridge 日志可观测性手册
 
-**Version:** 1.3  
-**Date:** 2026-04-07  
+**Version:** 1.4
+**Date:** 2026-04-13
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../../src/runtime/AppLogger.ts`
@@ -72,6 +72,8 @@
 | `diffCount` | `session.diff` 中 diff 项数量 |
 | `latencyMs` | 单次动作耗时 |
 | `attempt`/`delayMs` | 重连次数与实际重连延迟 |
+| `reconnectEligible` | 当前 `gateway.close` 是否允许自动重连 |
+| `reconnectDecisionReason` | 连接关闭后的自动重连决策原因 |
 
 ## 3. 关键路径时序图（Mermaid）
 
@@ -145,7 +147,8 @@ sequenceDiagram
   participant G as "GatewayConnection"
   participant P as "BridgeRuntime"
 
-  G->>G: gateway.close or gateway.error
+  G->>G: gateway.error
+  G->>G: gateway.close
   G->>G: gateway.reconnect.scheduled
   G->>G: gateway.reconnect.attempt
   G->>G: gateway.ready
@@ -214,8 +217,8 @@ sequenceDiagram
 | `gateway.open` | info | WebSocket onopen | - | `src/connection/GatewayConnection.ts:115` |
 | `gateway.register.sent` | info | register 消息发送后 | `toolType`,`toolVersion` | `src/connection/GatewayConnection.ts:119` |
 | `gateway.ready` | info | 状态切到 READY | - | `src/connection/GatewayConnection.ts:124` |
-| `gateway.close` | warn | WebSocket onclose | `opened`,`manuallyDisconnected`,`aborted`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
-| `gateway.error` | error | WebSocket onerror | `error`,`errorDetail`,`errorName?`,`errorType?`,`eventType?`,`readyState?` | `src/connection/GatewayConnection.ts:148` |
+| `gateway.close` | warn | WebSocket onclose；统一给出最终自动重连决策 | `opened`,`manuallyDisconnected`,`aborted`,`reconnectEligible`,`reconnectDecisionReason`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
+| `gateway.error` | error | WebSocket onerror；仅记录错误观测，不直接决定自动重连 | `error`,`errorDetail`,`errorName?`,`errorType?`,`eventType?`,`readyState?` | `src/connection/GatewayConnection.ts:148` |
 | `gateway.connect.failed` | error | connect 抛异常（URL/构造等） | `error`,`errorDetail`,`errorName?`,`sourceErrorCode?` | `src/connection/GatewayConnection.ts:162` |
 | `gateway.disconnect.requested` | info | 主动 disconnect | `state` | `src/connection/GatewayConnection.ts:171` |
 | `gateway.send.rejected_not_connected` | warn | 非连接态发送消息 | - | `src/connection/GatewayConnection.ts:190` |
@@ -232,6 +235,21 @@ sequenceDiagram
 | `gateway.message.ignored_non_json` | debug | 收到非 JSON 消息被忽略 | `payloadLength`,`frameBytes` | `src/connection/GatewayConnection.ts` |
 | `gateway.state.changed` | info | runtime 监听到连接状态变化 | `state` | `src/runtime/BridgeRuntime.ts:99` |
 | `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
+
+`gateway.close.reconnectDecisionReason` 固定枚举：
+
+- `manual_disconnect`
+- `aborted`
+- `gateway_rejected`
+- `close_code_retryable`
+- `close_code_non_retryable`
+- `close_code_missing`
+- `reconnect_window_exhausted`
+
+一致性约束：
+
+- `reconnectEligible=true` 时，`reconnectDecisionReason` 只能为 `close_code_retryable`
+- `closeCode=undefined` 时，`reconnectDecisionReason` 必须为 `close_code_missing`
 
 ### 4.4 event.*
 
