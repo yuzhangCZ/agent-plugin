@@ -172,28 +172,75 @@ function compareVersion(a, b) {
   return 0;
 }
 
-export function assertVersionSatisfies(actualVersion, range) {
+function parseVersionComparators(range) {
   const normalizedRange = String(range ?? "").trim();
-  if (!normalizedRange.startsWith(">=")) {
-    throw createInstallerError(
-      "OPENCLAW_VERSION_UNSUPPORTED",
-      `Unsupported OpenClaw version range: ${normalizedRange || "<empty>"}`,
-    );
+  if (!normalizedRange) {
+    throw createInstallerError("OPENCLAW_VERSION_UNSUPPORTED", "Unsupported OpenClaw version range: <empty>");
   }
 
-  const minVersion = parseVersion(normalizedRange.slice(2));
+  const comparators = normalizedRange
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^(>=|<=|>|<|=)?(\d+\.\d+\.\d+)$/);
+      if (!match) {
+        throw createInstallerError(
+          "OPENCLAW_VERSION_UNSUPPORTED",
+          `Unsupported OpenClaw version range: ${normalizedRange}`,
+        );
+      }
+
+      const operator = match[1] ?? "=";
+      const version = parseVersion(match[2]);
+      if (!version) {
+        throw createInstallerError(
+          "OPENCLAW_VERSION_UNSUPPORTED",
+          `Unable to compare OpenClaw version range: ${normalizedRange}`,
+        );
+      }
+
+      return { operator, version };
+    });
+
+  if (comparators.length === 0) {
+    throw createInstallerError("OPENCLAW_VERSION_UNSUPPORTED", "Unsupported OpenClaw version range: <empty>");
+  }
+
+  return comparators;
+}
+
+export function assertVersionSatisfies(actualVersion, range) {
   const currentVersion = parseVersion(actualVersion);
-  if (!minVersion || !currentVersion) {
+  if (!currentVersion) {
     throw createInstallerError(
       "OPENCLAW_VERSION_UNSUPPORTED",
-      `Unable to compare OpenClaw version ${actualVersion} against ${normalizedRange}.`,
+      `Unable to compare OpenClaw version ${actualVersion} against ${String(range ?? "").trim() || "<empty>"}.`,
     );
   }
 
-  if (compareVersion(currentVersion, minVersion) < 0) {
+  const comparators = parseVersionComparators(range);
+  const satisfied = comparators.every(({ operator, version }) => {
+    const result = compareVersion(currentVersion, version);
+    switch (operator) {
+      case ">=":
+        return result >= 0;
+      case "<=":
+        return result <= 0;
+      case ">":
+        return result > 0;
+      case "<":
+        return result < 0;
+      case "=":
+        return result === 0;
+      default:
+        return false;
+    }
+  });
+
+  if (!satisfied) {
     throw createInstallerError(
       "OPENCLAW_VERSION_UNSUPPORTED",
-      `Current OpenClaw version ${actualVersion} does not satisfy required range ${normalizedRange}.`,
+      `Current OpenClaw version ${actualVersion} does not satisfy required range ${range}.`,
     );
   }
 }
@@ -386,7 +433,7 @@ export async function runInstaller({
   const args = parseArgs(argv);
   const packageRoot = resolvePackageRoot(importMetaUrl);
   const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
-  const requiredRange = packageJson.peerDependencies?.openclaw ?? ">=0.0.0";
+  const requiredRange = packageJson.openclaw?.install?.minHostVersion ?? packageJson.peerDependencies?.openclaw ?? ">=0.0.0";
   const openclawBin = resolveOpenClawCommand({
     cliOpenclawBin: args.openclawBin,
     env,
