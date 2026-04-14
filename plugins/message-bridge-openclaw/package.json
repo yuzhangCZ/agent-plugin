@@ -61,7 +61,7 @@
       "npmSpec": "@wecode/skill-openclaw-plugin",
       "localPath": "extensions/skill-openclaw-plugin",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.3.24 <2026.3.31"
+      "minHostVersion": ">=2026.3.24"
     }
   }
 }

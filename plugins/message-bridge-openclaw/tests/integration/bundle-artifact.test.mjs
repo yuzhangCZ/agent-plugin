@@ -30,7 +30,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
   assert.equal(manifest.bin["message-bridge-openclaw-install"], "./install.mjs");
   assert.equal(manifest.openclaw.extensions[0], "./index.js");
   assert.equal(manifest.openclaw.install.defaultChoice, "npm");
-  assert.equal(manifest.openclaw.install.minHostVersion, ">=2026.3.24 <2026.3.31");
+  assert.equal(manifest.openclaw.install.minHostVersion, ">=2026.3.24");
   assert.equal(manifest.peerDependencies.openclaw, ">=2026.3.24");
   assert.match(bundleContent, /ws:\/\/localhost:8081\/ws\/agent/);
 });

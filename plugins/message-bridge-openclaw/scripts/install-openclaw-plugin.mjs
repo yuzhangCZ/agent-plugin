@@ -12,6 +12,7 @@ const PLUGIN_ID = "skill-openclaw-plugin";
 const PLUGIN_LABEL = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
+const INSTALL_SUPPORTED_HOST_RANGE = ">=2026.3.24 <2026.3.31";
 
 function createInstallerError(code, message) {
   const error = new Error(message);
@@ -427,13 +428,10 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
 export async function runInstaller({
   argv = process.argv.slice(2),
   env = process.env,
-  importMetaUrl = import.meta.url,
   cwd = process.cwd(),
 } = {}) {
   const args = parseArgs(argv);
-  const packageRoot = resolvePackageRoot(importMetaUrl);
-  const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
-  const requiredRange = packageJson.openclaw?.install?.minHostVersion ?? packageJson.peerDependencies?.openclaw ?? ">=0.0.0";
+  const requiredRange = INSTALL_SUPPORTED_HOST_RANGE;
   const openclawBin = resolveOpenClawCommand({
     cliOpenclawBin: args.openclawBin,
     env,

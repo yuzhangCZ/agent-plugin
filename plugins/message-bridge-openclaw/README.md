@@ -69,7 +69,7 @@ message contract.
 版本约束现已拆分为两类：
 
 - 运行时宿主版本：`>=2026.3.24`
-- npm 安装流支持窗口：`>=2026.3.24 <2026.3.31`
+- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
 
 这意味着：当前 README 中基于私有 npm helper 的一键安装流程，仅适用于 `2026.3.24` 到 `2026.3.28` 的已测版本；对 `2026.3.31` 及更新版本，需要先完成发布产物兼容性改造，再恢复该安装路径。
 
@@ -89,7 +89,7 @@ npx --yes \
 
 安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
 
-- 检查 `openclaw` 是否已安装且版本满足 npm 安装流支持窗口 `>=2026.3.24 <2026.3.31`
+- 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
 - 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
@@ -321,7 +321,7 @@ Behavior:
 
 - `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
 - the helper resolves `@wecode:registry` from `--registry`, then `WECODE_NPM_REGISTRY`, then the existing user `.npmrc`, and writes back the resolved value idempotently
-- checks `openclaw --version` against `package.json.openclaw.install.minHostVersion`
+- checks `openclaw --version` against the helper-supported host window `>=2026.3.24 <2026.3.31`
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
 - runs `openclaw channels add --channel message-bridge ...`

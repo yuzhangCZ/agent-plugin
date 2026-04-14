@@ -31,7 +31,7 @@ The package does not ship `dist/`, docs, sourcemaps, or a bundled copy of
 
 The plugin relies on host-provided `openclaw/plugin-sdk/*` public subpath exports at runtime.
 
-For the published npm install flow, the currently supported host window is
+For the published npm helper install flow, the currently supported host window is
 `>=2026.3.24 <2026.3.31`.
 
 ## Local Validation
