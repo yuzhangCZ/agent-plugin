@@ -146,7 +146,6 @@ function normalizeCreateSessionPayload(payload: unknown): NormalizeResult<Create
     });
   }
   return ok({
-    sessionId: asString(payload.sessionId),
     metadata: isRecord(payload.metadata) ? payload.metadata : undefined,
   });
 }

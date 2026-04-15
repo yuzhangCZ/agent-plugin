@@ -34,6 +34,16 @@ import {
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
+import {
+  buildAssistantMessageUpdated,
+  buildAssistantPartDelta,
+  buildAssistantPartUpdated,
+  buildBusyEvent,
+  buildIdleEvent,
+  buildSessionErrorEvent,
+  buildToolPartUpdated,
+  createToolSessionId,
+} from "./session/upstreamEvents.js";
 
 export interface OpenClawGatewayBridgeOptions {
   account: MessageBridgeResolvedAccount;
@@ -146,39 +156,6 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
-function buildBusyEvent(sessionKey: string): Record<string, unknown> {
-  return {
-    type: "session.status",
-    properties: {
-      sessionID: sessionKey,
-      status: {
-        type: "busy",
-      },
-    },
-  };
-}
-
-function buildIdleEvent(sessionKey: string): Record<string, unknown> {
-  return {
-    type: "session.idle",
-    properties: {
-      sessionID: sessionKey,
-    },
-  };
-}
-
-function buildSessionErrorEvent(sessionKey: string, error: string): Record<string, unknown> {
-  return {
-    type: "session.error",
-    properties: {
-      sessionID: sessionKey,
-      error: {
-        message: error,
-      },
-    },
-  };
-}
-
 interface AssistantStreamState {
   messageId: string;
   partId: string;
@@ -233,86 +210,6 @@ function createSelectedModelState(): SelectedModelState {
     provider: null,
     model: null,
     thinkLevel: null,
-  };
-}
-
-function buildAssistantMessageUpdated(sessionKey: string, messageId: string): Record<string, unknown> {
-  return {
-    type: "message.updated",
-    properties: {
-      info: {
-        id: messageId,
-        sessionID: sessionKey,
-        role: "assistant",
-        time: {
-          created: Date.now(),
-        },
-      },
-    },
-  };
-}
-
-function buildAssistantPartUpdated(
-  sessionKey: string,
-  messageId: string,
-  partId: string,
-  text: string,
-  delta?: string,
-): Record<string, unknown> {
-  return {
-    type: "message.part.updated",
-    properties: {
-      ...(delta !== undefined ? { delta } : {}),
-      part: {
-        id: partId,
-        sessionID: sessionKey,
-        messageID: messageId,
-        type: "text",
-        text,
-      },
-    },
-  };
-}
-
-function buildAssistantPartDelta(
-  sessionKey: string,
-  messageId: string,
-  partId: string,
-  delta: string,
-): Record<string, unknown> {
-  return {
-    type: "message.part.delta",
-    properties: {
-      sessionID: sessionKey,
-      messageID: messageId,
-      partID: partId,
-      field: "text",
-      delta,
-    },
-  };
-}
-
-function buildToolPartUpdated(
-  state: ToolPartState,
-): Record<string, unknown> {
-  return {
-    type: "message.part.updated",
-    properties: {
-      part: {
-        id: state.partId,
-        sessionID: state.sessionKey,
-        messageID: state.messageId,
-        type: "tool",
-        tool: state.toolName,
-        callID: state.toolCallId,
-        state: {
-          status: state.status,
-          ...(state.output !== undefined ? { output: state.output } : {}),
-          ...(state.error !== undefined ? { error: state.error } : {}),
-          ...(state.title !== undefined ? { title: state.title } : {}),
-        },
-      },
-    },
   };
 }
 
@@ -677,7 +574,7 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId: record.toolSessionId,
-      event: buildBusyEvent(record.sessionKey),
+      event: buildBusyEvent(record.toolSessionId),
     }, context);
     this.logChatPathSelected({
       toolSessionId: record.toolSessionId,
@@ -984,7 +881,7 @@ export class OpenClawGatewayBridge {
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId: record.toolSessionId,
-        event: buildIdleEvent(record.sessionKey),
+        event: buildIdleEvent(record.toolSessionId),
       }, context);
       this.sendToolDone({
         type: "tool_done",
@@ -1022,7 +919,7 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId: record.toolSessionId,
-      event: buildSessionErrorEvent(record.sessionKey, finalErrorMessage),
+      event: buildSessionErrorEvent(record.toolSessionId, finalErrorMessage),
     }, context);
     this.sendToolError({
       type: "tool_error",
@@ -1153,9 +1050,7 @@ export class OpenClawGatewayBridge {
     message: Extract<InvokeMessage, { action: "create_session" }>,
     context: UpstreamSendContext,
   ): Promise<boolean> {
-    const requestedSessionId = message.payload.sessionId?.trim();
-    const toolSessionId = requestedSessionId && requestedSessionId.length > 0 ? requestedSessionId : randomUUID();
-    const record = this.sessionRegistry.ensure(toolSessionId, message.welinkSessionId);
+    const record = this.sessionRegistry.ensure(createToolSessionId(), message.welinkSessionId);
     const response: SessionCreatedMessage = {
       type: "session_created",
       welinkSessionId: message.welinkSessionId,
@@ -1345,7 +1240,7 @@ export class OpenClawGatewayBridge {
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId,
-        event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, chunk, chunk),
+        event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, chunk, chunk),
       }, context);
       return;
     }
@@ -1353,7 +1248,7 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantPartDelta(state.sessionKey, state.messageId, state.partId, chunk),
+      event: buildAssistantPartDelta(toolSessionId, state.messageId, state.partId, chunk),
     }, context);
   }
 
@@ -1369,7 +1264,7 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantMessageUpdated(state.sessionKey, state.messageId),
+      event: buildAssistantMessageUpdated(toolSessionId, state.messageId),
     }, context);
     state.seeded = true;
   }
@@ -1385,7 +1280,7 @@ export class OpenClawGatewayBridge {
         this.sendToolEvent({
           type: "tool_event",
           toolSessionId,
-          event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, text),
+          event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, text),
         }, context);
         return;
       }
@@ -1393,7 +1288,7 @@ export class OpenClawGatewayBridge {
         type: "tool_event",
         toolSessionId,
         event: buildAssistantPartUpdated(
-          state.sessionKey,
+          toolSessionId,
           state.messageId,
           state.partId,
           state.accumulatedText || text,
@@ -1405,12 +1300,12 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantMessageUpdated(state.sessionKey, state.messageId),
+      event: buildAssistantMessageUpdated(toolSessionId, state.messageId),
     }, context);
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantPartUpdated(state.sessionKey, state.messageId, state.partId, text),
+      event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, text),
     }, context);
     state.seeded = true;
   }
@@ -1422,7 +1317,10 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildToolPartUpdated(toolState),
+      event: buildToolPartUpdated({
+        toolSessionId,
+        ...toolState,
+      }),
     }, context);
   }
 
