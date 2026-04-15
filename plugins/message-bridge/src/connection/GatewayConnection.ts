@@ -531,6 +531,9 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
   }
 
   private attemptReconnect(): void {
+    if (this.reconnectTimer) {
+      return;
+    }
     if (this.options.abortSignal?.aborted) {
       return;
     }
@@ -548,6 +551,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     });
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       if (this.manuallyDisconnected || this.options.abortSignal?.aborted) {
         return;
       }

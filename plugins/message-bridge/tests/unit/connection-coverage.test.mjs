@@ -463,6 +463,110 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
+  test('does not reconnect when websocket closes before open', async () => {
+    ScriptedWebSocket.scripts.push({
+      closeBeforeOpen: true,
+      closeEvent: { code: 1006, reason: 'connect-timeout', wasClean: false },
+    });
+    const { logger, entries } = createLoggerRecorder();
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await assert.rejects(conn.connect());
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.strictEqual(ScriptedWebSocket.instances.length, 1);
+    assert.strictEqual(conn.getState(), 'DISCONNECTED');
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+    conn.disconnect();
+  });
+
+  test('does not schedule duplicate reconnect when onclose fires repeatedly before retry timer executes', async () => {
+    ScriptedWebSocket.scripts.push({ open: true });
+    const { logger, entries } = createLoggerRecorder();
+    const reconnectPolicy = {
+      reset() {},
+      startWindow() {},
+      scheduleNextAttempt() {
+        return {
+          ok: true,
+          attempt: 1,
+          delayMs: 50,
+          elapsedMs: 0,
+        };
+      },
+      getExhaustedDecision() {
+        return null;
+      },
+    };
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnectPolicy,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    const ws = ScriptedWebSocket.instances[0];
+    ws.readyState = ScriptedWebSocket.CLOSED;
+    ws.onclose?.({ code: 1006, reason: 'flaky-network', wasClean: false });
+    ws.onclose?.({ code: 1006, reason: 'flaky-network-repeat', wasClean: false });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(
+      entries.filter((entry) => entry.message === 'gateway.reconnect.scheduled').length,
+      1,
+    );
+    conn.disconnect();
+  });
+
+  test('schedules reconnect at most once when onerror and onclose fire in sequence', async () => {
+    ScriptedWebSocket.scripts.push({ open: true });
+    const { logger, entries } = createLoggerRecorder();
+    let scheduleCalls = 0;
+    const reconnectPolicy = {
+      reset() {},
+      startWindow() {},
+      scheduleNextAttempt() {
+        scheduleCalls += 1;
+        return {
+          ok: true,
+          attempt: scheduleCalls,
+          delayMs: 50,
+          elapsedMs: 0,
+        };
+      },
+      getExhaustedDecision() {
+        return null;
+      },
+    };
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnectPolicy,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    conn.on('error', () => {});
+    await conn.connect();
+
+    const ws = ScriptedWebSocket.instances[0];
+    ws.onerror?.({ type: 'error', message: 'flaky socket', target: { readyState: 1 } });
+    ws.readyState = ScriptedWebSocket.CLOSED;
+    ws.onclose?.({ code: 1006, reason: 'after-error', wasClean: false });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(scheduleCalls, 1);
+    assert.strictEqual(
+      entries.filter((entry) => entry.message === 'gateway.reconnect.scheduled').length,
+      1,
+    );
+    conn.disconnect();
+  });
+
   for (const closeCode of [4403, 4408, 4409]) {
     test(`does not reconnect on gateway rejection close code ${closeCode}`, async () => {
       const { logger, entries } = createLoggerRecorder();
@@ -511,6 +615,31 @@ describe('DefaultGatewayConnection coverage', () => {
     await new Promise((r) => setTimeout(r, 20));
     assert.strictEqual(ScriptedWebSocket.instances.length, 1);
     assert.strictEqual(conn.getState(), 'READY');
+    conn.disconnect();
+  });
+
+  test('does not attempt reconnect when abort signal is raised after retry is scheduled', async () => {
+    const controller = new AbortController();
+    const { logger, entries } = createLoggerRecorder();
+    ScriptedWebSocket.scripts.push({ open: true });
+    const conn = new DefaultGatewayConnection({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
+      abortSignal: controller.signal,
+      registerMessage: registerMessage(),
+      logger,
+    });
+    await conn.connect();
+
+    const ws = ScriptedWebSocket.instances[0];
+    ws.readyState = ScriptedWebSocket.CLOSED;
+    ws.onclose?.({ code: 1006, reason: 'transient-network', wasClean: false });
+    controller.abort();
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.reconnect.scheduled'), true);
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.reconnect.attempt'), false);
+    assert.strictEqual(ScriptedWebSocket.instances.length, 1);
     conn.disconnect();
   });
 
