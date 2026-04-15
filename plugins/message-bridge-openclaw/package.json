@@ -5,9 +5,7 @@
   "private": true,
   "type": "module",
   "main": "bundle/index.js",
-  "bin": {
-    "message-bridge-openclaw-install": "./scripts/install-openclaw-plugin.mjs"
-  },
+  "bin": "./scripts/install-openclaw-plugin.mjs",
   "exports": {
     ".": {
       "default": "./bundle/index.js"

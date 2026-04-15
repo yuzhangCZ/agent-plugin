@@ -76,8 +76,7 @@ message contract.
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
@@ -85,7 +84,7 @@ npx --yes \
   --dev
 ```
 
-安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
+安装过一次之后，也可以直接通过 `npx @wecode/skill-openclaw-plugin` 使用。该命令会：
 
 - 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
@@ -310,8 +309,7 @@ For first-time private registry installation, prefer an explicit `npx` bootstrap
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \

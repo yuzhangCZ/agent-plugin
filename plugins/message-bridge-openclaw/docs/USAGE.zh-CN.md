@@ -34,8 +34,8 @@ OpenClaw 安装兼容窗口：
 ## 1. 当前支持的安装方式
 
 - 正式私有 npm 安装
-  - 首次安装推荐通过 `npx` 显式指定二方仓源拉起 `message-bridge-openclaw-install`
-  - 安装过一次后也可以直接运行 `message-bridge-openclaw-install`
+  - 首次安装推荐通过 `npx` 直接拉起 `@wecode/skill-openclaw-plugin`
+  - 安装过一次后也可以继续通过 `npx @wecode/skill-openclaw-plugin` 运行
   - 自动校验 `openclaw` 是否已安装且版本满足最低要求
   - 自动幂等配置 `@wecode` 二方仓源到用户级 `.npmrc`
   - 自动执行 `openclaw plugins install`
@@ -54,7 +54,7 @@ OpenClaw 安装兼容窗口：
 
 推荐顺序：
 
-1. 正式安装：`npx --registry ... --package @wecode/skill-openclaw-plugin message-bridge-openclaw-install ...`
+1. 正式安装：`npx --registry ... @wecode/skill-openclaw-plugin ...`
 2. 本地部署或交付验证：bundle 安装
 3. 手动交付或排障：手动复制 bundle
 
@@ -114,8 +114,7 @@ pnpm run install:bundle:dev
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \

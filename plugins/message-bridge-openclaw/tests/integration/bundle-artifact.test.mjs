@@ -32,7 +32,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
   assert.equal(manifest.main, "index.js");
   assert.equal(manifest.exports["."].default, "./index.js");
   assert.deepEqual(Object.keys(manifest.exports), ["."]);
-  assert.equal(manifest.bin["message-bridge-openclaw-install"], "./install.mjs");
+  assert.equal(manifest.bin, "./install.mjs");
   assert.equal(manifest.openclaw.extensions[0], "./index.js");
   assert.equal(manifest.openclaw.install.defaultChoice, "npm");
   assert.equal(manifest.peerDependencies.openclaw, sourceManifest.peerDependencies.openclaw);
