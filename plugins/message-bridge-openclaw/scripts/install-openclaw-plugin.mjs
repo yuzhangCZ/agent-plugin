@@ -6,12 +6,14 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildOpenClawInvocation, resolveOpenClawCommandSpec } from "./openclaw-command-resolver.mjs";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
 const PLUGIN_ID = "skill-openclaw-plugin";
 const PLUGIN_LABEL = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
+const DEFAULT_SCOPE_REGISTRY = "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/";
 const INSTALL_SUPPORTED_HOST_RANGE = ">=2026.3.24 <2026.3.31";
 
 function createInstallerError(code, message) {
@@ -56,7 +58,7 @@ export function resolvePackageRoot(importMetaUrl = import.meta.url) {
   throw createInstallerError("INSTALLER_PACKAGE_ROOT_NOT_FOUND", `Unable to locate package.json for ${scriptPath}`);
 }
 
-export function resolveWindowsHomeDir(env = process.env) {
+function resolveWindowsHomeDir(env = process.env) {
   if (env.USERPROFILE) {
     return env.USERPROFILE;
   }
@@ -89,7 +91,7 @@ export async function readOptionalTextFile(filePath) {
   }
 }
 
-export function readScopedRegistry(content) {
+function readScopedRegistry(content) {
   if (!content) {
     return "";
   }
@@ -118,18 +120,14 @@ export function resolveRegistryValue({
     return existingRegistry;
   }
 
-  throw createInstallerError(
-    "REGISTRY_NOT_CONFIGURED",
-    "Missing @wecode registry. Pass --registry, set WECODE_NPM_REGISTRY, or preconfigure ~/.npmrc.",
-  );
+  return DEFAULT_SCOPE_REGISTRY;
 }
 
-export function buildNextNpmrcContent(existingContent, registry) {
+export function buildNextNpmrcContent(existingContent, registry = DEFAULT_SCOPE_REGISTRY) {
   const normalizedRegistry = String(registry ?? "").trim();
   if (!normalizedRegistry) {
     throw createInstallerError("REGISTRY_NOT_CONFIGURED", "Registry value cannot be empty.");
   }
-
   const existingRegistry = readScopedRegistry(existingContent);
   if (existingRegistry === normalizedRegistry) {
     return existingContent;
@@ -246,30 +244,49 @@ export function assertVersionSatisfies(actualVersion, range) {
   }
 }
 
-export function resolveOpenClawCommand({ cliOpenclawBin = "", env = process.env } = {}) {
-  const explicitCommand = String(cliOpenclawBin ?? "").trim() || String(env.OPENCLAW_BIN ?? "").trim();
-  if (explicitCommand) {
-    return explicitCommand;
-  }
-
-  return "openclaw";
+function runCommandSync(command, args, {
+  cwd,
+  env = process.env,
+  encoding = "utf8",
+} = {}) {
+  return spawnSync(command, args, {
+    cwd,
+    env,
+    encoding,
+    shell: false,
+  });
 }
 
-export async function preflightOpenClaw({ openclawBin, requiredRange }) {
-  const result = spawnSync(openclawBin, ["--version"], {
-    encoding: "utf8",
+export async function preflightOpenClaw({
+  openclawBin = "",
+  requiredRange,
+  env = process.env,
+  platform = process.platform,
+  runSync = runCommandSync,
+} = {}) {
+  const resolved = resolveOpenClawCommandSpec({
+    cliOpenclawBin: openclawBin,
+    env,
+    platform,
+    runSync,
   });
+  const command = resolved.resolvedCommand;
+  const result = resolved.versionResult;
+
+  if (resolved.usedPathLookup && platform === "win32" && command !== "openclaw") {
+    writeStdout(formatStep(`Windows 环境通过 where.exe 检测到 openclaw shim，后续将使用 ${command}`));
+  }
 
   if (result.error) {
     if (result.error.code === "ENOENT") {
       throw createInstallerError(
         "OPENCLAW_NOT_FOUND",
-        `OpenClaw command not found: ${openclawBin}. Please install OpenClaw first.`,
+        `OpenClaw command not found: ${command}. Please install OpenClaw first.`,
       );
     }
     throw createInstallerError(
       "OPENCLAW_NOT_FOUND",
-      `Failed to execute OpenClaw command ${openclawBin}: ${result.error.message}`,
+      `Failed to execute OpenClaw command ${command}: ${result.error.message}`,
     );
   }
 
@@ -277,13 +294,21 @@ export async function preflightOpenClaw({ openclawBin, requiredRange }) {
     const detail = (result.stderr || result.stdout || "").trim();
     throw createInstallerError(
       "OPENCLAW_NOT_FOUND",
-      `Failed to execute ${openclawBin} --version${detail ? `: ${detail}` : ""}`,
+      `Failed to execute ${command} --version${detail ? `: ${detail}` : ""}`,
     );
   }
 
   const version = (result.stdout || result.stderr || "").trim();
   assertVersionSatisfies(version, requiredRange);
-  return { openclawBin, version };
+  return {
+    openclawBin: command,
+    executionMode: resolved.executionMode,
+    version,
+  };
+}
+
+function formatDisplayCommand(openclaw, args) {
+  return `${openclaw.openclawBin} ${args.join(" ")}`.trim();
 }
 
 export function parseArgs(argv) {
@@ -351,50 +376,49 @@ function writeStderr(message) {
   process.stderr.write(`${message}\n`);
 }
 
-function spawnForwarded(cmd, args, failureCode, cwd = process.cwd()) {
+function spawnForwarded(openclaw, args, failureCode, cwd = process.cwd()) {
+  const invocation = buildOpenClawInvocation({
+    resolvedCommand: openclaw.openclawBin,
+    executionMode: openclaw.executionMode,
+    args,
+  });
+
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
       env: process.env,
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: "inherit",
       shell: false,
-    });
-
-    let combined = "";
-    child.stdout?.on("data", (chunk) => {
-      const text = chunk.toString();
-      combined += text;
-      process.stdout.write(text);
-    });
-    child.stderr?.on("data", (chunk) => {
-      const text = chunk.toString();
-      combined += text;
-      process.stderr.write(text);
     });
     child.on("error", (error) => {
       if (error.code === "ENOENT") {
-        reject(createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${cmd}`));
+        reject(createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${openclaw.openclawBin}`));
         return;
       }
       reject(createInstallerError(failureCode, error.message));
     });
     child.on("exit", (code) => {
       if (code === 0) {
-        resolve({ combined });
+        resolve({});
         return;
       }
       reject(
         createInstallerError(
           failureCode,
-          `${cmd} ${args.join(" ")} failed with code ${code}`,
+          `${formatDisplayCommand(openclaw, args)} failed with code ${code}`,
         ),
       );
     });
   });
 }
 
-function execJson(cmd, args, failureCode, cwd = process.cwd()) {
-  const result = spawnSync(cmd, args, {
+function execJson(openclaw, args, failureCode, cwd = process.cwd()) {
+  const invocation = buildOpenClawInvocation({
+    resolvedCommand: openclaw.openclawBin,
+    executionMode: openclaw.executionMode,
+    args,
+  });
+  const result = runCommandSync(invocation.command, invocation.args, {
     cwd,
     env: process.env,
     encoding: "utf8",
@@ -402,7 +426,7 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
 
   if (result.error) {
     if (result.error.code === "ENOENT") {
-      throw createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${cmd}`);
+      throw createInstallerError("OPENCLAW_NOT_FOUND", `OpenClaw command not found: ${openclaw.openclawBin}`);
     }
     throw createInstallerError(failureCode, result.error.message);
   }
@@ -411,7 +435,7 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
     const detail = (result.stderr || result.stdout || "").trim();
     throw createInstallerError(
       failureCode,
-      `${cmd} ${args.join(" ")} failed with code ${result.status}${detail ? `: ${detail}` : ""}`,
+      `${formatDisplayCommand(openclaw, args)} failed with code ${result.status}${detail ? `: ${detail}` : ""}`,
     );
   }
 
@@ -420,7 +444,9 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
   } catch (error) {
     throw createInstallerError(
       failureCode,
-      `Failed to parse JSON from ${cmd} ${args.join(" ")}: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to parse JSON from ${formatDisplayCommand(openclaw, args)}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
 }
@@ -428,14 +454,12 @@ function execJson(cmd, args, failureCode, cwd = process.cwd()) {
 export async function runInstaller({
   argv = process.argv.slice(2),
   env = process.env,
+  importMetaUrl = import.meta.url,
   cwd = process.cwd(),
 } = {}) {
   const args = parseArgs(argv);
+  resolvePackageRoot(importMetaUrl);
   const requiredRange = INSTALL_SUPPORTED_HOST_RANGE;
-  const openclawBin = resolveOpenClawCommand({
-    cliOpenclawBin: args.openclawBin,
-    env,
-  });
   const npmrcPath = resolveUserNpmrcPath(env);
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
   const registry = resolveRegistryValue({
@@ -445,7 +469,11 @@ export async function runInstaller({
   });
 
   writeStdout(formatStep("正在检查 OpenClaw 环境"));
-  const openclaw = await preflightOpenClaw({ openclawBin, requiredRange });
+  const openclaw = await preflightOpenClaw({
+    openclawBin: args.openclawBin,
+    requiredRange,
+    env,
+  });
   writeStdout(formatStep(`已检测到 OpenClaw: ${openclaw.openclawBin} (${openclaw.version})`));
 
   writeStdout(formatStep("正在配置 @wecode 二方仓源"));
@@ -460,7 +488,7 @@ export async function runInstaller({
 
   writeStdout(formatStep(`正在通过 OpenClaw 安装 ${PLUGIN_LABEL} 插件`));
   await spawnForwarded(
-    openclaw.openclawBin,
+    openclaw,
     [...openclawArgsPrefix, "plugins", "install", PACKAGE_NAME],
     "PLUGIN_INSTALL_FAILED",
     cwd,
@@ -468,7 +496,7 @@ export async function runInstaller({
 
   writeStdout(formatStep(`${PLUGIN_LABEL} 插件安装命令执行完成，正在校验安装结果`));
   const pluginInfo = execJson(
-    openclaw.openclawBin,
+    openclaw,
     [...openclawArgsPrefix, "plugins", "info", PLUGIN_ID, "--json"],
     "PLUGIN_INSTALL_VERIFICATION_FAILED",
     cwd,
@@ -499,12 +527,12 @@ export async function runInstaller({
         ...(args.name ? ["--name", args.name] : []),
       ]
     : [...openclawArgsPrefix, "channels", "add", "--channel", CHANNEL_ID];
-  await spawnForwarded(openclaw.openclawBin, channelArgs, "CHANNEL_ADD_FAILED", cwd);
+  await spawnForwarded(openclaw, channelArgs, "CHANNEL_ADD_FAILED", cwd);
 
   if (!args.noRestart) {
     writeStdout(formatStep("正在重启 OpenClaw gateway"));
     await spawnForwarded(
-      openclaw.openclawBin,
+      openclaw,
       [...openclawArgsPrefix, "gateway", "restart"],
       "GATEWAY_RESTART_FAILED",
       cwd,

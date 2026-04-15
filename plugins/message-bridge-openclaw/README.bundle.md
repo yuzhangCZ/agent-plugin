@@ -8,8 +8,9 @@ OpenCode-side `message-bridge` plugin.
 
 This package is intended to be installed into a real OpenClaw host.
 
-- first-time bootstrap: use `npx --registry <private-registry> --package @wecode/skill-openclaw-plugin message-bridge-openclaw-install ...`
-- install helper: after the package is available, you can run `message-bridge-openclaw-install` directly
+- first-time bootstrap: use `npx --registry <private-registry> @wecode/skill-openclaw-plugin ...`
+- install helper: after the package is available, you can run `npx @wecode/skill-openclaw-plugin ...` directly
+- the helper writes the resolved `@wecode:registry=...` into the user `.npmrc`, preferring `--registry`, `WECODE_NPM_REGISTRY`, then existing npmrc scope, and finally the default internal registry
 - npm install: use the package through OpenClaw's plugin installation flow
 - local dev install: build the bundle and install `bundle/` into an isolated
   OpenClaw profile
@@ -27,12 +28,10 @@ The package does not ship `dist/`, docs, sourcemaps, or a bundled copy of
 
 ## Host Requirement
 
-- `openclaw >=2026.3.24`
+- runtime host: `openclaw >=2026.3.24`
+- npm helper install window: `openclaw >=2026.3.24 <2026.3.31`
 
-The plugin relies on host-provided `openclaw/plugin-sdk/*` public subpath exports at runtime.
-
-For the published npm helper install flow, the currently supported host window is
-`>=2026.3.24 <2026.3.31`.
+The plugin relies on the host-provided `openclaw/plugin-sdk` at runtime.
 
 ## Local Validation
 

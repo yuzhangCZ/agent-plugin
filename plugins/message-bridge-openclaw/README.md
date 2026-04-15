@@ -71,15 +71,12 @@ message contract.
 - 运行时宿主版本：`>=2026.3.24`
 - npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
 
-这意味着：当前 README 中基于私有 npm helper 的一键安装流程，仅适用于 `2026.3.24` 到 `2026.3.28` 的已测版本；对 `2026.3.31` 及更新版本，需要先完成发布产物兼容性改造，再恢复该安装路径。
-
 首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起 helper：
 
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
@@ -87,7 +84,7 @@ npx --yes \
   --dev
 ```
 
-安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
+安装过一次之后，也可以直接通过 `npx @wecode/skill-openclaw-plugin` 使用。该命令会：
 
 - 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
@@ -95,6 +92,9 @@ npx --yes \
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
 - 调用 `openclaw channels add --channel message-bridge ...`
 - 默认执行 `openclaw gateway restart`
+- 优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
+
+如果 Windows 环境里自动回退后仍然失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`。
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
@@ -309,8 +309,7 @@ For first-time private registry installation, prefer an explicit `npx` bootstrap
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -320,8 +319,8 @@ npx --yes \
 Behavior:
 
 - `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
-- the helper resolves `@wecode:registry` from `--registry`, then `WECODE_NPM_REGISTRY`, then the existing user `.npmrc`, and writes back the resolved value idempotently
-- checks `openclaw --version` against the helper-supported host window `>=2026.3.24 <2026.3.31`
+- the helper always writes `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`, aligned with `message-bridge`
+- checks `openclaw --version` against the package `peerDependencies.openclaw`
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
 - runs `openclaw channels add --channel message-bridge ...`

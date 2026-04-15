@@ -31,6 +31,15 @@ async function main() {
     },
   });
 
+  await build({
+    entryPoints: [sourceInstallScriptPath],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "es2022",
+    outfile: path.join(bundleDir, "install.mjs"),
+  });
+
   const sourcePackageJson = JSON.parse(await readFile(sourcePackageJsonPath, "utf8"));
   const bundlePackageJson = {
     name: sourcePackageJson.name,
@@ -45,9 +54,7 @@ async function main() {
       },
     },
     files: ["index.js", "install.mjs", "package.json", "openclaw.plugin.json", "README.md"],
-    bin: {
-      "message-bridge-openclaw-install": "./install.mjs",
-    },
+    bin: "./install.mjs",
     peerDependencies: sourcePackageJson.peerDependencies,
     peerDependenciesMeta: sourcePackageJson.peerDependenciesMeta,
     openclaw: {
@@ -64,7 +71,6 @@ async function main() {
 
   await copyFile(sourcePluginManifestPath, path.join(bundleDir, "openclaw.plugin.json"));
   await copyFile(sourceReadmePath, path.join(bundleDir, "README.md"));
-  await copyFile(sourceInstallScriptPath, path.join(bundleDir, "install.mjs"));
 }
 
 main().catch((error) => {
