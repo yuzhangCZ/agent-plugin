@@ -5,7 +5,8 @@ import {
   StatusQueryPayload,
   StatusQueryResultData,
 } from '../types/index.js';
-import { TOOL_ERROR_REASON, type ToolErrorReason } from '../contracts/transport-messages.js';
+import { ToolErrorClassifier } from '../error/ToolErrorClassifier.js';
+import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import { ChatAction } from '../action/ChatAction.js';
 import { CreateSessionAction } from '../action/CreateSessionAction.js';
 import { CloseSessionAction } from '../action/CloseSessionAction.js';
@@ -19,6 +20,7 @@ import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSe
 import { loadConfig } from '../config/index.js';
 import { DefaultAkSkAuth } from '../connection/AkSkAuth.js';
 import { DefaultGatewayConnection, GatewayConnection } from '../connection/GatewayConnection.js';
+import { DefaultReconnectPolicy, ReconnectPolicy } from '../connection/ReconnectPolicy.js';
 import { DefaultStateManager } from '../connection/StateManager.js';
 import { EventFilter } from '../event/EventFilter.js';
 import {
@@ -26,29 +28,36 @@ import {
   type MessagePartExtra,
   type MessageUpdatedExtra,
   type NormalizedUpstreamEvent,
+  type SessionCreatedExtra,
   type SessionStatusExtra,
 } from '../protocol/upstream/index.js';
 import {
   normalizeDownstreamMessage,
 } from '../protocol/downstream/index.js';
+import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
+import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
+import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
+import type { ReconnectConfig } from '../types/index.js';
+import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
   hostDirectory?: string;
   client: unknown;
+  runtimeTraceId?: string;
 }
 
 export interface BridgeRuntimeStartOptions {
@@ -82,7 +91,7 @@ export class BridgeRuntime {
   private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
   private readonly bridgeChannelPort: EnvBridgeChannelAdapter;
   private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
-  private readonly sessionGatewayPort: OpencodeSessionGatewayAdapter;
+  private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
@@ -98,20 +107,33 @@ export class BridgeRuntime {
   private effectiveDirectory?: string;
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
+  private readonly toolErrorClassifier = new ToolErrorClassifier();
+  private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
+  private readonly statusAdapter: BridgeRuntimeStatusAdapter;
+  private sessionDirectoryPolicyContext: {
+    channel?: string;
+    bridgeDirectoryConfigured: boolean;
+  } = {
+    channel: TOOL_TYPE_OPENX,
+    bridgeDirectoryConfigured: true,
+  };
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
     this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(this.rawClient, { component: 'runtime' });
+    this.logger = new AppLogger(this.rawClient, { component: 'runtime' }, options.runtimeTraceId);
     this.sdkClient = createSdkAdapter(options.client);
     this.bridgeChannelPort = new EnvBridgeChannelAdapter();
     this.assiantDirectoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
       process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
       () => this.logger,
     );
-    this.sessionGatewayPort = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
+    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
+      () => this.sdkClient,
+      () => this.sessionDirectoryPolicyContext,
+    );
     this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
       this.bridgeChannelPort,
       this.assiantDirectoryMappingPort,
@@ -119,9 +141,10 @@ export class BridgeRuntime {
     );
     this.createSessionUseCase = new CreateSessionUseCase(
       this.resolveCreateSessionDirectoryUseCase,
-      this.sessionGatewayPort,
+      this.opencodeSessionGatewayAdapter,
     );
-    this.chatUseCase = new ChatUseCase(this.sessionGatewayPort);
+    this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -130,10 +153,20 @@ export class BridgeRuntime {
     return loadConfig(this.workspacePath, this.logger);
   }
 
+  protected createReconnectPolicy(reconnect: ReconnectConfig): ReconnectPolicy {
+    return new DefaultReconnectPolicy(reconnect);
+  }
+
+  protected createGatewayConnection(options: ConstructorParameters<typeof DefaultGatewayConnection>[0]): GatewayConnection {
+    return new DefaultGatewayConnection(options);
+  }
+
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
+    const pluginVersion = resolvePluginVersion();
     this.logger.info('runtime.start.requested', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
+      pluginVersion,
     });
     if (this.started) {
       this.logger.debug('runtime.start.skipped_already_started');
@@ -163,6 +196,7 @@ export class BridgeRuntime {
         config_version: config.config_version,
         enabled: config.enabled,
         gateway_url: config.gateway.url,
+        gateway_channel: config.gateway.channel,
         bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
@@ -171,23 +205,37 @@ export class BridgeRuntime {
         error: errorMessage,
         workspacePath: this.workspacePath,
       });
+      this.statusAdapter.publishConfigInvalid(errorMessage);
       throw error;
     }
     if (!config.enabled) {
+      this.statusAdapter.publishDisabled();
       this.logger.info('runtime.start.disabled_by_config');
       this.started = true;
       return;
     }
 
     this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.sessionDirectoryPolicyContext = {
+      channel: config.gateway.channel,
+      bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
+    };
     this.logger.info('runtime.directory.resolved', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
       effectiveDirectory: this.effectiveDirectory,
       directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
+      sessionDirectoryPolicyChannel: this.sessionDirectoryPolicyContext.channel,
+      sessionDirectoryPolicyBridgeDirectoryConfigured: this.sessionDirectoryPolicyContext.bridgeDirectoryConfigured,
     });
 
-    const startupValidation = await this.validateStartupPrerequisites();
+    let startupValidation;
+    try {
+      startupValidation = await this.validateStartupPrerequisites();
+    } catch (error) {
+      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      throw error;
+    }
     this.sdkClient = startupValidation.sdkClient;
     const agentId = this.stateManager.generateAndBindAgentId();
     this.eventFilter = new EventFilter(config.events.allowlist);
@@ -198,13 +246,13 @@ export class BridgeRuntime {
 
     const auth = new DefaultAkSkAuth(config.auth.ak, config.auth.sk);
     const authPayloadProvider = () => auth.generateAuthPayload();
+    const reconnectPolicy = this.createReconnectPolicy(config.gateway.reconnect);
 
-    const connection = new DefaultGatewayConnection({
+    const connection = this.createGatewayConnection({
       url: config.gateway.url,
       debug: effectiveDebug,
-      reconnectBaseMs: config.gateway.reconnect.baseMs,
-      reconnectMaxMs: config.gateway.reconnect.maxMs,
-      reconnectExponential: config.gateway.reconnect.exponential,
+      reconnect: config.gateway.reconnect,
+      reconnectPolicy,
       heartbeatIntervalMs: config.gateway.heartbeatIntervalMs,
       abortSignal: options.abortSignal,
       authPayloadProvider,
@@ -221,11 +269,18 @@ export class BridgeRuntime {
 
     connection.on('stateChange', (state) => {
       this.stateManager.setState(state);
+      this.statusAdapter.publishConnectionState(state);
       this.logger.info('gateway.state.changed', { state });
       if (state === 'CONNECTING') {
         const nextAgentId = this.stateManager.resetForReconnect();
         this.logger.info('runtime.agent.rebound', { agentId: nextAgentId });
       }
+    });
+    connection.on('registerRejected', (reason) => {
+      this.statusAdapter.publishServerFailure(reason ?? 'register rejected');
+    });
+    connection.on('closed', (detail) => {
+      this.statusAdapter.publishConnectionClosed(detail);
     });
 
     connection.on('message', (message) => {
@@ -249,7 +304,12 @@ export class BridgeRuntime {
       throw new Error('runtime_start_aborted');
     }
 
-    await connection.connect();
+    try {
+      await connection.connect();
+    } catch (error) {
+      this.statusAdapter.publishConnectFailure(getErrorMessage(error));
+      throw error;
+    }
     if (options.abortSignal?.aborted) {
       this.gatewayConnection.disconnect();
       this.gatewayConnection = null;
@@ -284,6 +344,13 @@ export class BridgeRuntime {
     const eventLogger = this.createMessageLogger(eventFields, eventTraceId);
     eventLogger.debug('event.received');
 
+    // session.created 只用于预热父子 session 映射，不参与业务 allowlist 和上行转发。
+    if (normalized.common.eventType === 'session.created') {
+      this.recordSessionCreated(normalized, eventLogger);
+      eventLogger.debug('event.control_session_created');
+      return;
+    }
+
     if (!this.stateManager.isReady() || !this.gatewayConnection || !this.eventFilter) {
       eventLogger.debug('event.ignored_not_ready', {
         state: this.stateManager.getState(),
@@ -299,23 +366,42 @@ export class BridgeRuntime {
     const bridgeMessageId = randomUUID();
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
+    // 对 child session，外层 envelope 始终聚合到 parent；真正的 child 身份通过 subagent 字段保留给下游。
+    const subagentResolution = await this.subagentSessionMapper.resolve(normalized.common.toolSessionId);
+    if (subagentResolution.status === 'lookup_failed') {
+      // 懒查询失败时按原 session 继续上报，避免 lookup 抖动阻断正常事件转发。
+      forwardingLogger.warn('event.subagent_lookup_failed', {
+        toolSessionId: normalized.common.toolSessionId,
+        ...getErrorDetailsForLog(subagentResolution.error),
+      });
+    }
+    const subagentMapping = subagentResolution.status === 'mapped' ? subagentResolution.mapping : null;
+    const envelopeToolSessionId = subagentMapping?.parentSessionId ?? normalized.common.toolSessionId;
+    const subagentEnvelopeFields = subagentMapping
+      ? {
+          subagentSessionId: subagentMapping.childSessionId,
+          subagentName: subagentMapping.agentName,
+        }
+      : {};
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
     const transportEnvelope = {
       type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: transportEvent,
     };
     const originalEnvelope = {
       type: 'tool_event',
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: normalized.raw,
     };
     this.gatewayConnection.send(transportEnvelope, {
       traceId: bridgeMessageId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: bridgeMessageId,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
       eventType: normalized.common.eventType,
       opencodeMessageId: eventFields.opencodeMessageId,
       opencodePartId: eventFields.opencodePartId,
@@ -325,7 +411,8 @@ export class BridgeRuntime {
     });
     forwardingLogger.debug('event.forwarded');
 
-    if (normalized.common.eventType === 'session.idle') {
+    // child session 的 idle 仅表示子代理收尾，不能向父 session 额外补发 tool_done。
+    if (normalized.common.eventType === 'session.idle' && !subagentMapping) {
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
         logger: forwardingLogger,
@@ -340,6 +427,20 @@ export class BridgeRuntime {
     }
   }
 
+  private recordSessionCreated(normalized: NormalizedUpstreamEvent, logger: BridgeLogger): void {
+    const extra = normalized.extra as SessionCreatedExtra | undefined;
+    if (!extra || extra.kind !== 'session.created') {
+      logger.warn('event.control_session_created_invalid_extra');
+      return;
+    }
+
+    this.subagentSessionMapper.recordSessionCreated({
+      childSessionId: normalized.common.toolSessionId,
+      parentSessionId: extra.parentSessionId,
+      agentName: extra.agentName,
+    });
+  }
+
   getStarted(): boolean {
     return this.started;
   }
@@ -348,11 +449,11 @@ export class BridgeRuntime {
     const actions = [
       new ChatAction(this.chatUseCase),
       new CreateSessionAction(this.createSessionUseCase),
-      new CloseSessionAction(),
-      new PermissionReplyAction(),
+      new CloseSessionAction(this.opencodeSessionGatewayAdapter),
+      new PermissionReplyAction(this.opencodeSessionGatewayAdapter),
       new StatusQueryAction(),
-      new AbortSessionAction(),
-      new QuestionReplyAction(),
+      new AbortSessionAction(this.opencodeSessionGatewayAdapter),
+      new QuestionReplyAction(this.opencodeSessionGatewayAdapter),
     ] as const;
 
     for (const action of actions) {
@@ -729,9 +830,14 @@ export class BridgeRuntime {
     }
 
     const error = result.success ? 'Unknown error' : result.errorMessage ?? 'Unknown error';
-    const reason = this.getToolErrorReason(result);
+    const reason = this.toolErrorClassifier.classify(result, logOptions?.action);
     const logger = logOptions?.logger ?? this.logger;
-    logger.error('runtime.tool_error.sending', { welinkSessionId, error, reason });
+    logger.error('runtime.tool_error.sending', {
+      welinkSessionId,
+      error,
+      reason,
+      sourceErrorCode: result.success ? undefined : result.errorEvidence?.sourceErrorCode,
+    });
 
     this.gatewayConnection.send({
       type: 'tool_error',
@@ -747,25 +853,6 @@ export class BridgeRuntime {
       action: logOptions?.action,
       toolSessionId: logOptions?.toolSessionId,
     });
-  }
-
-  private getToolErrorReason(result: ActionResult): ToolErrorReason | undefined {
-    if (result.success) {
-      return undefined;
-    }
-
-    const message = (result.errorMessage ?? '').toLowerCase();
-    if (
-      message.includes('not found') ||
-      message.includes('404') ||
-      message.includes(TOOL_ERROR_REASON.SESSION_NOT_FOUND) ||
-      message.includes('unexpected eof') ||
-      message.includes('json parse error')
-    ) {
-      return TOOL_ERROR_REASON.SESSION_NOT_FOUND;
-    }
-
-    return undefined;
   }
 
   private sendToolDone(

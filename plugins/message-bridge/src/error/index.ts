@@ -1,6 +1,7 @@
 import type { ToolErrorMessage, ToolErrorReason } from '../contracts/transport-messages.js';
 import { FastFailDetector } from './FastFailDetector.js';
 import { ErrorMapper } from './ErrorMapper.js';
+import { ToolErrorClassifier } from './ToolErrorClassifier.js';
 
 export class BridgeError extends Error {
   constructor(message: string, public code?: string) {
@@ -27,3 +28,4 @@ export function buildToolError(
 }
 
 export { FastFailDetector, ErrorMapper };
+export { ToolErrorClassifier };

@@ -118,22 +118,53 @@ describe('upstream event extractor', () => {
     assert.strictEqual(result.value.extra, undefined);
   });
 
-  test('rejects unsupported events and records a unified extraction log', () => {
+  test('extracts session.created control event fields from properties.info', () => {
+    const { logger } = createLogger();
+    const result = extractUpstreamEvent(
+      {
+        type: 'session.created',
+        properties: {
+          info: {
+            id: 'ses_child_1',
+            parentID: 'ses_parent_1',
+            title: 'research-agent',
+          },
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value.common, {
+      eventType: 'session.created',
+      toolSessionId: 'ses_child_1',
+    });
+    assert.deepStrictEqual(result.value.extra, {
+      kind: 'session.created',
+      parentSessionId: 'ses_parent_1',
+      agentName: 'research-agent',
+    });
+  });
+
+  test('rejects session.created missing required fields and records a unified extraction log', () => {
     const { logger, entries } = createLogger();
     const result = extractUpstreamEvent(
       {
         type: 'session.created',
-        properties: {},
+        properties: {
+          info: {},
+        },
       },
       logger,
     );
 
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.error.code, 'unsupported_event');
+    assert.strictEqual(result.error.code, 'missing_required_field');
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].message, 'event.extraction_failed');
     assert.strictEqual(entries[0].extra.eventType, 'session.created');
-    assert.strictEqual(entries[0].extra.errorCode, 'unsupported_event');
+    assert.strictEqual(entries[0].extra.errorCode, 'missing_required_field');
+    assert.strictEqual(entries[0].extra.field, 'properties.info.id');
   });
 
   test('rejects missing required fields and records a unified extraction log', () => {

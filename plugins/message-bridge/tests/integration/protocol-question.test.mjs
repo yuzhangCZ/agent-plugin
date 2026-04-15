@@ -13,6 +13,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
@@ -107,16 +113,119 @@ describe('protocol question-roundtrip', () => {
       },
     });
 
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-1' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
       },
     ]);
     assert.strictEqual(sent.length, 1);
+  });
+
+  test('aggregates child question events under parent and routes question_reply to the child session', async () => {
+    const getCalls = [];
+    const postCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        _client: {
+          get: async (options) => {
+            getCalls.push(options);
+            if (options?.url === '/global/health') {
+              return { data: { healthy: true, version: '9.9.9' } };
+            }
+            return {
+              data: [
+                {
+                  id: 'question-request-child-1',
+                  sessionID: 'ses_child_question_1',
+                  tool: { callID: 'call_child_question_1' },
+                },
+              ],
+            };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['question.asked']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_question_1',
+          parentID: 'ses_parent_question_1',
+          title: 'planner-agent',
+        },
+      },
+    });
+
+    const questionAskedEvent = {
+      type: 'question.asked',
+      properties: {
+        sessionID: 'ses_child_question_1',
+      },
+    };
+    await runtime.handleEvent(questionAskedEvent);
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_parent_question_1',
+        subagentSessionId: 'ses_child_question_1',
+        subagentName: 'planner-agent',
+        event: questionAskedEvent,
+      },
+    ]);
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-question-child-1',
+      action: 'question_reply',
+      payload: {
+        toolSessionId: 'ses_child_question_1',
+        toolCallId: 'call_child_question_1',
+        answer: 'Vite',
+      },
+    });
+
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
+    assert.deepStrictEqual(postCalls, [
+      {
+        url: '/question/{requestID}/reply',
+        path: { requestID: 'question-request-child-1' },
+        body: { answers: [['Vite']] },
+        headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
+      },
+    ]);
   });
 
   test('returns tool_error when question_reply cannot resolve a unique pending request', async () => {

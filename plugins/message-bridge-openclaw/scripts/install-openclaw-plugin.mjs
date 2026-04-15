@@ -14,6 +14,7 @@ const PLUGIN_LABEL = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
 const DEFAULT_SCOPE_REGISTRY = "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/";
+const INSTALL_SUPPORTED_HOST_RANGE = ">=2026.3.24 <2026.3.31";
 
 function createInstallerError(code, message) {
   const error = new Error(message);
@@ -34,7 +35,7 @@ function normalizeCliPath(candidatePath) {
   return path.resolve(candidatePath).replace(/\\/g, "/");
 }
 
-function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
+export function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
   if (!argvEntry) {
     return false;
   }
@@ -44,7 +45,7 @@ function isCliEntry(importMetaUrl, argvEntry, cwd = process.cwd()) {
   return importMetaPath === argvPath;
 }
 
-function resolvePackageRoot(importMetaUrl = import.meta.url) {
+export function resolvePackageRoot(importMetaUrl = import.meta.url) {
   const scriptPath = fileURLToPath(importMetaUrl);
   const scriptDir = path.dirname(scriptPath);
 
@@ -67,7 +68,7 @@ function resolveWindowsHomeDir(env = process.env) {
   return homedir();
 }
 
-function resolveUserNpmrcPath(env = process.env, platform = process.platform) {
+export function resolveUserNpmrcPath(env = process.env, platform = process.platform) {
   if (env.NPM_CONFIG_USERCONFIG) {
     return env.NPM_CONFIG_USERCONFIG;
   }
@@ -79,7 +80,7 @@ function resolveUserNpmrcPath(env = process.env, platform = process.platform) {
   return path.join(env.HOME || homedir(), ".npmrc");
 }
 
-async function readOptionalTextFile(filePath) {
+export async function readOptionalTextFile(filePath) {
   try {
     return await readFile(filePath, "utf8");
   } catch (error) {
@@ -99,8 +100,34 @@ function readScopedRegistry(content) {
   return match?.[1]?.trim() ?? "";
 }
 
-function buildNextNpmrcContent(existingContent) {
-  const normalizedRegistry = DEFAULT_SCOPE_REGISTRY;
+export function resolveRegistryValue({
+  cliRegistry = "",
+  envRegistry = "",
+  npmrcContent = null,
+}) {
+  const normalizedCliRegistry = String(cliRegistry ?? "").trim();
+  if (normalizedCliRegistry) {
+    return normalizedCliRegistry;
+  }
+
+  const normalizedEnvRegistry = String(envRegistry ?? "").trim();
+  if (normalizedEnvRegistry) {
+    return normalizedEnvRegistry;
+  }
+
+  const existingRegistry = readScopedRegistry(npmrcContent);
+  if (existingRegistry) {
+    return existingRegistry;
+  }
+
+  return DEFAULT_SCOPE_REGISTRY;
+}
+
+export function buildNextNpmrcContent(existingContent, registry = DEFAULT_SCOPE_REGISTRY) {
+  const normalizedRegistry = String(registry ?? "").trim();
+  if (!normalizedRegistry) {
+    throw createInstallerError("REGISTRY_NOT_CONFIGURED", "Registry value cannot be empty.");
+  }
   const existingRegistry = readScopedRegistry(existingContent);
   if (existingRegistry === normalizedRegistry) {
     return existingContent;
@@ -144,28 +171,75 @@ function compareVersion(a, b) {
   return 0;
 }
 
-function assertVersionSatisfies(actualVersion, range) {
+function parseVersionComparators(range) {
   const normalizedRange = String(range ?? "").trim();
-  if (!normalizedRange.startsWith(">=")) {
-    throw createInstallerError(
-      "OPENCLAW_VERSION_UNSUPPORTED",
-      `Unsupported OpenClaw version range: ${normalizedRange || "<empty>"}`,
-    );
+  if (!normalizedRange) {
+    throw createInstallerError("OPENCLAW_VERSION_UNSUPPORTED", "Unsupported OpenClaw version range: <empty>");
   }
 
-  const minVersion = parseVersion(normalizedRange.slice(2));
+  const comparators = normalizedRange
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^(>=|<=|>|<|=)?(\d+\.\d+\.\d+)$/);
+      if (!match) {
+        throw createInstallerError(
+          "OPENCLAW_VERSION_UNSUPPORTED",
+          `Unsupported OpenClaw version range: ${normalizedRange}`,
+        );
+      }
+
+      const operator = match[1] ?? "=";
+      const version = parseVersion(match[2]);
+      if (!version) {
+        throw createInstallerError(
+          "OPENCLAW_VERSION_UNSUPPORTED",
+          `Unable to compare OpenClaw version range: ${normalizedRange}`,
+        );
+      }
+
+      return { operator, version };
+    });
+
+  if (comparators.length === 0) {
+    throw createInstallerError("OPENCLAW_VERSION_UNSUPPORTED", "Unsupported OpenClaw version range: <empty>");
+  }
+
+  return comparators;
+}
+
+export function assertVersionSatisfies(actualVersion, range) {
   const currentVersion = parseVersion(actualVersion);
-  if (!minVersion || !currentVersion) {
+  if (!currentVersion) {
     throw createInstallerError(
       "OPENCLAW_VERSION_UNSUPPORTED",
-      `Unable to compare OpenClaw version ${actualVersion} against ${normalizedRange}.`,
+      `Unable to compare OpenClaw version ${actualVersion} against ${String(range ?? "").trim() || "<empty>"}.`,
     );
   }
 
-  if (compareVersion(currentVersion, minVersion) < 0) {
+  const comparators = parseVersionComparators(range);
+  const satisfied = comparators.every(({ operator, version }) => {
+    const result = compareVersion(currentVersion, version);
+    switch (operator) {
+      case ">=":
+        return result >= 0;
+      case "<=":
+        return result <= 0;
+      case ">":
+        return result > 0;
+      case "<":
+        return result < 0;
+      case "=":
+        return result === 0;
+      default:
+        return false;
+    }
+  });
+
+  if (!satisfied) {
     throw createInstallerError(
       "OPENCLAW_VERSION_UNSUPPORTED",
-      `Current OpenClaw version ${actualVersion} does not satisfy required range ${normalizedRange}.`,
+      `Current OpenClaw version ${actualVersion} does not satisfy required range ${range}.`,
     );
   }
 }
@@ -183,7 +257,7 @@ function runCommandSync(command, args, {
   });
 }
 
-async function preflightOpenClaw({
+export async function preflightOpenClaw({
   openclawBin = "",
   requiredRange,
   env = process.env,
@@ -237,10 +311,11 @@ function formatDisplayCommand(openclaw, args) {
   return `${openclaw.openclawBin} ${args.join(" ")}`.trim();
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const parsed = {
     dev: false,
     noRestart: false,
+    registry: "",
     url: "",
     token: "",
     password: "",
@@ -256,6 +331,10 @@ function parseArgs(argv) {
         break;
       case "--no-restart":
         parsed.noRestart = true;
+        break;
+      case "--registry":
+        parsed.registry = argv[index + 1] ?? "";
+        index += 1;
         break;
       case "--url":
         parsed.url = argv[index + 1] ?? "";
@@ -372,18 +451,22 @@ function execJson(openclaw, args, failureCode, cwd = process.cwd()) {
   }
 }
 
-async function runInstaller({
+export async function runInstaller({
   argv = process.argv.slice(2),
   env = process.env,
   importMetaUrl = import.meta.url,
   cwd = process.cwd(),
 } = {}) {
   const args = parseArgs(argv);
-  const packageRoot = resolvePackageRoot(importMetaUrl);
-  const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
-  const requiredRange = packageJson.peerDependencies?.openclaw ?? ">=0.0.0";
+  resolvePackageRoot(importMetaUrl);
+  const requiredRange = INSTALL_SUPPORTED_HOST_RANGE;
   const npmrcPath = resolveUserNpmrcPath(env);
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
+  const registry = resolveRegistryValue({
+    cliRegistry: args.registry,
+    envRegistry: env.WECODE_NPM_REGISTRY,
+    npmrcContent: existingNpmrc,
+  });
 
   writeStdout(formatStep("正在检查 OpenClaw 环境"));
   const openclaw = await preflightOpenClaw({
@@ -394,12 +477,12 @@ async function runInstaller({
   writeStdout(formatStep(`已检测到 OpenClaw: ${openclaw.openclawBin} (${openclaw.version})`));
 
   writeStdout(formatStep("正在配置 @wecode 二方仓源"));
-  const nextNpmrc = buildNextNpmrcContent(existingNpmrc);
+  const nextNpmrc = buildNextNpmrcContent(existingNpmrc, registry);
   if (nextNpmrc !== existingNpmrc) {
     await writeFileAtomically(npmrcPath, nextNpmrc);
   }
   writeStdout(formatStep(`npm scope 配置文件: ${npmrcPath}`));
-  writeStdout(formatStep(`使用 registry: ${DEFAULT_SCOPE_REGISTRY}`));
+  writeStdout(formatStep(`使用 registry: ${registry}`));
 
   const openclawArgsPrefix = args.dev ? ["--dev"] : [];
 

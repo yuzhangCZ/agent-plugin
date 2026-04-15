@@ -197,7 +197,10 @@ export function createTestConfig(overrides = {}) {
       heartbeatIntervalMs: 30000,
       reconnect: {
         baseMs: 1000,
-        maxMs: 30000
+        maxMs: 30000,
+        exponential: true,
+        jitter: 'full',
+        maxElapsedMs: 600000,
       }
     },
     sdk: {

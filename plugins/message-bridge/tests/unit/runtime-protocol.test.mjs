@@ -5,6 +5,11 @@ import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 
 function createRuntimeClient(overrides = {}) {
@@ -12,6 +17,12 @@ function createRuntimeClient(overrides = {}) {
     global: {},
     session: {
       create: async () => ({}),
+      get: async (options) => ({
+        data: {
+          id: options?.path?.id ?? 'session-default',
+          directory: '/session/default-directory',
+        },
+      }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
@@ -60,6 +71,8 @@ function createResolvedConfig(overrides = {}) {
         baseMs: 1000,
         maxMs: 30000,
         exponential: true,
+        jitter: 'full',
+        maxElapsedMs: 600000,
       },
     },
     sdk: {
@@ -102,6 +115,8 @@ async function writeEnabledConfig(workspace) {
           baseMs: 1000,
           maxMs: 30000,
           exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
         },
       },
       sdk: {
@@ -147,6 +162,315 @@ function createRegisterCaptureWebSocket() {
 }
 
 describe('runtime protocol strictness', () => {
+  test('status api defaults to unavailable and not_ready before runtime start', () => {
+    __resetMessageBridgeStatusForTests();
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), {
+      connected: false,
+      phase: 'unavailable',
+      unavailableReason: 'not_ready',
+      willReconnect: false,
+      lastError: null,
+      updatedAt: getMessageBridgeStatus().updatedAt,
+      lastReadyAt: null,
+    });
+  });
+
+  test('start publishes disabled when config disables bridge', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'disabled');
+    assert.strictEqual(snapshot.willReconnect, false);
+  });
+
+  test('start publishes config_invalid when config resolution fails', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = new (class extends BridgeRuntime {
+      async resolveConfig() {
+        throw new Error('broken config');
+      }
+    })({
+      client: createRuntimeClient(),
+    });
+
+    await assert.rejects(runtime.start(), /broken config/);
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'broken config');
+  });
+
+  test('start publishes plugin_failure when startup prerequisites fail', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        global: undefined,
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              throw new Error('startup boom');
+            }
+            return { data: [] };
+          },
+          post: async () => ({ data: undefined }),
+        },
+      }),
+    });
+
+    await assert.rejects(runtime.start());
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.connected, false);
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
+    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
+  });
+
+  test('start publishes server_failure when gateway closes and will not reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RejectedCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 4403, reason: 'server closed', wasClean: true });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = RejectedCloseWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'server closed');
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+        {
+          phase: 'unavailable',
+          unavailableReason: 'server_failure',
+          lastError: 'server closed',
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start keeps server_failure when close follows rejection', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RegisterRejectedWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = RegisterRejectedWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.onmessage?.({
+              data: JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }),
+            });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.({ code: 4403, reason: 'device_conflict', wasClean: true });
+      }
+    }
+
+    globalThis.WebSocket = RegisterRejectedWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'device_conflict');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes network_failure when connect fails without rejection evidence', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class FailingHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 1006, reason: 'connect timeout', wasClean: false });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = FailingHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'gateway_websocket_closed_before_open');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes connecting once when gateway closes and will reconnect', async () => {
+    __resetMessageBridgeStatusForTests();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        lastError: snapshot.lastError,
+      });
+    });
+    const originalWebSocket = globalThis.WebSocket;
+    class ReconnectingCloseWebSocket {
+      static OPEN = 1;
+
+      constructor() {
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = ReconnectingCloseWebSocket.OPEN;
+          this.onopen?.();
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network jitter', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+      }
+    }
+
+    globalThis.WebSocket = ReconnectingCloseWebSocket;
+
+    let runtime = null;
+    try {
+      runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'connecting');
+      assert.strictEqual(snapshot.unavailableReason, null);
+      assert.strictEqual(snapshot.willReconnect, true);
+      assert.strictEqual(snapshot.lastError, null);
+      assert.deepStrictEqual(seen, [
+        {
+          phase: 'connecting',
+          unavailableReason: null,
+          lastError: null,
+        },
+      ]);
+    } finally {
+      runtime?.stop();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      unsubscribe();
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('start publishes server_failure when handshake closes with rejection evidence before open', async () => {
+    __resetMessageBridgeStatusForTests();
+    const originalWebSocket = globalThis.WebSocket;
+    class RejectedHandshakeWebSocket {
+      constructor() {
+        setTimeout(() => {
+          this.onclose?.({ code: 4403, reason: 'auth rejected', wasClean: true });
+        }, 0);
+      }
+
+      send() {}
+
+      close() {}
+    }
+
+    globalThis.WebSocket = RejectedHandshakeWebSocket;
+
+    try {
+      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+
+      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+
+      const snapshot = getMessageBridgeStatus();
+      assert.strictEqual(snapshot.phase, 'unavailable');
+      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+      assert.strictEqual(snapshot.willReconnect, false);
+      assert.strictEqual(snapshot.lastError, 'auth rejected');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
   test('ignores invoke messages until runtime state is READY', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -215,8 +539,12 @@ describe('runtime protocol strictness', () => {
     runtime.actionRouter = {
       route: async () => ({
         success: false,
-        errorCode: 'INVALID_PAYLOAD',
-        errorMessage: 'Failed to send message: session not found',
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
       }),
     };
 
@@ -232,9 +560,133 @@ describe('runtime protocol strictness', () => {
       type: 'tool_error',
       welinkSessionId: 's-rebuild',
       toolSessionId: 'tool-rebuild',
-      error: 'Failed to send message: session not found',
+      error: 'Failed to send message',
       reason: 'session_not_found',
     });
+  });
+
+  test('close_session not-found text does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'INVALID_PAYLOAD',
+        errorMessage: 'session not found',
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('close_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to close session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-close-evidence',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close-evidence' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('create_session session_not_found evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to create session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-create-evidence',
+      action: 'create_session',
+      payload: { title: 'new session' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('chat prompt evidence does not collapse to session_not_found', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.stateManager.setState('READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.prompt',
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-chat-prompt',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-chat-prompt', text: 'hello' },
+    });
+
+    assert.strictEqual((sent).length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].reason, undefined);
   });
 
   test('accepts baseline invoke shape and emits tool_done on chat success', async () => {
@@ -264,6 +716,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'tool-100' },
+      query: { directory: '/session/default-directory' },
       body: {
         parts: [{ type: 'text', text: 'hello' }],
       },
@@ -335,13 +788,21 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-42', toolCallId: 'call-42', answer: 'Vite' },
     });
 
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(getCalls, [{
+      url: '/question',
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-42' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
+        query: {
+          directory: '/session/default-directory',
+        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
@@ -419,6 +880,9 @@ describe('runtime protocol strictness', () => {
         },
         body: {
           response: 'once',
+        },
+        query: {
+          directory: '/session/default-directory',
         },
       },
     ]);
@@ -848,6 +1312,118 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-1');
   });
 
+  test('session.created primes child mapping outside the allowlist and rewrites later child events to parent envelope', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_permission_1',
+          parentID: 'ses_parent_permission_1',
+          title: 'research-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_1',
+        permissionID: 'perm-child-1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_1',
+      subagentSessionId: 'ses_child_permission_1',
+      subagentName: 'research-agent',
+      event: {
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'ses_child_permission_1',
+          permissionID: 'perm-child-1',
+        },
+      },
+    });
+    assert.strictEqual(sent[0].context.toolSessionId, 'ses_parent_permission_1');
+  });
+
+  test('falls back to original session and retries mapping after lazy lookup failures', async () => {
+    const logs = [];
+    let calls = 0;
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+        session: {
+          get: async () => {
+            calls += 1;
+            if (calls === 1) {
+              throw new Error('temporary lookup timeout');
+            }
+
+            return {
+              data: {
+                id: 'ses_child_permission_retry',
+                directory: '/session/default-directory',
+                parentID: 'ses_parent_permission_retry',
+                title: 'retry-agent',
+              },
+            };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    runtime.stateManager.setState('READY');
+
+    const event = {
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_retry',
+        permissionID: 'perm-retry-1',
+      },
+    };
+
+    await runtime.handleEvent(event);
+    await runtime.handleEvent(event);
+
+    assert.strictEqual(sent.length, 2);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_child_permission_retry',
+      event,
+    });
+    assert.deepStrictEqual(sent[1].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_permission_retry',
+      subagentSessionId: 'ses_child_permission_retry',
+      subagentName: 'retry-agent',
+      event,
+    });
+    const warnEntry = logs.find((item) => item?.body?.message === 'event.subagent_lookup_failed');
+    assert.ok(!!warnEntry);
+    assert.strictEqual(warnEntry.body.extra.toolSessionId, 'ses_child_permission_retry');
+  });
+
   test('does not emit duplicate tool_done when session.idle follows chat success', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -880,6 +1456,48 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
+  });
+
+  test('child session.idle does not emit tool_done compat messages', async () => {
+    const runtime = new BridgeRuntime({ client: createRuntimeClient() });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_idle_1',
+          parentID: 'ses_parent_idle_1',
+          title: 'idle-agent',
+        },
+      },
+    });
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'ses_child_idle_1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'ses_parent_idle_1',
+      subagentSessionId: 'ses_child_idle_1',
+      subagentName: 'idle-agent',
+      event: {
+        type: 'session.idle',
+        properties: {
+          sessionID: 'ses_child_idle_1',
+        },
+      },
+    });
   });
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {
@@ -953,7 +1571,12 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-close-1' },
     });
 
-    assert.deepStrictEqual(deleteCalls, [{ path: { id: 'tool-close-1' } }]);
+    assert.deepStrictEqual(deleteCalls, [{
+      path: { id: 'tool-close-1' },
+      query: {
+        directory: '/session/default-directory',
+      },
+    }]);
     assert.strictEqual((sent).length, 0);
   });
 
@@ -965,6 +1588,12 @@ describe('runtime protocol strictness', () => {
       hostDirectory: '/workspace/current',
       client: createRuntimeClient({
         session: {
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'created-dir-1',
+              directory: '/env/bridge-root',
+            },
+          }),
           create: async (options) => {
             createCalls.push(options);
             return { data: { id: 'created-dir-1' } };
@@ -1014,6 +1643,9 @@ describe('runtime protocol strictness', () => {
         path: {
           id: 'created-dir-1',
         },
+        query: {
+          directory: '/env/bridge-root',
+        },
         body: {
           parts: [{ type: 'text', text: 'hello from bridge directory' }],
         },
@@ -1040,11 +1672,13 @@ describe('runtime protocol strictness', () => {
           channel: 'openx',
           toolVersion: '1.2.3',
           heartbeatIntervalMs: 30000,
-          reconnect: {
-            baseMs: 1000,
-            maxMs: 30000,
-            exponential: true,
-          },
+        reconnect: {
+          baseMs: 1000,
+          maxMs: 30000,
+          exponential: true,
+          jitter: 'full',
+          maxElapsedMs: 600000,
+        },
         },
         sdk: {
           timeoutMs: 10000,
@@ -1310,6 +1944,55 @@ describe('runtime protocol strictness', () => {
         process.env.HOME = originalHome;
       }
       globalThis.WebSocket = originalWebSocket;
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start fails when session.get capability is missing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-start-missing-get-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-home-missing-get-'));
+    const originalHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    await writeEnabledConfig(workspace);
+
+    const appLogs = [];
+    try {
+      const runtime = new BridgeRuntime({
+        workspacePath: workspace,
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+              return true;
+            },
+          },
+          session: {
+            get: undefined,
+          },
+        }),
+      });
+
+      await assert.rejects(runtime.start(), (err) => {
+        assert.deepStrictEqual(err, {
+          code: 'SDK_CLIENT_CAPABILITIES_MISSING',
+          message: 'OpenCode client is missing required action capabilities',
+          details: {
+            missingCapabilities: ['session.get'],
+          },
+        });
+        return true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const failureLog = appLogs.find((entry) => entry.message === 'runtime.start.failed_capabilities');
+      assert.deepStrictEqual(failureLog.extra.missingCapabilities, ['session.get']);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
     }
@@ -1644,6 +2327,112 @@ describe('runtime protocol strictness', () => {
       runtime.stop();
     } finally {
       globalThis.WebSocket = originalWebSocket;
+    }
+  });
+
+  test('runtime.start applies reconnect env overrides to scheduling and exhaustion behavior', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const originalHome = process.env.HOME;
+    const originalJitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+    const originalMaxElapsed = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+    const originalBaseMs = process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+    const originalMaxMs = process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+
+    class ExhaustingWebSocket {
+      static OPEN = 1;
+      static instances = [];
+
+      constructor() {
+        this.readyState = 0;
+        this.sent = [];
+        ExhaustingWebSocket.instances.push(this);
+        setTimeout(() => {
+          this.readyState = ExhaustingWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+          setTimeout(() => {
+            this.readyState = 3;
+            this.onclose?.({ code: 1006, reason: 'network-loss', wasClean: false });
+          }, 0);
+        }, 0);
+      }
+
+      send(data) {
+        this.sent.push(JSON.parse(data));
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    globalThis.WebSocket = ExhaustingWebSocket;
+
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-env-'));
+    const fakeHome = await mkdtemp(join(tmpdir(), 'mb-runtime-reconnect-home-'));
+    process.env.HOME = fakeHome;
+    process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = 'none';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = '1';
+    process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = '20';
+    process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = '20';
+
+    const appLogs = [];
+
+    try {
+      await writeEnabledConfig(workspace);
+
+      const runtime = new BridgeRuntime({
+        client: createRuntimeClient({
+          app: {
+            log: async (options) => {
+              appLogs.push(options.body);
+            },
+          },
+        }),
+        workspacePath: workspace,
+      });
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const exhausted = appLogs.find((entry) => entry.message === 'gateway.reconnect.exhausted');
+
+      assert.strictEqual(ExhaustingWebSocket.instances.length, 1);
+      assert.strictEqual(appLogs.some((entry) => entry.message === 'gateway.reconnect.scheduled'), false);
+      assert.ok(exhausted);
+      assert.strictEqual(exhausted.extra.maxElapsedMs, 1);
+
+      runtime.stop();
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalJitter === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_JITTER = originalJitter;
+      }
+      if (originalMaxElapsed === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS = originalMaxElapsed;
+      }
+      if (originalBaseMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS = originalBaseMs;
+      }
+      if (originalMaxMs === undefined) {
+        delete process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS;
+      } else {
+        process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS = originalMaxMs;
+      }
+      await rm(workspace, { recursive: true, force: true });
+      await rm(fakeHome, { recursive: true, force: true });
     }
   });
 });

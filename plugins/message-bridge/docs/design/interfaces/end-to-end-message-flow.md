@@ -1,7 +1,7 @@
 # OpenCode 全链路接口与报文分层说明
 
-**Version:** 1.1  
-**Date:** 2026-03-11  
+**Version:** 1.4  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/BridgeRuntime.ts`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
@@ -450,7 +450,7 @@ type NormalizedDownstreamMessage =
 |---|---|---|
 | `session_created` | `create_session` 成功 | `welinkSessionId`、`toolSessionId`、`session` |
 | `tool_done` | `chat` 成功 | `toolSessionId`、`welinkSessionId?` |
-| `tool_error` | 归一化失败或 action 失败 | `welinkSessionId?`、`toolSessionId?`、`error` |
+| `tool_error` | 归一化失败或 action 失败 | `welinkSessionId?`、`toolSessionId?`、`error`、`reason?` |
 | `status_response` | `status_query` 成功 | `opencodeOnline` |
 
 输出报文样例：`session_created`
@@ -477,6 +477,25 @@ type NormalizedDownstreamMessage =
   "welinkSessionId": "skill-42",
   "toolSessionId": "tool-42",
   "error": "Invalid invoke payload shape"
+}
+```
+
+`reason` 约束：
+
+- `chat` 执行前先调用 `session.get`；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
+- OpenX 兼容路径：当 `gateway.channel==='openx' && bridgeDirectory` 缺省时，`chat` 省略 `directory` 且不执行前置 `session.get`。
+- 仅当 `chat` 前置 `session.get` 命中 `NotFoundError` 时，返回 `"session_not_found"`。
+- 其余 action 失败路径，或 `session.get` 的非 NotFound 异常，不返回 `session_not_found`，避免 gateway 误判会话缺失。
+
+会话缺失样例：
+
+```json
+{
+  "type": "tool_error",
+  "welinkSessionId": "skill-42",
+  "toolSessionId": "ses-missing",
+  "error": "Failed to send message: Session not found: ses-missing",
+  "reason": "session_not_found"
 }
 ```
 
@@ -569,6 +588,7 @@ type NormalizedUpstreamEvent = {
    - `session.error`
    - `permission.updated`
    - `permission.asked`
+   - `permission.replied`
    - `question.asked`
 
 ### 6.3 B4 下行：bridge 调用 SDK
@@ -589,12 +609,12 @@ type NormalizedUpstreamEvent = {
 
 | action | SDK/raw API 输出请求 |
 |---|---|
-| `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory` |
-| `chat` | 按 SDK 正式参数传递 `sessionID` 与消息体，并在该调用中复用 `effectiveDirectory` |
-| `close_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
-| `abort_session` | 按 SDK 正式参数传递 `sessionID`，并在该调用中复用 `effectiveDirectory` |
-| `permission_reply` | 通过 bridge 当前 permission reply 映射传递响应，并在该调用中复用 `effectiveDirectory` |
-| `question_reply` | 在问题查询与回复链路中统一复用 `effectiveDirectory` |
+| `create_session` | 显式映射 `title`，并在相关调用中统一复用 `effectiveDirectory`；当 `title` 命中 `^im-group` 时附加 `permission` deny 列表（含 `playwright*`） |
+| `chat` | 默认路径按 `session.get -> session.prompt` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` 并直接调用 `session.prompt` |
+| `close_session` | 默认路径按 `session.get -> session.delete` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `abort_session` | 默认路径按 `session.get -> session.abort` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `permission_reply` | 默认路径按 `session.get -> postSessionIdPermissionsPermissionId` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
+| `question_reply` | 默认路径按 `session.get -> GET /question -> POST /question/{requestID}/reply` 透传目录；OpenX 且 `bridgeDirectory` 缺省时省略 `directory` |
 | `status_query` | `app.health()` |
 
 `chat` 的 B4 输出样例：
@@ -678,6 +698,7 @@ type NormalizedUpstreamEvent = {
 | `session.status` | `toolSessionId=properties.sessionID` | `status` |
 | `session.idle` | `toolSessionId=properties.sessionID` | 无 |
 | `permission.asked` | `toolSessionId=properties.sessionID` | 无 |
+| `permission.replied` | `toolSessionId=properties.sessionID` | 无 |
 | `question.asked` | `toolSessionId=properties.sessionID` | 无 |
 
 #### 6.4.3 输出数据：发回 B3 的业务对象
@@ -879,6 +900,7 @@ type NormalizedUpstreamEvent = {
 | `session.error` | `properties.sessionID` | `tool_event` | `type:'session_error'` `welinkSessionId` `toolSessionId` `event` | `type:'session.error'` `detail` |
 | `permission.updated` | `properties.sessionID` | `tool_event` | `type:'permission.updated'` `welinkSessionId` `toolSessionId` `event` | `type:'permission.updated'` |
 | `permission.asked` | `properties.sessionID` `properties.id` `properties.title` `properties.metadata` | `tool_event` | `type:'permission.asked'` `welinkSessionId` `toolSessionId` `permissionId` `title` `metadata` | `type:'permission.request'` `permissionId` `title` `metadata` |
+| `permission.replied` | `properties.sessionID` `properties.requestID` `properties.reply` | `tool_event` | `type:'permission.replied'` `toolSessionId` `event` | `type:'permission.replied'` `requestID` `reply` |
 | `question.asked` | `properties.sessionID` `properties.questions` `properties.tool.callID` | `tool_event` | `type:'question.asked'` `welinkSessionId` `toolSessionId` `questions` `toolCallId` | `type:'question.request'` `questions` `toolCallId` |
 
 #### 6.6.6 推荐 UI 消费语义
@@ -935,7 +957,7 @@ sequenceDiagram
   SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'create_session', payload:{ title? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { messageId, welinkSessionId, action:'create_session', payload }
   BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
-  BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory? })
+  BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory?, permission? })
   SDK-->>BRIDGE: B4 返回值\n{ sessionId, ... }
   BRIDGE->>GW: B3 上行输出\nsession_created { welinkSessionId, toolSessionId, session }
   GW->>SKILL: B2 上行结果\n{ welinkSessionId, toolSessionId, type:'session_created' }
@@ -947,6 +969,7 @@ sequenceDiagram
 - `directory` 不应只在 `create_session` 单点考虑
 - 当 `BRIDGE_DIRECTORY` 能力落地后，bridge 将先统一决策 `effectiveDirectory`
 - 相关下行 SDK 调用将复用同一目录上下文
+- 当 `title` 命中 `^im-group` 时，bridge 会在 `session.create` 注入 deny 权限列表（含 `playwright*`）
 
 ### 8.2 `chat -> tool_done + tool_event`
 

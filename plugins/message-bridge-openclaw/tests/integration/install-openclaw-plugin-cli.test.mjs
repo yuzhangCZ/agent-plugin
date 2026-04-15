@@ -309,7 +309,7 @@ test("installer runs preflight, install, verify, configure, and restart with non
   });
 });
 
-test("installer rewrites existing scoped registry to the fixed default registry", async () => {
+test("installer preserves existing scoped registry when no override is provided", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
@@ -335,8 +335,7 @@ test("installer rewrites existing scoped registry to the fixed default registry"
 
     assert.equal(result.status, 0, result.stderr);
     const npmrc = await readFile(path.join(home, ".npmrc"), "utf8");
-    assert.ok(npmrc.includes("@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"));
-    assert.ok(!npmrc.includes("@wecode:registry=https://old.registry/"));
+    assert.ok(npmrc.includes("@wecode:registry=https://old.registry/"));
   });
 });
 

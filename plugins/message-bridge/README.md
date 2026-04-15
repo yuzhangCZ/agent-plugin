@@ -13,7 +13,7 @@
 
 - 官方受保障的发布路径只有 GitHub release workflow 和 `pnpm release:local`
 - 这两条路径会要求显式提供默认网关地址，并在构建期通过 `MB_DEFAULT_GATEWAY_URL` 固化到产物
-- 普通本地开发构建未注入时，`gateway.url` 仍回退到 `ws://localhost:8081/ws/agent`
+- 普通本地开发构建未注入时，`gateway.url` 会继续走 `default-config` 默认链路，并最终回退到 `ws://localhost:8081/ws/agent`
 - 手工执行 `npm publish`、`pnpm pack` 或其他非官方发包路径时，产物仍可能保留 localhost 默认值
 
 ## 插件异常隔离语义
@@ -162,6 +162,7 @@ payload: {
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 不再使用 `message.*`、`session.*` 这类 wildcard 默认值。
@@ -239,8 +240,20 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 
 1. `BRIDGE_*` 环境变量
 2. 项目级配置：`.opencode/message-bridge.jsonc`，其次 `.opencode/message-bridge.json`
-3. 用户级配置：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
+3. 用户级配置：
+   - 设置 `OPENCODE_CONFIG_DIR` 时：`$OPENCODE_CONFIG_DIR/message-bridge.jsonc`，其次 `.json`
+   - 否则：`~/.config/opencode/message-bridge.jsonc`，其次 `.json`
 4. 内置默认值
+
+用户级配置隔离补充：
+
+- `OPENCODE_CONFIG_DIR` 是 `message-bridge` 用户级配置的硬隔离根；设置后不会再回退默认 `~/.config/opencode`
+- `OPENCODE_CONFIG` 不参与 bridge 用户级配置定位；如果只设置了它，插件会记录 warning，但仍继续读取默认用户级目录
+
+`auth.ak` / `auth.sk` 额外规则：
+
+1. 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`auth.ak/sk` 仅从 `BRIDGE_AUTH_AK/SK` 读取（不再回退本地配置）。
+2. 当 `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白时，只有同时提供 `BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 才会覆盖本地；否则完整回退本地 `auth.ak/sk`（不做半覆盖）。
 
 默认值定义见：
 
@@ -263,12 +276,14 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 |---|---|
 | `enabled` | `true` |
 | `config_version` | `1` |
-| `gateway.url` | 官方发布产物由 `MB_DEFAULT_GATEWAY_URL` 注入；普通本地构建回退到 `ws://localhost:8081/ws/agent` |
+| `gateway.url` | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` |
 | `gateway.channel` | `openx` |
 | `gateway.heartbeatIntervalMs` | `30000` |
 | `gateway.reconnect.baseMs` | `1000` |
 | `gateway.reconnect.maxMs` | `30000` |
 | `gateway.reconnect.exponential` | `true` |
+| `gateway.reconnect.jitter` | `full` |
+| `gateway.reconnect.maxElapsedMs` | `600000` |
 | `gateway.ping.intervalMs` | `30000` |
 | `gateway.ping.pongTimeoutMs` | `10000` |
 | `sdk.timeoutMs` | `10000` |
@@ -276,6 +291,13 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 
 `gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `toolType` 字段。
 当前内置已知值集合为 `openx`、`uniassistant`、`codeagent`；如果配置了其他值，运行时会记录 `config.gateway.channel.unknown` 警告日志，但不会阻断连接。
+
+当前自动重连策略：
+
+- `exponential=true` 时按截断指数退避计算目标间隔：`1s -> 2s -> 4s -> 8s -> 16s -> 30s -> 30s ...`
+- `exponential=false` 时固定按 `baseMs` 重试，仍受 `maxMs` 截断
+- `jitter=full` 时，实际重连延迟会在 `0..cappedDelay` 范围内随机
+- `maxElapsedMs=600000` 表示单轮自动重连总时长最多 10 分钟；超时后停止自动重连，连接保持 `DISCONNECTED`
 
 ## 日志
 

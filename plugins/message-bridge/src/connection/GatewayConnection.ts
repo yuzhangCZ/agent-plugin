@@ -1,14 +1,21 @@
 import { EventEmitter } from 'events';
-import { ConnectionState } from '../types/index.js';
+import { ConnectionState, RECONNECT_JITTER, type ReconnectConfig } from '../types/index.js';
 import type { HeartbeatMessage, RegisterMessage } from '../contracts/transport-messages.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
 import type { AkSkAuthPayload } from './AkSkAuth.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import {
+  DefaultReconnectPolicy,
+  type ReconnectClock,
+  type ReconnectPolicy,
+} from './ReconnectPolicy.js';
 
 export interface GatewayConnectionEvents {
   stateChange: (state: ConnectionState) => void;
   message: (message: unknown) => void;
   error: (error: Error) => void;
+  registerRejected: (reason?: string) => void;
+  closed: (detail: GatewayConnectionCloseDetail) => void;
 }
 
 export interface GatewayConnection {
@@ -18,6 +25,17 @@ export interface GatewayConnection {
   isConnected(): boolean;
   getState(): ConnectionState;
   on<E extends keyof GatewayConnectionEvents>(event: E, listener: GatewayConnectionEvents[E]): this;
+}
+
+export interface GatewayConnectionCloseDetail {
+  opened: boolean;
+  manuallyDisconnected: boolean;
+  aborted: boolean;
+  rejected: boolean;
+  code?: number;
+  reason?: string;
+  wasClean?: boolean;
+  willReconnect: boolean;
 }
 
 export interface GatewaySendLogContext {
@@ -54,9 +72,10 @@ function buildGatewaySendLogExtra(messageType: string, payloadBytes: number, log
 export interface GatewayConnectionOptions {
   url: string;
   debug?: boolean;
-  reconnectBaseMs?: number;
-  reconnectMaxMs?: number;
-  reconnectExponential?: boolean;
+  reconnect?: ReconnectConfig;
+  reconnectPolicy?: ReconnectPolicy;
+  clock?: ReconnectClock;
+  random?: () => number;
   heartbeatIntervalMs?: number;
   abortSignal?: AbortSignal;
   authPayloadProvider?: () => AkSkAuthPayload;
@@ -205,9 +224,17 @@ interface OutboundMessageSummary {
   payloadBytes: number;
 }
 
+const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
+  baseMs: 1000,
+  maxMs: 30000,
+  exponential: true,
+  jitter: RECONNECT_JITTER.FULL,
+  maxElapsedMs: 600000,
+};
+
 export class DefaultGatewayConnection extends EventEmitter implements GatewayConnection {
+  private readonly reconnectPolicy: ReconnectPolicy;
   private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private manuallyDisconnected = false;
@@ -217,6 +244,13 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
   constructor(private readonly options: GatewayConnectionOptions) {
     super();
+    this.reconnectPolicy = options.reconnectPolicy ?? new DefaultReconnectPolicy(
+      options.reconnect ?? DEFAULT_RECONNECT_CONFIG,
+      {
+        clock: options.clock,
+        random: options.random,
+      },
+    );
   }
 
   private logRawFrame(eventName: 'onOpen' | 'onMessage' | 'onError', payload: unknown): void {
@@ -291,7 +325,6 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
         ws.onopen = (event) => {
           opened = true;
-          this.reconnectAttempts = 0;
           this.logRawFrame('onOpen', event);
           this.options.logger?.info('gateway.open');
           this.setState('CONNECTED');
@@ -306,6 +339,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
         ws.onclose = (event?: CloseEvent) => {
           const rejected = isGatewayRejectedCloseCode(event?.code);
+          const willReconnect = opened && !this.manuallyDisconnected && !this.options.abortSignal?.aborted && !rejected;
           this.options.logger?.warn('gateway.close', {
             opened,
             manuallyDisconnected: this.manuallyDisconnected,
@@ -327,6 +361,16 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           }
           this.teardownTimers();
           this.setState('DISCONNECTED');
+          this.emit('closed', {
+            opened,
+            manuallyDisconnected: this.manuallyDisconnected,
+            aborted: !!this.options.abortSignal?.aborted,
+            rejected,
+            code: event?.code,
+            reason: event?.reason,
+            wasClean: event?.wasClean,
+            willReconnect,
+          });
 
           if (rejected) {
             this.options.logger?.warn('gateway.close.rejected', {
@@ -337,7 +381,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
             return;
           }
 
-          if (opened && !this.manuallyDisconnected && !this.options.abortSignal?.aborted) {
+          if (willReconnect) {
             this.attemptReconnect();
           }
         };
@@ -376,6 +420,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
   disconnect(): void {
     this.options.logger?.info('gateway.disconnect.requested', { state: this.state });
     this.manuallyDisconnected = true;
+    this.reconnectPolicy.reset();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -490,18 +535,16 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
       return;
     }
 
-    this.reconnectAttempts += 1;
+    const reconnectDecision = this.reconnectPolicy.scheduleNextAttempt();
+    if (!reconnectDecision.ok) {
+      this.logReconnectExhausted(reconnectDecision.elapsedMs, reconnectDecision.maxElapsedMs);
+      return;
+    }
 
-    const base = this.options.reconnectBaseMs ?? 1000;
-    const cap = this.options.reconnectMaxMs ?? 30000;
-    const exp = this.options.reconnectExponential ?? true;
-
-    const delay = exp
-      ? Math.min(base * Math.pow(2, this.reconnectAttempts - 1), cap)
-      : Math.min(base, cap);
     this.options.logger?.warn('gateway.reconnect.scheduled', {
-      attempt: this.reconnectAttempts,
-      delayMs: delay,
+      attempt: reconnectDecision.attempt,
+      delayMs: reconnectDecision.delayMs,
+      elapsedMs: reconnectDecision.elapsedMs,
     });
 
     this.reconnectTimer = setTimeout(async () => {
@@ -509,14 +552,20 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
         return;
       }
 
+      const exhaustedDecision = this.reconnectPolicy.getExhaustedDecision();
+      if (exhaustedDecision) {
+        this.logReconnectExhausted(exhaustedDecision.elapsedMs, exhaustedDecision.maxElapsedMs);
+        return;
+      }
+
       try {
         this.options.logger?.info('gateway.reconnect.attempt', {
-          attempt: this.reconnectAttempts,
+          attempt: reconnectDecision.attempt,
         });
         await this.connect();
       } catch (error) {
         this.options.logger?.warn('gateway.reconnect.failed', {
-          attempt: this.reconnectAttempts,
+          attempt: reconnectDecision.attempt,
           error: getErrorMessage(error),
           ...getErrorDetailsForLog(error),
         });
@@ -524,7 +573,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
           this.attemptReconnect();
         }
       }
-    }, delay);
+    }, reconnectDecision.delayMs);
   }
 
   private async handleMessage(event: WsMessageEvent): Promise<void> {
@@ -592,12 +641,20 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
     }
   }
 
+  private logReconnectExhausted(elapsedMs: number, maxElapsedMs: number): void {
+    this.options.logger?.warn('gateway.reconnect.exhausted', {
+      elapsedMs,
+      maxElapsedMs,
+    });
+  }
+
   private handleControlMessage(message: GatewayControlMessage): void {
     if (message.type === 'register_ok') {
       if (this.state === 'READY') {
         this.options.logger?.warn('gateway.register.duplicate_ok');
         return;
       }
+      this.reconnectPolicy.reset();
       this.setState('READY');
       this.options.logger?.info('gateway.register.accepted');
       this.setupHeartbeat();
@@ -607,6 +664,7 @@ export class DefaultGatewayConnection extends EventEmitter implements GatewayCon
 
     const reason = typeof message.reason === 'string' ? message.reason : undefined;
     this.options.logger?.error('gateway.register.rejected', { reason });
+    this.emit('registerRejected', reason);
     this.manuallyDisconnected = true;
     if (this.ws) {
       this.ws.close();

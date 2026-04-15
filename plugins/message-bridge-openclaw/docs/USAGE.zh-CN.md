@@ -19,6 +19,12 @@
 - 文本输出为 block 级 streaming，不是 token 级 streaming
 - 当前环境里模型首块延迟和超时仍可能影响实际流式体验
 
+OpenClaw 安装兼容窗口：
+
+- 运行时宿主版本：`>=2026.3.24`
+- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
+- `2026.3.31` 起，OpenClaw 插件安装期危险代码扫描默认 fail-closed，当前带 `install.mjs` 的 npm helper 包会被阻断
+
 运行时依赖约束：
 
 - 插件运行时使用宿主 OpenClaw 提供的 `plugin-sdk`
@@ -64,7 +70,7 @@
 
 当前本地验证使用：
 
-- OpenClaw `2026.3.11`
+- OpenClaw `2026.3.24`
 - 网关地址：`ws://127.0.0.1:8081/ws/agent`
 - 测试凭据：
   - `ak`: `test-ak-openclaw-001`
@@ -110,6 +116,7 @@ npx --yes \
   --registry https://your-private-registry.example.com/ \
   --package @wecode/skill-openclaw-plugin \
   message-bridge-openclaw-install \
+  --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -119,9 +126,9 @@ npx --yes \
 说明：
 
 - `npx --registry ...` 负责让首次执行时能从私仓下载 helper 自身
-- helper 会固定写入 `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`，不支持通过命令参数覆盖
+- helper 会优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
 - helper 会先通过 `which openclaw` / `where.exe openclaw` 检测宿主命令是否存在
-- 命令会参考 `openclaw-weixin-cli` 的实现，通过 shell 执行 `openclaw --version`
+- 命令会先检查 `openclaw --version`，并验证版本位于 npm helper 支持窗口 `>=2026.3.24 <2026.3.31`
 - 当候选为 `openclaw.cmd` 时，helper 会通过 `cmd.exe /d /s /c` 显式执行后续 OpenClaw CLI 命令
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令默认执行 `openclaw gateway restart`

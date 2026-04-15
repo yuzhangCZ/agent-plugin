@@ -219,9 +219,6 @@ describe('assiant use cases', () => {
             },
           };
         },
-        promptSession: async () => ({
-          success: true,
-        }),
       },
     );
 
@@ -255,10 +252,103 @@ describe('assiant use cases', () => {
     ]);
   });
 
+  test('create session use case applies deny permissions for im-group sessions', async () => {
+    const calls = [];
+    const createSessionUseCase = new CreateSessionUseCase(
+      {
+        execute: async () => ({
+          directory: '/mapped/group',
+          source: 'mapping',
+        }),
+      },
+      {
+        createSession: async (parameters) => {
+          calls.push(parameters);
+          return {
+            success: true,
+            data: {
+              sessionId: 'created-group-1',
+              session: { sessionId: 'created-group-1' },
+            },
+          };
+        },
+      },
+    );
+
+    const result = await createSessionUseCase.execute({
+      payload: {
+        title: 'im-group-123',
+        assistantId: 'tenant-group',
+      },
+      effectiveDirectory: '/fallback',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls, [
+      {
+        title: 'im-group-123',
+        directory: '/mapped/group',
+        permission: [
+          { permission: 'bash', pattern: '*', action: 'deny' },
+          { permission: 'read', pattern: '*', action: 'deny' },
+          { permission: 'glob', pattern: '*', action: 'deny' },
+          { permission: 'grep', pattern: '*', action: 'deny' },
+          { permission: 'edit', pattern: '*', action: 'deny' },
+          { permission: 'write', pattern: '*', action: 'deny' },
+          { permission: 'task', pattern: '*', action: 'deny' },
+          { permission: 'webfetch', pattern: '*', action: 'deny' },
+          { permission: 'myAgentWebFetch', pattern: '*', action: 'deny' },
+          { permission: 'meeting*', pattern: '*', action: 'deny' },
+          { permission: 'knowledge*', pattern: '*', action: 'deny' },
+          { permission: 'playwright*', pattern: '*', action: 'deny' },
+        ],
+      },
+    ]);
+  });
+
+  test('create session use case does not pass permission for non im-group sessions', async () => {
+    const calls = [];
+    const createSessionUseCase = new CreateSessionUseCase(
+      {
+        execute: async () => ({
+          directory: '/mapped/normal',
+          source: 'mapping',
+        }),
+      },
+      {
+        createSession: async (parameters) => {
+          calls.push(parameters);
+          return {
+            success: true,
+            data: {
+              sessionId: 'created-normal-1',
+              session: { sessionId: 'created-normal-1' },
+            },
+          };
+        },
+      },
+    );
+
+    const result = await createSessionUseCase.execute({
+      payload: {
+        title: 'tenant session',
+        assistantId: 'tenant-normal',
+      },
+      effectiveDirectory: '/fallback',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls, [
+      {
+        title: 'tenant session',
+        directory: '/mapped/normal',
+      },
+    ]);
+  });
+
   test('chat use case forwards assistantId as agent without directory', async () => {
     const calls = [];
     const chatUseCase = new ChatUseCase({
-      createSession: async () => ({ success: true, data: { sessionId: 'ignored', session: {} } }),
       promptSession: async (parameters) => {
         calls.push(parameters);
         return { success: true };

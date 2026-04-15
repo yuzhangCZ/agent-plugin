@@ -53,14 +53,10 @@ async function main() {
         default: "./index.js",
       },
     },
-    files: [
-      "index.js",
-      "install.mjs",
-      "package.json",
-      "openclaw.plugin.json",
-      "README.md",
-    ],
-    bin: "./install.mjs",
+    files: ["index.js", "install.mjs", "package.json", "openclaw.plugin.json", "README.md"],
+    bin: {
+      "message-bridge-openclaw-install": "./install.mjs",
+    },
     peerDependencies: sourcePackageJson.peerDependencies,
     peerDependenciesMeta: sourcePackageJson.peerDependenciesMeta,
     openclaw: {

@@ -39,7 +39,18 @@ export interface SessionStatusExtra {
   status: string;
 }
 
-export type SupportedUpstreamExtra = MessageUpdatedExtra | MessagePartExtra | SessionStatusExtra | undefined;
+export interface SessionCreatedExtra {
+  kind: 'session.created';
+  parentSessionId?: string;
+  agentName: string;
+}
+
+export type SupportedUpstreamExtra =
+  | MessageUpdatedExtra
+  | MessagePartExtra
+  | SessionStatusExtra
+  | SessionCreatedExtra
+  | undefined;
 
 export interface NormalizedUpstreamEvent<TExtra = SupportedUpstreamExtra> {
   common: CommonUpstreamFields;

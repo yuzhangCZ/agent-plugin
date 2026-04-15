@@ -1,10 +1,10 @@
 # Message-Bridge OpenCode 集成指导
 
-**Version:** 1.5  
-**Date:** 2026-03-23  
+**Version:** 1.10  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
-**Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `./npm-publish-guide.md`
+**Related:** `../../README.md`, `../README.md`, `../design/interfaces/config-contract.md`, `../design/interfaces/private-status-api-contract.md`, `./third-party-status-api-guide.md`, `./npm-publish-guide.md`
 
 面向通过 `@opencode-ai/sdk` 代码方式集成 OpenCode 的应用方，说明如何接入 `message-bridge` 插件。
 
@@ -15,7 +15,7 @@
 ```js
 process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
   $schema: 'https://opencode.ai/config.json',
-  plugin: ['@opencode-cui/message-bridge'],
+  plugin: ['@wecode/skill-opencode-plugin'],
 });
 ```
 
@@ -38,7 +38,18 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 | `sk` | `BRIDGE_AUTH_SK` | 是 | 插件鉴权 SK |
 | `channel` | `BRIDGE_GATEWAY_CHANNEL` | 是 | 填写应用别名，用于标识当前接入应用 |
 | `gateway.url` | `BRIDGE_GATEWAY_URL` | 否 | 生产环境通常不需要配置；切换到 UAT 等非生产环境时再显式填写 |
-| `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文 |
+| `directory` | `BRIDGE_DIRECTORY` | 否 | 按需配置，用于指定插件目录上下文；若 `channel=openx` 且缺省，session-scoped 调用将走“省略 directory”的兼容路径 |
+
+如果应用希望把 bridge 用户级配置与原生 OpenCode 隔离，还需要显式设置：
+
+| 配置项 | 环境变量 | 是否必须 | 说明 |
+|---|---|---|---|
+| `bridge user config root` | `OPENCODE_CONFIG_DIR` | 建议 | 作为 `message-bridge.jsonc|json` 的用户级硬隔离目录 |
+
+`auth` 凭证读取补充：
+
+- 当 `BRIDGE_GATEWAY_CHANNEL` 显式设置（`trim()` 后非空）时，`BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 只能通过环境变量提供，本地配置中的 `auth.ak/sk` 不参与回退。
+- 当 `BRIDGE_GATEWAY_CHANNEL` 未设置或仅空白时，`BRIDGE_AUTH_AK` 与 `BRIDGE_AUTH_SK` 只有“同时提供”才会覆盖本地；若只提供一项，会整体回退本地 `auth.ak/sk`。
 
 最小示例：
 
@@ -46,6 +57,7 @@ process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
 process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 ```
 
 UAT 示例：
@@ -55,21 +67,27 @@ process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
 process.env.BRIDGE_GATEWAY_URL = 'wss://gateway-uat.example.com/ws/agent';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 ```
+
+隔离规则补充：
+
+- `OPENCODE_CONFIG_DIR` 一旦设置，`message-bridge` 的用户级配置只从该目录读取，不再回退 `~/.config/opencode`
+- `OPENCODE_CONFIG` 不会改变 bridge 的用户级配置目录；仅设置它不能解决第三方宿主与原生 OpenCode 的配置污染问题
 
 ## 3. `.npmrc` 要求
 
 如果使用 npm 包方式接入，必须提前准备 `.npmrc`：
 
 ```ini
-@opencode-cui:registry=https://<your-private-registry>/
+@wecode:registry=https://<your-private-registry>/
 registry=https://registry.npmjs.org/
 strict-ssl=false
 ```
 
 说明：
 
-- `@opencode-cui:registry`：指定 `@opencode-cui` 走企业二方仓
+- `@wecode:registry`：指定 `@wecode` 作用域包走企业二方仓
 - `registry`：保留公共 npm 默认源
 - `strict-ssl=false`：在企业私仓证书链不完整时禁用 SSL 校验，避免启动阶段拉包失败
 
@@ -83,6 +101,7 @@ strict-ssl=false
 - `BRIDGE_GATEWAY_CHANNEL`
 - `BRIDGE_GATEWAY_URL`（如有）
 - `BRIDGE_DIRECTORY`（如有）
+- `OPENCODE_CONFIG_DIR`（如需用户级配置隔离）
 - `.npmrc`
 
 配置变更后需要重启 OpenCode 才会生效，包括：
@@ -102,12 +121,13 @@ import { createOpencode } from '@opencode-ai/sdk';
 
 process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
   $schema: 'https://opencode.ai/config.json',
-  plugin: ['@opencode-cui/message-bridge'],
+  plugin: ['@wecode/skill-opencode-plugin'],
 });
 
 process.env.BRIDGE_AUTH_AK = 'your-ak';
 process.env.BRIDGE_AUTH_SK = 'your-sk';
 process.env.BRIDGE_GATEWAY_CHANNEL = 'your-app-alias';
+process.env.OPENCODE_CONFIG_DIR = '/absolute/path/to/third-party-opencode-config';
 
 const { server } = await createOpencode({
   hostname: '127.0.0.1',
@@ -120,6 +140,39 @@ server.close();
 ```
 
 ## 6. FAQ
+
+### 6.0 如何在宿主 UI 中读取插件连接状态
+
+如果你的应用与 `message-bridge` 运行在同一进程内，可以直接读取插件私有状态 API：
+
+```js
+import {
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '@wecode/skill-opencode-plugin';
+
+const snapshot = getMessageBridgeStatus();
+console.log(snapshot.phase, snapshot.unavailableReason, snapshot.willReconnect);
+
+const unsubscribe = subscribeMessageBridgeStatus((nextSnapshot) => {
+  console.log(nextSnapshot.phase);
+});
+```
+
+当前推荐的 UI 解释方式：
+
+- `phase='ready'`：显示“已连接”
+- `phase='connecting'`：显示“连接中”
+- `phase='unavailable'`：显示“不可用”
+- `unavailableReason='server_failure'` 且 `willReconnect=false`：可提示“服务端拒绝或已断开连接，当前不会自动重连”
+
+边界说明：
+
+- 该能力是 `message-bridge` 私有 API，不是宿主通用插件能力
+- 只适用于与插件同进程的集成方式
+- 不应通过 `status_query -> status_response` 读取 bridge 连接状态
+
+如果你是三方应用集成方，且需要查看私有状态 API 的导出方式、状态对象和字段语义，请直接阅读 [三方应用私有状态 API 接口说明](./third-party-status-api-guide.md)。
 
 ### 6.1 如何判断插件已加载成功
 
@@ -145,7 +198,7 @@ server.close();
 
 优先检查以下几项：
 
-- `.npmrc` 是否已配置 `@opencode-cui` 二方仓地址
+- `.npmrc` 是否已配置 `@wecode` 作用域包的私仓地址
 - 企业私仓是否要求禁用 SSL 校验
 - 以上配置是否都在 OpenCode 启动前完成
 

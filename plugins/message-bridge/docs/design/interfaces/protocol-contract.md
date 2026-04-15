@@ -1,10 +1,10 @@
 # 协议契约
 
-**Version:** 2.2
-**Date:** 2026-03-28
+**Version:** 2.5
+**Date:** 2026-04-07
 **Status:** Active
 **Owner:** message-bridge maintainers
-**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`
+**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`, `./private-status-api-contract.md`
 
 ## 1. 边界层
 
@@ -95,6 +95,7 @@ type QuestionReplyPayload = {
 - `assistantId` 在 `chat` 和 `create_session` 中均为可选字段
 - 当最终解析后的 `gateway.channel === 'uniassistant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
 - `chat` 在存在 `assistantId` 时，会把它透传到 SDK 的 `session.prompt(...).agent`
+- OpenX 兼容策略：当 `gateway.channel === 'openx'` 且 `bridgeDirectory` 缺省时，`chat/close_session/abort_session/permission_reply/question_reply` 省略 `directory`，并跳过前置 `session.get` 目录回查
 - `assistantId` 仅接受字符串；`null` 视为无效 payload
 - 旧字段 `assiantId` 已废弃；当前会被当作未知字段静默忽略，不会触发 `agent` 透传，也不会触发目录映射
 
@@ -118,6 +119,29 @@ type QuestionReplyPayload = {
 - bridge 类型定义与归一化逻辑已经与 `title?: string` 对齐
 - 其余更宽的历史引用都应视为历史残留，而不是当前协议
 
+### 2.1.2 `create_session` 的 IM 群权限注入规则
+
+在 `create_session.payload.title` 命中 IM 群前缀时，bridge 会在调用 `session.create` 时附加权限 deny 列表：
+
+- 命中条件：`title` 以 `im-group` 开头（正则：`/^im-group/`）
+- 注入字段：`permission: Array<{ permission, pattern, action }>`
+- 注入策略：`pattern='*'`，`action='deny'`
+- 覆盖项：
+  - `bash`
+  - `read`
+  - `glob`
+  - `grep`
+  - `edit`
+  - `write`
+  - `task`
+  - `webfetch`
+  - `myAgentWebFetch`
+  - `meeting*`
+  - `knowledge*`
+  - `playwright*`
+
+非 IM 群会话不会附加 `permission` 字段（而不是传 `permission: undefined`）。
+
 ### 2.2 `status_query`
 
 独立形状：
@@ -127,6 +151,13 @@ type QuestionReplyPayload = {
   type: 'status_query';
 }
 ```
+
+补充边界说明：
+
+- `status_query` 属于 gateway 外部协议
+- `status_response` 仍只承诺返回 `opencodeOnline:boolean`
+- 当前分支新增的私有状态 API 不属于协议契约，不会扩展 `status_response`
+- 如需读取 bridge 自身连接状态，应使用 `private-status-api-contract.md` 中定义的插件私有读取面
 
 ## 3. 上行事件契约
 
@@ -142,6 +173,7 @@ type QuestionReplyPayload = {
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 默认 allowlist 与上述列表完全一致。
@@ -208,6 +240,7 @@ type ToolErrorMessage = {
   welinkSessionId?: string;
   toolSessionId?: string;
   error: string;
+  reason?: 'session_not_found';
 };
 
 type SessionCreatedMessage = {
@@ -243,3 +276,20 @@ type StatusResponseMessage = {
 
 - 记录日志事件：`downstream.normalization_failed`
 - bridge 按现有 `tool_error` 语义返回错误
+
+`tool_error.reason` 判定边界（当前实现）：
+
+| 错误来源 | 证据 | reason |
+|---|---|---|
+| `chat` 执行前置探测 | `session.get` 返回 `NotFoundError` | `session_not_found` |
+| `chat` 执行前置探测 | `session.get` 返回其他错误或抛出其他异常 | `undefined` |
+| `chat` 执行（OpenX 兼容路径） | `gateway.channel='openx' && bridgeDirectory 缺省`，未执行 `session.get` | `undefined` |
+| 其他 action（`create_session/close_session/abort_session/permission_reply/question_reply`） | 无会话缺失强证据 | `undefined` |
+| `chat` prompt 阶段错误 | 不命中 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` | `undefined` |
+
+补充说明：
+
+1. `session.get` 是启动必选能力；`chat` 默认执行时若前置 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
+2. OpenX 兼容路径（`gateway.channel='openx' && bridgeDirectory 缺省`）不走前置 `session.get`，因此该路径不会产出 `session_not_found` 证据。
+3. 当前 `session_not_found` 只允许由 `chat` 前置 `session.get` 上报，不允许靠文案、泛化 `404` 或 `session.prompt` 错误推断。
+4. 分类器做“action + 结构化证据”映射：仅 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` 命中 `reason=session_not_found`。

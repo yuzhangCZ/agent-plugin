@@ -10,7 +10,7 @@ This package is intended to be installed into a real OpenClaw host.
 
 - first-time bootstrap: use `npx --registry <private-registry> --package @wecode/skill-openclaw-plugin message-bridge-openclaw-install ...`
 - install helper: after the package is available, you can run `message-bridge-openclaw-install` directly
-- the helper writes `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/` into the resolved user `.npmrc`
+- the helper writes the resolved `@wecode:registry=...` into the user `.npmrc`, preferring `--registry`, `WECODE_NPM_REGISTRY`, then existing npmrc scope, and finally the default internal registry
 - npm install: use the package through OpenClaw's plugin installation flow
 - local dev install: build the bundle and install `bundle/` into an isolated
   OpenClaw profile
@@ -28,7 +28,8 @@ The package does not ship `dist/`, docs, sourcemaps, or a bundled copy of
 
 ## Host Requirement
 
-- `openclaw >=2026.3.11`
+- runtime host: `openclaw >=2026.3.24`
+- npm helper install window: `openclaw >=2026.3.24 <2026.3.31`
 
 The plugin relies on the host-provided `openclaw/plugin-sdk` at runtime.
 

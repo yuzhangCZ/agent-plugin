@@ -2,6 +2,7 @@ import type { HostClientLike, OpencodeClient, OpencodeHealthResult } from '../ty
 
 export const REQUIRED_SDK_CAPABILITIES = [
   'session.create',
+  'session.get',
   'session.prompt',
   'session.abort',
   'session.delete',
@@ -54,7 +55,7 @@ function buildLegacyCreateOptions(parameters?: {
   directory?: string;
   parentID?: string;
   title?: string;
-  permission?: Record<string, unknown>;
+  permission?: Array<Record<string, unknown>>;
 }): Record<string, unknown> {
   if (!parameters) {
     return {};
@@ -161,6 +162,8 @@ export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[
     switch (capability) {
       case 'session.create':
         return typeof session?.create !== 'function';
+      case 'session.get':
+        return typeof session?.get !== 'function';
       case 'session.prompt':
         return typeof session?.prompt !== 'function';
       case 'session.abort':
@@ -201,6 +204,7 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
   const root = client as {
     session: {
       create: (options?: Record<string, unknown>) => Promise<unknown>;
+      get: (options: Record<string, unknown>) => Promise<unknown>;
       prompt: (options: Record<string, unknown>) => Promise<unknown>;
       abort: (options: Record<string, unknown>) => Promise<unknown>;
       delete: (options: Record<string, unknown>) => Promise<unknown>;
@@ -215,6 +219,7 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
   return {
     session: {
       create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
+      get: (parameters) => root.session.get(buildLegacySessionTarget(parameters)),
       prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
       abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
       delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),

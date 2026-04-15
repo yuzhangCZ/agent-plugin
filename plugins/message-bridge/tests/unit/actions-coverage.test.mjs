@@ -36,133 +36,108 @@ function createLoggerRecorder() {
   return { calls, logger };
 }
 
+function createChatAction(overrides = {}) {
+  return new ChatAction({
+    execute: async (input) => {
+      if (overrides.execute) {
+        return overrides.execute(input);
+      }
+      return { success: true };
+    },
+  });
+}
+
 describe('ChatAction coverage', () => {
-  test('execute success path with strict prompt shape', async () => {
-    const action = new ChatAction();
+  test('execute delegates to chat use case with expected payload shape', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async (options) => {
-          calls.push(options);
-          return { data: { ok: true } };
-        },
+    const action = createChatAction({
+      execute: async (input) => {
+        calls.push(input);
+        return { success: true };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
-    const result = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext(client));
+    });
+    const result = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext({}));
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionID: 's-1',
-      parts: [{ type: 'text', text: 'hi' }],
+      payload: { toolSessionId: 's-1', text: 'hi' },
+      logger: undefined,
     });
   });
 
-  test('ignores effectiveDirectory when sending prompt', async () => {
-    const action = new ChatAction();
+  test('does not read effectiveDirectory when delegating chat', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async (options) => {
-          calls.push(options);
-          return { data: { ok: true } };
-        },
+    const action = createChatAction({
+      execute: async (input) => {
+        calls.push(input);
+        return { success: true };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
-    const result = await action.execute({ toolSessionId: 's-2', text: 'hello' }, readyContext(client, {
+    const result = await action.execute({ toolSessionId: 's-2', text: 'hello' }, readyContext({}, {
       effectiveDirectory: '/tmp/bridge-dir',
     }));
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionID: 's-2',
-      parts: [{ type: 'text', text: 'hello' }],
+      payload: { toolSessionId: 's-2', text: 'hello' },
+      logger: undefined,
     });
   });
 
-  test('forwards assistantId as agent in fallback prompt path', async () => {
-    const action = new ChatAction();
+  test('forwards assistantId through chat use case payload', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async (options) => {
-          calls.push(options);
-          return { data: { ok: true } };
-        },
+    const action = createChatAction({
+      execute: async (input) => {
+        calls.push(input);
+        return { success: true };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
     const result = await action.execute(
       { toolSessionId: 's-3', text: 'hello agent', assistantId: 'persona-1' },
-      readyContext(client, {
+      readyContext({}, {
         effectiveDirectory: '/tmp/bridge-dir',
       }),
     );
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionID: 's-3',
-      parts: [{ type: 'text', text: 'hello agent' }],
-      agent: 'persona-1',
+      payload: { toolSessionId: 's-3', text: 'hello agent', assistantId: 'persona-1' },
+      logger: undefined,
     });
   });
 
-  test('execute handles sdk error object', async () => {
-    const action = new ChatAction();
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => ({ error: { message: 'boom' } }),
-      },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
-    const result = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext(client));
+  test('execute handles use case failure result', async () => {
+    const action = createChatAction({
+      execute: async () => ({ success: false, errorCode: 'SDK_UNREACHABLE', errorMessage: 'boom' }),
+    });
+    const result = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext({}));
     assert.strictEqual(result.success, false);
     assert.strictEqual(result.errorCode, 'SDK_UNREACHABLE');
     assert.ok(result.errorMessage.includes('boom'));
   });
 
-  test('execute handles promise rejection and sync throw', async () => {
-    const action = new ChatAction();
-    const rejectClient = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => {
-          throw new Error('transport down');
-        },
+  test('execute handles rejected and thrown use case errors', async () => {
+    const rejectAction = createChatAction({
+      execute: async () => {
+        throw new Error('transport down');
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
-    const rejectResult = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext(rejectClient));
+    });
+    const rejectResult = await rejectAction.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext({}));
     assert.strictEqual(rejectResult.success, false);
     assert.strictEqual(rejectResult.errorCode, 'SDK_UNREACHABLE');
-    assert.ok(rejectResult.errorMessage.includes('Failed to send message'));
+    assert.ok(rejectResult.errorMessage.includes('transport down'));
 
-    const throwClient = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: () => {
-          throw new Error('timeout now');
-        },
+    const throwAction = createChatAction({
+      execute: () => {
+        throw new Error('timeout now');
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
-    const throwResult = await action.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext(throwClient));
+    });
+    const throwResult = await throwAction.execute({ toolSessionId: 's-1', text: 'hi' }, readyContext({}));
     assert.strictEqual(throwResult.success, false);
     assert.strictEqual(throwResult.errorCode, 'SDK_TIMEOUT');
   });
 
   test('errorMapper variants', () => {
-    const action = new ChatAction();
+    const action = createChatAction();
     assert.strictEqual(action.errorMapper(new Error('connection refused')), 'SDK_UNREACHABLE');
     assert.strictEqual(action.errorMapper(new Error('session not found')), 'INVALID_PAYLOAD');
     assert.strictEqual(action.errorMapper('timeout'), 'SDK_TIMEOUT');
@@ -177,7 +152,7 @@ describe('CreateSessionAction coverage', () => {
       session: {
         create: async (options) => {
           calls.push(options);
-          return { data: { sessionId: 'new-1' } };
+          return { data: { id: 'new-1' } };
         },
         abort: async () => ({}),
         prompt: async () => ({}),
@@ -197,7 +172,7 @@ describe('CreateSessionAction coverage', () => {
       session: {
         create: async (options) => {
           calls.push(options);
-          return { data: { sessionId: 'new-2' } };
+          return { data: { id: 'new-2' } };
         },
         abort: async () => ({}),
         prompt: async () => ({}),
@@ -256,7 +231,7 @@ describe('CreateSessionAction coverage', () => {
     const action = new CreateSessionAction();
     const client = {
       session: {
-        create: async () => ({ data: { sessionId: 'new-4' } }),
+        create: async () => ({ data: { id: 'new-4' } }),
         abort: async () => ({}),
         prompt: async () => ({}),
       },
@@ -295,106 +270,86 @@ describe('CreateSessionAction coverage', () => {
 });
 
 describe('CloseSessionAction coverage', () => {
-  test('execute success path', async () => {
-    const action = new CloseSessionAction();
+  test('execute delegates close_session to session-scoped gateway', async () => {
     const calls = [];
-    const okClient = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({ data: { aborted: true } }),
-        delete: async (options) => {
-          calls.push(options);
-          return { data: { deleted: true } };
-        },
-        prompt: async () => ({}),
+    const action = new CloseSessionAction({
+      closeSession: async (options) => {
+        calls.push(options);
+        return { success: true, data: { sessionId: 's1', closed: true } };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
-    const ok = await action.execute({ toolSessionId: 's1' }, readyContext(okClient));
+    });
+    const ok = await action.execute({ toolSessionId: 's1' }, readyContext({}));
     assert.strictEqual(ok.success, true);
     assert.strictEqual(ok.data.closed, true);
-    assert.deepStrictEqual(calls[0], { sessionID: 's1' });
+    assert.deepStrictEqual(calls[0], { sessionId: 's1' });
   });
 
-  test('ignores effectiveDirectory for close_session', async () => {
-    const action = new CloseSessionAction();
+  test('does not read effectiveDirectory when delegating close_session', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({ data: { aborted: true } }),
-        delete: async (options) => {
-          calls.push(options);
-          return { data: { deleted: true } };
-        },
-        prompt: async () => ({}),
+    const action = new CloseSessionAction({
+      closeSession: async (options) => {
+        calls.push(options);
+        return { success: true, data: { sessionId: 's2', closed: true } };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
-    const result = await action.execute({ toolSessionId: 's2' }, readyContext(client, {
+    const result = await action.execute({ toolSessionId: 's2' }, readyContext({}, {
       effectiveDirectory: '/tmp/bridge-dir',
     }));
     assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(calls[0], { sessionID: 's2' });
+    assert.deepStrictEqual(calls[0], { sessionId: 's2' });
   });
 });
 
 describe('PermissionReplyAction coverage', () => {
-  test('execute maps response to sdk path/body', async () => {
+  test('execute delegates permission_reply to session-scoped gateway', async () => {
     const calls = [];
-    const action = new PermissionReplyAction();
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => ({}),
+    const action = new PermissionReplyAction({
+      replyPermission: async (options) => {
+        calls.push(options);
+        return {
+          success: true,
+          data: { permissionId: 'p1', response: 'once', applied: true },
+        };
       },
-      postSessionIdPermissionsPermissionId: async (opts) => {
-        calls.push(opts);
-        return { data: { ok: true } };
-      },
-    };
+    });
 
     const allow = await action.execute(
       { permissionId: 'p1', toolSessionId: 's-tool', response: 'once' },
-      readyContext(client),
+      readyContext({}),
     );
 
     assert.strictEqual(allow.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionID: 's-tool',
-      permissionID: 'p1',
+      sessionId: 's-tool',
+      permissionId: 'p1',
       response: 'once',
     });
   });
 
-  test('ignores effectiveDirectory for permission_reply', async () => {
+  test('does not read effectiveDirectory when delegating permission_reply', async () => {
     const calls = [];
-    const action = new PermissionReplyAction();
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => ({}),
+    const action = new PermissionReplyAction({
+      replyPermission: async (options) => {
+        calls.push(options);
+        return {
+          success: true,
+          data: { permissionId: 'p2', response: 'reject', applied: true },
+        };
       },
-      postSessionIdPermissionsPermissionId: async (opts) => {
-        calls.push(opts);
-        return { data: { ok: true } };
-      },
-    };
+    });
 
     const result = await action.execute(
       { permissionId: 'p2', toolSessionId: 's-tool-2', response: 'reject' },
-      readyContext(client, {
+      readyContext({}, {
         effectiveDirectory: '/tmp/bridge-dir',
       }),
     );
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionID: 's-tool-2',
-      permissionID: 'p2',
+      sessionId: 's-tool-2',
+      permissionId: 'p2',
       response: 'reject',
     });
   });
@@ -483,143 +438,87 @@ describe('StatusQueryAction coverage', () => {
 });
 
 describe('AbortSessionAction coverage', () => {
-  test('execute success path', async () => {
-    const action = new AbortSessionAction();
+  test('execute delegates abort_session to session-scoped gateway', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async (options) => {
-          calls.push(options);
-          return { data: { aborted: true } };
-        },
-        prompt: async () => ({}),
+    const action = new AbortSessionAction({
+      abortSession: async (options) => {
+        calls.push(options);
+        return { success: true, data: { sessionId: 'abort-1', aborted: true } };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
-    const result = await action.execute({ toolSessionId: 'abort-1' }, readyContext(client));
+    const result = await action.execute({ toolSessionId: 'abort-1' }, readyContext({}));
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { sessionId: 'abort-1', aborted: true });
-    assert.deepStrictEqual(calls[0], { sessionID: 'abort-1' });
+    assert.deepStrictEqual(calls[0], { sessionId: 'abort-1' });
   });
 
-  test('ignores effectiveDirectory for abort_session', async () => {
-    const action = new AbortSessionAction();
+  test('does not read effectiveDirectory when delegating abort_session', async () => {
     const calls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async (options) => {
-          calls.push(options);
-          return { data: { aborted: true } };
-        },
-        prompt: async () => ({}),
+    const action = new AbortSessionAction({
+      abortSession: async (options) => {
+        calls.push(options);
+        return { success: true, data: { sessionId: 'abort-2', aborted: true } };
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
-    const result = await action.execute({ toolSessionId: 'abort-2' }, readyContext(client, {
+    const result = await action.execute({ toolSessionId: 'abort-2' }, readyContext({}, {
       effectiveDirectory: '/tmp/bridge-dir',
     }));
     assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(calls[0], { sessionID: 'abort-2' });
+    assert.deepStrictEqual(calls[0], { sessionId: 'abort-2' });
   });
 });
 
 describe('QuestionReplyAction coverage', () => {
-  test('execute resolves pending request and replies through raw question API', async () => {
-    const action = new QuestionReplyAction();
-    const getCalls = [];
-    const postCalls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => ({}),
+  test('execute delegates question_reply to session-scoped gateway', async () => {
+    const calls = [];
+    const action = new QuestionReplyAction({
+      replyQuestion: async (options) => {
+        calls.push(options);
+        return { success: true, data: { requestId: 'req-1', replied: true } };
       },
-      _client: {
-        get: async (options) => {
-          getCalls.push(options);
-          return {
-            data: [
-              {
-                id: 'req-1',
-                sessionID: 'tool-9',
-                tool: { callID: 'call-1' },
-              },
-            ],
-          };
-        },
-        post: async (options) => {
-          postCalls.push(options);
-          return { data: { ok: true } };
-        },
-      },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
     const result = await action.execute(
-      { toolSessionId: 'tool-9', toolCallId: 'call-1', answer: 'ship it' },
-      readyContext(client),
+      { toolSessionId: 'tool-9', toolCallId: 'call-1', answer: 'answer' },
+      readyContext({}),
     );
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { requestId: 'req-1', replied: true });
-    assert.deepStrictEqual(getCalls[0], { url: '/question' });
-    assert.deepStrictEqual(postCalls[0], {
-      url: '/question/{requestID}/reply',
-      path: { requestID: 'req-1' },
-      body: { answers: [['ship it']] },
-      headers: { 'Content-Type': 'application/json' },
-    });
+    assert.deepStrictEqual(calls, [
+      {
+        sessionId: 'tool-9',
+        toolCallId: 'call-1',
+        answer: 'answer',
+      },
+    ]);
   });
 
-  test('ignores effectiveDirectory for question list/reply requests', async () => {
-    const action = new QuestionReplyAction();
-    const getCalls = [];
-    const postCalls = [];
-    const client = {
-      session: {
-        create: async () => ({}),
-        abort: async () => ({}),
-        prompt: async () => ({}),
+  test('does not read effectiveDirectory when delegating question_reply', async () => {
+    const calls = [];
+    const action = new QuestionReplyAction({
+      replyQuestion: async (options) => {
+        calls.push(options);
+        return { success: true, data: { requestId: 'req-2', replied: true } };
       },
-      _client: {
-        get: async (options) => {
-          getCalls.push(options);
-          return {
-            data: [
-              {
-                id: 'req-2',
-                sessionID: 'tool-10',
-                tool: { callID: 'call-2' },
-              },
-            ],
-          };
-        },
-        post: async (options) => {
-          postCalls.push(options);
-          return { data: { ok: true } };
-        },
-      },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-    };
+    });
 
     const result = await action.execute(
-      { toolSessionId: 'tool-10', toolCallId: 'call-2', answer: 'done' },
-      readyContext(client, {
+      { toolSessionId: 'tool-10', toolCallId: 'call-2', answer: 'go' },
+      readyContext({}, {
         effectiveDirectory: '/tmp/bridge-dir',
       }),
     );
 
     assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(getCalls[0], { url: '/question' });
-    assert.deepStrictEqual(postCalls[0], {
-      url: '/question/{requestID}/reply',
-      path: { requestID: 'req-2' },
-      body: { answers: [['done']] },
-      headers: { 'Content-Type': 'application/json' },
-    });
+    assert.deepStrictEqual(calls, [
+      {
+        sessionId: 'tool-10',
+        toolCallId: 'call-2',
+        answer: 'go',
+      },
+    ]);
   });
 });

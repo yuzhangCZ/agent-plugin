@@ -1,7 +1,7 @@
 # message-bridge 日志可观测性手册
 
-**Version:** 1.0  
-**Date:** 2026-03-07  
+**Version:** 1.3  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../../README.md`, `../README.md`, `../../src/runtime/AppLogger.ts`
@@ -20,6 +20,7 @@
 补充说明：
 
 - `debug` 默认关闭
+- `config.env.snapshot` 固定使用 `info` 级输出，不受 `debug` 开关影响
 - 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文
 - 这些原始报文日志固定使用 `info` 级别，避免依赖宿主 `debug` 级过滤后丢失
 
@@ -70,7 +71,7 @@
 | `deltaBytes` | 事件 delta 字段 UTF-8 字节数 |
 | `diffCount` | `session.diff` 中 diff 项数量 |
 | `latencyMs` | 单次动作耗时 |
-| `attempt`/`delayMs` | 重连次数与重连延迟 |
+| `attempt`/`delayMs` | 重连次数与实际重连延迟 |
 
 ## 3. 关键路径时序图（Mermaid）
 
@@ -188,7 +189,22 @@ sequenceDiagram
 | `runtime.singleton.initialized` | info | singleton 初始化完成 | - | `src/runtime/singleton.ts:38` |
 | `runtime.singleton.initialization_failed` | error | singleton 初始化失败 | `error`,`errorDetail`,`errorName`,`sourceErrorCode?` | `src/runtime/singleton.ts:43` |
 
-### 4.2 gateway.*
+### 4.2 status_api.*
+
+| message | level | 触发时机 | 关键 extra | 源码位置 |
+|---|---|---|---|---|
+| `status_api.query` | info | 调用 `getMessageBridgeStatus()` 读取当前快照 | `phase`,`connected`,`unavailableReason`,`willReconnect`,`lastReadyAt`,`updatedAt` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.subscribe` | info | 调用 `subscribeMessageBridgeStatus()` 建立订阅 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.unsubscribe` | info | 订阅解除且监听器成功移除 | `listenerCount` | `src/runtime/MessageBridgeStatusStore.ts` |
+| `status_api.changed` | info | 私有状态语义发生变化并发布给订阅方 | `fromPhase`,`toPhase`,`fromConnected`,`toConnected`,`fromUnavailableReason`,`toUnavailableReason`,`fromWillReconnect`,`toWillReconnect`,`lastError` | `src/runtime/MessageBridgeStatusStore.ts` |
+
+说明：
+
+- `status_api.*` 只表示插件私有状态 API 的读取、订阅与状态变化，不等同于 `status_query/status_response` 协议链路
+- `status_api.changed` 仅在状态语义变化时输出；若只是 `updatedAt` 变化而语义不变，不会重复打印
+- 对于一次建链失败或一次连接关闭，若最终原因已知，`status_api.changed` 应直接输出最终可消费状态；不会先额外输出一个仅用于内部拼装原因的临时中间态
+
+### 4.3 gateway.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -208,6 +224,7 @@ sequenceDiagram
 | `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
 | `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
 | `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
+| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs` | `src/connection/GatewayConnection.ts` |
 | `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
 | `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
 | `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
@@ -216,7 +233,7 @@ sequenceDiagram
 | `gateway.state.changed` | info | runtime 监听到连接状态变化 | `state` | `src/runtime/BridgeRuntime.ts:99` |
 | `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
 
-### 4.3 event.*
+### 4.4 event.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -226,7 +243,7 @@ sequenceDiagram
 | `event.forwarding` | info | runtime 上行发送前 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
 | `event.forwarded` | debug | runtime 上行发送后 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
 
-### 4.4 compat.*
+### 4.5 compat.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -234,7 +251,7 @@ sequenceDiagram
 | `compat.tool_done.skipped_duplicate` | debug | compat 层抑制重复 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
 | `compat.tool_done.fallback_from_idle` | info | `session.idle` 触发兜底 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
 
-### 4.5 router.*
+### 4.6 router.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -244,7 +261,7 @@ sequenceDiagram
 | `router.route.invalid_payload` | warn | action 参数校验失败 | `action`,`error` | `src/action/ActionRouter.ts:50` |
 | `router.route.completed` | info | action 执行完成 | `action`,`success`,`errorCode?` | `src/action/ActionRouter.ts:62` |
 
-### 4.6 action.*
+### 4.7 action.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
@@ -276,6 +293,16 @@ sequenceDiagram
 | `action.status_query.exception` | error | status_query 抛异常 | `error`,`errorCode?` | `src/action/StatusQueryAction.ts:70` |
 | `action.status_query.finished` | debug | status_query 结束（finally） | `latencyMs` | `src/action/StatusQueryAction.ts:82` |
 
+### 4.8 session_directory.*
+
+| message | level | 触发时机 | 关键 extra | 源码位置 |
+|---|---|---|---|---|
+| `session_directory.policy.openx.directory_omitted` | info | `openx` 且 `bridgeDirectory` 缺省时，session-scoped 调用跳过目录回查并省略 `directory` | `toolSessionId`,`hasAgent?` | `src/adapter/OpencodeSessionGatewayAdapter.ts` |
+| `session_directory.session_get.directory_resolved` | debug | `session.get` 成功并提取到目录 | `toolSessionId`,`directory` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.directory_missing` | warn | `session.get` 成功但未返回可用目录 | `toolSessionId` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.not_found` | warn | `session.get` 命中 `NotFoundError` | `toolSessionId`,`errorDetail`,`errorName` | `src/adapter/SessionDirectoryResolver.ts` |
+| `session_directory.session_get.failed` | warn | `session.get` 返回/抛出非 NotFound 错误 | `toolSessionId`,`errorDetail`,`errorName` | `src/adapter/SessionDirectoryResolver.ts` |
+
 ## 5. 排障指引（推荐顺序）
 
 ### 5.1 连接失败 / 反复重连
@@ -288,6 +315,7 @@ sequenceDiagram
 4. `gateway.ready`
 5. `gateway.close` / `gateway.error`
 6. `gateway.reconnect.scheduled` / `gateway.reconnect.attempt`
+7. 若看到 `gateway.reconnect.exhausted`，表示单轮自动重连总时长已达到 `maxElapsedMs`，连接会停在 `DISCONNECTED`
 
 若没有 `gateway.open`，优先检查网关地址、AK/SK 签名参数与网络可达性。
 

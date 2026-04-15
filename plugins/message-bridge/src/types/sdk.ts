@@ -26,8 +26,9 @@ export interface OpencodeSessionClient {
     directory?: string;
     parentID?: string;
     title?: string;
-    permission?: Record<string, unknown>;
+    permission?: Array<Record<string, unknown>>;
   }): Promise<unknown>;
+  get(options: { sessionID: string; directory?: string }): Promise<unknown>;
   abort(options: { sessionID: string; directory?: string }): Promise<unknown>;
   delete(options: { sessionID: string; directory?: string }): Promise<unknown>;
   prompt(options: {

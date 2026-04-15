@@ -1,10 +1,24 @@
 # Message-Bridge 文档变更日志
 
-**Version:** 1.1  
-**Date:** 2026-03-07  
+**Version:** 1.2  
+**Date:** 2026-04-07  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `../migration/path-mapping.md`, `../README.md`
+
+## 2026-04-07
+
+### Added
+
+- `operations/single-init-latch-archive.md`：归档“单进程仅一次初始化尝试（首次尝试后阻断，`stopRuntime` 可重置）”方案，包含背景、决策、状态机、边界与验证口径。
+
+### Changed
+
+- `product/prd.md`：补充 OpenX 目录兼容更正，明确 `openx + bridgeDirectory` 缺省时 session-scoped 调用省略 `directory` 的边界。
+- `design/interfaces/protocol-contract.md`：更新失败语义与目录策略说明，补充 OpenX 兼容路径不执行 `session.get` 的契约口径。
+- `design/interfaces/end-to-end-message-flow.md`：更新 B4 下行映射表，明确 session-scoped action 在 OpenX 缺省目录场景下的省略目录行为。
+- `operations/opencode-integration-guide.md`：更新 `BRIDGE_DIRECTORY` 配置说明，补充 OpenX 缺省目录时的兼容行为提示。
+- `operations/logging-reference.md`：新增 `session_directory.*` 事件组，补充 `session_directory.policy.openx.directory_omitted` 与目录回查日志说明。
 
 ## 2026-03-11
 

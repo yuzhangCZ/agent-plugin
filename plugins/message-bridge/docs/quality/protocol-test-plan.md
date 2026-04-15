@@ -156,11 +156,13 @@
 
 输入：
 
+- `permission.replied`
 - `permission.asked`
 - `invoke/permission_reply`
 
 期望：
 
+- `permission.replied` 上送为 `tool_event`
 - `permission.asked` 上送为 `tool_event`
 - `permission_reply` 正确映射到 SDK
 - `once|always|reject` 语义正确
