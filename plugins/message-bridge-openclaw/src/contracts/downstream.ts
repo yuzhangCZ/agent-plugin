@@ -18,7 +18,6 @@ export interface ChatPayload {
 }
 
 export interface CreateSessionPayload {
-  sessionId?: string;
   metadata?: Record<string, unknown>;
 }
 
