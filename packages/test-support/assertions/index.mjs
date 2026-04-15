@@ -37,6 +37,50 @@ export function assertToolErrorShape(message, expected = {}) {
   }
 }
 
+export function createInvalidInvokeInboundFrame(overrides = {}) {
+  return {
+    kind: 'invalid',
+    messageType: 'invoke',
+    gatewayMessageId: 'gw-invalid-1',
+    action: 'chat',
+    welinkSessionId: 'wl-invalid-1',
+    toolSessionId: 'tool-invalid-1',
+    violation: {
+      violation: {
+        stage: 'payload',
+        code: 'missing_required_field',
+        field: 'payload.text',
+        message: 'payload.text is required',
+        messageType: 'invoke',
+        action: 'chat',
+        welinkSessionId: 'wl-invalid-1',
+        toolSessionId: 'tool-invalid-1',
+      },
+    },
+    rawPreview: {
+      type: 'invoke',
+      messageId: 'gw-invalid-1',
+      action: 'chat',
+      welinkSessionId: 'wl-invalid-1',
+      payload: {
+        toolSessionId: 'tool-invalid-1',
+      },
+    },
+    ...overrides,
+  };
+}
+
+export function assertInvalidInvokeToolErrorContract(message, expected = {}) {
+  const code = expected.code ?? 'missing_required_field';
+  assertToolErrorShape(message, {
+    welinkSessionId: expected.welinkSessionId,
+    toolSessionId: expected.toolSessionId,
+    error: expected.error ?? `gateway_invalid_invoke:${code}`,
+    reason: expected.reason,
+    hasCode: false,
+  });
+}
+
 export function assertNormalizedDownstreamInvokeShape(message, expected = {}) {
   assert.strictEqual(message.type, 'invoke');
   if ('action' in expected) assert.strictEqual(message.action, expected.action);

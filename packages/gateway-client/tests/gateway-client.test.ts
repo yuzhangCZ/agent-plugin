@@ -402,16 +402,26 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
   const messages: unknown[] = [];
+  const errors: GatewayClientError[] = [];
+  const logs = {
+    error: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
+  };
 
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
     registerMessage: registerMessage(),
     heartbeatIntervalMs: 60_000,
+    logger: {
+      error(message, meta) {
+        logs.error.push({ message, meta });
+      },
+    },
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
   });
 
   client.on('inbound', (message) => inbound.push(message));
   client.on('message', (message) => messages.push(message));
+  client.on('error', (error) => errors.push(error as GatewayClientError));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
@@ -422,6 +432,8 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
 
   ws.emitMessage({
     type: 'invoke',
+    messageId: 'gw-invalid-1',
+    welinkSessionId: 'wl-invalid-1',
     action: 'chat',
     payload: {
       toolSessionId: 'tool-1',
@@ -429,17 +441,56 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
   });
   await flushAsyncHandlers();
 
-  const lastInbound = inbound.at(-1) as { kind?: string; messageType?: string; rawPreview?: unknown } | undefined;
+  const lastInbound = inbound.at(-1) as {
+    kind?: string;
+    messageType?: string;
+    gatewayMessageId?: string;
+    welinkSessionId?: string;
+    toolSessionId?: string;
+    action?: string;
+    rawPreview?: unknown;
+  } | undefined;
   assert.equal(lastInbound?.kind, 'invalid');
   assert.equal(lastInbound?.messageType, 'invoke');
+  assert.equal(lastInbound?.gatewayMessageId, 'gw-invalid-1');
+  assert.equal(lastInbound?.welinkSessionId, 'wl-invalid-1');
+  assert.equal(lastInbound?.toolSessionId, 'tool-1');
+  assert.equal(lastInbound?.action, 'chat');
   assert.deepEqual(lastInbound?.rawPreview, {
     type: 'invoke',
+    messageId: 'gw-invalid-1',
+    welinkSessionId: 'wl-invalid-1',
     action: 'chat',
     payload: {
       toolSessionId: 'tool-1',
     },
   });
   assert.equal(messages.length, 0);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
+  assert.equal(errors[0]!.retryable, false);
+  assert.equal(errors[0]!.details?.stage, 'payload');
+  assert.equal(errors[0]!.details?.code, 'missing_required_field');
+  assert.equal(errors[0]!.details?.field, 'payload.text');
+  assert.equal(errors[0]!.details?.messageType, 'invoke');
+  assert.equal(errors[0]!.details?.action, 'chat');
+  assert.equal(errors[0]!.details?.welinkSessionId, 'wl-invalid-1');
+  assert.equal(errors[0]!.details?.toolSessionId, 'tool-1');
+  assert.equal(errors[0]!.details?.gatewayMessageId, 'gw-invalid-1');
+  assert.deepEqual(errors[0]!.details?.messagePreview, {
+    type: 'invoke',
+    keys: ['type', 'messageId', 'welinkSessionId', 'action', 'payload'],
+  });
+  assert.equal('rawPreview' in (errors[0]!.details ?? {}), false);
+  assert.equal(logs.error[0]?.message, 'gateway.business.validation_failed');
+  assert.equal(logs.error[0]?.meta?.failClosed, false);
+  assert.equal(logs.error[0]?.meta?.gatewayMessageId, 'gw-invalid-1');
+  assert.deepEqual(logs.error[0]?.meta?.messagePreview, {
+    type: 'invoke',
+    keys: ['type', 'messageId', 'welinkSessionId', 'action', 'payload'],
+  });
+  assert.equal('rawPreview' in (logs.error[0]?.meta ?? {}), false);
+  assert.equal(client.getState(), 'READY');
 
   client.disconnect();
 });
@@ -448,12 +499,20 @@ test('invalid control frame emits protocol error instead of being silently ignor
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
   const errors: GatewayClientError[] = [];
+  const logs = {
+    error: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
+  };
   const fallbackCodec = new GatewayWireV1CodecAdapter();
 
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
     registerMessage: registerMessage(),
     heartbeatIntervalMs: 60_000,
+    logger: {
+      error(message, meta) {
+        logs.error.push({ message, meta });
+      },
+    },
     wireCodec: {
       normalizeDownstream(raw) {
         return fallbackCodec.normalizeDownstream(raw);
@@ -498,6 +557,22 @@ test('invalid control frame emits protocol error instead of being silently ignor
   assert.equal(errors.length, 1);
   assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
   assert.equal(errors[0]!.retryable, false);
+  assert.equal(errors[0]!.details?.stage, 'transport');
+  assert.equal(errors[0]!.details?.code, 'invalid_payload');
+  assert.equal(errors[0]!.details?.field, 'reason');
+  assert.equal(errors[0]!.details?.messageType, 'register_rejected');
+  assert.equal(errors[0]!.details?.gatewayMessageId, undefined);
+  assert.deepEqual(errors[0]!.details?.messagePreview, {
+    type: 'register_rejected',
+    keys: ['type', 'reason'],
+  });
+  assert.equal('rawPreview' in (errors[0]!.details ?? {}), false);
+  assert.equal(logs.error[0]?.message, 'gateway.control.validation_failed');
+  assert.deepEqual(logs.error[0]?.meta?.messagePreview, {
+    type: 'register_rejected',
+    keys: ['type', 'reason'],
+  });
+  assert.equal('rawPreview' in (logs.error[0]?.meta ?? {}), false);
   assert.equal(client.getState(), 'DISCONNECTED');
   assert.equal((inbound.at(-1) as { kind?: string })?.kind, 'invalid');
   assert.equal((inbound.at(-1) as { messageType?: string })?.messageType, 'register_rejected');

@@ -26,7 +26,16 @@ export type GatewayInboundFrame =
   | { kind: 'parse_error'; rawPreview: string }
   | { kind: 'control'; messageType: string; message: RegisterOkMessage | RegisterRejectedMessage }
   | { kind: 'business'; messageType: string; message: GatewayBusinessMessage }
-  | { kind: 'invalid'; messageType?: string; violation: WireContractViolation; rawPreview: unknown };
+  | {
+    kind: 'invalid';
+    messageType?: string;
+    gatewayMessageId?: string;
+    action?: string;
+    welinkSessionId?: string;
+    toolSessionId?: string;
+    violation: WireContractViolation;
+    rawPreview: unknown;
+  };
 
 /**
  * 统一出站观测契约，覆盖业务负载与内部控制帧。

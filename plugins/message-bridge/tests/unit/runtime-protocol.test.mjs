@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  assertInvalidInvokeToolErrorContract,
+  createInvalidInvokeInboundFrame,
+} from '@agent-plugin/test-support/assertions';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
@@ -173,8 +177,305 @@ function createGatewayConnectionMock(state = 'DISCONNECTED') {
   };
 }
 
+function createEventedGatewayConnectionMock(state = 'READY') {
+  let currentState = state;
+  const listeners = new Map();
+  const sent = [];
+  return {
+    sent,
+    send: (message) => sent.push(message),
+    disconnect: () => undefined,
+    connect: async () => undefined,
+    getState: () => currentState,
+    getStatus: () => ({
+      isReady: () => currentState === 'READY',
+    }),
+    setState: (next) => {
+      currentState = next;
+    },
+    on: (event, listener) => {
+      const current = listeners.get(event) ?? [];
+      current.push(listener);
+      listeners.set(event, current);
+    },
+    emit: (event, payload) => {
+      for (const listener of listeners.get(event) ?? []) {
+        listener(payload);
+      }
+    },
+  };
+}
+
 describe('runtime protocol strictness', () => {
-  test('handleDownstreamMessage logs one adapter failure and fails closed without extra runtime boundary warning', async () => {
+  test('start wires invalid invoke inbound frames to tool_error best-effort reply', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit('inbound', createInvalidInvokeInboundFrame());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: 'wl-invalid-1',
+      toolSessionId: 'tool-invalid-1',
+    });
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.replying_tool_error'),
+      true,
+    );
+
+    runtime.stop();
+  });
+
+  test('start logs unroutable invalid invoke inbound frames without sending tool_error', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        welinkSessionId: undefined,
+        toolSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          action: 'chat',
+          payload: {},
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.unreplyable'),
+      true,
+    );
+
+    runtime.stop();
+  });
+
+  test('start skips tool_error reply for invalid invoke inbound frames before READY', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('CONNECTED');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit('inbound', createInvalidInvokeInboundFrame());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.skipped_not_ready'),
+      true,
+    );
+
+    runtime.stop();
+  });
+
+  test('start ignores error events for invalid-invoke tool_error bridging', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit('error', new Error('gateway protocol error'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => String(entry.message).startsWith('runtime.invalid_invoke.')),
+      false,
+    );
+
+    runtime.stop();
+  });
+
+  test('start replies tool_error when only welinkSessionId is routable', async () => {
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient(),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        toolSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-invalid-1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          messageId: 'gw-invalid-1',
+          action: 'chat',
+          welinkSessionId: 'wl-invalid-1',
+          payload: {},
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: 'wl-invalid-1',
+      toolSessionId: undefined,
+    });
+
+    runtime.stop();
+  });
+
+  test('start replies tool_error when only toolSessionId is routable', async () => {
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient(),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        welinkSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+            toolSessionId: 'tool-invalid-1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          messageId: 'gw-invalid-1',
+          action: 'chat',
+          payload: {
+            toolSessionId: 'tool-invalid-1',
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: undefined,
+      toolSessionId: 'tool-invalid-1',
+    });
+
+    runtime.stop();
+  });
+
+  test('handleDownstreamMessage does not emit downstream normalization failure for typed status_query facade messages', async () => {
+    const logEntries = [];
+    const sent = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.gatewayConnection = {
+      send: (msg) => sent.push(msg),
+      getState: () => 'ready',
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'status_query',
+      rawPayload: {
+        type: 'status_query',
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].type, 'status_response');
+    assert.deepStrictEqual(
+      logEntries
+        .filter((entry) => entry.message === 'downstream.normalization_failed')
+        .map((entry) => entry.message),
+      [],
+    );
+  });
+
+  test('handleDownstreamMessage fails closed when adapter rejects spoofed typed facade action', async () => {
     const logEntries = [];
     const sent = [];
     const runtime = new BridgeRuntime({
@@ -191,10 +492,11 @@ describe('runtime protocol strictness', () => {
     runtime.gatewayConnection = {
       send: (msg) => sent.push(msg),
     };
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
-      welinkSessionId: 'wl_1',
+      welinkSessionId: 'wl-invalid-2',
       action: 'delete_session',
       payload: {},
     });
@@ -202,14 +504,9 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual(sent.length, 1);
     assert.strictEqual(sent[0].type, 'tool_error');
-    assert.deepStrictEqual(
-      logEntries
-        .filter((entry) => entry.message === 'downstream.normalization_failed')
-        .map((entry) => entry.message),
-      ['downstream.normalization_failed'],
-    );
+    assert.strictEqual(sent[0].welinkSessionId, 'wl-invalid-2');
     assert.strictEqual(
-      logEntries.some((entry) => entry.message === 'runtime.downstream_rejected_plugin_boundary'),
+      logEntries.some((entry) => entry.message === 'downstream.normalization_failed'),
       false,
     );
   });
@@ -273,30 +570,6 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual(routeCalls, 0);
     assert.deepStrictEqual(sent, []);
-  });
-
-  test('rejects non-baseline nested invoke payload and returns tool_error without code', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: '42',
-      payload: {
-        action: 'chat',
-        payload: { toolSessionId: 'tool-1', text: 'hello' },
-      },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, '42');
-    assert.strictEqual('code' in sent[0], false);
   });
 
   test('chat session-not-found failure adds tool_error reason for auto-rebuild', async () => {
@@ -496,27 +769,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].type, 'tool_done');
     assert.strictEqual(sent[0].toolSessionId, 'tool-100');
     assert.strictEqual(sent[0].welinkSessionId, '100');
-  });
-
-  test('rejects permission_reply payloads with unsupported response values', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'perm-42',
-      action: 'permission_reply',
-      payload: { toolSessionId: 'tool-42', permissionId: 'perm-1', response: 'allow' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'perm-42');
   });
 
   test('accepts question_reply invoke shape and routes answer via question API', async () => {
@@ -731,56 +983,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].welinkSessionId, 'q-46');
   });
 
-  test('rejects question_reply payloads missing toolSessionId', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          prompt: async () => ({ data: { ok: true } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'q-44',
-      action: 'question_reply',
-      payload: { toolCallId: 'call-44', answer: 'Vite' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'q-44');
-  });
-
-  test('rejects question_reply payloads missing answer', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          prompt: async () => ({ data: { ok: true } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'q-45',
-      action: 'question_reply',
-      payload: { toolSessionId: 'tool-45', toolCallId: 'call-45' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'q-45');
-  });
-
   test('responds to standalone status_query with envelope-free status_response', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -800,123 +1002,6 @@ describe('runtime protocol strictness', () => {
       type: 'status_response',
       opencodeOnline: true,
     });
-  });
-
-  test('rejects create_session without welinkSessionId', async () => {
-    const createCalls = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          create: async (options) => {
-            createCalls.push(options);
-            return { data: { id: 'created-1' } };
-          },
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      action: 'create_session',
-      payload: {},
-    });
-
-    assert.strictEqual((createCalls).length, 0);
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, undefined);
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('rejects blank create_session welinkSessionId', async () => {
-    const createCalls = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          create: async (options) => {
-            createCalls.push(options);
-            return { data: { id: 'created-1' } };
-          },
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: '   ',
-      action: 'create_session',
-      payload: {},
-    });
-
-    assert.strictEqual((createCalls).length, 0);
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, undefined);
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('create_session missing welinkSessionId does not call SDK and does not emit warning-only success', async () => {
-    const appLogs = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        app: {
-          log: async (options) => {
-            appLogs.push(options.body);
-            return true;
-          },
-        },
-        session: {
-          create: async () => ({ data: { id: 'created-1' } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      messageId: 'gw-create-1',
-      action: 'create_session',
-      payload: {},
-    });
-    await new Promise((r) => setTimeout(r, 10));
-
-    const warningLog = appLogs.find((entry) => entry.message === 'runtime.create_session.missing_welink_session_id');
-    assert.strictEqual(warningLog, undefined);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, undefined);
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('rejects invoke status_query compatibility variant', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'status-compat',
-      action: 'status_query',
-      payload: {},
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'status-compat');
   });
 
   test('applies config.debug to runtime fallback logging after config load', async () => {

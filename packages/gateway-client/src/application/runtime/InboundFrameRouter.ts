@@ -9,6 +9,7 @@ import type { ControlMessageHandler } from '../handlers/ControlMessageHandler.ts
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayInboundFrame } from '../../ports/GatewayClientMessages.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
+import { buildMessagePreview } from '../telemetry/message-log-fields.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { HeartbeatLoop } from './HeartbeatLoop.ts';
 import { ReconnectOrchestrator } from './ReconnectOrchestrator.ts';
@@ -85,6 +86,11 @@ export class InboundFrameRouter {
       return;
     }
 
+    if (inboundFrame.kind === 'invalid') {
+      this.emitProtocolError(inboundFrame, false);
+      return;
+    }
+
     if (inboundFrame.kind !== 'business') {
       return;
     }
@@ -103,14 +109,7 @@ export class InboundFrameRouter {
   }
 
   private failClosedOnInvalidControlFrame(inboundFrame: GatewayInboundFrame & { kind: 'invalid' }): void {
-    const error = new GatewayClientError({
-      code: 'GATEWAY_PROTOCOL_VIOLATION',
-      category: 'protocol',
-      retryable: false,
-      message: inboundFrame.violation.violation.message,
-      details: { ...inboundFrame.violation.violation },
-      cause: inboundFrame.violation,
-    });
+    const error = this.buildProtocolViolationError(inboundFrame);
     this.context.logger?.error?.('gateway.control.validation_failed', {
       ...error.details,
     });
@@ -118,6 +117,37 @@ export class InboundFrameRouter {
     this.state.setManuallyDisconnected(true);
     this.transport.close();
     this.context.sink.emitError(error);
+  }
+
+  private emitProtocolError(inboundFrame: GatewayInboundFrame & { kind: 'invalid' }, failClosed: boolean): void {
+    const error = this.buildProtocolViolationError(inboundFrame);
+    this.context.logger?.error?.('gateway.business.validation_failed', {
+      ...error.details,
+      failClosed,
+    });
+    if (failClosed) {
+      this.state.setManuallyDisconnected(true);
+      this.transport.close();
+    }
+    this.context.sink.emitError(error);
+  }
+
+  private buildProtocolViolationError(inboundFrame: GatewayInboundFrame & { kind: 'invalid' }): GatewayClientError {
+    return new GatewayClientError({
+      code: 'GATEWAY_PROTOCOL_VIOLATION',
+      category: 'protocol',
+      retryable: false,
+      message: inboundFrame.violation.violation.message,
+      details: {
+        ...inboundFrame.violation.violation,
+        gatewayMessageId: inboundFrame.gatewayMessageId,
+        action: inboundFrame.action ?? inboundFrame.violation.violation.action,
+        welinkSessionId: inboundFrame.welinkSessionId ?? inboundFrame.violation.violation.welinkSessionId,
+        toolSessionId: inboundFrame.toolSessionId ?? inboundFrame.violation.violation.toolSessionId,
+        messagePreview: buildMessagePreview(inboundFrame.rawPreview),
+      },
+      cause: inboundFrame.violation,
+    });
   }
 
   private handleControlMessage(inboundFrame: GatewayInboundFrame & { kind: 'control' }): void {

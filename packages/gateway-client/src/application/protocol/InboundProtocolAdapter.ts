@@ -1,8 +1,19 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES, type RegisterOkMessage, type RegisterRejectedMessage } from '@agent-plugin/gateway-wire-v1';
+import {
+  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  type RegisterOkMessage,
+  type RegisterRejectedMessage,
+  type WireContractViolation,
+} from '@agent-plugin/gateway-wire-v1';
 
 import type { GatewayWireCodec } from '../../ports/GatewayWireCodec.ts';
 import type { GatewayBusinessMessage, GatewayInboundFrame } from '../../ports/GatewayClientMessages.ts';
-import { getMessageType } from '../telemetry/message-log-fields.ts';
+import {
+  extractGatewayMessageId,
+  extractMessageAction,
+  extractToolSessionId,
+  extractWelinkSessionId,
+  getMessageType,
+} from '../telemetry/message-log-fields.ts';
 
 const [, REGISTER_OK_MESSAGE_TYPE, REGISTER_REJECTED_MESSAGE_TYPE] = TRANSPORT_UPSTREAM_MESSAGE_TYPES;
 
@@ -14,6 +25,19 @@ function attachRawPayloadContext(message: GatewayBusinessMessage, raw: unknown):
   return {
     ...message,
     rawPayload: (raw as { payload?: unknown }).payload,
+  };
+}
+
+function buildInvalidFrame(raw: unknown, messageType: string | undefined, violation: WireContractViolation): GatewayInboundFrame {
+  return {
+    kind: 'invalid',
+    messageType,
+    gatewayMessageId: extractGatewayMessageId(raw),
+    action: extractMessageAction(raw),
+    welinkSessionId: extractWelinkSessionId(raw),
+    toolSessionId: extractToolSessionId(raw),
+    violation,
+    rawPreview: raw,
   };
 }
 
@@ -34,12 +58,7 @@ export class InboundProtocolAdapter {
     if (messageType === REGISTER_OK_MESSAGE_TYPE || messageType === REGISTER_REJECTED_MESSAGE_TYPE) {
       const validation = this.wireCodec.validateTransportMessage(raw);
       if (!validation.ok) {
-        return {
-          kind: 'invalid',
-          messageType,
-          violation: validation.error,
-          rawPreview: raw,
-        };
+        return buildInvalidFrame(raw, messageType, validation.error);
       }
 
       return {
@@ -51,12 +70,7 @@ export class InboundProtocolAdapter {
 
     const normalized = this.wireCodec.normalizeDownstream(raw);
     if (!normalized.ok) {
-      return {
-        kind: 'invalid',
-        messageType,
-        violation: normalized.error,
-        rawPreview: raw,
-      };
+      return buildInvalidFrame(raw, messageType, normalized.error);
     }
 
     return {

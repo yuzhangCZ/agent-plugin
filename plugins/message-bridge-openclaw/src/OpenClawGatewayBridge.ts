@@ -5,7 +5,7 @@ import {
   type OpenClawConfig,
   type PluginRuntime,
 } from "openclaw/plugin-sdk";
-import type { GatewayBusinessMessage } from "@agent-plugin/gateway-client";
+import type { GatewayBusinessMessage, GatewayInboundFrame } from "@agent-plugin/gateway-client";
 import type {
   DownstreamMessage,
   InvokeMessage,
@@ -52,6 +52,7 @@ import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoo
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import { asRecord, asString, asTrimmedString } from "./utils/type-guards.js";
 import { buildGatewayClientConfig } from "./gateway-client.js";
+import { InvalidInvokeToolErrorResponder } from "./protocol/InvalidInvokeToolErrorResponder.js";
 
 export interface OpenClawGatewayBridgeOptions {
   account: MessageBridgeResolvedAccount;
@@ -350,6 +351,7 @@ export class OpenClawGatewayBridge {
   private readonly connection: GatewayClient;
   private readonly runtime: PluginRuntime;
   private readonly registerMetadata: RegisterMetadata;
+  private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
   private readonly activeToolSessions = new Map<
     string,
     {
@@ -380,6 +382,14 @@ export class OpenClawGatewayBridge {
     this.connection =
       options.connectionFactory?.(options.account, options.logger) ??
       createGatewayClient(buildGatewayClientConfig(options.account, options.logger, this.registerMetadata));
+    this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
+      sendToolError: (message, context) => this.sendToolError(message, context),
+      canReply: () => {
+        const status = this.connection.getStatus?.();
+        return typeof status?.isReady === "function" ? status.isReady() : true;
+      },
+      getConnectionState: () => this.connection.getState?.(),
+    });
 
     this.status = {
       accountId: options.account.accountId,
@@ -416,9 +426,10 @@ export class OpenClawGatewayBridge {
       }
       this.publishStatus();
     });
-    this.connection.on("inbound", () => {
+    this.connection.on("inbound", (frame) => {
       this.status.lastInboundAt = Date.now();
       this.publishStatus();
+      this.handleInboundFrame(frame as GatewayInboundFrame);
     });
     this.connection.on("outbound", () => {
       this.status.lastOutboundAt = Date.now();
@@ -499,6 +510,10 @@ export class OpenClawGatewayBridge {
     this.options.logger.info("runtime.stop.completed", {
       accountId: this.options.account.accountId,
     });
+  }
+
+  private handleInboundFrame(frame: GatewayInboundFrame): void {
+    this.invalidInvokeToolErrorResponder.respond(frame, this.options.logger);
   }
 
   async handleDownstreamMessage(message: GatewayBusinessMessage): Promise<void> {

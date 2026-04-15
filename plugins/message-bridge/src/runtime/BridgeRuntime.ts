@@ -27,6 +27,7 @@ import {
   createAkSkAuthProvider,
   createGatewayClient,
   type GatewayBusinessMessage,
+  type GatewayInboundFrame,
   type GatewayClient,
   type GatewayClientConfig,
   type GatewaySendContext as GatewaySendLogContext,
@@ -48,6 +49,7 @@ import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
 import {
   adaptGatewayBusinessMessage,
   type DownstreamNormalizationError,
+  InvalidInvokeToolErrorResponder,
 } from '../protocol/downstream/index.js';
 import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
@@ -118,6 +120,7 @@ export class BridgeRuntime {
   private logger: BridgeLogger;
   private readonly toolDoneCompat = new ToolDoneCompat();
   private readonly toolErrorClassifier = new ToolErrorClassifier();
+  private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -142,6 +145,11 @@ export class BridgeRuntime {
       this.opencodeSessionGatewayAdapter,
     );
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
+      sendToolError: (result, welinkSessionId, logOptions) => this.sendToolError(result, welinkSessionId, logOptions),
+      canReply: () => this.gatewayConnection?.getStatus().isReady() ?? false,
+      getConnectionState: () => this.gatewayConnection?.getState(),
+    });
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -245,6 +253,10 @@ export class BridgeRuntime {
       this.logger.info('gateway.state.changed', { state });
     });
 
+    connection.on('inbound', (frame) => {
+      this.handleInboundFrame(frame as GatewayInboundFrame);
+    });
+
     connection.on('message', (message) => {
       const messageType =
         message && typeof message === 'object' && 'type' in (message as { type?: unknown })
@@ -287,6 +299,10 @@ export class BridgeRuntime {
 
     this.started = false;
     this.logger.info('runtime.stop.completed');
+  }
+
+  private handleInboundFrame(frame: GatewayInboundFrame): void {
+    this.invalidInvokeToolErrorResponder.respond(frame, this.logger);
   }
 
   async handleEvent(event: BridgeEvent): Promise<void> {

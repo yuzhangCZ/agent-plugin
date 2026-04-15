@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
+import {
+  assertInvalidInvokeToolErrorContract,
+  createInvalidInvokeInboundFrame,
+} from "@agent-plugin/test-support/assertions";
 import { normalizeDownstreamMessage } from "../../src/protocol/downstream.ts";
 
 test("normalizes chat invoke message", () => {
@@ -137,6 +141,7 @@ class FakeGatewayClient {
     this.listeners = new Map();
     this.sent = [];
     this.connected = true;
+    this.state = "READY";
   }
 
   on(event, listener) {
@@ -156,6 +161,20 @@ class FakeGatewayClient {
 
   isConnected() {
     return this.connected;
+  }
+
+  getState() {
+    return this.state;
+  }
+
+  getStatus() {
+    return {
+      isReady: () => this.state === "READY",
+    };
+  }
+
+  setState(state) {
+    this.state = state;
   }
 
   send(message) {
@@ -263,4 +282,169 @@ test("openclaw bridge applies legacy compat after shared client emits typed faca
   assert.equal(connection.sent.length, 1);
   assert.equal(connection.sent[0].type, "session_created");
   assert.equal(connection.sent[0].session.sessionId, "session-123");
+});
+
+test("openclaw bridge replies tool_error for routable invalid invoke inbound frames", async () => {
+  const { connection } = await createOpenClawGatewayBridgeForTest();
+
+  connection.emit("inbound", createInvalidInvokeInboundFrame());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(connection.sent.length, 1);
+  assertInvalidInvokeToolErrorContract(connection.sent[0], {
+    code: "missing_required_field",
+    welinkSessionId: "wl-invalid-1",
+    toolSessionId: "tool-invalid-1",
+  });
+});
+
+test("openclaw bridge only logs unroutable invalid invoke inbound frames", async () => {
+  const { connection, logs } = await createOpenClawGatewayBridgeForTest();
+
+  connection.emit(
+    "inbound",
+    createInvalidInvokeInboundFrame({
+      welinkSessionId: undefined,
+      toolSessionId: undefined,
+      violation: {
+        violation: {
+          stage: "payload",
+          code: "missing_required_field",
+          field: "payload.text",
+          message: "payload.text is required",
+          messageType: "invoke",
+          action: "chat",
+        },
+      },
+      rawPreview: {
+        type: "invoke",
+        action: "chat",
+        payload: {},
+      },
+    }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(connection.sent, []);
+  assert.equal(
+    logs.warn.some((entry) => entry.message === "runtime.invalid_invoke.unreplyable"),
+    true,
+  );
+});
+
+test("openclaw bridge skips invalid invoke tool_error before READY", async () => {
+  const { connection, logs } = await createOpenClawGatewayBridgeForTest();
+  connection.setState("CONNECTED");
+
+  connection.emit("inbound", createInvalidInvokeInboundFrame());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(connection.sent, []);
+  assert.equal(
+    logs.warn.some((entry) => entry.message === "runtime.invalid_invoke.skipped_not_ready"),
+    true,
+  );
+});
+
+test("openclaw bridge ignores error events for invalid-invoke tool_error bridging", async () => {
+  const { connection, logs } = await createOpenClawGatewayBridgeForTest();
+
+  connection.emit("error", new Error("gateway protocol error"));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(connection.sent, []);
+  assert.equal(
+    logs.warn.some((entry) => String(entry.message).startsWith("runtime.invalid_invoke.")),
+    false,
+  );
+});
+
+test("openclaw bridge replies tool_error when only welinkSessionId is routable", async () => {
+  const { connection } = await createOpenClawGatewayBridgeForTest();
+
+  connection.emit(
+    "inbound",
+    createInvalidInvokeInboundFrame({
+      toolSessionId: undefined,
+      violation: {
+        violation: {
+          stage: "payload",
+          code: "missing_required_field",
+          field: "payload.text",
+          message: "payload.text is required",
+          messageType: "invoke",
+          action: "chat",
+          welinkSessionId: "wl-invalid-1",
+        },
+      },
+      rawPreview: {
+        type: "invoke",
+        messageId: "gw-invalid-1",
+        action: "chat",
+        welinkSessionId: "wl-invalid-1",
+        payload: {},
+      },
+    }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(connection.sent.length, 1);
+  assertInvalidInvokeToolErrorContract(connection.sent[0], {
+    code: "missing_required_field",
+    welinkSessionId: "wl-invalid-1",
+    toolSessionId: undefined,
+  });
+});
+
+test("openclaw bridge replies tool_error when only toolSessionId is routable", async () => {
+  const { connection } = await createOpenClawGatewayBridgeForTest();
+
+  connection.emit(
+    "inbound",
+    createInvalidInvokeInboundFrame({
+      welinkSessionId: undefined,
+      violation: {
+        violation: {
+          stage: "payload",
+          code: "missing_required_field",
+          field: "payload.text",
+          message: "payload.text is required",
+          messageType: "invoke",
+          action: "chat",
+          toolSessionId: "tool-invalid-1",
+        },
+      },
+      rawPreview: {
+        type: "invoke",
+        messageId: "gw-invalid-1",
+        action: "chat",
+        payload: {
+          toolSessionId: "tool-invalid-1",
+        },
+      },
+    }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(connection.sent.length, 1);
+  assertInvalidInvokeToolErrorContract(connection.sent[0], {
+    code: "missing_required_field",
+    welinkSessionId: undefined,
+    toolSessionId: "tool-invalid-1",
+  });
+});
+
+test("openclaw bridge start wires invalid invoke inbound frames to tool_error", async () => {
+  const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
+
+  await bridge.start();
+  connection.emit("inbound", createInvalidInvokeInboundFrame());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(connection.sent.length, 1);
+  assertInvalidInvokeToolErrorContract(connection.sent[0], {
+    code: "missing_required_field",
+    welinkSessionId: "wl-invalid-1",
+    toolSessionId: "tool-invalid-1",
+  });
 });

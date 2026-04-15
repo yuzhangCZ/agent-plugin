@@ -2,6 +2,10 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  assertInvalidInvokeToolErrorContract,
+  createInvalidInvokeInboundFrame,
+} from '@agent-plugin/test-support/assertions';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
@@ -149,7 +153,7 @@ describe('protocol permission-roundtrip', () => {
     assert.strictEqual(sent.length, 1);
   });
 
-  test('returns tool_error when permission_reply uses an unsupported response enum', async () => {
+  test('returns tool_error when invalid permission_reply invoke is rejected before runtime dispatch', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
     });
@@ -160,24 +164,41 @@ describe('protocol permission-roundtrip', () => {
     };
     setRuntimeGatewayState(runtime, 'READY');
 
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'wl-perm-invalid',
-      action: 'permission_reply',
-      payload: {
-        toolSessionId: 'ses_permission_1',
-        permissionId: 'perm_fixture_1',
-        response: 'allow',
-      },
-    });
-
-    assert.deepStrictEqual(sent, [
-      {
-        type: 'tool_error',
+    runtime.handleInboundFrame(
+      createInvalidInvokeInboundFrame({
+        action: 'permission_reply',
         welinkSessionId: 'wl-perm-invalid',
         toolSessionId: 'ses_permission_1',
-        error: 'Invalid invoke payload shape',
-      },
-    ]);
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'invalid_field_value',
+            field: 'payload.response',
+            message: 'payload.response is invalid',
+            messageType: 'invoke',
+            action: 'permission_reply',
+            welinkSessionId: 'wl-perm-invalid',
+            toolSessionId: 'ses_permission_1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          welinkSessionId: 'wl-perm-invalid',
+          action: 'permission_reply',
+          payload: {
+            toolSessionId: 'ses_permission_1',
+            permissionId: 'perm_fixture_1',
+            response: 'allow',
+          },
+        },
+      }),
+    );
+
+    assert.strictEqual(sent.length, 1);
+    assertInvalidInvokeToolErrorContract(sent[0], {
+      code: 'invalid_field_value',
+      welinkSessionId: 'wl-perm-invalid',
+      toolSessionId: 'ses_permission_1',
+    });
   });
 });
