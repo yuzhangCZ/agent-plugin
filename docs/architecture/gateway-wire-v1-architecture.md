@@ -20,7 +20,7 @@
 ## 需要记住的迁移结论
 
 - `GatewayWireProtocol` 是 current-state 全量协议 umbrella term
-- `GatewayTransportMessage` 是 transport-only union
+- `GatewayUpstreamTransportMessage` 是 upstream-only transport union
 - `gateway-wire-v1` 不再是 current-state 主页面或主路径
 
 ## 历史页保留范围

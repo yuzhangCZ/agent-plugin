@@ -34,6 +34,8 @@
 - 不在本轮实现长期 host 统一层。
 - 不将 `message-bridge` 的私有连接状态 API 提升为跨插件通用 host 能力。
 
+补充说明：上述“不确定最终包名”仅适用于本篇 Bridge 重构主叙事中的阶段工作名。对三方 Agent Runtime 方案，目标态命名已单独固定为 `gateway-schema` 与 `bridge-runtime-sdk`，详见 [third-party-agent-runtime-architecture.md](./third-party-agent-runtime-architecture.md)。
+
 ## Design Principles
 
 ### 1. 外部协议冻结，内部语义后移

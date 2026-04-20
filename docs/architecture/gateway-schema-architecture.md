@@ -13,11 +13,11 @@
 本文负责定义：
 
 - `GatewayWireProtocol`
-- `GatewayTransportMessage`
+- `GatewayUpstreamTransportMessage`
 - `GatewayDownstreamBusinessRequest`
 - `GatewayUplinkBusinessMessage`
 - `GatewayToolEventPayload`
-- uplink / downstream / transport 的术语分层
+- `wire-protocol.ts` / `upstream.ts` / `downstream.ts` 的边界分工
 - 当前态与目标态的关系
 
 本文不负责定义：
@@ -40,7 +40,7 @@
 
 ### 3.1 `GatewayWireProtocol`
 
-`GatewayWireProtocol` 是 current-state 全量协议的 umbrella term。
+`GatewayWireProtocol` 是 current-state 全量协议的 umbrella term，并且位于独立的 `wire-protocol.ts` protocol root。
 
 它覆盖：
 
@@ -50,23 +50,23 @@
 
 它的职责是表达“当前共享 schema 能识别的全部 wire envelope”，而不是表达某一侧方向的子集合。
 
-### 3.2 `GatewayTransportMessage`
+### 3.2 `GatewayUpstreamTransportMessage`
 
-`GatewayTransportMessage` 是 transport-only union。
+`GatewayUpstreamTransportMessage` 是 upstream-only transport union，位于 `upstream.ts`。
 
 它只覆盖 plugin -> gateway 方向的 transport envelope，当前态等价于：
 
 ```text
-GatewayTransportMessage
+GatewayUpstreamTransportMessage
   ├─ GatewayTransportControlMessage
   └─ GatewayUplinkBusinessMessage
 ```
 
 因此：
 
-- `GatewayTransportMessage` 不包含 `GatewayDownstreamBusinessRequest`
-- `GatewayTransportMessage` 不是 `GatewayWireProtocol` 的同义词
-- `GatewayTransportMessage` 只描述 transport-only 边界，不负责代表全量协议
+- `GatewayUpstreamTransportMessage` 不包含 `GatewayDownstreamBusinessRequest`
+- `GatewayUpstreamTransportMessage` 不是 `GatewayWireProtocol` 的同义词
+- `GatewayUpstreamTransportMessage` 只描述 upstream transport 边界，不负责代表全量协议
 
 ### 3.3 `GatewayDownstreamBusinessRequest`
 
@@ -133,19 +133,19 @@ GatewayUplinkBusinessMessage
 ```text
 GatewayWireProtocol
   ├─ GatewayDownstreamBusinessRequest
-  ├─ GatewayTransportControlMessage
-  └─ GatewayUplinkBusinessMessage
+  └─ GatewayUpstreamTransportMessage
 
-GatewayTransportMessage
+GatewayUpstreamTransportMessage
   ├─ GatewayTransportControlMessage
   └─ GatewayUplinkBusinessMessage
 ```
 
 这里的关键点是：
 
-- `GatewayWireProtocol` 是 umbrella term，覆盖 current-state 全量协议
-- `GatewayTransportMessage` 是 transport-only union，只覆盖上行 transport 边界
-- `GatewayTransportMessage` 与 `GatewayWireProtocol` 有交集，但语义不同
+- `GatewayWireProtocol` 是独立 protocol root，不再挂在方向性模块上
+- `upstream.ts` 只承载 `GatewayUpstreamTransportMessage`
+- `downstream.ts` 只承载 `GatewayDownstreamBusinessRequest`
+- `GatewayUpstreamTransportMessage` 与 `GatewayWireProtocol` 有交集，但语义不同
 
 ### 4.2 Downstream
 
@@ -182,7 +182,7 @@ uplink 表达 Runtime 发往 AI Gateway 的业务消息；transport 则是更窄
 
 - `tool_event.event` 不是全量上行协议
 - `GatewayUplinkBusinessMessage` 不等于全量协议
-- `GatewayTransportMessage` 也不等于全量协议
+- `GatewayUpstreamTransportMessage` 也不等于全量协议
 - 只有 `GatewayWireProtocol` 才是 current-state 全量协议 umbrella term
 
 ## 5. 当前态与目标态
@@ -190,13 +190,13 @@ uplink 表达 Runtime 发往 AI Gateway 的业务消息；transport 则是更窄
 当前事实如下：
 
 - `@agent-plugin/gateway-schema` 是当前已落地、可验证、可消费的 schema package。
-- `GatewayWireProtocol`、`GatewayTransportMessage`、`GatewayDownstreamBusinessRequest`、`GatewayUplinkBusinessMessage`、`GatewayTransportControlMessage` 已在共享 schema 包中落地。
+- `GatewayWireProtocol`、`GatewayUpstreamTransportMessage`、`GatewayDownstreamBusinessRequest`、`GatewayUplinkBusinessMessage`、`GatewayTransportControlMessage` 已在共享 schema 包中落地。
 - 当前 `tool_event.event` 的允许 shape 以 `OpencodeProviderEvent` 白名单集合为准。
 - `SkillProviderEvent` 相关协议定义仍属于目标态待补项。
 
 因此，当前态不能被写成：
 
-- `GatewayTransportMessage` 等于全量协议
+- `GatewayUpstreamTransportMessage` 等于全量协议
 - `GatewayWireProtocol` 只是 upstream transport 的别名
 - `tool_event.event` 已经覆盖未来所有统一上行业务事件
 - `OpencodeProviderEvent` 已经等同于目标态统一核心模型
@@ -213,7 +213,7 @@ AI Gateway
 ProviderFact
   -> SkillProviderEvent
   -> GatewayUplinkBusinessMessage
-  -> GatewayTransportMessage
+  -> GatewayUpstreamTransportMessage
   -> GatewayWireProtocol
 ```
 
@@ -237,7 +237,7 @@ current-state 主路径如下：
 本文约束当前态协议术语如下：
 
 - 用 `GatewayWireProtocol` 统称 current-state 全量协议
-- 用 `GatewayTransportMessage` 表示 transport-only union
+- 用 `GatewayUpstreamTransportMessage` 表示 upstream-only transport union
 - 用 `GatewayDownstreamBusinessRequest` 统称下行业务请求
 - 用 `GatewayUplinkBusinessMessage` 统称上行业务消息
 - 用 `GatewayToolEventPayload` 统称 `tool_event.event` 的当前 payload family
