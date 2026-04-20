@@ -45,6 +45,9 @@ export interface MessageBridgeSessionRecord {
   toolSessionId: string;
   sessionKey: string;
   welinkSessionId?: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MessageBridgeStatusSnapshot {

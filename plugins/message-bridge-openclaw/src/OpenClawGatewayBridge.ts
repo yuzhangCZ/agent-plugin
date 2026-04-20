@@ -35,13 +35,17 @@ import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } f
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import {
-  buildAssistantMessageUpdated,
-  buildAssistantPartDelta,
-  buildAssistantPartUpdated,
   buildBusyEvent,
   buildIdleEvent,
+  buildMessagePartDelta,
+  buildMessageUpdated,
+  buildSessionUpdated,
   buildSessionErrorEvent,
+  buildStepFinishPartUpdated,
+  buildStepStartPartUpdated,
+  buildTextPartUpdated,
   buildToolPartUpdated,
+  buildReasoningPartUpdated,
   createToolSessionId,
 } from "./session/upstreamEvents.js";
 
@@ -158,21 +162,44 @@ function extractAssistantText(messages: unknown[]): string {
 
 interface AssistantStreamState {
   messageId: string;
-  partId: string;
+  textPartId: string;
+  stepStartPartId: string;
+  stepFinishPartId: string;
+  reasoningPartId: string;
   sessionKey: string;
   seeded: boolean;
+  stepStarted: boolean;
+  stepFinished: boolean;
+  textSeeded: boolean;
+  reasoningSeeded: boolean;
+  messageCreatedAt: number;
   accumulatedText: string;
+  accumulatedReasoning: string;
+  reasoningStartedAt: number | null;
+  reasoningMetadata?: Record<string, unknown>;
   chunkCount: number;
   firstChunkAt: number | null;
 }
 
 function createAssistantStreamState(sessionKey: string): AssistantStreamState {
+  const createdAt = Date.now();
   return {
     messageId: `msg_${randomUUID()}`,
-    partId: `prt_${randomUUID()}`,
+    textPartId: `prt_${randomUUID()}`,
+    stepStartPartId: `prt_${randomUUID()}`,
+    stepFinishPartId: `prt_${randomUUID()}`,
+    reasoningPartId: `prt_${randomUUID()}`,
     sessionKey,
     seeded: false,
+    stepStarted: false,
+    stepFinished: false,
+    textSeeded: false,
+    reasoningSeeded: false,
+    messageCreatedAt: createdAt,
     accumulatedText: "",
+    accumulatedReasoning: "",
+    reasoningStartedAt: null,
+    reasoningMetadata: undefined,
     chunkCount: 0,
     firstChunkAt: null,
   };
@@ -229,6 +256,24 @@ function extractToolResultTitle(meta: unknown, toolName: string): string | undef
   }
 
   return toolName;
+}
+
+function extractToolResultText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of ["text", "message", "content", "output", "result", "error"]) {
+    const nested = extractToolResultText(value[key]);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
 }
 
 export class OpenClawGatewayBridge {
@@ -410,6 +455,12 @@ export class OpenClawGatewayBridge {
       this.options.logger.warn("runtime.downstream_ignored_no_connection");
       return;
     }
+    if (this.connection.getState() !== "READY") {
+      this.options.logger.warn("runtime.downstream_ignored_not_ready", {
+        state: this.connection.getState(),
+      });
+      return;
+    }
     const startedAt = Date.now();
     const fields = extractDownstreamLogFields(raw);
     logDebug(this.options.logger, "runtime.downstream.received", fields as Record<string, unknown>);
@@ -522,11 +573,14 @@ export class OpenClawGatewayBridge {
     message: Extract<InvokeMessage, { action: "chat" }>,
     context: UpstreamSendContext,
   ): Promise<boolean> {
-    const record = this.sessionRegistry.ensure(message.payload.toolSessionId, message.welinkSessionId);
+    const chatStartedAt = Date.now();
+    const record = this.sessionRegistry.ensure(message.payload.toolSessionId, message.welinkSessionId, {
+      updatedAt: chatStartedAt,
+    });
     this.clearSessionTermination(record);
     const assistantStream = createAssistantStreamState(record.sessionKey);
     const toolStates = new Map<string, ToolPartState>();
-    const startedAt = Date.now();
+    const startedAt = chatStartedAt;
     const chatRequestId = randomUUID();
     const configuredTimeoutMs = this.options.account.runTimeoutMs;
     const selectedModel = createSelectedModelState();
@@ -571,6 +625,8 @@ export class OpenClawGatewayBridge {
       toolStates,
       pendingToolResultTarget: null,
     });
+    this.sendUserMessage(record, message.payload.text, context);
+    this.sendSessionUpdated(record, context);
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId: record.toolSessionId,
@@ -748,6 +804,7 @@ export class OpenClawGatewayBridge {
             return;
           }
 
+          activeSession.pendingToolResultTarget = null;
           toolState.output = output;
           this.emitToolPartUpdate(record.toolSessionId, toolState, context);
           return;
@@ -860,6 +917,9 @@ export class OpenClawGatewayBridge {
         finalText,
         context,
       );
+      record.updatedAt = Date.now();
+      this.sendAssistantCompleted(record.toolSessionId, assistantStream, context);
+      this.sendSessionUpdated(record, context);
       this.logChatCompleted({
         toolSessionId: record.toolSessionId,
         sessionKey: record.sessionKey,
@@ -988,6 +1048,9 @@ export class OpenClawGatewayBridge {
       }
       const assistantText = extractAssistantText(session.messages) || "(empty response)";
       this.sendAssistantFinalResponse(record.toolSessionId, assistantStream, assistantText, context);
+      record.updatedAt = Date.now();
+      this.sendAssistantCompleted(record.toolSessionId, assistantStream, context);
+      this.sendSessionUpdated(record, context);
       this.logChatCompleted({
         toolSessionId: record.toolSessionId,
         sessionKey: record.sessionKey,
@@ -1013,7 +1076,7 @@ export class OpenClawGatewayBridge {
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId: record.toolSessionId,
-        event: buildIdleEvent(record.sessionKey),
+        event: buildIdleEvent(record.toolSessionId),
       }, context);
       this.sendToolDone({
         type: "tool_done",
@@ -1050,7 +1113,22 @@ export class OpenClawGatewayBridge {
     message: Extract<InvokeMessage, { action: "create_session" }>,
     context: UpstreamSendContext,
   ): Promise<boolean> {
-    const record = this.sessionRegistry.ensure(createToolSessionId(), message.welinkSessionId);
+    const createdAt = Date.now();
+    const toolSessionId = createToolSessionId();
+    const title =
+      isRecord(message.payload.metadata) && typeof message.payload.metadata.title === "string" && message.payload.metadata.title.trim()
+        ? message.payload.metadata.title.trim()
+        : toolSessionId;
+    const record = this.sessionRegistry.ensure(toolSessionId, message.welinkSessionId, {
+      title,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    this.sendSessionUpdated(record, {
+      ...context,
+      toolSessionId: record.toolSessionId,
+      welinkSessionId: message.welinkSessionId,
+    });
     const response: SessionCreatedMessage = {
       type: "session_created",
       welinkSessionId: message.welinkSessionId,
@@ -1237,10 +1315,14 @@ export class OpenClawGatewayBridge {
 
     if (state.accumulatedText === chunk) {
       this.ensureAssistantMessageStarted(toolSessionId, state, context);
+      state.textSeeded = true;
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId,
-        event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, chunk, chunk),
+        event: buildTextPartUpdated(toolSessionId, state.messageId, state.textPartId, chunk, {
+          delta: chunk,
+          time: Date.now(),
+        }),
       }, context);
       return;
     }
@@ -1248,7 +1330,7 @@ export class OpenClawGatewayBridge {
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantPartDelta(toolSessionId, state.messageId, state.partId, chunk),
+      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, chunk),
     }, context);
   }
 
@@ -1258,15 +1340,35 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): void {
     if (state.seeded) {
+      if (!state.stepStarted) {
+        this.sendToolEvent({
+          type: "tool_event",
+          toolSessionId,
+          event: buildStepStartPartUpdated(toolSessionId, state.messageId, state.stepStartPartId, {
+            time: Date.now(),
+          }),
+        }, context);
+        state.stepStarted = true;
+      }
       return;
     }
 
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantMessageUpdated(toolSessionId, state.messageId),
+      event: buildMessageUpdated(toolSessionId, state.messageId, "assistant", {
+        created: state.messageCreatedAt,
+      }),
     }, context);
     state.seeded = true;
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildStepStartPartUpdated(toolSessionId, state.messageId, state.stepStartPartId, {
+        time: Date.now(),
+      }),
+    }, context);
+    state.stepStarted = true;
   }
 
   private sendAssistantFinalResponse(
@@ -1275,39 +1377,89 @@ export class OpenClawGatewayBridge {
     text: string,
     context: UpstreamSendContext,
   ): void {
-    if (state.seeded) {
-      if (state.accumulatedText.length === 0) {
-        this.sendToolEvent({
-          type: "tool_event",
-          toolSessionId,
-          event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, text),
-        }, context);
-        return;
-      }
+    this.ensureAssistantMessageStarted(toolSessionId, state, context);
+    state.textSeeded = true;
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildTextPartUpdated(
+        toolSessionId,
+        state.messageId,
+        state.textPartId,
+        state.accumulatedText || text,
+        {
+          time: Date.now(),
+        },
+      ),
+    }, context);
+  }
+
+  private sendAssistantCompleted(
+    toolSessionId: string,
+    state: AssistantStreamState,
+    context: UpstreamSendContext,
+  ): void {
+    if (!state.stepFinished) {
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId,
-        event: buildAssistantPartUpdated(
-          toolSessionId,
-          state.messageId,
-          state.partId,
-          state.accumulatedText || text,
-        ),
+        event: buildStepFinishPartUpdated(toolSessionId, state.messageId, state.stepFinishPartId, {
+          time: Date.now(),
+        }),
       }, context);
-      return;
+      state.stepFinished = true;
     }
 
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
-      event: buildAssistantMessageUpdated(toolSessionId, state.messageId),
+      event: buildMessageUpdated(toolSessionId, state.messageId, "assistant", {
+        created: state.messageCreatedAt,
+        completed: Date.now(),
+      }),
+    }, context);
+  }
+
+  private sendSessionUpdated(
+    record: { toolSessionId: string; title: string; createdAt: number; updatedAt: number },
+    context: UpstreamSendContext,
+  ): void {
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId: record.toolSessionId,
+      event: buildSessionUpdated(record.toolSessionId, {
+        id: record.toolSessionId,
+        title: record.title,
+        time: {
+          created: record.createdAt,
+          updated: record.updatedAt,
+        },
+      }),
+    }, context);
+  }
+
+  private sendUserMessage(
+    record: { toolSessionId: string; updatedAt: number },
+    text: string,
+    context: UpstreamSendContext,
+  ): void {
+    const createdAt = Date.now();
+    const messageId = `msg_${randomUUID()}`;
+    const partId = `prt_${randomUUID()}`;
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId: record.toolSessionId,
+      event: buildMessageUpdated(record.toolSessionId, messageId, "user", {
+        created: createdAt,
+      }),
     }, context);
     this.sendToolEvent({
       type: "tool_event",
-      toolSessionId,
-      event: buildAssistantPartUpdated(toolSessionId, state.messageId, state.partId, text),
+      toolSessionId: record.toolSessionId,
+      event: buildTextPartUpdated(record.toolSessionId, messageId, partId, text, {
+        time: createdAt,
+      }),
     }, context);
-    state.seeded = true;
   }
 
   private emitToolPartUpdate(toolSessionId: string, toolState: ToolPartState, context: UpstreamSendContext): void {
@@ -1319,9 +1471,68 @@ export class OpenClawGatewayBridge {
       toolSessionId,
       event: buildToolPartUpdated({
         toolSessionId,
+        time: Date.now(),
         ...toolState,
       }),
     }, context);
+  }
+
+  private emitReasoningEvent(
+    toolSessionId: string,
+    state: AssistantStreamState,
+    phase: string,
+    deltaText: string,
+    metadata: Record<string, unknown> | undefined,
+    context: UpstreamSendContext,
+  ): void {
+    this.ensureAssistantMessageStarted(toolSessionId, state, context);
+    const now = Date.now();
+    if (metadata) {
+      state.reasoningMetadata = metadata;
+    }
+
+    if (!state.reasoningSeeded) {
+      state.reasoningSeeded = true;
+      state.reasoningStartedAt = now;
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildReasoningPartUpdated(toolSessionId, state.messageId, state.reasoningPartId, "", {
+          start: now,
+          metadata: state.reasoningMetadata,
+        }),
+      }, context);
+    }
+
+    const shouldAppendDelta =
+      deltaText.length > 0 && (phase !== "finish" && phase !== "result" || state.accumulatedReasoning.length === 0);
+
+    if (shouldAppendDelta) {
+      state.accumulatedReasoning += deltaText;
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildMessagePartDelta(toolSessionId, state.messageId, state.reasoningPartId, deltaText),
+      }, context);
+    }
+
+    if (phase === "finish" || phase === "result") {
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildReasoningPartUpdated(
+          toolSessionId,
+          state.messageId,
+          state.reasoningPartId,
+          state.accumulatedReasoning,
+          {
+            start: state.reasoningStartedAt ?? now,
+            end: now,
+            metadata: state.reasoningMetadata,
+          },
+        ),
+      }, context);
+    }
   }
 
   private trackSessionRunId(sessionKey: string, runId: string): void {
@@ -1368,7 +1579,7 @@ export class OpenClawGatewayBridge {
   }
 
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
-    if (evt.stream !== "tool" || !isRecord(evt.data)) {
+    if (!isRecord(evt.data)) {
       return;
     }
 
@@ -1389,6 +1600,20 @@ export class OpenClawGatewayBridge {
       return;
     }
 
+    const context = this.buildChatEventContext(activeSession.toolSessionId);
+    if (evt.stream === "reasoning") {
+      const phase = typeof evt.data.phase === "string" ? evt.data.phase : "delta";
+      const text = typeof evt.data.text === "string" ? evt.data.text : "";
+      const metadata =
+        isRecord(evt.data.metadata) ? evt.data.metadata : isRecord(evt.data.meta) ? evt.data.meta : undefined;
+      this.emitReasoningEvent(activeSession.toolSessionId, activeSession.assistantStream, phase, text, metadata, context);
+      return;
+    }
+
+    if (evt.stream !== "tool") {
+      return;
+    }
+
     const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
     const toolName = typeof evt.data.name === "string" && evt.data.name.length > 0 ? evt.data.name : "tool";
     const toolCallId =
@@ -1396,7 +1621,6 @@ export class OpenClawGatewayBridge {
         ? evt.data.toolCallId
         : `tool_${randomUUID()}`;
 
-    const context = this.buildChatEventContext(activeSession.toolSessionId);
     this.ensureAssistantMessageStarted(activeSession.toolSessionId, activeSession.assistantStream, context);
 
     let toolState = activeSession.toolStates.get(toolCallId);
@@ -1425,7 +1649,10 @@ export class OpenClawGatewayBridge {
     if (phase === "result") {
       const isError = evt.data.isError === true;
       toolState.status = isError ? "error" : "completed";
-      toolState.error = isError ? `tool_${toolName}_failed` : undefined;
+      const directOutput = extractToolResultText(evt.data.output) ?? extractToolResultText(evt.data.result);
+      const directError = extractToolResultText(evt.data.error) ?? extractToolResultText(evt.data.result);
+      toolState.output = !isError && directOutput ? directOutput : toolState.output;
+      toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
       activeSession.pendingToolResultTarget = toolCallId;
       this.emitToolPartUpdate(activeSession.toolSessionId, toolState, context);
     }

@@ -24,7 +24,7 @@
     "pack:check": "pnpm run build:bundle && node scripts/check-pack.mjs",
     "validate:skill-relay": "node scripts/skill-relay-live-check.mjs",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:unit": "node --import tsx/esm --test tests/unit/*.test.mjs",
+    "test:unit": "node ./scripts/run-unit-tests.mjs",
     "test:integration": "node --import tsx/esm --test tests/integration/*.test.mjs",
     "verify:openclaw:env": "node ./scripts/verify-openclaw-env.mjs",
     "verify:openclaw:load": "pnpm run build && node ./scripts/verify-openclaw-load.mjs",
