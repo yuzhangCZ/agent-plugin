@@ -51,7 +51,7 @@ export class InboundProtocolAdapter {
     const messageType = getMessageType(raw);
 
     if (messageType === REGISTER_OK_MESSAGE_TYPE || messageType === REGISTER_REJECTED_MESSAGE_TYPE) {
-      const validation = this.wireCodec.validateGatewayTransportMessage(raw);
+      const validation = this.wireCodec.validateGatewayUpstreamTransportMessage(raw);
       if (!validation.ok) {
         return buildInvalidFrame(raw, messageType, validation.error);
       }

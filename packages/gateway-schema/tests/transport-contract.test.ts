@@ -4,15 +4,15 @@ import assert from 'node:assert/strict';
 import { createGatewayWireMessageUpdatedEvent } from '../../test-support/fixtures/index.mjs';
 import { assertWireViolationShape } from '../../test-support/assertions/index.mjs';
 import {
-  gatewayTransportMessageSchema,
+  gatewayUpstreamTransportMessageSchema,
   gatewayTransportControlMessageSchema,
   gatewayUplinkBusinessMessageSchema,
   gatewayWireProtocolSchema,
-  validateGatewayTransportMessage,
+  validateGatewayUpstreamTransportMessage,
   validateGatewayUplinkBusinessMessage,
 } from '../src/index.ts';
 
-test('validateGatewayTransportMessage accepts the transport-only envelope set', () => {
+test('validateGatewayUpstreamTransportMessage accepts the upstream transport envelope set', () => {
   const cases = [
     {
       type: 'register',
@@ -73,10 +73,10 @@ test('validateGatewayTransportMessage accepts the transport-only envelope set', 
   ];
 
   for (const message of cases) {
-    const result = validateGatewayTransportMessage(message);
+    const result = validateGatewayUpstreamTransportMessage(message);
     assert.equal(result.ok, true, message.type);
     assert.deepEqual(result.value, message);
-    assert.equal(gatewayTransportMessageSchema.safeParse(message).success, true, message.type);
+    assert.equal(gatewayUpstreamTransportMessageSchema.safeParse(message).success, true, message.type);
     assert.equal(gatewayWireProtocolSchema.safeParse(message).success, true, message.type);
   }
 });
@@ -123,7 +123,7 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
   assert.equal(controlResult.ok, false);
 });
 
-test('validateGatewayTransportMessage accepts control messages through the transport-only union', () => {
+test('validateGatewayUpstreamTransportMessage accepts control messages through the upstream transport union', () => {
   const controlMessages = [
     {
       type: 'register',
@@ -146,17 +146,17 @@ test('validateGatewayTransportMessage accepts control messages through the trans
   ];
 
   for (const message of controlMessages) {
-    const result = validateGatewayTransportMessage(message);
+    const result = validateGatewayUpstreamTransportMessage(message);
     assert.equal(result.ok, true, message.type);
     assert.equal(gatewayTransportControlMessageSchema.safeParse(message).success, true, message.type);
     assert.equal(gatewayUplinkBusinessMessageSchema.safeParse(message).success, false, message.type);
-    assert.equal(gatewayTransportMessageSchema.safeParse(message).success, true, message.type);
+    assert.equal(gatewayUpstreamTransportMessageSchema.safeParse(message).success, true, message.type);
     assert.equal(gatewayWireProtocolSchema.safeParse(message).success, true, message.type);
   }
 });
 
-test('validateGatewayTransportMessage omits blank register macAddress', () => {
-  const result = validateGatewayTransportMessage({
+test('validateGatewayUpstreamTransportMessage omits blank register macAddress', () => {
+  const result = validateGatewayUpstreamTransportMessage({
     type: 'register',
     deviceName: 'device-blank-mac',
     macAddress: '   ',
@@ -175,8 +175,8 @@ test('validateGatewayTransportMessage omits blank register macAddress', () => {
   });
 });
 
-test('validateGatewayTransportMessage rejects non-string register macAddress values', () => {
-  const result = validateGatewayTransportMessage({
+test('validateGatewayUpstreamTransportMessage rejects non-string register macAddress values', () => {
+  const result = validateGatewayUpstreamTransportMessage({
     type: 'register',
     deviceName: 'device-invalid-mac',
     macAddress: 123,
@@ -194,8 +194,8 @@ test('validateGatewayTransportMessage rejects non-string register macAddress val
   });
 });
 
-test('validateGatewayTransportMessage rejects unsupported transport message types', () => {
-  const result = validateGatewayTransportMessage({
+test('validateGatewayUpstreamTransportMessage rejects unsupported upstream transport message types', () => {
+  const result = validateGatewayUpstreamTransportMessage({
     type: 'unknown',
   });
 
@@ -208,8 +208,8 @@ test('validateGatewayTransportMessage rejects unsupported transport message type
   });
 });
 
-test('validateGatewayTransportMessage rejects malformed tool_event envelopes through the shared error envelope', () => {
-  const result = validateGatewayTransportMessage({
+test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envelopes through the shared error envelope', () => {
+  const result = validateGatewayUpstreamTransportMessage({
     type: 'tool_event',
     toolSessionId: 'tool-invalid',
     event: {
@@ -228,7 +228,7 @@ test('validateGatewayTransportMessage rejects malformed tool_event envelopes thr
   });
 });
 
-test('validateGatewayTransportMessage rejects downstream requests', () => {
+test('validateGatewayUpstreamTransportMessage rejects downstream requests', () => {
   const cases = [
     {
       type: 'status_query',
@@ -244,7 +244,7 @@ test('validateGatewayTransportMessage rejects downstream requests', () => {
   ];
 
   for (const message of cases) {
-    const result = validateGatewayTransportMessage(message);
+    const result = validateGatewayUpstreamTransportMessage(message);
     assert.equal(result.ok, false, message.type);
     if (result.ok) {
       continue;

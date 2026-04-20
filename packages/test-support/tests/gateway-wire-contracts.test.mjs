@@ -217,7 +217,7 @@ test('gateway schema docs must declare the reference host version and field-tabl
   }
 });
 
-test('gateway-wire-v1 legacy docs stay downgraded and point back to gateway-schema', async () => {
+test('gateway-schema legacy docs stay downgraded and point back to the current gateway-schema root', async () => {
   const [legacyArchitectureDoc, legacyModuleDesignDoc, legacyEventContractDoc] = await Promise.all([
     readFile(legacyArchitectureDocPath, 'utf8'),
     readFile(legacyModuleDesignDocPath, 'utf8'),

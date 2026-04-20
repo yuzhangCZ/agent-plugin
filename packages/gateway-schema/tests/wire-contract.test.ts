@@ -167,6 +167,34 @@ test('gatewayWireProtocolSchema accepts downstream business requests', () => {
   }
 });
 
+test('gatewayWireProtocolSchema accepts downstream, uplink business, and control frames', () => {
+  const cases = [
+    {
+      type: 'status_query',
+    },
+    {
+      type: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'wl-1',
+      payload: {
+        title: 'hello',
+      },
+    },
+    {
+      type: 'status_response',
+      opencodeOnline: true,
+    },
+    {
+      type: 'heartbeat',
+      timestamp: '2026-03-30T00:00:00.000Z',
+    },
+  ];
+
+  for (const message of cases) {
+    assert.equal(gatewayWireProtocolSchema.safeParse(message).success, true, message.type);
+  }
+});
+
 test('validateGatewayWireProtocolMessage accepts current-state downstream + uplink/control messages', () => {
   const cases = [
     {

@@ -1,7 +1,7 @@
 import {
   GatewaySchemaFacade,
-  type GatewayTransportMessage,
   type GatewayDownstreamBusinessRequest,
+  type GatewayUpstreamTransportMessage,
   type GatewayUplinkBusinessMessage,
   type GatewayWireProtocol,
   type WireContractViolation,
@@ -25,10 +25,10 @@ export class GatewaySchemaCodecAdapter implements GatewayWireCodec {
     return this.schemaFacade.validateGatewayUplinkBusinessMessage(raw);
   }
 
-  validateGatewayTransportMessage(
+  validateGatewayUpstreamTransportMessage(
     raw: unknown,
-  ): { ok: true; value: GatewayTransportMessage } | { ok: false; error: WireContractViolation } {
-    return this.schemaFacade.validateGatewayTransportMessage(raw);
+  ): { ok: true; value: GatewayUpstreamTransportMessage } | { ok: false; error: WireContractViolation } {
+    return this.schemaFacade.validateGatewayUpstreamTransportMessage(raw);
   }
 
   validateGatewayWireProtocolMessage(

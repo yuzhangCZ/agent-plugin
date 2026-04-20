@@ -1,6 +1,6 @@
 import type {
   GatewayDownstreamBusinessRequest,
-  GatewayTransportMessage,
+  GatewayUpstreamTransportMessage,
   GatewayUplinkBusinessMessage,
   GatewayWireProtocol,
   WireContractViolation,
@@ -17,8 +17,10 @@ export interface GatewayWireCodec {
   validateGatewayUplinkBusinessMessage(
     raw: unknown,
   ): { ok: true; value: GatewayUplinkBusinessMessage } | { ok: false; error: WireContractViolation };
-  /** 校验 transport-only 上行消息，覆盖 control + business，但不包含 downstream。 */
-  validateGatewayTransportMessage(raw: unknown): { ok: true; value: GatewayTransportMessage } | { ok: false; error: WireContractViolation };
+  /** 校验 upstream transport 上行消息，覆盖 control + business，但不包含 downstream。 */
+  validateGatewayUpstreamTransportMessage(
+    raw: unknown,
+  ): { ok: true; value: GatewayUpstreamTransportMessage } | { ok: false; error: WireContractViolation };
   /** 校验 current-state 全量 wire protocol frame。 */
   validateGatewayWireProtocolMessage(raw: unknown): { ok: true; value: GatewayWireProtocol } | { ok: false; error: WireContractViolation };
 }

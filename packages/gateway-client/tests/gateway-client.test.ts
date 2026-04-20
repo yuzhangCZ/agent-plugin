@@ -521,7 +521,7 @@ test('invalid control frame emits protocol error instead of being silently ignor
       validateGatewayUplinkBusinessMessage(raw) {
         return fallbackCodec.validateGatewayUplinkBusinessMessage(raw);
       },
-      validateGatewayTransportMessage(raw) {
+      validateGatewayUpstreamTransportMessage(raw) {
         if (
           raw &&
           typeof raw === 'object' &&
@@ -541,7 +541,7 @@ test('invalid control frame emits protocol error instead of being silently ignor
             },
           };
         }
-        return fallbackCodec.validateGatewayTransportMessage(raw);
+        return fallbackCodec.validateGatewayUpstreamTransportMessage(raw);
       },
       validateGatewayWireProtocolMessage(raw) {
         return fallbackCodec.validateGatewayWireProtocolMessage(raw);
@@ -842,8 +842,8 @@ test('internal register and heartbeat use the same outbound validation gate', as
   assert.ok(gateCalls.includes('control:heartbeat'));
 });
 
-test('validateControl should route through transport-only validation instead of the full wire union', () => {
-  let transportValidateCalls = 0;
+test('validateControl uses upstream transport validation instead of the umbrella validator', () => {
+  let upstreamTransportValidationCount = 0;
   let wireValidateCalls = 0;
   const wireCodec = {
     normalizeDownstream() {
@@ -856,22 +856,22 @@ test('validateControl should route through transport-only validation instead of 
       wireValidateCalls += 1;
       return { ok: true as const, value: message };
     },
-    validateGatewayTransportMessage(message: unknown) {
-      transportValidateCalls += 1;
+    validateGatewayUpstreamTransportMessage(message: unknown) {
+      upstreamTransportValidationCount += 1;
       return { ok: true as const, value: message };
     },
   } satisfies {
     normalizeDownstream(raw: unknown): never;
     validateGatewayUplinkBusinessMessage(raw: unknown): never;
     validateGatewayWireProtocolMessage(raw: unknown): { ok: true; value: unknown };
-    validateGatewayTransportMessage(raw: unknown): { ok: true; value: unknown };
+    validateGatewayUpstreamTransportMessage(raw: unknown): { ok: true; value: unknown };
   };
 
   const gate = new DefaultOutboundProtocolGate(wireCodec as unknown as GatewayWireCodec);
   const result = gate.validateControl(registerMessage());
 
   assert.deepEqual(result, registerMessage());
-  assert.equal(transportValidateCalls, 1);
+  assert.equal(upstreamTransportValidationCount, 1);
   assert.equal(wireValidateCalls, 0);
 });
 

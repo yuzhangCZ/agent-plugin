@@ -1,6 +1,16 @@
-import { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateGatewayUplinkBusinessMessage } from "@agent-plugin/gateway-schema";
+import {
+  TOOL_ERROR_REASONS,
+  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  validateGatewayUpstreamTransportMessage,
+  validateGatewayUplinkBusinessMessage,
+} from "@agent-plugin/gateway-schema";
 
-export { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateGatewayUplinkBusinessMessage } from "@agent-plugin/gateway-schema";
+export {
+  TOOL_ERROR_REASONS,
+  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  validateGatewayUpstreamTransportMessage,
+  validateGatewayUplinkBusinessMessage,
+} from "@agent-plugin/gateway-schema";
 
 export const UPSTREAM_MESSAGE_TYPE = {
   REGISTER: "register",
@@ -19,6 +29,7 @@ export const TOOL_ERROR_REASON = {
 } as const;
 
 export type {
+  GatewayUpstreamTransportMessage,
   GatewayUplinkBusinessMessage,
   ToolErrorReason,
   RegisterMessage,

@@ -2,7 +2,7 @@ import type { DownstreamNormalizerPort } from '../ports/downstream-normalizer-po
 import type { ProtocolFailureReporterPort } from '../ports/protocol-failure-reporter-port.ts';
 import type { TransportMessageValidatorPort } from '../ports/transport-message-validator-port.ts';
 import { gatewayDownstreamEnvelopeSchema } from '../../contract/schemas/downstream.ts';
-import type { GatewayWireProtocol } from '../../contract/schemas/upstream.ts';
+import type { GatewayWireProtocol } from '../../contract/schemas/wire-protocol.ts';
 import type { Result } from '../../shared/result.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { UnknownBoundaryInput } from '../../shared/boundary-types.ts';
@@ -19,21 +19,18 @@ export interface ValidateGatewayWireProtocolMessageDeps {
   reporter?: ProtocolFailureReporterPort;
 }
 
-function shouldUseDownstreamNormalizer(raw: UnknownBoundaryInput): boolean {
-  return gatewayDownstreamEnvelopeSchema.safeParse(raw).success;
-}
-
 /**
  * 全量 wire 校验入口。
- * @remarks wire 语义覆盖 downstream + transport-only；失败时只对最终选择的校验结果上报一次。
+ * @remarks wire 语义覆盖 downstream + upstream transport；失败时只对最终选择的校验结果上报一次。
  */
 export function validateGatewayWireProtocolMessageUseCase(
   input: ValidateGatewayWireProtocolMessageInput,
   deps: ValidateGatewayWireProtocolMessageDeps,
 ): Result<GatewayWireProtocol, WireContractViolation> {
-  const result = shouldUseDownstreamNormalizer(input.raw)
-    ? deps.downstreamNormalizer.normalize(input.raw)
-    : deps.transportValidator.validate(input.raw);
+  const raw = input.raw;
+  const result = gatewayDownstreamEnvelopeSchema.safeParse(raw).success
+    ? deps.downstreamNormalizer.normalize(raw)
+    : deps.transportValidator.validate(raw);
 
   if (!result.ok) {
     deps.reporter?.report(result.error.violation);

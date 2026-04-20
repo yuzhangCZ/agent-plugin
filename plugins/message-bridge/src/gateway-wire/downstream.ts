@@ -13,7 +13,20 @@ import type {
   NormalizedDownstreamMessage,
 } from '../protocol/downstream/DownstreamMessageTypes.js';
 
-export * from '@agent-plugin/gateway-schema';
+export {
+  DOWNSTREAM_MESSAGE_TYPES,
+  INVOKE_ACTIONS,
+  gatewayDownstreamEnvelopeSchema,
+  gatewayDownstreamBusinessRequestSchema,
+  normalizeDownstream as normalizeSharedDownstream,
+} from '@agent-plugin/gateway-schema';
+export type {
+  ActionPayloadByName,
+  GatewayDownstreamBusinessRequest,
+  InvokeMessage,
+  InvokePayloadByAction,
+  StatusQueryMessage,
+} from '@agent-plugin/gateway-schema';
 export type {
   DownstreamNormalizationError,
   NormalizeResult,

@@ -1,7 +1,9 @@
 import {
+  type GatewayUpstreamTransportMessage,
   type GatewayUplinkBusinessMessage,
   TOOL_ERROR_REASONS,
   TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  validateGatewayUpstreamTransportMessage,
   validateGatewayUplinkBusinessMessage,
 } from '@agent-plugin/gateway-schema';
 
@@ -22,12 +24,14 @@ export const UPSTREAM_MESSAGE_TYPE = {
 } as const;
 
 export {
+  validateGatewayUpstreamTransportMessage,
   validateGatewayUplinkBusinessMessage,
   TOOL_ERROR_REASONS,
   TRANSPORT_UPSTREAM_MESSAGE_TYPES,
 } from '@agent-plugin/gateway-schema';
 
 export type {
+  GatewayUpstreamTransportMessage,
   GatewayUplinkBusinessMessage,
   ToolErrorReason,
   RegisterMessage,
@@ -39,5 +43,5 @@ export type {
   StatusResponseMessage,
 } from '@agent-plugin/gateway-schema';
 
-export const isUpstreamMessage = (message: unknown): message is GatewayUplinkBusinessMessage =>
-  validateGatewayUplinkBusinessMessage(message).ok;
+export const isGatewayUpstreamTransportMessage = (message: unknown): message is GatewayUpstreamTransportMessage =>
+  validateGatewayUpstreamTransportMessage(message).ok;

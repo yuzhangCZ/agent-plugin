@@ -5,7 +5,8 @@ import type { TransportMessageValidatorPort } from '../../application/ports/tran
 import type { GatewayDownstreamBusinessRequest } from '../../contract/schemas/downstream.ts';
 import type { GatewayToolEventPayload } from '../../contract/schemas/tool-event/index.ts';
 import type { Result } from '../../shared/result.ts';
-import type { GatewayTransportMessage, GatewayUplinkBusinessMessage, GatewayWireProtocol } from '../../contract/schemas/upstream.ts';
+import type { GatewayUpstreamTransportMessage, GatewayUplinkBusinessMessage } from '../../contract/schemas/upstream.ts';
+import type { GatewayWireProtocol } from '../../contract/schemas/wire-protocol.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { UnknownBoundaryInput } from '../../shared/boundary-types.ts';
 import { NoopProtocolFailureReporter } from '../reporters/noop-protocol-failure-reporter.ts';
@@ -13,7 +14,7 @@ import { DefaultDownstreamNormalizer } from '../validators/downstream-normalizer
 import { DefaultToolEventValidator } from '../validators/tool-event-validator.ts';
 import { DefaultTransportMessageValidator } from '../validators/transport-message-validator.ts';
 import { normalizeDownstreamUseCase } from '../../application/usecases/normalize-downstream.ts';
-import { validateGatewayTransportMessageUseCase } from '../../application/usecases/validate-gateway-transport-message.ts';
+import { validateGatewayUpstreamTransportMessageUseCase } from '../../application/usecases/validate-gateway-upstream-transport-message.ts';
 import { validateToolEventUseCase } from '../../application/usecases/validate-tool-event.ts';
 import { validateGatewayWireProtocolMessageUseCase } from '../../application/usecases/validate-gateway-wire-protocol-message.ts';
 import { zodErrorToWireViolation } from '../zod/zod-error-to-wire-violation.ts';
@@ -66,9 +67,9 @@ export class GatewaySchemaFacade {
     );
   }
 
-  /** transport-only 入口：校验 plugin -> gateway 的 control/business 发送消息。 */
-  validateGatewayTransportMessage(raw: UnknownBoundaryInput): Result<GatewayTransportMessage, WireContractViolation> {
-    return validateGatewayTransportMessageUseCase(
+  /** upstream transport 入口：校验 plugin -> gateway 的 control/business 发送消息。 */
+  validateGatewayUpstreamTransportMessage(raw: UnknownBoundaryInput): Result<GatewayUpstreamTransportMessage, WireContractViolation> {
+    return validateGatewayUpstreamTransportMessageUseCase(
       { raw },
       {
         validator: this.transportMessageValidator,
@@ -77,7 +78,7 @@ export class GatewaySchemaFacade {
     );
   }
 
-  /** 上行入口：校验全量 current-state wire protocol union。 */
+  /** umbrella 入口：校验全量 current-state wire protocol union。 */
   validateGatewayWireProtocolMessage(raw: UnknownBoundaryInput): Result<GatewayWireProtocol, WireContractViolation> {
     return validateGatewayWireProtocolMessageUseCase(
       { raw },
@@ -91,7 +92,7 @@ export class GatewaySchemaFacade {
 
   /** 业务上行入口：只接收 `tool_event` / `tool_done` / `tool_error` / `session_created` / `status_response`。 */
   validateGatewayUplinkBusinessMessage(raw: UnknownBoundaryInput): Result<GatewayUplinkBusinessMessage, WireContractViolation> {
-    const result = this.validateGatewayTransportMessage(raw);
+    const result = this.validateGatewayUpstreamTransportMessage(raw);
     if (!result.ok) {
       return result;
     }
@@ -123,9 +124,9 @@ export function validateToolEvent(raw: UnknownBoundaryInput, options?: GatewaySc
   return (options ? new GatewaySchemaFacade(options) : defaultFacade).validateToolEvent(raw);
 }
 
-/** 便捷函数：只校验 transport-only 上行消息。 */
-export function validateGatewayTransportMessage(raw: UnknownBoundaryInput, options?: GatewaySchemaFacadeOptions) {
-  return (options ? new GatewaySchemaFacade(options) : defaultFacade).validateGatewayTransportMessage(raw);
+/** 便捷函数：只校验 upstream transport 上行消息。 */
+export function validateGatewayUpstreamTransportMessage(raw: UnknownBoundaryInput, options?: GatewaySchemaFacadeOptions) {
+  return (options ? new GatewaySchemaFacade(options) : defaultFacade).validateGatewayUpstreamTransportMessage(raw);
 }
 
 /** 便捷函数：只校验协议层业务上行消息。 */

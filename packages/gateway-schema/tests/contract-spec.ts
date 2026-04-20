@@ -1,4 +1,4 @@
-import { validateToolEvent, validateGatewayWireProtocolMessage } from '../src/index.ts';
+import { validateToolEvent, validateGatewayUpstreamTransportMessage } from '../src/index.ts';
 
 export const validateToolEventSpec = validateToolEvent;
-export const validateUpstreamTransportSpec = validateGatewayWireProtocolMessage;
+export const validateUpstreamTransportSpec = validateGatewayUpstreamTransportMessage;
