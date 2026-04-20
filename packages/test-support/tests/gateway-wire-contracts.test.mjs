@@ -37,8 +37,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '../../..');
 
-const docsArchitecturePath = resolve(repoRoot, 'docs/architecture/gateway-wire-v1-architecture.md');
-const docsEventContractPath = resolve(repoRoot, 'docs/design/interfaces/gateway-wire-v1-event-contract.md');
+const docsArchitecturePath = resolve(repoRoot, 'docs/architecture/gateway-schema-architecture.md');
+const docsEventContractPath = resolve(repoRoot, 'docs/design/interfaces/gateway-schema-event-contract.md');
+const legacyArchitectureDocPath = resolve(repoRoot, 'docs/architecture/gateway-wire-v1-architecture.md');
+const legacyModuleDesignDocPath = resolve(repoRoot, 'docs/design/gateway-wire-v1-module-design.md');
+const legacyEventContractDocPath = resolve(repoRoot, 'docs/design/interfaces/gateway-wire-v1-event-contract.md');
 const pluginPackageJsonPath = resolve(repoRoot, 'plugins/message-bridge/package.json');
 const lockfilePath = resolve(repoRoot, 'pnpm-lock.yaml');
 
@@ -64,6 +67,10 @@ function getSection(markdown, heading) {
   const nextHeadingMatch = rest.match(/\n##\s+`?[^`\n]+`?\s*$/m);
   const end = nextHeadingMatch ? start + startMatch[0].length + nextHeadingMatch.index : markdown.length;
   return markdown.slice(start, end);
+}
+
+function getMetadataLine(markdown, label) {
+  return markdown.split('\n').find((line) => line.startsWith(`**${label}:**`)) ?? null;
 }
 
 test('gateway wire fixtures expose canonical and legacy create_session inputs', () => {
@@ -172,7 +179,12 @@ test('gateway wire message.part.updated tool fixture stays in projected shape', 
   });
 });
 
-test('gateway wire docs must declare the reference host version and field-table contract', async () => {
+test('gateway schema docs must declare the reference host version and field-table contract', async () => {
+  assert.match(docsArchitecturePath, /gateway-schema-architecture\.md$/);
+  assert.match(docsEventContractPath, /gateway-schema-event-contract\.md$/);
+  assert.doesNotMatch(docsArchitecturePath, /gateway-wire-v1/);
+  assert.doesNotMatch(docsEventContractPath, /gateway-wire-v1/);
+
   const [architectureDoc, eventDoc, packageJson, lockfile] = await Promise.all([
     readFile(docsArchitecturePath, 'utf8'),
     readFile(docsEventContractPath, 'utf8'),
@@ -193,11 +205,29 @@ test('gateway wire docs must declare the reference host version and field-table 
 
   const docEventTypes = extractToolEventSectionHeadings(eventDoc);
   assert.deepStrictEqual(docEventTypes, SUPPORTED_TOOL_EVENT_TYPES);
+  const relatedLine = getMetadataLine(eventDoc, 'Related');
+  assert.ok(relatedLine, 'missing Related metadata');
+  assert.doesNotMatch(relatedLine, /protocol-contract\.md/);
+  assert.doesNotMatch(eventDoc, /current-state 主契约.*protocol-contract\.md/s);
 
   for (const eventType of SUPPORTED_TOOL_EVENT_TYPES) {
     const section = getSection(eventDoc, eventType);
     assert.ok(section, `missing section for ${eventType}`);
     assert.match(section, /\| 字段路径 \| 类型 \| 必填 \| 取值\/枚举 \| 说明 \| 来源 \| 参考宿主版本 \|/);
+  }
+});
+
+test('gateway-wire-v1 legacy docs stay downgraded and point back to gateway-schema', async () => {
+  const [legacyArchitectureDoc, legacyModuleDesignDoc, legacyEventContractDoc] = await Promise.all([
+    readFile(legacyArchitectureDocPath, 'utf8'),
+    readFile(legacyModuleDesignDocPath, 'utf8'),
+    readFile(legacyEventContractDocPath, 'utf8'),
+  ]);
+
+  for (const legacyDoc of [legacyArchitectureDoc, legacyModuleDesignDoc, legacyEventContractDoc]) {
+    assert.match(legacyDoc, /\*\*Status:\*\*\s+Historical Alias/);
+    assert.match(legacyDoc, /gateway-schema-architecture\.md|gateway-schema-event-contract\.md/);
+    assert.match(legacyDoc, /不再|历史工作名|历史页/);
   }
 });
 

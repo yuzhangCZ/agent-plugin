@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 import {
+  gatewayDownstreamBusinessRequestSchema,
+  type GatewayDownstreamBusinessRequest,
+} from './downstream.ts';
+import {
   gatewayTransportControlMessageSchema,
   heartbeatMessageSchema,
   registerMessageSchema,
@@ -30,12 +34,23 @@ import {
 } from './upstream-business.ts';
 
 /**
- * 当前态全量上行协议 union。
- * @remarks 仅作为 umbrella term 覆盖 business + control，不应替代 `GatewayUplinkBusinessMessage`。
+ * transport-only 上行协议 union。
+ * @remarks 仅覆盖 plugin -> gateway 的 control + business，不包含 gateway -> plugin downstream。
  */
-export const gatewayWireProtocolSchema = z.union([
+export const gatewayTransportMessageSchema = z.union([
   gatewayTransportControlMessageSchema,
   gatewayUplinkBusinessMessageSchema,
+]);
+export type GatewayTransportMessage = z.output<typeof gatewayTransportMessageSchema>;
+
+/**
+ * 当前态全量 wire 协议 union。
+ * @remarks 作为 umbrella term 覆盖 downstream request + uplink business + transport control。
+ */
+export const gatewayWireProtocolSchema = z.union([
+  gatewayDownstreamBusinessRequestSchema,
+  gatewayUplinkBusinessMessageSchema,
+  gatewayTransportControlMessageSchema,
 ]);
 export type GatewayWireProtocol = z.output<typeof gatewayWireProtocolSchema>;
 
@@ -55,6 +70,7 @@ export {
 };
 
 export type {
+  GatewayDownstreamBusinessRequest,
   GatewayTransportControlMessage,
   GatewayUplinkBusinessMessage,
   HeartbeatMessage,

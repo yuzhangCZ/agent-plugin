@@ -28,7 +28,7 @@ export {
 } from '@agent-plugin/gateway-schema';
 
 export type {
-  GatewayUplinkBusinessMessage as UpstreamMessage,
+  GatewayUplinkBusinessMessage,
   ToolErrorReason,
   RegisterMessage,
   HeartbeatMessage,

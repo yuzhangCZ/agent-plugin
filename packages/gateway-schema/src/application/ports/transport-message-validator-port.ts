@@ -1,9 +1,9 @@
-import type { GatewayWireProtocol } from '../../contract/schemas/upstream.ts';
+import type { GatewayTransportMessage } from '../../contract/schemas/upstream.ts';
 import type { Result } from '../../shared/result.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { UnknownBoundaryInput } from '../../shared/boundary-types.ts';
 
-/** 上行端口：校验所有 plugin -> gateway 的 transport 消息是否可以真正发送。 */
+/** transport-only 端口：校验 plugin -> gateway 的 control/business 消息是否满足发送契约。 */
 export interface TransportMessageValidatorPort {
-  validate(raw: UnknownBoundaryInput): Result<GatewayWireProtocol, WireContractViolation>;
+  validate(raw: UnknownBoundaryInput): Result<GatewayTransportMessage, WireContractViolation>;
 }

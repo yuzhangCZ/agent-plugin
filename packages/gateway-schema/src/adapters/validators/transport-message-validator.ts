@@ -4,7 +4,7 @@ import type { WireContractViolation } from '../../contract/errors/wire-errors.ts
 import { requiredTrimmedString } from '../../contract/schemas/shared.ts';
 import type { Result } from '../../shared/result.ts';
 import type {
-  GatewayWireProtocol,
+  GatewayTransportMessage,
   ToolEventMessage,
 } from '../../contract/schemas/upstream.ts';
 import type { PlainObject, UnknownBoundaryInput } from '../../shared/boundary-types.ts';
@@ -63,7 +63,7 @@ function normalizeToolEventMessage(raw: PlainObject): Result<ToolEventMessage, W
 }
 
 export class DefaultTransportMessageValidator implements TransportMessageValidatorPort {
-  validate(raw: UnknownBoundaryInput): Result<GatewayWireProtocol, WireContractViolation> {
+  validate(raw: UnknownBoundaryInput): Result<GatewayTransportMessage, WireContractViolation> {
     if (!isRecord(raw) || !readString(raw.type)) {
       return fail({
         stage: 'transport',

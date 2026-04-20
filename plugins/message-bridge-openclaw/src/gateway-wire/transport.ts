@@ -1,9 +1,4 @@
-import {
-  type GatewayUplinkBusinessMessage,
-  TOOL_ERROR_REASONS,
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
-  validateGatewayUplinkBusinessMessage,
-} from "@agent-plugin/gateway-schema";
+import { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateGatewayUplinkBusinessMessage } from "@agent-plugin/gateway-schema";
 
 export { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateGatewayUplinkBusinessMessage } from "@agent-plugin/gateway-schema";
 
@@ -24,7 +19,7 @@ export const TOOL_ERROR_REASON = {
 } as const;
 
 export type {
-  GatewayUplinkBusinessMessage as UpstreamMessage,
+  GatewayUplinkBusinessMessage,
   ToolErrorReason,
   RegisterMessage,
   HeartbeatMessage,

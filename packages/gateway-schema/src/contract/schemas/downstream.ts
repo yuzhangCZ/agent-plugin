@@ -195,6 +195,14 @@ export interface ActionPayloadByName extends InvokePayloadByAction {
 
 export type InvokePayload = InvokePayloadByAction[InvokeAction];
 
+/**
+ * downstream envelope 路由契约。
+ * @remarks 这里只关心 message family 的 `type`，供 wire 入口做无副作用分流，不参与 payload 级校验。
+ */
+export const gatewayDownstreamEnvelopeSchema = z.object({
+  type: z.enum(DOWNSTREAM_MESSAGE_TYPES),
+});
+
 export const downstreamMessageSchema = z.union([invokeMessageSchema, statusQueryMessageSchema]);
 export const gatewayDownstreamBusinessRequestSchema = downstreamMessageSchema;
 export type GatewayDownstreamBusinessRequest = z.output<typeof gatewayDownstreamBusinessRequestSchema>;

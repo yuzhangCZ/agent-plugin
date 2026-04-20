@@ -5,7 +5,7 @@ import type { TransportMessageValidatorPort } from '../../application/ports/tran
 import type { GatewayDownstreamBusinessRequest } from '../../contract/schemas/downstream.ts';
 import type { GatewayToolEventPayload } from '../../contract/schemas/tool-event/index.ts';
 import type { Result } from '../../shared/result.ts';
-import type { GatewayUplinkBusinessMessage, GatewayWireProtocol } from '../../contract/schemas/upstream.ts';
+import type { GatewayTransportMessage, GatewayUplinkBusinessMessage, GatewayWireProtocol } from '../../contract/schemas/upstream.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { UnknownBoundaryInput } from '../../shared/boundary-types.ts';
 import { NoopProtocolFailureReporter } from '../reporters/noop-protocol-failure-reporter.ts';
@@ -13,6 +13,7 @@ import { DefaultDownstreamNormalizer } from '../validators/downstream-normalizer
 import { DefaultToolEventValidator } from '../validators/tool-event-validator.ts';
 import { DefaultTransportMessageValidator } from '../validators/transport-message-validator.ts';
 import { normalizeDownstreamUseCase } from '../../application/usecases/normalize-downstream.ts';
+import { validateGatewayTransportMessageUseCase } from '../../application/usecases/validate-gateway-transport-message.ts';
 import { validateToolEventUseCase } from '../../application/usecases/validate-tool-event.ts';
 import { validateGatewayWireProtocolMessageUseCase } from '../../application/usecases/validate-gateway-wire-protocol-message.ts';
 import { zodErrorToWireViolation } from '../zod/zod-error-to-wire-violation.ts';
@@ -65,9 +66,9 @@ export class GatewaySchemaFacade {
     );
   }
 
-  /** 上行入口：校验全量 current-state wire protocol union。 */
-  validateGatewayWireProtocolMessage(raw: UnknownBoundaryInput): Result<GatewayWireProtocol, WireContractViolation> {
-    return validateGatewayWireProtocolMessageUseCase(
+  /** transport-only 入口：校验 plugin -> gateway 的 control/business 发送消息。 */
+  validateGatewayTransportMessage(raw: UnknownBoundaryInput): Result<GatewayTransportMessage, WireContractViolation> {
+    return validateGatewayTransportMessageUseCase(
       { raw },
       {
         validator: this.transportMessageValidator,
@@ -76,9 +77,21 @@ export class GatewaySchemaFacade {
     );
   }
 
+  /** 上行入口：校验全量 current-state wire protocol union。 */
+  validateGatewayWireProtocolMessage(raw: UnknownBoundaryInput): Result<GatewayWireProtocol, WireContractViolation> {
+    return validateGatewayWireProtocolMessageUseCase(
+      { raw },
+      {
+        downstreamNormalizer: this.downstreamNormalizer,
+        transportValidator: this.transportMessageValidator,
+        reporter: this.reporter,
+      },
+    );
+  }
+
   /** 业务上行入口：只接收 `tool_event` / `tool_done` / `tool_error` / `session_created` / `status_response`。 */
   validateGatewayUplinkBusinessMessage(raw: UnknownBoundaryInput): Result<GatewayUplinkBusinessMessage, WireContractViolation> {
-    const result = this.validateGatewayWireProtocolMessage(raw);
+    const result = this.validateGatewayTransportMessage(raw);
     if (!result.ok) {
       return result;
     }
@@ -108,6 +121,11 @@ export function normalizeDownstream(raw: UnknownBoundaryInput, options?: Gateway
 /** 便捷函数：供插件在发送 `tool_event` 前做统一协议准入。 */
 export function validateToolEvent(raw: UnknownBoundaryInput, options?: GatewaySchemaFacadeOptions) {
   return (options ? new GatewaySchemaFacade(options) : defaultFacade).validateToolEvent(raw);
+}
+
+/** 便捷函数：只校验 transport-only 上行消息。 */
+export function validateGatewayTransportMessage(raw: UnknownBoundaryInput, options?: GatewaySchemaFacadeOptions) {
+  return (options ? new GatewaySchemaFacade(options) : defaultFacade).validateGatewayTransportMessage(raw);
 }
 
 /** 便捷函数：只校验协议层业务上行消息。 */

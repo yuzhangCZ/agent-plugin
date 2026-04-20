@@ -18,20 +18,20 @@ import {
   SESSION_STATUS_TYPE,
   TOOL_EVENT_TYPE,
   TOOL_PART_STATUS,
-  type GatewayMessagePartDeltaEvent,
-  type GatewayMessagePartUpdatedEvent,
-  type GatewayMessageUpdatedEvent,
-  type GatewaySessionErrorEvent,
-  type GatewaySessionIdleEvent,
-  type GatewaySessionStatusEvent,
+  type MessagePartDeltaEvent,
+  type MessagePartUpdatedEvent,
+  type MessageUpdatedEvent,
+  type SessionErrorEvent,
+  type SessionIdleEvent,
+  type SessionStatusEvent,
 } from "./gateway-wire/tool-event.js";
 import type {
+  GatewayUplinkBusinessMessage,
   SessionCreatedMessage,
   StatusResponseMessage,
   ToolDoneMessage,
   ToolErrorMessage,
   ToolEventMessage,
-  UpstreamMessage,
 } from "./gateway-wire/transport.js";
 import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateGatewayUplinkBusinessMessage } from "./gateway-wire/transport.js";
 import {
@@ -158,7 +158,7 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
-function buildBusyEvent(sessionKey: string): GatewaySessionStatusEvent {
+function buildBusyEvent(sessionKey: string): SessionStatusEvent {
   return {
     type: TOOL_EVENT_TYPE.SESSION_STATUS,
     properties: {
@@ -170,7 +170,7 @@ function buildBusyEvent(sessionKey: string): GatewaySessionStatusEvent {
   };
 }
 
-function buildIdleEvent(sessionKey: string): GatewaySessionIdleEvent {
+function buildIdleEvent(sessionKey: string): SessionIdleEvent {
   return {
     type: TOOL_EVENT_TYPE.SESSION_IDLE,
     properties: {
@@ -179,7 +179,7 @@ function buildIdleEvent(sessionKey: string): GatewaySessionIdleEvent {
   };
 }
 
-function buildSessionErrorEvent(sessionKey: string, error: string): GatewaySessionErrorEvent {
+function buildSessionErrorEvent(sessionKey: string, error: string): SessionErrorEvent {
   return {
     type: TOOL_EVENT_TYPE.SESSION_ERROR,
     properties: {
@@ -248,7 +248,7 @@ function createSelectedModelState(): SelectedModelState {
   };
 }
 
-function buildAssistantMessageUpdated(sessionKey: string, messageId: string): GatewayMessageUpdatedEvent {
+function buildAssistantMessageUpdated(sessionKey: string, messageId: string): MessageUpdatedEvent {
   return {
     type: TOOL_EVENT_TYPE.MESSAGE_UPDATED,
     properties: {
@@ -270,7 +270,7 @@ function buildAssistantPartUpdated(
   partId: string,
   text: string,
   delta?: string,
-): GatewayMessagePartUpdatedEvent {
+): MessagePartUpdatedEvent {
   return {
     type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
     properties: {
@@ -291,7 +291,7 @@ function buildAssistantPartDelta(
   messageId: string,
   partId: string,
   delta: string,
-): GatewayMessagePartDeltaEvent {
+): MessagePartDeltaEvent {
   return {
     type: TOOL_EVENT_TYPE.MESSAGE_PART_DELTA,
     properties: {
@@ -306,7 +306,7 @@ function buildAssistantPartDelta(
 
 function buildToolPartUpdated(
   state: ToolPartState,
-): GatewayMessagePartUpdatedEvent {
+): MessagePartUpdatedEvent {
   return {
     type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
     properties: {
@@ -1337,7 +1337,7 @@ export class OpenClawGatewayBridge {
   }
 
   private sendValidatedUpstreamMessage(
-    message: UpstreamMessage,
+    message: GatewayUplinkBusinessMessage,
     context?: UpstreamSendContext & { eventType?: string },
   ): boolean {
     // openclaw 侧的统一发送出口。所有候选上行消息必须先通过共享协议校验，失败直接 fail-closed。

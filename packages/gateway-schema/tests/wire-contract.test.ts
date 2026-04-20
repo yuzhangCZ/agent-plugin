@@ -9,7 +9,12 @@ import {
   assertWireViolationShape,
 } from '../../test-support/assertions/index.mjs';
 import { RecordingProtocolFailureReporter } from '../src/adapters/reporters/recording-protocol-failure-reporter.ts';
-import { normalizeDownstream, validateToolEvent, validateGatewayWireProtocolMessage } from '../src/index.ts';
+import {
+  gatewayWireProtocolSchema,
+  normalizeDownstream,
+  validateToolEvent,
+  validateGatewayWireProtocolMessage,
+} from '../src/index.ts';
 
 test('normalizeDownstream canonicalizes supported invoke shapes', () => {
   const result = normalizeDownstream({
@@ -139,6 +144,83 @@ test('validateGatewayWireProtocolMessage validates transport envelopes and neste
   assert.equal(result.value.type, 'tool_event');
   assert.equal(result.value.event.type, 'session.status');
   assert.equal(result.value.event.properties.status.type, 'busy');
+});
+
+test('gatewayWireProtocolSchema accepts downstream business requests', () => {
+  const cases = [
+    {
+      type: 'status_query',
+    },
+    {
+      type: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'wl-1',
+      payload: {
+        title: 'hello',
+      },
+    },
+  ];
+
+  for (const message of cases) {
+    const result = gatewayWireProtocolSchema.safeParse(message);
+    assert.equal(result.success, true, message.type);
+  }
+});
+
+test('validateGatewayWireProtocolMessage accepts current-state downstream + uplink/control messages', () => {
+  const cases = [
+    {
+      type: 'status_query',
+    },
+    {
+      type: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'wl-1',
+      payload: {
+        title: 'hello',
+      },
+    },
+    {
+      type: 'register',
+      deviceName: 'device-a',
+      os: 'linux',
+      toolType: 'opencode',
+      toolVersion: '1.0.0',
+    },
+    {
+      type: 'tool_done',
+      toolSessionId: 'tool-1',
+    },
+  ];
+
+  for (const message of cases) {
+    const result = validateGatewayWireProtocolMessage(message);
+    assert.equal(result.ok, true, message.type);
+  }
+});
+
+test('validateGatewayWireProtocolMessage reports invalid downstream payloads once with the downstream violation', () => {
+  const reporter = new RecordingProtocolFailureReporter();
+  const result = validateGatewayWireProtocolMessage(
+    {
+      type: 'invoke',
+      action: 'create_session',
+      payload: {},
+    },
+    {
+      reporter,
+    },
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+
+  assert.equal(result.error.violation.field, 'welinkSessionId');
+  assert.equal(result.error.violation.stage, 'payload');
+  assert.equal(reporter.violations.length, 1);
+  assert.deepStrictEqual(reporter.violations[0], result.error.violation);
 });
 
 test('validateToolEvent returns a typed violation for unsupported event types', () => {

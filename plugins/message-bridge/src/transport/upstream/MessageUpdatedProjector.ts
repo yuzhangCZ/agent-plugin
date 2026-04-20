@@ -2,19 +2,19 @@ import type { BridgeEvent } from '../../runtime/types.js';
 import { asNumber, asRecord, asString } from '../../utils/type-guards.js';
 import {
   TOOL_EVENT_TYPE,
-  type GatewayMessageSummaryDiff,
-  type GatewayMessageSummary,
-  type GatewayMessageUpdatedEvent,
+  type MessageUpdatedSummaryDiff,
+  type MessageUpdatedSummary,
+  type MessageUpdatedEvent,
 } from '../../gateway-wire/tool-event.js';
 import type { GatewayProjectedEvent } from './projection-types.js';
 
-function projectSummaryDiff(diff: unknown): GatewayMessageSummaryDiff | null {
+function projectSummaryDiff(diff: unknown): MessageUpdatedSummaryDiff | null {
   const record = asRecord(diff);
   if (!record) {
     return null;
   }
 
-  const projected: GatewayMessageSummaryDiff = {};
+  const projected: MessageUpdatedSummaryDiff = {};
   const file = asString(record.file);
   const status = asString(record.status);
   const additions = asNumber(record.additions);
@@ -28,8 +28,8 @@ function projectSummaryDiff(diff: unknown): GatewayMessageSummaryDiff | null {
   return Object.keys(projected).length > 0 ? projected : null;
 }
 
-function projectSummary(summary: Record<string, unknown>): GatewayMessageSummary {
-  const projected: GatewayMessageSummary = {};
+function projectSummary(summary: Record<string, unknown>): MessageUpdatedSummary {
+  const projected: MessageUpdatedSummary = {};
 
   const additions = asNumber(summary.additions);
   const deletions = asNumber(summary.deletions);
@@ -37,7 +37,7 @@ function projectSummary(summary: Record<string, unknown>): GatewayMessageSummary
   const diffs = Array.isArray(summary.diffs)
     ? summary.diffs
         .map((diff) => projectSummaryDiff(diff))
-        .filter((diff): diff is GatewayMessageSummaryDiff => diff !== null)
+        .filter((diff): diff is MessageUpdatedSummaryDiff => diff !== null)
     : undefined;
 
   if (additions !== undefined) projected.additions = additions;
@@ -58,11 +58,11 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
   const projectedInfo: {
     id?: string;
     sessionID?: string;
-    role?: GatewayMessageUpdatedEvent['properties']['info']['role'];
-    time?: GatewayMessageUpdatedEvent['properties']['info']['time'];
-    model?: GatewayMessageUpdatedEvent['properties']['info']['model'];
-    summary?: GatewayMessageUpdatedEvent['properties']['info']['summary'];
-    finish?: GatewayMessageUpdatedEvent['properties']['info']['finish'];
+    role?: MessageUpdatedEvent['properties']['info']['role'];
+    time?: MessageUpdatedEvent['properties']['info']['time'];
+    model?: MessageUpdatedEvent['properties']['info']['model'];
+    summary?: MessageUpdatedEvent['properties']['info']['summary'];
+    finish?: MessageUpdatedEvent['properties']['info']['finish'];
   } = {};
   const id = asString(info.id);
   const sessionID = asString(info.sessionID);
@@ -111,9 +111,9 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
   }
 
   return {
-    type: TOOL_EVENT_TYPE.MESSAGE_UPDATED,
-    properties: {
-      info: projectedInfo as GatewayMessageUpdatedEvent['properties']['info'],
-    },
-  } as GatewayProjectedEvent;
+      type: TOOL_EVENT_TYPE.MESSAGE_UPDATED,
+      properties: {
+      info: projectedInfo as MessageUpdatedEvent['properties']['info'],
+      },
+    } as GatewayProjectedEvent;
 }

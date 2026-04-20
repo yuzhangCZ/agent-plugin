@@ -59,7 +59,7 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
       throw this.toUnsupportedMessageTypeError(message);
     }
 
-    const validation = this.wireCodec.validateGatewayWireProtocolMessage(message);
+    const validation = this.wireCodec.validateGatewayTransportMessage(message);
     if (!validation.ok) {
       throw this.toProtocolViolation(message, validation.error);
     }
