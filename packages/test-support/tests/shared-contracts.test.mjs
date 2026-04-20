@@ -109,7 +109,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
   assert.doesNotThrow(() => assertSessionCreatedShape({ type: 'session_created', welinkSessionId: 'wl', toolSessionId: 'tool' }, { welinkSessionId: 'wl', toolSessionId: 'tool' }));
   assert.doesNotThrow(() => assertStatusResponseShape({ type: 'status_response', opencodeOnline: true }, { opencodeOnline: true, envelopeFree: true }));
   assert.doesNotThrow(() => assertToolErrorShape({ type: 'tool_error', error: 'bad', welinkSessionId: 'wl' }, { welinkSessionId: 'wl', error: 'bad', hasCode: false }));
-  assert.doesNotThrow(() => assertToolEventShape({ type: 'tool_event', toolSessionId: 'tool', event: { type: 'message.updated' } }, { toolSessionId: 'tool', eventType: 'message.updated' }));
+  assert.doesNotThrow(() => assertToolEventShape({ type: 'tool_event', toolSessionId: 'tool', event: { family: 'opencode', type: 'message.updated' } }, { toolSessionId: 'tool', eventType: 'message.updated' }));
   assert.doesNotThrow(() =>
     assertSimpleToolEventShape(createGatewayWireSessionStatusEvent(), {
       type: 'session.status',

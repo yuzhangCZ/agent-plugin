@@ -2,6 +2,14 @@ function withDefault(value, fallback) {
   return value === undefined ? fallback : value;
 }
 
+function createOpencodeEvent(base, overrides = {}) {
+  return {
+    family: 'opencode',
+    ...base,
+    ...overrides,
+  };
+}
+
 export function createInvokeMessage(overrides = {}) {
   return {
     type: 'invoke',
@@ -84,7 +92,7 @@ export function createGatewayWireLegacyCreateSessionInvokeMessage(overrides = {}
 }
 
 export function createGatewayWireMessageUpdatedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'message.updated',
     properties: {
       info: {
@@ -113,12 +121,11 @@ export function createGatewayWireMessageUpdatedEvent(overrides = {}) {
         },
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireMessagePartUpdatedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'message.part.updated',
     properties: {
       part: {
@@ -134,12 +141,11 @@ export function createGatewayWireMessagePartUpdatedEvent(overrides = {}) {
         },
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireMessagePartUpdatedToolEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'message.part.updated',
     properties: {
       part: {
@@ -162,12 +168,11 @@ export function createGatewayWireMessagePartUpdatedToolEvent(overrides = {}) {
         },
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireMessagePartDeltaEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'message.part.delta',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -176,24 +181,22 @@ export function createGatewayWireMessagePartDeltaEvent(overrides = {}) {
       field: 'text',
       delta: 'he',
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireMessagePartRemovedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'message.part.removed',
     properties: {
       sessionID: 'tool-gateway-wire',
       messageID: 'msg-gateway-wire',
       partID: 'part-gateway-wire',
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireSessionStatusEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'session.status',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -201,34 +204,31 @@ export function createGatewayWireSessionStatusEvent(overrides = {}) {
         type: 'busy',
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireSessionIdleEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'session.idle',
     properties: {
       sessionID: 'tool-gateway-wire',
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireSessionUpdatedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'session.updated',
     properties: {
       info: {
         id: 'tool-gateway-wire',
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireSessionErrorEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'session.error',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -236,24 +236,22 @@ export function createGatewayWireSessionErrorEvent(overrides = {}) {
         message: 'boom',
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWirePermissionUpdatedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'permission.updated',
     properties: {
       sessionID: 'tool-gateway-wire',
       id: 'perm-gateway-wire',
       status: 'granted',
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWirePermissionAskedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'permission.asked',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -265,12 +263,11 @@ export function createGatewayWirePermissionAskedEvent(overrides = {}) {
         source: 'test',
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export function createGatewayWireQuestionAskedEvent(overrides = {}) {
-  return {
+  return createOpencodeEvent({
     type: 'question.asked',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -291,8 +288,7 @@ export function createGatewayWireQuestionAskedEvent(overrides = {}) {
         callID: 'call-gateway-wire',
       },
     },
-    ...overrides,
-  };
+  }, overrides);
 }
 
 export const GATEWAY_WIRE_TOOL_EVENT_FIXTURES = [

@@ -62,6 +62,7 @@ test('normalizeDownstream reports contract violations through the reporter', () 
 
 test('validateToolEvent projects message.updated to the wire contract', () => {
   const result = validateToolEvent({
+    family: 'opencode',
     type: 'message.updated',
     properties: {
       info: {
@@ -127,6 +128,7 @@ test('validateGatewayWireProtocolMessage validates transport envelopes and neste
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
+      family: 'opencode',
       type: 'session.status',
       properties: {
         sessionID: 'ses-1',
@@ -253,6 +255,7 @@ test('validateGatewayWireProtocolMessage reports invalid downstream payloads onc
 
 test('validateToolEvent returns a typed violation for unsupported event types', () => {
   const result = validateToolEvent({
+    family: 'opencode',
     type: 'unknown.event',
   });
 

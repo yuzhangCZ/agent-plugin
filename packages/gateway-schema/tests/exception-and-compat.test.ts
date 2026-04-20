@@ -28,6 +28,7 @@ test('downstream contract violations use the shared violation envelope', () => {
 
 test('tool_event contract violations use the shared violation envelope', () => {
   const result = validateToolEvent({
+    family: 'opencode',
     type: 'message.part.updated',
     properties: {
       part: {
