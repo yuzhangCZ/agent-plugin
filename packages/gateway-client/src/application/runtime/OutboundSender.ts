@@ -1,8 +1,8 @@
 import {
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  HEARTBEAT_MESSAGE_TYPE,
   type HeartbeatMessage,
   type RegisterMessage,
-} from '@agent-plugin/gateway-wire-v1';
+} from '@agent-plugin/gateway-schema';
 
 import type { GatewaySendContext } from '../../domain/send-context.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
@@ -80,7 +80,7 @@ export class OutboundSender {
     this.context.telemetry.markSent(message, payloadBytes, logContext, isBusinessMessage);
     this.transport.send(serialized);
     this.context.sink.emitOutbound(message);
-    if (messageType === TRANSPORT_UPSTREAM_MESSAGE_TYPES[3]) {
+    if (messageType === HEARTBEAT_MESSAGE_TYPE) {
       this.context.sink.emitHeartbeat(message as HeartbeatMessage);
     }
   }

@@ -459,9 +459,6 @@ describe('runtime protocol strictness', () => {
 
     await runtime.handleDownstreamMessage({
       type: 'status_query',
-      rawPayload: {
-        type: 'status_query',
-      },
     });
     await new Promise((resolve) => setImmediate(resolve));
 

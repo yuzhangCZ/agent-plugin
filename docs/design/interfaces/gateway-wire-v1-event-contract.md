@@ -1,4 +1,4 @@
-# gateway-wire-v1 事件契约
+# gateway-wire-v1 事件契约（当前由 `@agent-plugin/gateway-schema` 承接）
 
 **Version:** 1.0  
 **Date:** 2026-03-30  
@@ -8,7 +8,7 @@
 
 ## 背景
 
-本文定义 `tool_event.event` 的正式事件契约。它不是宿主 SDK 类型的直接别名，而是基于 `@opencode-ai/plugin@1.2.15` / `@opencode-ai/sdk@1.2.15` 的当前可观察行为冻结出的共享外部模型。
+本文定义 `tool_event.event` 的正式事件契约。当前实现由 `@agent-plugin/gateway-schema` 承接。它不是宿主 SDK 类型的直接别名，而是基于 `@opencode-ai/plugin@1.2.15` / `@opencode-ai/sdk@1.2.15` 的当前可观察行为冻结出的共享外部模型。
 
 ## 范围
 
@@ -59,7 +59,7 @@
 
 ## 事件契约总览
 
-当前共享包支持的 `tool_event.event.type` 只有 11 个，必须与 `SUPPORTED_TOOL_EVENT_TYPES` 一致：
+当前共享包支持的 `tool_event.event.type` 只有 11 个，必须与 `SUPPORTED_TOOL_EVENT_TYPES` 一致。它们在代码中由 `OpencodeProviderEvent` 承接，并通过 `GatewayToolEventPayload` 对外暴露：
 
 - `message.updated`
 - `message.part.updated`

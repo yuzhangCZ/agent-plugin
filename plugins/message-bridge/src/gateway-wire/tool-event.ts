@@ -3,9 +3,9 @@ import {
   SESSION_STATUS_TYPES,
   TOOL_EVENT_TYPES,
   validateToolEvent,
-} from '@agent-plugin/gateway-wire-v1';
+} from '@agent-plugin/gateway-schema';
 
-export { TOOL_EVENT_TYPES, validateToolEvent } from '@agent-plugin/gateway-wire-v1';
+export { TOOL_EVENT_TYPES, validateToolEvent } from '@agent-plugin/gateway-schema';
 
 export const TOOL_EVENT_TYPE = {
   MESSAGE_UPDATED: TOOL_EVENT_TYPES[0],
@@ -31,19 +31,19 @@ export const SESSION_STATUS_TYPE = {
 } as const;
 
 export type {
-  GatewayToolEventV1 as GatewayToolEvent,
-  MessageUpdatedEventV1 as GatewayMessageUpdatedEvent,
-  MessageUpdatedSummaryDiffV1 as GatewayMessageSummaryDiff,
-  MessageUpdatedSummaryV1 as GatewayMessageSummary,
-  MessagePartUpdatedEventV1 as GatewayMessagePartUpdatedEvent,
-  MessagePartDeltaEventV1 as GatewayMessagePartDeltaEvent,
-  MessagePartRemovedEventV1 as GatewayMessagePartRemovedEvent,
-  SessionStatusEventV1 as GatewaySessionStatusEvent,
-  SessionIdleEventV1 as GatewaySessionIdleEvent,
-  SessionUpdatedEventV1 as GatewaySessionUpdatedEvent,
-  SessionErrorEventV1 as GatewaySessionErrorEvent,
-  PermissionUpdatedEventV1 as GatewayPermissionUpdatedEvent,
-  PermissionAskedEventV1 as GatewayPermissionAskedEvent,
-  QuestionAskedEventV1 as GatewayQuestionAskedEvent,
+  GatewayToolEventPayload as GatewayToolEvent,
+  MessageUpdatedEvent as GatewayMessageUpdatedEvent,
+  MessageUpdatedSummaryDiff as GatewayMessageSummaryDiff,
+  MessageUpdatedSummary as GatewayMessageSummary,
+  MessagePartUpdatedEvent as GatewayMessagePartUpdatedEvent,
+  MessagePartDeltaEvent as GatewayMessagePartDeltaEvent,
+  MessagePartRemovedEvent as GatewayMessagePartRemovedEvent,
+  SessionStatusEvent as GatewaySessionStatusEvent,
+  SessionIdleEvent as GatewaySessionIdleEvent,
+  SessionUpdatedEvent as GatewaySessionUpdatedEvent,
+  SessionErrorEvent as GatewaySessionErrorEvent,
+  PermissionUpdatedEvent as GatewayPermissionUpdatedEvent,
+  PermissionAskedEvent as GatewayPermissionAskedEvent,
+  QuestionAskedEvent as GatewayQuestionAskedEvent,
   SupportedToolEventType as GatewayToolEventType,
-} from '@agent-plugin/gateway-wire-v1';
+} from '@agent-plugin/gateway-schema';

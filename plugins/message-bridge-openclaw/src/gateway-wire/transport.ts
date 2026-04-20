@@ -1,10 +1,11 @@
 import {
+  type GatewayUplinkBusinessMessage,
   TOOL_ERROR_REASONS,
   TRANSPORT_UPSTREAM_MESSAGE_TYPES,
-  validateUpstreamMessage,
-} from "@agent-plugin/gateway-wire-v1";
+  validateGatewayUplinkBusinessMessage,
+} from "@agent-plugin/gateway-schema";
 
-export { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateUpstreamMessage } from "@agent-plugin/gateway-wire-v1";
+export { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES, validateGatewayUplinkBusinessMessage } from "@agent-plugin/gateway-schema";
 
 export const UPSTREAM_MESSAGE_TYPE = {
   REGISTER: "register",
@@ -23,6 +24,7 @@ export const TOOL_ERROR_REASON = {
 } as const;
 
 export type {
+  GatewayUplinkBusinessMessage as UpstreamMessage,
   ToolErrorReason,
   RegisterMessage,
   HeartbeatMessage,
@@ -31,5 +33,4 @@ export type {
   ToolErrorMessage,
   SessionCreatedMessage,
   StatusResponseMessage,
-  UpstreamTransportMessage as UpstreamMessage,
-} from "@agent-plugin/gateway-wire-v1";
+} from "@agent-plugin/gateway-schema";

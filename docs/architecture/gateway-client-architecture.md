@@ -8,7 +8,7 @@
 
 ## 背景
 
-`gateway-wire-v1` 已经作为第一阶段协议真源落地，统一了 transport message、downstream normalizer 与协议错误形状。`gateway-client` 在此基础上承接第二阶段共享 transport runtime，把两个插件中重复的 `AkSkAuth`、`GatewayConnection`、READY gating、heartbeat 与 reconnect 收敛为一个共享包。
+`@agent-plugin/gateway-schema` 已经作为第一阶段协议 schema 真源落地，统一了 transport message、downstream normalizer 与协议错误形状。`gateway-client` 在此基础上承接第二阶段共享 transport runtime，把两个插件中重复的 `AkSkAuth`、`GatewayConnection`、READY gating、heartbeat 与 reconnect 收敛为一个共享包。
 
 ## 职责边界
 
@@ -31,14 +31,15 @@
 - 不接管插件本地 `gateway-wire/*` legacy wrapper
 - 不引入宿主统一 application / mapper 语义层
 
-## 与 gateway-wire-v1 的关系
+## 与 gateway-schema 的关系
 
-`gateway-wire-v1` 负责“协议是什么、是否合法”。  
+`gateway-schema` 负责“协议是什么、是否合法”。  
 `gateway-client` 负责“如何基于这个协议稳定连接和传输”。
 
-当前实现中，`gateway-client` 只通过 `@agent-plugin/gateway-wire-v1` 包入口消费共享协议能力：
+当前实现中，`gateway-client` 只通过 `@agent-plugin/gateway-schema` 包入口消费共享协议能力：
 
-- `validateUpstreamMessage`
+- `validateGatewayUplinkBusinessMessage`
+- `validateGatewayWireProtocolMessage`
 - `normalizeDownstream`
 - transport message type literals
 - `WireContractViolation`
@@ -73,7 +74,7 @@ packages/gateway-client/src/
 
 - `domain/`：连接状态、重连配置、发送上下文、错误契约
 - `ports/`：client、events、options、codec、auth、logger 抽象
-- `adapters/`：`gateway-wire-v1` codec 与默认 reconnect policy
+- `adapters/`：`gateway-schema` codec 与默认 reconnect policy
 - `application/`：默认 client runtime / facade
 - `auth/`：默认 AK/SK auth provider
 - `errors/`：`GatewayClientError`

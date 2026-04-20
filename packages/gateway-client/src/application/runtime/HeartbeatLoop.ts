@@ -1,11 +1,9 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES, type HeartbeatMessage } from '@agent-plugin/gateway-wire-v1';
+import { HEARTBEAT_MESSAGE_TYPE, type HeartbeatMessage } from '@agent-plugin/gateway-schema';
 
 import type { HeartbeatScheduler } from '../../ports/HeartbeatScheduler.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { OutboundSender } from './OutboundSender.ts';
 import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapper.ts';
-
-const HEARTBEAT_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[3];
 
 /**
  * 心跳循环编排器，负责 READY 后的周期心跳发送。

@@ -4,14 +4,11 @@ import assert from 'node:assert/strict';
 import { adaptGatewayBusinessMessage } from '../../src/protocol/downstream/GatewayBusinessMessageAdapter.ts';
 
 describe('gateway business message adapter', () => {
-  test('accepts typed facade question_reply message and strips transitional rawPayload', () => {
+  test('accepts typed facade question_reply message', () => {
     const result = adaptGatewayBusinessMessage({
       type: 'invoke',
       action: 'question_reply',
       welinkSessionId: 'wl-question-1',
-      rawPayload: {
-        toolCallId: 'legacy-call-1',
-      },
       payload: {
         toolSessionId: 'tool-question-1',
         toolCallId: 'call-question-1',
@@ -36,9 +33,6 @@ describe('gateway business message adapter', () => {
     const result = adaptGatewayBusinessMessage({
       type: 'invoke',
       action: 'chat',
-      rawPayload: {
-        assistantId: 'persona-legacy',
-      },
       payload: {
         toolSessionId: 'tool-chat-1',
         text: 'hello',

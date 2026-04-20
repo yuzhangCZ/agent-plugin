@@ -3,7 +3,7 @@ import {
   INVOKE_ACTIONS,
   normalizeDownstream as normalizeSharedDownstream,
   type WireContractViolation,
-} from "@agent-plugin/gateway-wire-v1";
+} from "@agent-plugin/gateway-schema";
 
 import { normalizeLegacyCreateSessionPayload } from "../adapters/legacyCreateSessionAdapter.js";
 import type { BridgeLogger } from "../types.js";

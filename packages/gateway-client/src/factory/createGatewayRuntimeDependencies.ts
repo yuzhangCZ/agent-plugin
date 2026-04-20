@@ -1,7 +1,7 @@
 import type { GatewayClientOptions } from '../ports/GatewayClientOptions.ts';
 import { buildAuthSubprotocol } from '../auth/AkSkAuthProvider.ts';
 import { DefaultReconnectPolicy } from '../adapters/DefaultReconnectPolicy.ts';
-import { GatewayWireV1CodecAdapter } from '../adapters/GatewayWireV1CodecAdapter.ts';
+import { GatewaySchemaCodecAdapter } from '../adapters/GatewaySchemaCodecAdapter.ts';
 import { WebSocketGatewayTransport } from '../adapters/WebSocketGatewayTransport.ts';
 import { IntervalHeartbeatScheduler } from '../adapters/IntervalHeartbeatScheduler.ts';
 import { TimeoutReconnectScheduler } from '../adapters/TimeoutReconnectScheduler.ts';
@@ -35,7 +35,7 @@ function resolveStandardReconnectPreset(options: GatewayClientOptions): Required
  * @returns 运行时编排所需的依赖对象。
  */
 export function createGatewayRuntimeDependencies(options: GatewayClientOptions): GatewayClientRuntimeDependencies {
-  const wireCodec = options.wireCodec ?? new GatewayWireV1CodecAdapter();
+  const wireCodec = options.wireCodec ?? new GatewaySchemaCodecAdapter();
   const reconnectPreset = resolveStandardReconnectPreset(options);
   const reconnectPolicy = options.reconnectPolicy ?? new DefaultReconnectPolicy(
     reconnectPreset,

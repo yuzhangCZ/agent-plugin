@@ -10,7 +10,7 @@ import {
   TOOL_ERROR_REASON,
   UPSTREAM_MESSAGE_TYPE,
   type ToolErrorReason,
-  validateUpstreamMessage,
+  validateGatewayUplinkBusinessMessage,
 } from '../gateway-wire/transport.js';
 import { ChatAction } from '../action/ChatAction.js';
 import { CreateSessionAction } from '../action/CreateSessionAction.js';
@@ -359,7 +359,7 @@ export class BridgeRuntime {
       originalPayloadBytes: Buffer.byteLength(JSON.stringify(originalEnvelope), 'utf8'),
       transportPayloadBytes: Buffer.byteLength(JSON.stringify(transportEnvelope), 'utf8'),
     };
-    const validatedEnvelope = this.validateUpstreamMessageOrLog(
+    const validatedEnvelope = this.validateGatewayUplinkBusinessMessageOrLog(
       transportEnvelope,
       transportLogContext,
       forwardingLogger,
@@ -464,7 +464,7 @@ export class BridgeRuntime {
         gatewayMessageId: downstreamFields.gatewayMessageId,
         action: DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
       };
-      const validatedStatusResponse = this.validateUpstreamMessageOrLog(
+      const validatedStatusResponse = this.validateGatewayUplinkBusinessMessageOrLog(
         statusResponse,
         statusLogContext,
         statusLogger,
@@ -552,7 +552,7 @@ export class BridgeRuntime {
         toolSessionId,
         action: invokeMessage.action,
       };
-      const validatedSessionCreated = this.validateUpstreamMessageOrLog(
+      const validatedSessionCreated = this.validateGatewayUplinkBusinessMessageOrLog(
         sessionCreated,
         sessionCreatedLogContext,
         invokeLogger,
@@ -830,7 +830,7 @@ export class BridgeRuntime {
       action: logOptions?.action,
       toolSessionId: logOptions?.toolSessionId,
     };
-    const validatedToolError = this.validateUpstreamMessageOrLog(
+    const validatedToolError = this.validateGatewayUplinkBusinessMessageOrLog(
       toolErrorMessage,
       toolErrorLogContext,
       logger,
@@ -879,7 +879,7 @@ export class BridgeRuntime {
       toolSessionId,
       source,
     };
-    const validatedToolDone = this.validateUpstreamMessageOrLog(
+    const validatedToolDone = this.validateGatewayUplinkBusinessMessageOrLog(
       toolDoneMessage,
       toolDoneLogContext,
       logger,
@@ -890,13 +890,13 @@ export class BridgeRuntime {
     this.gatewayConnection.send(validatedToolDone, toolDoneLogContext);
   }
 
-  private validateUpstreamMessageOrLog(
+  private validateGatewayUplinkBusinessMessageOrLog(
     message: GatewaySendPayload,
     logContext: GatewaySendLogContext,
     logger: BridgeLogger = this.logger,
   ): GatewaySendPayload | null {
     // 运行时最终准入点：只有通过共享 wire 校验的消息才允许真正发往 gateway。
-    const validation = validateUpstreamMessage(message);
+    const validation = validateGatewayUplinkBusinessMessage(message);
     if (validation.ok) {
       return validation.value as GatewaySendPayload;
     }

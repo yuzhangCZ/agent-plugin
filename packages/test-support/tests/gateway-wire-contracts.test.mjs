@@ -23,15 +23,15 @@ import {
 import {
   DOWNSTREAM_MESSAGE_TYPES,
   INVOKE_ACTIONS,
-} from '../../gateway-wire-v1/src/contract/literals/downstream.ts';
+} from '../../gateway-schema/src/contract/literals/downstream.ts';
 import {
   SUPPORTED_TOOL_EVENT_TYPES,
-} from '../../gateway-wire-v1/src/contract/literals/tool-event.ts';
+} from '../../gateway-schema/src/contract/literals/tool-event.ts';
 import {
   TRANSPORT_UPSTREAM_MESSAGE_TYPES,
   UPSTREAM_MESSAGE_TYPES,
   TOOL_ERROR_REASONS,
-} from '../../gateway-wire-v1/src/contract/literals/upstream.ts';
+} from '../../gateway-schema/src/contract/literals/upstream.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

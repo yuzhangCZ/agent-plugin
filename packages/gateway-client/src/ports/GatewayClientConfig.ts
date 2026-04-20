@@ -1,4 +1,4 @@
-import type { RegisterMessage } from '@agent-plugin/gateway-wire-v1';
+import type { RegisterMessage } from '@agent-plugin/gateway-schema';
 
 import type { GatewayReconnectConfig } from '../domain/reconnect.ts';
 import type { AkSkAuthPayload } from './GatewayAuthProvider.ts';

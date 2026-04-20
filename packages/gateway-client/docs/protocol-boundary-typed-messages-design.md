@@ -30,7 +30,7 @@
 
 ## 核心设计原则
 
-1. `gateway-wire-v1` 是共享 wire contract，不是 `gateway-client` 的最终 public facade contract
+1. `gateway-schema` 是共享 wire contract，不是 `gateway-client` 的最终 public facade contract
 2. `gateway-client` 负责“协议模型 -> facade 模型”的映射
 3. 插件专属兼容逻辑保留在各自插件 bounded context，不污染 shared client
 4. runtime 只负责编排、状态机、副作用，不负责 raw schema 解释
@@ -38,7 +38,7 @@
 
 ## 一、分层边界
 
-### 1. `packages/gateway-wire-v1`
+### 1. `packages/gateway-schema`
 
 职责：
 
@@ -81,20 +81,20 @@
 
 ### 设计核心
 
-不要把 `GatewayBusinessMessage = DownstreamMessage` 固化为长期终态。
+不要把 `GatewayBusinessMessage = GatewayDownstreamBusinessRequest` 固化为长期终态。
 
 原因：
 
-- `DownstreamMessage` 是 wire 层模型
+- `GatewayDownstreamBusinessRequest` 是 wire 层模型
 - `GatewayBusinessMessage` 应是 facade 层模型
-- 如果两者永久等同，`gateway-wire-v1` 的字段演进会直接穿透 `gateway-client` public API
+- 如果两者永久等同，`gateway-schema` 的字段演进会直接穿透 `gateway-client` public API
 
 ### 过渡版策略
 
 为降低 PR2 范围，允许先用共享 contract 的稳定主链路作为过渡 facade 类型：
 
 ```ts
-type GatewayBusinessMessage = DownstreamMessage;
+type GatewayBusinessMessage = GatewayDownstreamBusinessRequest;
 ```
 
 但需要在设计与代码注释中明确：
@@ -116,14 +116,14 @@ type GatewayBusinessMessage =
 再由 `gateway-client` 内部 protocol adapter 完成：
 
 ```ts
-DownstreamMessage -> GatewayBusinessMessage
+GatewayDownstreamBusinessRequest -> GatewayBusinessMessage
 ```
 
 这样做的收益：
 
 - wire 层兼容字段可以被 adapter 吸收
 - facade 只暴露稳定语义，不暴露底层协议细节
-- 上层 runtime 与 `gateway-wire-v1` 解耦
+- 上层 runtime 与 `gateway-schema` 解耦
 
 ## 三、目标类型模型
 
@@ -139,7 +139,7 @@ DownstreamMessage -> GatewayBusinessMessage
 
 过渡阶段：
 
-- 可先别名至共享 `DownstreamMessage` 主链路
+- 可先别名至共享 `GatewayDownstreamBusinessRequest` 主链路
 
 终态：
 
@@ -434,7 +434,7 @@ type GatewayInboundFrame =
 - 删除 bridge 侧共享 downstream normalize 主链路
 - runtime 只保留业务 dispatch、日志、错误处理
 - 若仍需插件专属兼容，改为在 facade message 之后追加本地 adapter，而不是回退到 raw normalize
-- `adaptGatewayBusinessMessage()` 当前直接对 typed facade 做本地 shape 收口：剥离迁移期 `rawPayload`、补齐可选 `welinkSessionId` 的 `undefined` 语义
+- `adaptGatewayBusinessMessage()` 当前直接对 typed facade 做本地 shape 收口：补齐可选 `welinkSessionId` 的 `undefined` 语义
 - `DownstreamMessageNormalizer` 已降级为 raw/shared 包装器，只供 isolated normalization 测试或原始输入场景复用，不再作为 runtime typed 主链路入口
 
 ### 2. `plugins/message-bridge-openclaw/src/OpenClawGatewayBridge.ts`
@@ -506,8 +506,8 @@ GatewayBusinessMessage -> PluginCompatAdapter -> PluginNormalizedMessage
 
 - PR2 期间，插件 compat 不再直接接收 raw websocket frame
 - 也不再以 shared normalize 结果作为主输入
-- 若 `GatewayBusinessMessage` 仍暂时别名到 `DownstreamMessage`，需要在文档和类型注释中明确其 transitional 属性，避免被误当成长期稳定边界
-- 若插件私有 compat 仍需访问共享归一化前的 payload 片段，可由 facade 在 `GatewayBusinessMessage` 上临时附带 `rawPayload` 作为迁移期上下文，但该字段不属于长期稳定 API，也不能替代插件私有 compat adapter
+- 若 `GatewayBusinessMessage` 仍暂时别名到 `GatewayDownstreamBusinessRequest`，需要在文档和类型注释中明确其 transitional 属性，避免被误当成长期稳定边界
+- 若插件私有 compat 仍需访问共享归一化前的 payload 片段，应改走 `GatewayInboundFrame.business` 这类观测入口，在插件私有 adapter 中消费，而不是污染 `GatewayBusinessMessage` 主链路
 
 ## 九、观测事件约束
 
@@ -537,7 +537,7 @@ GatewayBusinessMessage -> PluginCompatAdapter -> PluginNormalizedMessage
 
 - 在 `GatewayClientMessages.ts` 定义过渡版 typed contract
 - `GatewayBusinessMessage` 可暂时别名共享稳定主链路
-- 对确有历史兼容需求的插件，允许临时透传 `rawPayload` 作为 compat 上下文，并在类型注释中明确其迁移期属性
+- 对确有历史兼容需求的插件，应通过插件私有 compat adapter 读取观测入口中的原始 payload 上下文，而不是继续把它挂在 facade 业务消息上
 - 新增 `GatewayInboundFrame`
 - 明确 `GatewayInboundFrame` 必须覆盖 decode / parse / invalid / control / business 五类路径
 
@@ -658,7 +658,7 @@ pnpm verify:workspace
 ### 4. 演进收益
 
 - 为后续 facade 自有 business model 预留空间
-- `gateway-wire-v1` 演进不会直接污染 `gateway-client` 公共 API
+- `gateway-schema` 演进不会直接污染 `gateway-client` 公共 API
 
 ## 十三、风险与控制
 
@@ -696,6 +696,6 @@ pnpm verify:workspace
 本设计的最终结论是：
 
 - `gateway-client` 应承担共享协议上下行消息的类型归一化
-- 但它不应把 `gateway-wire-v1` 原始 contract 原样固化为长期 public facade contract
+- 但它不应把 `gateway-schema` 原始 contract 原样固化为长期 public facade contract
 - 本次 PR2 先以过渡类型收口 raw/unknown 穿透，再通过 protocol adapter 建立从 wire model 到 facade model 的稳定边界
 - `BridgeRuntime` 与 `OpenClawGatewayBridge` 在改造后将主要消费 typed 事件，不再直接承担共享协议解释责任

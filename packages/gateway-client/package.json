@@ -19,7 +19,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@agent-plugin/gateway-wire-v1": "workspace:*"
+    "@agent-plugin/gateway-schema": "workspace:*"
   },
   "scripts": {
     "test": "node --experimental-strip-types --test tests/**/*.test.ts"

@@ -1,9 +1,10 @@
 import {
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
+  REGISTER_OK_MESSAGE_TYPE,
+  REGISTER_REJECTED_MESSAGE_TYPE,
   type RegisterOkMessage,
   type RegisterRejectedMessage,
   type WireContractViolation,
-} from '@agent-plugin/gateway-wire-v1';
+} from '@agent-plugin/gateway-schema';
 
 import type { GatewayWireCodec } from '../../ports/GatewayWireCodec.ts';
 import type { GatewayBusinessMessage, GatewayInboundFrame } from '../../ports/GatewayClientMessages.ts';
@@ -15,17 +16,11 @@ import {
   getMessageType,
 } from '../telemetry/message-log-fields.ts';
 
-const [, REGISTER_OK_MESSAGE_TYPE, REGISTER_REJECTED_MESSAGE_TYPE] = TRANSPORT_UPSTREAM_MESSAGE_TYPES;
-
-function attachRawPayloadContext(message: GatewayBusinessMessage, raw: unknown): GatewayBusinessMessage {
-  if (message.type !== 'invoke' || typeof raw !== 'object' || raw === null || !('payload' in raw)) {
-    return message;
+function extractRawPayload(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || !('payload' in raw)) {
+    return undefined;
   }
-
-  return {
-    ...message,
-    rawPayload: (raw as { payload?: unknown }).payload,
-  };
+  return (raw as { payload?: unknown }).payload;
 }
 
 function buildInvalidFrame(raw: unknown, messageType: string | undefined, violation: WireContractViolation): GatewayInboundFrame {
@@ -56,7 +51,7 @@ export class InboundProtocolAdapter {
     const messageType = getMessageType(raw);
 
     if (messageType === REGISTER_OK_MESSAGE_TYPE || messageType === REGISTER_REJECTED_MESSAGE_TYPE) {
-      const validation = this.wireCodec.validateTransportMessage(raw);
+      const validation = this.wireCodec.validateGatewayWireProtocolMessage(raw);
       if (!validation.ok) {
         return buildInvalidFrame(raw, messageType, validation.error);
       }
@@ -73,10 +68,13 @@ export class InboundProtocolAdapter {
       return buildInvalidFrame(raw, messageType, normalized.error);
     }
 
+    const rawPayload = normalized.value.type === 'invoke' ? extractRawPayload(raw) : undefined;
+
     return {
       kind: 'business',
       messageType: normalized.value.type,
-      message: attachRawPayloadContext(normalized.value, raw),
+      message: normalized.value,
+      ...(rawPayload !== undefined ? { rawPayload } : {}),
     };
   }
 }

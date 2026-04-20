@@ -33,7 +33,7 @@ import type {
   ToolEventMessage,
   UpstreamMessage,
 } from "./gateway-wire/transport.js";
-import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateUpstreamMessage } from "./gateway-wire/transport.js";
+import { TOOL_ERROR_REASON, UPSTREAM_MESSAGE_TYPE, validateGatewayUplinkBusinessMessage } from "./gateway-wire/transport.js";
 import {
   createGatewayClient,
   type GatewayClient,
@@ -363,6 +363,7 @@ export class OpenClawGatewayBridge {
     }
   >();
   private readonly activeRunToSessionKey = new Map<string, string>();
+  private readonly pendingCreateSessionCompatPayloads = new Map<string, unknown[]>();
   private readonly terminatedToolSessionIds = new Set<string>();
   private readonly terminatedSessionKeys = new Set<string>();
   private running = false;
@@ -501,6 +502,7 @@ export class OpenClawGatewayBridge {
     this.unsubscribeAgentEvents = null;
     this.activeToolSessions.clear();
     this.activeRunToSessionKey.clear();
+    this.pendingCreateSessionCompatPayloads.clear();
     this.status.running = false;
     this.status.connected = false;
     this.status.runtimePhase = "idle";
@@ -513,7 +515,37 @@ export class OpenClawGatewayBridge {
   }
 
   private handleInboundFrame(frame: GatewayInboundFrame): void {
+    this.captureCreateSessionCompatPayload(frame);
     this.invalidInvokeToolErrorResponder.respond(frame, this.options.logger);
+  }
+
+  private captureCreateSessionCompatPayload(frame: GatewayInboundFrame): void {
+    if (frame.kind !== "business" || frame.message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE) {
+      return;
+    }
+    if (frame.message.action !== INVOKE_ACTION.CREATE_SESSION || frame.rawPayload === undefined) {
+      return;
+    }
+
+    const existing = this.pendingCreateSessionCompatPayloads.get(frame.message.welinkSessionId);
+    if (existing) {
+      existing.push(frame.rawPayload);
+      return;
+    }
+    this.pendingCreateSessionCompatPayloads.set(frame.message.welinkSessionId, [frame.rawPayload]);
+  }
+
+  private takeCreateSessionCompatPayload(welinkSessionId: string): unknown | undefined {
+    const queue = this.pendingCreateSessionCompatPayloads.get(welinkSessionId);
+    if (!queue || queue.length === 0) {
+      return undefined;
+    }
+
+    const payload = queue.shift();
+    if (queue.length === 0) {
+      this.pendingCreateSessionCompatPayloads.delete(welinkSessionId);
+    }
+    return payload;
   }
 
   async handleDownstreamMessage(message: GatewayBusinessMessage): Promise<void> {
@@ -583,7 +615,8 @@ export class OpenClawGatewayBridge {
       return message as DownstreamMessage;
     }
 
-    const payload = normalizeLegacyCreateSessionPayload(message.rawPayload ?? message.payload).payload;
+    const compatPayload = this.takeCreateSessionCompatPayload(message.welinkSessionId);
+    const payload = normalizeLegacyCreateSessionPayload(compatPayload ?? message.payload).payload;
     return {
       ...message,
       payload,
@@ -1308,7 +1341,7 @@ export class OpenClawGatewayBridge {
     context?: UpstreamSendContext & { eventType?: string },
   ): boolean {
     // openclaw 侧的统一发送出口。所有候选上行消息必须先通过共享协议校验，失败直接 fail-closed。
-    const validation = validateUpstreamMessage(message);
+    const validation = validateGatewayUplinkBusinessMessage(message);
     if (!validation.ok) {
       const violation = validation.error.violation;
       this.options.logger.error("runtime.upstream_validation_failed", {

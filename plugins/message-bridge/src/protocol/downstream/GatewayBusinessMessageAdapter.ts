@@ -104,8 +104,8 @@ function adaptInvokeMessage(
  *
  * @remarks
  * 共享 `gateway-client` 已经完成主链路 typed facade 归一化；这里信任 facade
- * 输出，只做本地 shape 收口：剥离迁移期 `rawPayload`、补齐可选 `welinkSessionId`
- * 的 `undefined` 语义，并预留未来插件私有 compat/fail-closed seam。
+ * 输出，只做本地 shape 收口：补齐可选 `welinkSessionId` 的 `undefined` 语义，
+ * 并预留未来插件私有 compat/fail-closed seam。
  */
 export function adaptGatewayBusinessMessage(
   message: GatewayBusinessMessage,

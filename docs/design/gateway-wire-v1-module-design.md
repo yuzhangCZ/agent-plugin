@@ -1,14 +1,14 @@
-# gateway-wire-v1 模块设计
+# gateway-wire-v1 模块设计（历史名，现包名为 `gateway-schema`）
 
 **Version:** 1.0  
 **Date:** 2026-03-30  
-**Status:** Frozen  
+**Status:** Superseded by `@agent-plugin/gateway-schema`  
 **Owner:** agent-plugin maintainers  
 **Related:** [gateway-wire-v1-architecture.md](../architecture/gateway-wire-v1-architecture.md), [gateway-wire-v1-event-contract.md](./interfaces/gateway-wire-v1-event-contract.md), [bridge-refactor-migration-plan.md](../architecture/bridge-refactor-migration-plan.md)
 
 ## 目标
 
-`gateway-wire-v1` 只做一件事：把当前 `ai-gateway` 对外协议冻结成一个可直接消费的共享层。它不接管宿主连接，不实现业务 policy，也不把 raw event 提取逻辑搬进共享包。
+当前共享包 `@agent-plugin/gateway-schema` 只做一件事：把当前 `ai-gateway` 对外协议冻结成一个可直接消费的 schema 层。它不接管宿主连接，不实现业务 policy，也不把 raw event 提取逻辑搬进共享包。
 
 ## 参考版本
 
@@ -22,7 +22,7 @@
 当前目录如下：
 
 ```text
-packages/gateway-wire-v1/
+packages/gateway-schema/
   src/
     contract/
       literals/
@@ -46,17 +46,17 @@ packages/gateway-wire-v1/
 
 ## Public API
 
-对外只暴露以下对象：
+对外主入口暴露以下对象：
 
-- 类型：`DownstreamMessage`、`GatewayToolEventV1`、`UpstreamTransportMessage`、`WireViolation`、`WireErrorCode`、`Result<T, E>`
+- 类型：`GatewayDownstreamBusinessRequest`、`GatewayToolEventPayload`、`OpencodeProviderEvent`、`GatewayUplinkBusinessMessage`、`GatewayTransportControlMessage`、`GatewayWireProtocol`、`WireViolation`、`WireErrorCode`、`Result<T, E>`
 - 常量：`DOWNSTREAM_MESSAGE_TYPES`、`INVOKE_ACTIONS`、`UPSTREAM_MESSAGE_TYPES`、`TOOL_EVENT_TYPES`、`TOOL_ERROR_REASONS`、`PERMISSION_REPLY_RESPONSES`、`SESSION_STATUS_TYPES`、`MESSAGE_PART_TYPES`
-- façade：`normalizeDownstream(raw, options?)`、`validateToolEvent(raw, options?)`、`validateUpstreamMessage(raw, options?)`
+- façade：`normalizeDownstream(raw, options?)`、`validateToolEvent(raw, options?)`、`validateGatewayUplinkBusinessMessage(raw, options?)`、`validateGatewayWireProtocolMessage(raw, options?)`
 
 禁止普通消费者直接依赖内部目录。公共入口必须保持薄，只承载稳定契约。
 
 ### 入口规则
 
-- 包外消费者使用 `@agent-plugin/gateway-wire-v1`。
+- 包外消费者使用 `@agent-plugin/gateway-schema`。
 - 插件包内部通过本地 `gateway-wire/*` 包装层接入共享能力。
 - 只有共享包自测和静态契约测试才允许直接读取 `src/contract/*`。
 
@@ -69,9 +69,9 @@ packages/gateway-wire-v1/
 
 ## 端口设计
 
-- `DownstreamNormalizerPort`：把原始下行输入归一化成正式 `DownstreamMessage`
+- `DownstreamNormalizerPort`：把原始下行输入归一化成正式 `GatewayDownstreamBusinessRequest`
 - `ToolEventValidatorPort`：按 `event.type` 校验 `tool_event.event`
-- `TransportMessageValidatorPort`：校验上行 transport 消息
+- `TransportMessageValidatorPort`：校验上行协议消息
 - `ProtocolFailureReporterPort`：把协议失败报告给调用方或测试钩子
 
 ## 共享能力
@@ -98,9 +98,12 @@ packages/gateway-wire-v1/
 
 ## 协议契约模型
 
-- `DownstreamMessage`
-- `GatewayToolEventV1`
-- `UpstreamTransportMessage`
+- `GatewayDownstreamBusinessRequest`
+- `GatewayToolEventPayload`
+- `OpencodeProviderEvent`
+- `GatewayUplinkBusinessMessage`
+- `GatewayTransportControlMessage`
+- `GatewayWireProtocol`
 - `WireViolation`
 - `WireErrorCode`
 - `Result<T, E>`
@@ -129,6 +132,23 @@ packages/gateway-wire-v1/
 - 每个事件必须有独立 validator
 - `message.updated` 的白名单投影必须可测试
 - 共享 validator 只校验最终对外形状，不负责 raw event 提取
+
+当前目录切分如下：
+
+- `contract/schemas/tool-event/opencode-provider-event/*`：当前已落地事件 schema 真源
+- `contract/schemas/tool-event/index.ts`：`GatewayToolEventPayload` 协议入口
+
+当前 `GatewayToolEventPayload` 仅等价于 `OpencodeProviderEvent`，公共 API 不暴露任何 `SkillProviderEvent` 占位导出。
+
+## `upstream` 入口设计
+
+当前上行 schema 拆为三个稳定入口：
+
+- `upstream-business.ts`：`GatewayUplinkBusinessMessage`
+- `upstream-control.ts`：`GatewayTransportControlMessage`
+- `upstream.ts`：`GatewayWireProtocol`
+
+这样业务消息校验与全量协议校验不会再共用语义含糊的 `UpstreamTransportMessage` 主入口。
 
 ### 结构约束
 
@@ -186,7 +206,7 @@ packages/gateway-wire-v1/
 
 实施期间必须满足：
 
-1. `packages/gateway-wire-v1` 包级测试通过。
+1. `packages/gateway-schema` 包级测试通过。
 2. `packages/test-support` 共享测试通过。
 3. 两个插件受影响测试通过。
 4. `pnpm test` 通过。
@@ -194,4 +214,4 @@ packages/gateway-wire-v1/
 
 ## 结论
 
-`gateway-wire-v1` 的模块设计必须把协议真源、端口、用例和适配器拆开。公开接口应尽量薄，异常模型要可区分、可映射、可回滚。
+当前 `gateway-schema` 的模块设计必须把协议真源、端口、用例和适配器拆开。公开接口应尽量薄，异常模型要可区分、可映射、可回滚，并且不再让旧术语主导公共 API。

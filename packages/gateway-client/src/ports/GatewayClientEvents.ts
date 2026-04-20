@@ -1,4 +1,4 @@
-import type { HeartbeatMessage } from '@agent-plugin/gateway-wire-v1';
+import type { HeartbeatMessage } from '@agent-plugin/gateway-schema';
 
 import type { GatewayClientState } from '../domain/state.ts';
 import type { GatewayClientErrorShape } from '../domain/error-contract.ts';

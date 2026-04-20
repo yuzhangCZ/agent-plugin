@@ -1,4 +1,4 @@
-import type { RegisterMessage } from '@agent-plugin/gateway-wire-v1';
+import type { RegisterMessage } from '@agent-plugin/gateway-schema';
 
 /**
  * Gateway register 报文所需输入。

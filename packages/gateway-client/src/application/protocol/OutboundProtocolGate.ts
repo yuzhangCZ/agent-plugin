@@ -1,13 +1,15 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES, type HeartbeatMessage, type RegisterMessage } from '@agent-plugin/gateway-wire-v1';
-import type { WireContractViolation } from '@agent-plugin/gateway-wire-v1';
+import {
+  HEARTBEAT_MESSAGE_TYPE,
+  REGISTER_MESSAGE_TYPE,
+  type HeartbeatMessage,
+  type RegisterMessage,
+  type WireContractViolation,
+} from '@agent-plugin/gateway-schema';
 
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import { getMessageType } from '../telemetry/message-log-fields.ts';
 import type { GatewayWireCodec } from '../../ports/GatewayWireCodec.ts';
 import type { GatewaySendPayload } from '../../ports/GatewayClientMessages.ts';
-
-const [REGISTER_MESSAGE_TYPE] = TRANSPORT_UPSTREAM_MESSAGE_TYPES;
-const HEARTBEAT_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[3];
 
 function isControlMessageType(messageType: string): boolean {
   return messageType === REGISTER_MESSAGE_TYPE || messageType === HEARTBEAT_MESSAGE_TYPE;
@@ -43,7 +45,7 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
       throw this.toUnsupportedMessageTypeError(message);
     }
 
-    const validation = this.wireCodec.validateTransportMessage(message);
+    const validation = this.wireCodec.validateGatewayUplinkBusinessMessage(message);
     if (!validation.ok) {
       throw this.toProtocolViolation(message, validation.error);
     }
@@ -57,7 +59,7 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
       throw this.toUnsupportedMessageTypeError(message);
     }
 
-    const validation = this.wireCodec.validateTransportMessage(message);
+    const validation = this.wireCodec.validateGatewayWireProtocolMessage(message);
     if (!validation.ok) {
       throw this.toProtocolViolation(message, validation.error);
     }

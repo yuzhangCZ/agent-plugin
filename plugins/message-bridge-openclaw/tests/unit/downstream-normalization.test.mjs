@@ -266,14 +266,24 @@ async function createOpenClawGatewayBridgeForTest() {
 test("openclaw bridge applies legacy compat after shared client emits typed facade message", async () => {
   const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
 
+  connection.emit("inbound", {
+    kind: "business",
+    messageType: "invoke",
+    message: {
+      type: "invoke",
+      welinkSessionId: "wl_legacy",
+      action: "create_session",
+      payload: {},
+    },
+    rawPayload: {
+      sessionId: "session-123",
+    },
+  });
   connection.emit("message", {
     type: "invoke",
     welinkSessionId: "wl_legacy",
     action: "create_session",
     payload: {},
-    rawPayload: {
-      sessionId: "session-123",
-    },
   });
   await new Promise((resolve) => setImmediate(resolve));
 

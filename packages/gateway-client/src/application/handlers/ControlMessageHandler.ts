@@ -1,10 +1,12 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES } from '@agent-plugin/gateway-wire-v1';
-import type { RegisterOkMessage, RegisterRejectedMessage } from '@agent-plugin/gateway-wire-v1';
+import {
+  REGISTER_OK_MESSAGE_TYPE,
+  REGISTER_REJECTED_MESSAGE_TYPE,
+  type RegisterOkMessage,
+  type RegisterRejectedMessage,
+} from '@agent-plugin/gateway-schema';
 
 import { GATEWAY_CLIENT_STATE, type GatewayClientState } from '../../domain/state.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
-
-const [, REGISTER_OK_MESSAGE_TYPE, REGISTER_REJECTED_MESSAGE_TYPE] = TRANSPORT_UPSTREAM_MESSAGE_TYPES;
 
 export type ControlMessageCommand =
   | { kind: 'noop' }

@@ -1,6 +1,7 @@
 import {
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES,
-} from '@agent-plugin/gateway-wire-v1';
+  REGISTER_OK_MESSAGE_TYPE,
+  REGISTER_REJECTED_MESSAGE_TYPE,
+} from '@agent-plugin/gateway-schema';
 
 import { InboundFrameDecoder } from '../protocol/InboundFrameDecoder.ts';
 import { InboundProtocolAdapter } from '../protocol/InboundProtocolAdapter.ts';
@@ -13,9 +14,6 @@ import { buildMessagePreview } from '../telemetry/message-log-fields.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { HeartbeatLoop } from './HeartbeatLoop.ts';
 import { ReconnectOrchestrator } from './ReconnectOrchestrator.ts';
-
-const REGISTER_OK_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[1];
-const REGISTER_REJECTED_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[2];
 
 function logDebug(logger: GatewayRuntimeContext['logger'], message: string, meta?: Record<string, unknown>): void {
   if (!logger) {

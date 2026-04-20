@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { validateUpstreamMessage, UPSTREAM_MESSAGE_TYPE } from "../../src/gateway-wire/transport.ts";
+import { validateGatewayUplinkBusinessMessage, UPSTREAM_MESSAGE_TYPE } from "../../src/gateway-wire/transport.ts";
 
 const bridgeSourcePath = fileURLToPath(new URL("../../src/OpenClawGatewayBridge.ts", import.meta.url));
 
 test("shared upstream validator rejects malformed tool_event envelopes", () => {
-  const result = validateUpstreamMessage({
+  const result = validateGatewayUplinkBusinessMessage({
     type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
     toolSessionId: "tool-invalid",
     event: {

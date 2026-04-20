@@ -10,15 +10,15 @@ importers:
 
   packages/gateway-client:
     dependencies:
-      '@agent-plugin/gateway-wire-v1':
+      '@agent-plugin/gateway-schema':
         specifier: workspace:*
-        version: link:../gateway-wire-v1
+        version: link:../gateway-schema
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15
 
-  packages/gateway-wire-v1:
+  packages/gateway-schema:
     dependencies:
       zod:
         specifier: ^4.1.8
@@ -39,9 +39,9 @@ importers:
       '@agent-plugin/gateway-client':
         specifier: workspace:*
         version: link:../../packages/gateway-client
-      '@agent-plugin/gateway-wire-v1':
+      '@agent-plugin/gateway-schema':
         specifier: workspace:*
-        version: link:../../packages/gateway-wire-v1
+        version: link:../../packages/gateway-schema
       '@agent-plugin/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -78,9 +78,9 @@ importers:
 
   plugins/message-bridge-openclaw:
     dependencies:
-      '@agent-plugin/gateway-wire-v1':
+      '@agent-plugin/gateway-schema':
         specifier: workspace:*
-        version: link:../../packages/gateway-wire-v1
+        version: link:../../packages/gateway-schema
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

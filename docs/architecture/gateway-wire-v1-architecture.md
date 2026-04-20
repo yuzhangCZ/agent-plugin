@@ -1,28 +1,28 @@
-# gateway-wire-v1 架构设计
+# gateway-wire-v1 架构设计（历史名，现包名为 `gateway-schema`）
 
 **Version:** 1.0  
 **Date:** 2026-03-30  
-**Status:** Frozen  
+**Status:** Superseded by `@agent-plugin/gateway-schema`  
 **Owner:** agent-plugin maintainers  
-**Related:** [bridge-refactor-architecture.md](./bridge-refactor-architecture.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [gateway-wire-v1-module-design.md](../design/gateway-wire-v1-module-design.md), [gateway-wire-v1-event-contract.md](../design/interfaces/gateway-wire-v1-event-contract.md)
+**Related:** [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md), [bridge-refactor-architecture.md](./bridge-refactor-architecture.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [gateway-wire-v1-module-design.md](../design/gateway-wire-v1-module-design.md), [gateway-wire-v1-event-contract.md](../design/interfaces/gateway-wire-v1-event-contract.md)
 
 ## 背景
 
-`message-bridge` 和 `message-bridge-openclaw` 过去分别维护自己的下行归一化、上行 transport 和事件投影逻辑，导致外部 wire shape 没有单一真源。`gateway-wire-v1` 的目标不是重写桥接逻辑，而是把当前 `ai-gateway` 对外协议冻结成一个独立、可测试、可迁移的协议边界。
+`message-bridge` 和 `message-bridge-openclaw` 过去分别维护自己的下行归一化、上行 transport 和事件投影逻辑，导致外部 wire shape 缺少清晰边界。最初设计名为 `gateway-wire-v1`，当前实现包已重命名为 `@agent-plugin/gateway-schema`，用来承接当前态协议 schema 边界。
 
 ## 参考基线
 
 - `Reference Host SDK: @opencode-ai/plugin@1.2.15`
 - `Reference Host SDK: @opencode-ai/sdk@1.2.15`
 
-`gateway-wire-v1` 只参考上述版本下当前可观察的宿主行为，不直接依赖宿主类型作为共享真源。宿主版本升级时，必须先重新做事件字段和 transport 契约评审，再决定是否升级共享协议。
+`@agent-plugin/gateway-schema` 只参考上述版本下当前可观察的宿主行为，不直接依赖宿主类型作为共享真源。宿主版本升级时，必须先重新做事件字段和 transport 契约评审，再决定是否升级共享协议。
 
 ## 边界
 
 ## 当前源码结构
 
 ```text
-packages/gateway-wire-v1/src/
+packages/gateway-schema/src/
   contract/
     literals/
     schemas/
@@ -38,35 +38,45 @@ packages/gateway-wire-v1/src/
   index.ts
 ```
 
-- `contract/*` 是唯一协议真源，负责字面量、canonical schema 和协议错误。
+- `contract/*` 是当前态协议 schema 真源，负责字面量、canonical schema 和协议错误。
 - 协议公开类型统一由 `z.output<typeof schema>` 派生，不再保留第二份手写协议 model。
 - `application/*` 只编排端口与用例，不再承载协议结构定义。
 - `adapters/*` 只做 projector、normalizer、validator、reporter 和 façade，不再维护第二份 canonical schema。
 - 旧 `src/domain/*` 与 `src/adapters/zod/schemas/*` 兼容层已删除，后续不得回流。
 
-### `gateway-wire-v1` 负责什么
+### `gateway-schema` 负责什么
 
-- 冻结 `DownstreamMessage`、`GatewayToolEventV1`、`UpstreamTransportMessage`
+- 冻结当前已落地的 `GatewayDownstreamBusinessRequest`
+- 冻结当前已落地的 `GatewayUplinkBusinessMessage`
+- 冻结当前已落地的 `GatewayTransportControlMessage`
+- 通过 `GatewayWireProtocol` 汇总当前态全量协议
+- 通过 `GatewayToolEventPayload` 冻结 `tool_event.event` 当前白名单
 - 校验协议输入，产出正式 wire 对象
 - 统一协议异常模型
 - 提供 façade 和端口接口
 - 提供常量与类型守卫的共享入口
 
-### `gateway-wire-v1` 不负责什么
+### `gateway-schema` 不负责什么
 
 - `gateway-client` 的连接、鉴权、重连、READY gating
 - `bridge-mapper` 的语义映射
 - `bridge-application` 的 policy、identity、capability 决策
 - 宿主 raw event 的提取和投影生成
 - 插件私有 legacy 兼容适配
+- `SkillProviderEvent` 的具体 schema 落地
 
 ### 分工关系
 
 - 宿主 SDK：产生 raw event 和宿主调用能力
 - runtime：负责连接生命周期与运行时编排
 - mapper：把 raw event 投影成共享 wire 形状
-- `gateway-wire-v1`：只校验最终对外形状，不接管 raw 提取
+- `gateway-schema`：只校验最终对外形状，不接管 raw 提取
 - 前端 / gateway：只依赖共享字段表消费协议
+
+补充说明：
+
+- `gateway-schema` 负责当前已落地的 schema contract。
+- 面向长期演进的协议层术语与目标态关系，由 [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md) 统一定义。
 
 ## 六原则落地
 
@@ -79,7 +89,7 @@ packages/gateway-wire-v1/src/
 
 ## 公开入口规则
 
-- 外部消费者优先通过包入口 `@agent-plugin/gateway-wire-v1` 使用共享能力。
+- 外部消费者优先通过包入口 `@agent-plugin/gateway-schema` 使用共享能力。
 - 插件内部若需要本地包装层，应只依赖各自 `gateway-wire/*` 适配入口，不直接穿透到共享包源码内部路径。
 - 测试允许为了静态契约校验直接读取 `src/contract/*`，但不得再引用已删除的 `src/domain/*` 或 `src/adapters/zod/schemas/*`。
 
@@ -95,9 +105,11 @@ packages/gateway-wire-v1/src/
 - `invoke.permission_reply`
 - `invoke.question_reply`
 
-### 上行 transport
+### 上行 current-state 协议
 
 - `register`
+- `register_ok`
+- `register_rejected`
 - `heartbeat`
 - `tool_event`
 - `tool_done`
@@ -127,6 +139,18 @@ packages/gateway-wire-v1/src/
 - `question.asked`
 
 这些类型必须与共享包 `SUPPORTED_TOOL_EVENT_TYPES` 保持一致。
+
+当前代码结构上，这些 schema 已收敛到 `contract/schemas/tool-event/opencode-provider-event/*`，并由 `GatewayToolEventPayload` 统一导出。当前公共 API 不暴露任何 `SkillProviderEvent` 占位 schema。
+
+### `upstream` 入口拆分
+
+当前共享包不再把 business message 和 transport/control message 混在同一个主入口里：
+
+- `upstream-business.ts`：`GatewayUplinkBusinessMessage`
+- `upstream-control.ts`：`GatewayTransportControlMessage`
+- `upstream.ts`：`GatewayWireProtocol`
+
+这样 `GatewayUplinkBusinessMessage` 明确只覆盖业务上行消息，不再混入 `register` / `heartbeat`。
 
 ## 异常建模
 
@@ -174,4 +198,4 @@ packages/gateway-wire-v1/src/
 
 ## 结论
 
-`gateway-wire-v1` 是 Phase 1 的协议真源层，只负责外部 wire 的稳定边界。它必须显式定义 `tool_event.event`，必须用可验证的字段表冻结行为，并且不能再依赖宿主 SDK 类型作为共享真源。
+历史上的 `gateway-wire-v1` 已完成向 `@agent-plugin/gateway-schema` 的收敛。当前共享包只负责已落地外部 wire 的稳定 schema 边界：显式定义 `tool_event.event` 当前白名单、拆分 upstream business/control 边界，并继续避免依赖宿主 SDK 类型作为共享真源。

@@ -1,4 +1,4 @@
-import { TRANSPORT_UPSTREAM_MESSAGE_TYPES } from '@agent-plugin/gateway-wire-v1';
+import { REGISTER_MESSAGE_TYPE } from '@agent-plugin/gateway-schema';
 
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
@@ -10,7 +10,6 @@ import { ReconnectOrchestrator } from './ReconnectOrchestrator.ts';
 import { HeartbeatLoop } from './HeartbeatLoop.ts';
 
 const GATEWAY_REJECTION_CLOSE_CODES = new Set([4403, 4408, 4409]);
-const REGISTER_MESSAGE_TYPE = TRANSPORT_UPSTREAM_MESSAGE_TYPES[0];
 
 type GatewayCloseEventLike = Partial<CloseEvent> & {
   code?: unknown;

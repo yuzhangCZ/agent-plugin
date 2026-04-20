@@ -12,7 +12,7 @@ import type { OutboundProtocolGate } from '../src/application/protocol/OutboundP
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
 import { ControlMessageHandler } from '../src/application/handlers/ControlMessageHandler.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
-import { GatewayWireV1CodecAdapter } from '../src/adapters/GatewayWireV1CodecAdapter.ts';
+import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
 
 class FakeWebSocket {
   static OPEN = 1;
@@ -168,7 +168,7 @@ function createFakeSink() {
 }
 
 function buildFakeDependencies(overrides: Partial<GatewayClientRuntimeDependencies> = {}): GatewayClientRuntimeDependencies {
-  const wireCodec = overrides.wireCodec ?? new GatewayWireV1CodecAdapter();
+  const wireCodec = overrides.wireCodec ?? new GatewaySchemaCodecAdapter();
   return {
     transport: overrides.transport ?? new FakeTransport(),
     heartbeatScheduler: overrides.heartbeatScheduler ?? new FakeHeartbeatScheduler(),
@@ -502,7 +502,7 @@ test('invalid control frame emits protocol error instead of being silently ignor
   const logs = {
     error: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
   };
-  const fallbackCodec = new GatewayWireV1CodecAdapter();
+  const fallbackCodec = new GatewaySchemaCodecAdapter();
 
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
@@ -517,7 +517,10 @@ test('invalid control frame emits protocol error instead of being silently ignor
       normalizeDownstream(raw) {
         return fallbackCodec.normalizeDownstream(raw);
       },
-      validateTransportMessage(raw) {
+      validateGatewayUplinkBusinessMessage(raw) {
+        return fallbackCodec.validateGatewayUplinkBusinessMessage(raw);
+      },
+      validateGatewayWireProtocolMessage(raw) {
         if (
           raw &&
           typeof raw === 'object' &&
@@ -537,7 +540,7 @@ test('invalid control frame emits protocol error instead of being silently ignor
             },
           };
         }
-        return fallbackCodec.validateTransportMessage(raw);
+        return fallbackCodec.validateGatewayWireProtocolMessage(raw);
       },
     },
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
@@ -584,9 +587,10 @@ test('invalid control frame emits protocol error instead of being silently ignor
   client.disconnect();
 });
 
-test('business message preserves rawPayload for plugin-private compat after shared normalization', async () => {
+test('business inbound frame preserves rawPayload while business message stays on typed contract', async () => {
   FakeWebSocket.instances = [];
   const messages: Array<Record<string, unknown>> = [];
+  const inbound: unknown[] = [];
 
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
@@ -596,6 +600,7 @@ test('business message preserves rawPayload for plugin-private compat after shar
   });
 
   client.on('message', (message) => messages.push(message as Record<string, unknown>));
+  client.on('inbound', (message) => inbound.push(message));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
@@ -620,6 +625,16 @@ test('business message preserves rawPayload for plugin-private compat after shar
     action: 'create_session',
     welinkSessionId: 'wl_legacy',
     payload: {},
+  });
+  assert.deepEqual(inbound.at(-1), {
+    kind: 'business',
+    messageType: 'invoke',
+    message: {
+      type: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'wl_legacy',
+      payload: {},
+    },
     rawPayload: {
       sessionId: 'session-123',
       metadata: { title: 'hello' },
@@ -828,7 +843,7 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
   const heartbeatScheduler = new FakeHeartbeatScheduler();
   const reconnectScheduler = new FakeReconnectScheduler();
   const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
-  const wireCodec = new GatewayWireV1CodecAdapter();
+  const wireCodec = new GatewaySchemaCodecAdapter();
   const runtime = new GatewayClientRuntime(
     {
       url: 'ws://localhost:8081/ws/agent',

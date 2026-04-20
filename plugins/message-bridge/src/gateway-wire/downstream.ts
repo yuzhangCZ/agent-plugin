@@ -3,7 +3,7 @@ import {
   INVOKE_ACTIONS,
   normalizeDownstream as normalizeSharedDownstream,
   type WireContractViolation,
-} from '@agent-plugin/gateway-wire-v1';
+} from '@agent-plugin/gateway-schema';
 
 import { asRecord, asTrimmedString, type PlainObject } from '../utils/type-guards.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
@@ -13,7 +13,7 @@ import type {
   NormalizedDownstreamMessage,
 } from '../protocol/downstream/DownstreamMessageTypes.js';
 
-export * from '@agent-plugin/gateway-wire-v1';
+export * from '@agent-plugin/gateway-schema';
 export type {
   DownstreamNormalizationError,
   NormalizeResult,
