@@ -97,6 +97,13 @@ interface DownstreamLogFields {
   toolSessionId?: string;
 }
 
+function withOpencodeFamily<T extends object>(event: T): T & { family: 'opencode' } {
+  return {
+    ...event,
+    family: 'opencode',
+  };
+}
+
 export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
   private readonly registry = new DefaultActionRegistry();
@@ -337,6 +344,7 @@ export class BridgeRuntime {
     this.logEventForwardingDetail(normalized, forwardingLogger);
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
+    const rawEvent = withOpencodeFamily(normalized.raw);
     const transportEnvelope: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: normalized.common.toolSessionId,
@@ -345,7 +353,7 @@ export class BridgeRuntime {
     const originalEnvelope = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: normalized.common.toolSessionId,
-      event: normalized.raw,
+      event: rawEvent,
     };
     const transportLogContext: GatewaySendLogContext = {
       traceId: bridgeMessageId,

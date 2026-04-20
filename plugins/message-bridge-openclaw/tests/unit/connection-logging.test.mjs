@@ -331,6 +331,7 @@ test("gateway send/receive logs include message correlation fields", async (t) =
         type: "tool_event",
         toolSessionId: "tool_send_1",
         event: {
+          family: "opencode",
           type: "message.part.updated",
           properties: {
             part: {
@@ -439,6 +440,7 @@ test("send rejects business messages before READY and rejects heartbeat control 
           type: "tool_event",
           toolSessionId: "tool_before_ready",
           event: {
+            family: "opencode",
             type: "message.part.updated",
             properties: {
               part: {
@@ -585,6 +587,7 @@ test("raw packet logs are disabled when debug=false", async () => {
       type: "tool_event",
       toolSessionId: "tool_raw_disabled",
       event: {
+        family: "opencode",
         type: "message.part.updated",
         properties: {
           part: {
@@ -630,6 +633,7 @@ test("raw packet logs are readable and formatted when debug=true", async () => {
       type: "tool_event",
       toolSessionId: "tool_raw_debug",
       event: {
+        family: "opencode",
         type: "message.part.updated",
         properties: {
           part: {
@@ -660,7 +664,7 @@ test("raw packet logs are readable and formatted when debug=true", async () => {
     assert.equal(Boolean(sendLog), true);
     assert.equal(
       sendLog.message,
-      '「sendMessage」===>「{"type":"tool_event","toolSessionId":"tool_raw_debug","event":{"type":"message.part.updated","properties":{"part":{"id":"prt_raw_debug","sessionID":"tool_raw_debug","messageID":"msg_raw_debug","type":"text","text":"hello"}}}}」',
+      '「sendMessage」===>「{"type":"tool_event","toolSessionId":"tool_raw_debug","event":{"family":"opencode","type":"message.part.updated","properties":{"part":{"id":"prt_raw_debug","sessionID":"tool_raw_debug","messageID":"msg_raw_debug","type":"text","text":"hello"}}}}」',
     );
     assert.equal(Boolean(errorLog), true);
     assert.equal(errorLog.message, '「onError」===>「{"type":"error_event","reason":"upstream"}」');

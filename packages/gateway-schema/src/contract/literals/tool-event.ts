@@ -13,7 +13,7 @@ export type MessagePartDeltaField = (typeof MESSAGE_PART_DELTA_FIELDS)[number];
 export const SESSION_STATUS_TYPES = ['busy', 'idle'] as const;
 export type SessionStatusType = (typeof SESSION_STATUS_TYPES)[number];
 
-export const TOOL_EVENT_TYPES = [
+export const OPENCODE_TOOL_EVENT_TYPES = [
   'message.updated',
   'message.part.updated',
   'message.part.delta',
@@ -27,5 +27,42 @@ export const TOOL_EVENT_TYPES = [
   'question.asked',
 ] as const;
 
-export const SUPPORTED_TOOL_EVENT_TYPES = TOOL_EVENT_TYPES;
-export type SupportedToolEventType = (typeof TOOL_EVENT_TYPES)[number];
+/**
+ * 历史别名：保留给现有 opencode 侧调用方，语义等价于 OPENCODE_TOOL_EVENT_TYPES。
+ */
+export const TOOL_EVENT_TYPES = OPENCODE_TOOL_EVENT_TYPES;
+
+export const SKILL_PROVIDER_EVENT_TYPES = [
+  'text.delta',
+  'text.done',
+  'thinking.delta',
+  'thinking.done',
+  'tool.update',
+  'question',
+  'permission.ask',
+  'permission.reply',
+  'step.start',
+  'step.done',
+  'session.status',
+  'session.error',
+] as const;
+
+export const SUPPORTED_TOOL_EVENT_TYPES = [
+  ...OPENCODE_TOOL_EVENT_TYPES,
+  'text.delta',
+  'text.done',
+  'thinking.delta',
+  'thinking.done',
+  'tool.update',
+  'question',
+  'permission.ask',
+  'permission.reply',
+  'step.start',
+  'step.done',
+  'session.status',
+  'session.error',
+] as const;
+
+export type OpencodeToolEventType = (typeof OPENCODE_TOOL_EVENT_TYPES)[number];
+export type SkillProviderEventType = (typeof SKILL_PROVIDER_EVENT_TYPES)[number];
+export type SupportedToolEventType = (typeof SUPPORTED_TOOL_EVENT_TYPES)[number];

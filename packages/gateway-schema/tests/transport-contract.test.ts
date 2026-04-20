@@ -213,6 +213,7 @@ test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envel
     type: 'tool_event',
     toolSessionId: 'tool-invalid',
     event: {
+      family: 'opencode',
       type: 'session.status',
       properties: {},
     },
@@ -226,6 +227,50 @@ test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envel
     messageType: 'session.status',
     eventType: 'session.status',
   });
+});
+
+test('validateGatewayUpstreamTransportMessage rejects unknown explicit tool_event families instead of guessing by shape', () => {
+  const result = validateGatewayUpstreamTransportMessage({
+    type: 'tool_event',
+    toolSessionId: 'tool-skill',
+    event: {
+      family: 'other',
+      type: 'session.status',
+      properties: {
+        sessionStatus: 'idle',
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'event',
+    code: 'invalid_field_value',
+    field: 'family',
+  });
+});
+
+test('validateGatewayUpstreamTransportMessage accepts tool_event envelopes for both payload families', () => {
+  const opencodeResult = validateGatewayUpstreamTransportMessage({
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: createGatewayWireMessageUpdatedEvent(),
+  });
+
+  const skillResult = validateGatewayUpstreamTransportMessage({
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      family: 'skill',
+      type: 'session.status',
+      properties: {
+        sessionStatus: 'idle',
+      },
+    },
+  });
+
+  assert.equal(opencodeResult.ok, true);
+  assert.equal(skillResult.ok, true);
 });
 
 test('validateGatewayUpstreamTransportMessage rejects downstream requests', () => {

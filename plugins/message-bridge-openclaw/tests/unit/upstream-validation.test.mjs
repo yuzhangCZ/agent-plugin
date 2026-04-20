@@ -12,6 +12,7 @@ test("shared upstream validator rejects malformed tool_event envelopes", () => {
     type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
     toolSessionId: "tool-invalid",
     event: {
+      family: "opencode",
       type: "question.asked",
       properties: {
         sessionID: "tool-invalid",

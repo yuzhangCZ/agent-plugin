@@ -110,13 +110,14 @@ GatewayUplinkBusinessMessage
 当前态它表达的是：
 
 - 需要通过 `tool_event` 发送的上行业务事件载荷
-- 当前由 `OpencodeProviderEvent` 承接的已落地 payload 白名单
+- 通过显式 `family` discriminator 路由的共享 payload family
+- 当前已落地的 family 包括 `OpencodeProviderEvent` 与白名单收敛后的 `SkillProviderEvent`
 
 ### 3.6 `SkillProviderEvent`
 
-`SkillProviderEvent` 是目标态 `bridge-runtime-sdk` 的统一上行业务事件模型。
+`SkillProviderEvent` 是 current-state 已采纳的 skill payload family。
 
-从协议层角度看，它是目标态 `GatewayToolEventPayload` 的统一来源，而不是 current-state 共享 schema 已经落地的字段真源。
+当前采用固定白名单（12 个事件：`text.*`、`thinking.*`、`tool.update`、`question`、`permission.ask/reply`、`step.start/done`、`session.status/error`），并对非白名单事件 fail-closed。
 
 ### 3.7 `OpencodeProviderEvent`
 
@@ -181,9 +182,11 @@ uplink 表达 Runtime 发往 AI Gateway 的业务消息；transport 则是更窄
 这里的关键边界是：
 
 - `tool_event.event` 不是全量上行协议
+- `toolSessionId` 属于 `tool_event` envelope，而不是 `tool_event.event` payload
 - `GatewayUplinkBusinessMessage` 不等于全量协议
 - `GatewayUpstreamTransportMessage` 也不等于全量协议
 - 只有 `GatewayWireProtocol` 才是 current-state 全量协议 umbrella term
+- `gateway-client` 只能通过 `GatewayWireCodec` 消费共享协议，不应感知 provider family
 
 ## 5. 当前态与目标态
 
@@ -191,8 +194,8 @@ uplink 表达 Runtime 发往 AI Gateway 的业务消息；transport 则是更窄
 
 - `@agent-plugin/gateway-schema` 是当前已落地、可验证、可消费的 schema package。
 - `GatewayWireProtocol`、`GatewayUpstreamTransportMessage`、`GatewayDownstreamBusinessRequest`、`GatewayUplinkBusinessMessage`、`GatewayTransportControlMessage` 已在共享 schema 包中落地。
-- 当前 `tool_event.event` 的允许 shape 以 `OpencodeProviderEvent` 白名单集合为准。
-- `SkillProviderEvent` 相关协议定义仍属于目标态待补项。
+- 当前 `tool_event.event` 已要求显式 `family` discriminator。
+- 当前已落地的 `tool_event.event` family 为 `OpencodeProviderEvent` 与白名单收敛后的 `SkillProviderEvent`。
 
 因此，当前态不能被写成：
 
@@ -200,6 +203,7 @@ uplink 表达 Runtime 发往 AI Gateway 的业务消息；transport 则是更窄
 - `GatewayWireProtocol` 只是 upstream transport 的别名
 - `tool_event.event` 已经覆盖未来所有统一上行业务事件
 - `OpencodeProviderEvent` 已经等同于目标态统一核心模型
+- `SkillProviderEvent` 已经等同于目标态 runtime 的完整统一事件模型
 
 目标态责任链如下：
 

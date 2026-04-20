@@ -78,12 +78,18 @@ describe('protocol chat-stream', () => {
     assert.deepStrictEqual(sent[0], {
       type: 'tool_event',
       toolSessionId: 'ses_fixture_delta',
-      event: deltaEvent,
+      event: {
+        family: 'opencode',
+        ...deltaEvent,
+      },
     });
     assert.deepStrictEqual(sent[1], {
       type: 'tool_event',
       toolSessionId: 'ses_32c9fea15ffe2Rnv8tITmfmGmQ',
-      event: updatedEvent,
+      event: {
+        family: 'opencode',
+        ...updatedEvent,
+      },
     });
   });
 
@@ -119,6 +125,7 @@ describe('protocol chat-stream', () => {
         type: 'tool_event',
         toolSessionId: 'tool-chat-1',
         event: {
+          family: 'opencode',
           type: 'session.idle',
           properties: {
             sessionID: 'tool-chat-1',

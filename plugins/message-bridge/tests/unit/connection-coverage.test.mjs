@@ -127,6 +127,7 @@ function createMessagePartUpdatedToolEventMessage({
     type: 'tool_event',
     toolSessionId,
     event: {
+      family: 'opencode',
       type: 'message.part.updated',
       properties: {
         part: {
@@ -150,6 +151,7 @@ function createMessageUpdatedToolEventMessage({
     type: 'tool_event',
     toolSessionId,
     event: {
+      family: 'opencode',
       type: 'message.updated',
       properties: {
         info: {
@@ -169,6 +171,7 @@ function createSessionUpdatedToolEventMessage(toolSessionId) {
     type: 'tool_event',
     toolSessionId,
     event: {
+      family: 'opencode',
       type: 'session.updated',
       properties: {
         sessionID: toolSessionId,
@@ -185,6 +188,7 @@ function createSessionStatusToolEventMessage(toolSessionId) {
     type: 'tool_event',
     toolSessionId,
     event: {
+      family: 'opencode',
       type: 'session.status',
       properties: {
         sessionID: toolSessionId,
@@ -933,6 +937,7 @@ describe('DefaultGatewayConnection coverage', () => {
         type: 'tool_event',
         toolSessionId: 'tool-large',
         event: {
+          family: 'opencode',
           type: 'message.updated',
           properties: {
             info: {
@@ -976,6 +981,7 @@ describe('DefaultGatewayConnection coverage', () => {
         type: 'tool_event',
         toolSessionId: 'tool-business-1',
         event: {
+          family: 'opencode',
           type: 'session.updated',
           properties: {
             sessionID: 'tool-business-1',
@@ -1006,6 +1012,7 @@ describe('DefaultGatewayConnection coverage', () => {
             type: 'tool_event',
             toolSessionId: 'tool-business-1',
             event: {
+              family: 'opencode',
               type: 'session.updated',
               properties: {
                 sessionID: 'tool-business-1',
@@ -1043,6 +1050,7 @@ describe('DefaultGatewayConnection coverage', () => {
         type: 'tool_event',
         toolSessionId: 'tool-before',
         event: {
+          family: 'opencode',
           type: 'message.updated',
           properties: {
             info: {
@@ -1070,6 +1078,7 @@ describe('DefaultGatewayConnection coverage', () => {
         type: 'tool_event',
         toolSessionId: 'tool-after',
         event: {
+          family: 'opencode',
           type: 'session.status',
           properties: {
             sessionID: 'tool-after',
@@ -1102,6 +1111,7 @@ describe('DefaultGatewayConnection coverage', () => {
             type: 'tool_event',
             toolSessionId: 'tool-after',
             event: {
+              family: 'opencode',
               type: 'session.status',
               properties: {
                 sessionID: 'tool-after',

@@ -79,7 +79,10 @@ describe('protocol permission-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
-        event: permissionRepliedEvent,
+        event: {
+          family: 'opencode',
+          ...permissionRepliedEvent,
+        },
       },
     ]);
   });
@@ -110,6 +113,7 @@ describe('protocol permission-roundtrip', () => {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
         event: {
+          family: 'opencode',
           type: 'permission.asked',
           properties: {
             id: 'perm_fixture_1',

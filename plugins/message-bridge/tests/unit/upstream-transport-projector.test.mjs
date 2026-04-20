@@ -26,6 +26,7 @@ describe('upstream transport projection', () => {
       raw,
     });
 
+    assert.strictEqual(projected.family, 'opencode');
     assert.strictEqual(projected.type, 'message.updated');
     assert.deepStrictEqual(projected.properties.info.summary, {
       additions: 1227,
@@ -79,7 +80,10 @@ describe('upstream transport projection', () => {
       raw,
     });
 
-    assert.strictEqual(projected, raw);
+    assert.deepStrictEqual(projected, {
+      family: 'opencode',
+      ...raw,
+    });
   });
 
   test('does not mutate the original raw event while projecting message.updated', () => {
@@ -100,6 +104,7 @@ describe('upstream transport projection', () => {
       raw,
     });
 
+    assert.strictEqual(projected.family, 'opencode');
     assert.strictEqual(projected.type, 'message.updated');
     assert.deepStrictEqual(raw, original);
   });

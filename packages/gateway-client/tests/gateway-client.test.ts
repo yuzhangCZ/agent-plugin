@@ -875,6 +875,72 @@ test('validateControl uses upstream transport validation instead of the umbrella
   assert.equal(wireValidateCalls, 0);
 });
 
+test('validateBusiness uses uplink business validation instead of the umbrella validator', () => {
+  let uplinkBusinessValidationCount = 0;
+  let wireValidateCalls = 0;
+  const wireCodec = {
+    normalizeDownstream() {
+      throw new Error('normalizeDownstream is not expected here');
+    },
+    validateGatewayUplinkBusinessMessage(message: unknown) {
+      uplinkBusinessValidationCount += 1;
+      return { ok: true as const, value: message };
+    },
+    validateGatewayWireProtocolMessage(message: unknown) {
+      wireValidateCalls += 1;
+      return { ok: true as const, value: message };
+    },
+    validateGatewayUpstreamTransportMessage() {
+      throw new Error('validateGatewayUpstreamTransportMessage is not expected here');
+    },
+  } satisfies {
+    normalizeDownstream(raw: unknown): never;
+    validateGatewayUplinkBusinessMessage(raw: unknown): { ok: true; value: unknown };
+    validateGatewayWireProtocolMessage(raw: unknown): { ok: true; value: unknown };
+    validateGatewayUpstreamTransportMessage(raw: unknown): never;
+  };
+
+  const gate = new DefaultOutboundProtocolGate(wireCodec as unknown as GatewayWireCodec);
+  const result = gate.validateBusiness({ type: 'tool_done', toolSessionId: 'tool-1' });
+
+  assert.deepEqual(result, { type: 'tool_done', toolSessionId: 'tool-1' });
+  assert.equal(uplinkBusinessValidationCount, 1);
+  assert.equal(wireValidateCalls, 0);
+});
+
+test('validateBusiness accepts tool_event payloads from both provider families through wire codec', () => {
+  const gate = new DefaultOutboundProtocolGate(new GatewaySchemaCodecAdapter());
+
+  const opencodeMessage = gate.validateBusiness({
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      family: 'opencode',
+      type: 'session.idle',
+      properties: {
+        sessionID: 'session-1',
+      },
+    },
+  });
+
+  const skillMessage = gate.validateBusiness({
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      family: 'skill',
+      type: 'session.status',
+      properties: {
+        sessionStatus: 'idle',
+      },
+    },
+  });
+
+  assert.equal(opencodeMessage.type, 'tool_event');
+  assert.equal(opencodeMessage.event.family, 'opencode');
+  assert.equal(skillMessage.type, 'tool_event');
+  assert.equal(skillMessage.event.family, 'skill');
+});
+
 test('close logging follows resolved reconnectEnabled instead of raw reconnect config', async () => {
   const transport = new FakeTransport();
   const heartbeatScheduler = new FakeHeartbeatScheduler();

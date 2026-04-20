@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withToolEventFamily } from './shared-family.ts';
 
 import {
   messagePartDeltaEventSchema,
@@ -9,7 +10,6 @@ import {
   messagePartToolStateSchema,
   messagePartUpdatedEventSchema,
   messageUpdatedEventSchema,
-  opencodeProviderEventSchema,
   permissionAskedEventSchema,
   permissionUpdatedEventSchema,
   questionAskedEventSchema,
@@ -33,7 +33,6 @@ import {
   type MessageUpdatedSummaryDiff,
   type MessageUpdatedSummary,
   type MessageUpdatedTime,
-  type OpencodeProviderEvent,
   type PermissionAskedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
@@ -45,17 +44,75 @@ import {
   type SessionStatusEvent,
   type SessionUpdatedEvent,
 } from './opencode-provider-event/index.ts';
+import {
+  skillProviderEventSchema,
+  skillPermissionAskEventSchema,
+  skillPermissionReplyEventSchema,
+  skillQuestionEventSchema,
+  skillSessionStatusEventSchema,
+  skillSessionErrorEventSchema,
+  skillStepDoneEventSchema,
+  skillStepStartEventSchema,
+  skillTextDeltaEventSchema,
+  skillTextDoneEventSchema,
+  skillThinkingDeltaEventSchema,
+  skillThinkingDoneEventSchema,
+  skillToolUpdateEventSchema,
+  type SkillPermissionAskEvent,
+  type SkillPermissionReplyEvent,
+  type SkillProviderEvent,
+  type SkillQuestionEvent,
+  type SkillSessionErrorEvent,
+  type SkillSessionStatusEvent,
+  type SkillStepDoneEvent,
+  type SkillStepStartEvent,
+  type SkillTextDeltaEvent,
+  type SkillTextDoneEvent,
+  type SkillThinkingDeltaEvent,
+  type SkillThinkingDoneEvent,
+  type SkillToolUpdateEvent,
+} from './skill-provider-event/index.ts';
+
+const opencodeMessageUpdatedEventSchema = withToolEventFamily('opencode', messageUpdatedEventSchema);
+const opencodeMessagePartUpdatedEventSchema = withToolEventFamily('opencode', messagePartUpdatedEventSchema);
+const opencodeMessagePartDeltaEventSchema = withToolEventFamily('opencode', messagePartDeltaEventSchema);
+const opencodeMessagePartRemovedEventSchema = withToolEventFamily('opencode', messagePartRemovedEventSchema);
+const opencodeSessionStatusEventSchema = withToolEventFamily('opencode', sessionStatusEventSchema);
+const opencodeSessionIdleEventSchema = withToolEventFamily('opencode', sessionIdleEventSchema);
+const opencodeSessionUpdatedEventSchema = withToolEventFamily('opencode', sessionUpdatedEventSchema);
+const opencodeSessionErrorEventSchema = withToolEventFamily('opencode', sessionErrorEventSchema);
+const opencodePermissionUpdatedEventSchema = withToolEventFamily('opencode', permissionUpdatedEventSchema);
+const opencodePermissionAskedEventSchema = withToolEventFamily('opencode', permissionAskedEventSchema);
+const opencodeQuestionAskedEventSchema = withToolEventFamily('opencode', questionAskedEventSchema);
 
 /**
  * 当前态 `tool_event.event` payload family。
- * @remarks 现阶段只承接 `OpencodeProviderEvent`，不暴露 `SkillProviderEvent` 占位导出。
+ * @remarks current-state 通过显式 `family` 判定 payload 来源；
+ * `opencode` 与 `skill` 共存，但仍共享同一 `tool_event.event` 边界。
  */
-export const gatewayToolEventPayloadSchema = opencodeProviderEventSchema;
+export const opencodeProviderEventSchema = z.union([
+  opencodeMessageUpdatedEventSchema,
+  opencodeMessagePartUpdatedEventSchema,
+  opencodeMessagePartDeltaEventSchema,
+  opencodeMessagePartRemovedEventSchema,
+  opencodeSessionStatusEventSchema,
+  opencodeSessionIdleEventSchema,
+  opencodeSessionUpdatedEventSchema,
+  opencodeSessionErrorEventSchema,
+  opencodePermissionUpdatedEventSchema,
+  opencodePermissionAskedEventSchema,
+  opencodeQuestionAskedEventSchema,
+]);
 
+export const gatewayToolEventPayloadSchema = z.union([
+  opencodeProviderEventSchema,
+  skillProviderEventSchema,
+]);
+
+export type OpencodeProviderEvent = z.output<typeof opencodeProviderEventSchema>;
 export type GatewayToolEventPayload = z.output<typeof gatewayToolEventPayloadSchema>;
 
 export {
-  opencodeProviderEventSchema,
   messageUpdatedEventSchema,
   messagePartUpdatedEventSchema,
   messagePartDeltaEventSchema,
@@ -74,10 +131,22 @@ export {
   questionAskedOptionSchema,
   questionAskedItemSchema,
   questionAskedToolRefSchema,
+  skillProviderEventSchema,
+  skillTextDeltaEventSchema,
+  skillTextDoneEventSchema,
+  skillThinkingDeltaEventSchema,
+  skillThinkingDoneEventSchema,
+  skillToolUpdateEventSchema,
+  skillQuestionEventSchema,
+  skillPermissionAskEventSchema,
+  skillPermissionReplyEventSchema,
+  skillStepStartEventSchema,
+  skillStepDoneEventSchema,
+  skillSessionStatusEventSchema,
+  skillSessionErrorEventSchema,
 };
 
 export type {
-  OpencodeProviderEvent,
   MessageUpdatedEvent,
   MessageUpdatedInfo,
   MessageUpdatedModel,
@@ -101,4 +170,17 @@ export type {
   QuestionAskedItem,
   QuestionAskedToolRef,
   QuestionAskedEvent,
+  SkillProviderEvent,
+  SkillTextDeltaEvent,
+  SkillTextDoneEvent,
+  SkillThinkingDeltaEvent,
+  SkillThinkingDoneEvent,
+  SkillToolUpdateEvent,
+  SkillQuestionEvent,
+  SkillPermissionAskEvent,
+  SkillPermissionReplyEvent,
+  SkillStepStartEvent,
+  SkillStepDoneEvent,
+  SkillSessionStatusEvent,
+  SkillSessionErrorEvent,
 };

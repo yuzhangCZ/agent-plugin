@@ -149,6 +149,7 @@ describe('protocol message.updated large payload regression', () => {
 
     const toolEvent = harness.gateway.receivedMessages.find((message) => message.type === 'tool_event');
     assert.ok(toolEvent);
+    assert.strictEqual(toolEvent.event.family, 'opencode');
     assert.strictEqual(toolEvent.event.type, 'message.updated');
     assert.deepStrictEqual(toolEvent.event.properties.info.summary.diffs, [
       {
@@ -195,6 +196,7 @@ describe('protocol message.updated large payload regression', () => {
 
     const toolEvent = harness.gateway.receivedMessages.find((message) => message.type === 'tool_event');
     assert.ok(toolEvent);
+    assert.strictEqual(toolEvent.event.family, 'opencode');
     assert.strictEqual(Buffer.byteLength(JSON.stringify(toolEvent), 'utf8') < 1024, true);
     assert.deepStrictEqual(harness.gateway.closeEvents, []);
     assert.strictEqual(harness.connection.getState(), 'READY');

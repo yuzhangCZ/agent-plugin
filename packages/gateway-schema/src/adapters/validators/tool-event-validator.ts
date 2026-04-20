@@ -22,8 +22,8 @@ import {
   MESSAGE_PART_TYPES,
   MESSAGE_ROLES,
   TOOL_EVENT_TYPES,
+  type OpencodeToolEventType,
   type MessagePartStateStatus,
-  type SupportedToolEventType,
 } from '../../contract/literals/tool-event.ts';
 import type {
   GatewayToolEventPayload,
@@ -31,6 +31,7 @@ import type {
   MessagePartUpdatedEvent,
   MessageUpdatedEvent,
 } from '../../contract/schemas/tool-event/index.ts';
+import { skillProviderEventSchema } from '../../contract/schemas/tool-event/skill-provider-event/index.ts';
 import type { Result } from '../../shared/result.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { JsonValue, PlainObject, UnknownBoundaryInput } from '../../shared/boundary-types.ts';
@@ -42,7 +43,7 @@ type MessageUpdatedSummaryDiff = NonNullable<NonNullable<MessageUpdatedEvent['pr
 function requirePlainObject(
   value: UnknownBoundaryInput,
   field: string,
-  eventType: SupportedToolEventType,
+  eventType: OpencodeToolEventType,
 ): Result<PlainObject, WireContractViolation> {
   const record = readPlainObject(value);
   if (!record) {
@@ -156,9 +157,9 @@ function readSummary(raw: UnknownBoundaryInput): MessageUpdatedEvent['properties
   };
 }
 
-function parseSimpleEvent<T extends GatewayToolEventPayload>(
+function parseSimpleEvent<T>(
   raw: PlainObject,
-  eventType: SupportedToolEventType,
+  eventType: OpencodeToolEventType,
   schema: { safeParse: (input: PlainObject) => { success: true; data: T } | { success: false; error: import('zod').ZodError } },
 ): Result<T, WireContractViolation> {
   const parsed = schema.safeParse(raw);
@@ -177,9 +178,9 @@ function parseSimpleEvent<T extends GatewayToolEventPayload>(
  * 复杂事件先做白名单投影，再用 Zod 做最终准入。
  * 这样可以保留当前兼容裁剪语义，同时把最终外部形状固定在 adapter schema。
  */
-function parseProjectedEvent<T extends GatewayToolEventPayload>(
+function parseProjectedEvent<T>(
   projected: T,
-  eventType: SupportedToolEventType,
+  eventType: OpencodeToolEventType,
   schema: { safeParse: (input: T) => { success: true; data: T } | { success: false; error: import('zod').ZodError } },
 ): Result<T, WireContractViolation> {
   const parsed = schema.safeParse(projected);
@@ -265,7 +266,7 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
   });
 }
 
-function readToolState(raw: UnknownBoundaryInput, eventType: SupportedToolEventType): Result<MessagePartToolState | undefined, WireContractViolation> {
+function readToolState(raw: UnknownBoundaryInput, eventType: OpencodeToolEventType): Result<MessagePartToolState | undefined, WireContractViolation> {
   const state = readPlainObject(raw);
   if (!state) {
     return ok(undefined);
@@ -454,6 +455,55 @@ function normalizeMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartU
   return parseProjectedEvent(projected.value, eventType, messagePartUpdatedEventSchema);
 }
 
+function withFamily<Family extends GatewayToolEventPayload['family'], T extends object>(
+  family: Family,
+  event: T,
+): T & { family: Family } {
+  return {
+    family,
+    ...event,
+  };
+}
+
+function parseSkillProviderEvent(raw: PlainObject): Result<GatewayToolEventPayload, WireContractViolation> {
+  const parsed = skillProviderEventSchema.safeParse(raw);
+  return parsed.success
+    ? ok(parsed.data)
+    : fail(
+        zodErrorToWireViolation(parsed.error, {
+          stage: 'event',
+          messageType: readString(raw.type) ?? 'tool_event',
+          eventType: readString(raw.type) ?? 'tool_event',
+        }).violation,
+      );
+}
+
+function readRequiredToolEventFamily(raw: PlainObject): Result<'opencode' | 'skill', WireContractViolation> {
+  const family = readTrimmedString(raw.family);
+  if (!family) {
+    return fail({
+      stage: 'event',
+      code: 'missing_required_field',
+      field: 'family',
+      message: 'family is required',
+      messageType: readString(raw.type) ?? 'tool_event',
+      eventType: readString(raw.type) ?? 'tool_event',
+    });
+  }
+
+  if (family === 'opencode' || family === 'skill') {
+    return ok(family);
+  }
+
+  return invalidFieldType({
+    stage: 'event',
+    field: 'family',
+    expected: '"opencode" or "skill"',
+    eventType: readString(raw.type) as OpencodeToolEventType | undefined,
+    code: 'invalid_field_value',
+  });
+}
+
 export class DefaultToolEventValidator implements ToolEventValidatorPort {
   validate(raw: UnknownBoundaryInput): Result<GatewayToolEventPayload, WireContractViolation> {
     if (!isRecord(raw) || !readString(raw.type)) {
@@ -465,29 +515,60 @@ export class DefaultToolEventValidator implements ToolEventValidatorPort {
       });
     }
 
-    switch (raw.type as SupportedToolEventType) {
-      case TOOL_EVENT_TYPES[0]:
-        return normalizeMessageUpdatedEvent(raw);
-      case TOOL_EVENT_TYPES[1]:
-        return normalizeMessagePartUpdatedEvent(raw);
-      case TOOL_EVENT_TYPES[2]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[2], messagePartDeltaEventSchema);
-      case TOOL_EVENT_TYPES[3]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[3], messagePartRemovedEventSchema);
-      case TOOL_EVENT_TYPES[4]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[4], sessionStatusEventSchema);
-      case TOOL_EVENT_TYPES[5]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[5], sessionIdleEventSchema);
-      case TOOL_EVENT_TYPES[6]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[6], sessionUpdatedEventSchema);
-      case TOOL_EVENT_TYPES[7]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[7], sessionErrorEventSchema);
-      case TOOL_EVENT_TYPES[8]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[8], permissionUpdatedEventSchema);
-      case TOOL_EVENT_TYPES[9]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[9], permissionAskedEventSchema);
-      case TOOL_EVENT_TYPES[10]:
-        return parseSimpleEvent(raw, TOOL_EVENT_TYPES[10], questionAskedEventSchema);
+    const family = readRequiredToolEventFamily(raw);
+    if (!family.ok) {
+      return family;
+    }
+
+    if (family.value === 'skill') {
+      return parseSkillProviderEvent(raw);
+    }
+
+    switch (raw.type as OpencodeToolEventType) {
+      case TOOL_EVENT_TYPES[0]: {
+        const result = normalizeMessageUpdatedEvent(raw);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[1]: {
+        const result = normalizeMessagePartUpdatedEvent(raw);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[2]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[2], messagePartDeltaEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[3]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[3], messagePartRemovedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[4]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[4], sessionStatusEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[5]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[5], sessionIdleEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[6]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[6], sessionUpdatedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[7]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[7], sessionErrorEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[8]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[8], permissionUpdatedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[9]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[9], permissionAskedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[10]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[10], questionAskedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
       default:
         return unsupportedEventType(readString(raw.type) ?? String(raw.type));
     }

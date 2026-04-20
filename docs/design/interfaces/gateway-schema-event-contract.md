@@ -49,6 +49,7 @@
   "type": "tool_event",
   "toolSessionId": "tool-001",
   "event": {
+    "family": "opencode",
     "type": "message.updated"
   }
 }
@@ -59,14 +60,22 @@
 ## 通用规则
 
 - `toolSessionId` 为必填字符串。
+- `toolSessionId` 只属于 `tool_event` 外层 envelope，不属于 `tool_event.event` payload。
+- `event.family` 为必填字符串，当前允许 `opencode` / `skill`。
 - `event.type` 为必填字符串。
 - `event.type` 只能来自共享包支持集合。
 - 宿主 raw event 不得原样进入共享契约。
 - 所有事件都要先通过共享 validator，再发送到 gateway。
+- `gateway-client` 只消费共享协议校验结果，不感知 provider family 细节。
 
 ## 事件契约总览
 
-当前共享包支持的 `tool_event.event.type` 只有 11 个，必须与 `SUPPORTED_TOOL_EVENT_TYPES` 一致。它们由 `GatewayToolEventPayload` 对外暴露：
+当前共享包通过 `family` 分层维护事件白名单，并由 `SUPPORTED_TOOL_EVENT_TYPES` 暴露并集：
+
+- `opencode` family：11 个历史兼容事件
+- `skill` family：12 个协议收敛事件（不做兼容兜底）
+
+### opencode family（11）
 
 - `message.updated`
 - `message.part.updated`
@@ -79,6 +88,26 @@
 - `permission.updated`
 - `permission.asked`
 - `question.asked`
+
+### skill family（12）
+
+- `text.delta`
+- `text.done`
+- `thinking.delta`
+- `thinking.done`
+- `tool.update`
+- `question`
+- `permission.ask`
+- `permission.reply`
+- `step.start`
+- `step.done`
+- `session.status`
+- `session.error`
+
+说明：
+
+- `skill` family 只接受上述 12 个事件，未知或历史别名（如 `question.ask`、`permission.replied`、`session.idle`）必须 fail-closed。
+- `skill` family 不包含 `raw` 字段。
 
 ## `message.updated`
 
@@ -226,6 +255,7 @@
 
 ```json
 {
+  "family": "opencode",
   "type": "session.idle",
   "properties": {
     "sessionID": "sess-001"
@@ -235,8 +265,11 @@
 
 | 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
 |---|---|---|---|---|---|---|
+| `family` | string | 是 | `opencode` | payload family discriminator | 共享协议层 | current-state |
 | `type` | string | 是 | `session.idle` | 事件类型 | 共享 validator + 当前宿主可观察行为 | 同上 |
 | `properties.sessionID` | string | 是 | - | 会话 ID | 宿主投影 | 同上 |
+
+说明：`session.idle` 仅属于 `opencode` family；`skill` family 使用 `session.status` 表达会话状态。
 
 ## `session.updated`
 
@@ -349,6 +382,7 @@
 
 ```json
 {
+  "family": "opencode",
   "type": "question.asked",
   "properties": {
     "id": "question-001",
@@ -364,6 +398,7 @@
 
 | 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
 |---|---|---|---|---|---|---|
+| `family` | string | 是 | `opencode` | payload family discriminator | 共享协议层 | current-state |
 | `type` | string | 是 | `question.asked` | 事件类型 | 共享 validator + 当前宿主可观察行为 | 同上 |
 | `properties.id` | string | 否 | - | 问题请求 ID | 宿主投影 | 同上 |
 | `properties.sessionID` | string | 是 | - | 会话 ID | 宿主投影 | 同上 |
@@ -375,6 +410,8 @@
 | `properties.tool` | object | 否 | - | 关联工具信息 | 宿主投影 | 同上 |
 | `properties.tool.messageID` | string | 是 | - | 关联消息 ID | 宿主投影 | 同上 |
 | `properties.tool.callID` | string | 是 | - | 工具调用 ID | 宿主投影 | 同上 |
+
+说明：`question.asked` 仅属于 `opencode` family；`skill` family 使用 `question` 事件并采用独立字段集。
 
 ## 失败规则
 

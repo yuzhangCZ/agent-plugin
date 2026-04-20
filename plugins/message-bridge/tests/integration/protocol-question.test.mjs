@@ -99,7 +99,10 @@ describe('protocol question-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_question_1',
-        event: questionAskedEvent,
+        event: {
+          family: 'opencode',
+          ...questionAskedEvent,
+        },
       },
     ]);
 
