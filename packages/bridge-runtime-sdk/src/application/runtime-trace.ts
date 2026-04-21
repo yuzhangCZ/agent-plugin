@@ -49,6 +49,10 @@ export interface RuntimeTraceFailure {
 }
 
 export interface RuntimeDiagnostics {
+  gatewayState?: string;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+  lastHeartbeatAt: number | null;
   providerCalls: RuntimeTraceProviderCall[];
   facts: RuntimeTraceFact[];
   uplinks: Array<{ type: GatewayUplinkBusinessMessage['type']; toolSessionId?: string }>;
@@ -63,6 +67,10 @@ export interface RuntimeDiagnostics {
  */
 export class RuntimeTraceCollector {
   private readonly diagnostics: RuntimeDiagnostics = {
+    gatewayState: undefined,
+    lastInboundAt: null,
+    lastOutboundAt: null,
+    lastHeartbeatAt: null,
     providerCalls: [],
     facts: [],
     uplinks: [],
@@ -113,8 +121,28 @@ export class RuntimeTraceCollector {
     this.diagnostics.failures.push(failure);
   }
 
+  recordGatewayState(state: string): void {
+    this.diagnostics.gatewayState = state;
+  }
+
+  recordInboundAt(timestamp: number): void {
+    this.diagnostics.lastInboundAt = timestamp;
+  }
+
+  recordOutboundAt(timestamp: number): void {
+    this.diagnostics.lastOutboundAt = timestamp;
+  }
+
+  recordHeartbeatAt(timestamp: number): void {
+    this.diagnostics.lastHeartbeatAt = timestamp;
+  }
+
   snapshot(): RuntimeDiagnostics {
     return {
+      gatewayState: this.diagnostics.gatewayState,
+      lastInboundAt: this.diagnostics.lastInboundAt,
+      lastOutboundAt: this.diagnostics.lastOutboundAt,
+      lastHeartbeatAt: this.diagnostics.lastHeartbeatAt,
       providerCalls: [...this.diagnostics.providerCalls],
       facts: [...this.diagnostics.facts],
       uplinks: [...this.diagnostics.uplinks],

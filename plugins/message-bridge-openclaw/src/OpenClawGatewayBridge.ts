@@ -6,13 +6,10 @@ import {
   type PluginRuntime,
 } from "openclaw/plugin-sdk";
 import { createBridgeRuntime, type BridgeRuntime } from "@agent-plugin/bridge-runtime-sdk";
-import type { GatewayBusinessMessage, GatewayInboundFrame } from "@agent-plugin/gateway-client";
 import type {
-  DownstreamMessage,
   InvokeMessage,
 } from "./gateway-wire/downstream.js";
 import { DOWNSTREAM_MESSAGE_TYPE, INVOKE_ACTION } from "./gateway-wire/downstream.js";
-import { normalizeLegacyCreateSessionPayload } from "./adapters/legacyCreateSessionAdapter.js";
 import {
   MESSAGE_PART_FIELD,
   MESSAGE_PART_TYPE,
@@ -53,7 +50,6 @@ import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoo
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import { asRecord, asString, asTrimmedString } from "./utils/type-guards.js";
 import { buildGatewayClientConfig } from "./gateway-client.js";
-import { InvalidInvokeToolErrorResponder } from "./protocol/InvalidInvokeToolErrorResponder.js";
 import { OpenClawProviderAdapter } from "./sdk/OpenClawProviderAdapter.js";
 
 export interface OpenClawGatewayBridgeOptions {
@@ -350,11 +346,15 @@ function extractToolResultTitle(meta: unknown, toolName: string): string | undef
 
 export class OpenClawGatewayBridge {
   private readonly bridgeRuntime: Promise<BridgeRuntime>;
+  private bridgeRuntimeFacade: BridgeRuntime | null = null;
   private readonly sessionRegistry: SessionRegistry;
   private connection!: GatewayClient;
   private readonly runtime: PluginRuntime;
   private readonly registerMetadata: RegisterMetadata;
-  private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
+  private statusSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private lastLoggedGatewayState: string | null = null;
+  private pendingStatusRefresh = false;
+  private runtimePhaseOverride: MessageBridgeStatusSnapshot["runtimePhase"] | null = null;
   private readonly activeToolSessions = new Map<
     string,
     {
@@ -366,15 +366,95 @@ export class OpenClawGatewayBridge {
     }
   >();
   private readonly activeRunToSessionKey = new Map<string, string>();
-  private readonly pendingCreateSessionCompatPayloads = new Map<string, unknown[]>();
   private readonly terminatedToolSessionIds = new Set<string>();
   private readonly terminatedSessionKeys = new Set<string>();
   private running = false;
   private status: MessageBridgeStatusSnapshot;
 
+  private syncStatusFromBridgeRuntime(): void {
+    if (!this.bridgeRuntimeFacade) {
+      return;
+    }
+
+    const runtimeStatus = this.bridgeRuntimeFacade.getStatus();
+    const diagnostics = this.bridgeRuntimeFacade.getDiagnostics();
+    const nextRuntimePhase =
+      this.runtimePhaseOverride ??
+      (runtimeStatus.state === "ready"
+        ? "ready"
+        : runtimeStatus.state === "starting" || runtimeStatus.state === "reconnecting"
+          ? "connecting"
+          : runtimeStatus.state === "stopping"
+            ? "stopping"
+            : runtimeStatus.state === "failed"
+              ? "failed"
+              : "idle");
+
+    if (diagnostics.gatewayState && diagnostics.gatewayState !== this.lastLoggedGatewayState) {
+      this.lastLoggedGatewayState = diagnostics.gatewayState;
+      this.options.logger.info("gateway.state.changed", { state: diagnostics.gatewayState });
+    }
+
+    if (this.status.runtimePhase !== nextRuntimePhase) {
+      markRuntimePhase(this.options.account.accountId, nextRuntimePhase);
+      if (nextRuntimePhase === "ready") {
+        this.status.lastReadyAt = Date.now();
+      }
+    }
+
+    this.status.connected = nextRuntimePhase === "ready";
+    this.status.runtimePhase = nextRuntimePhase;
+    this.status.lastError = runtimeStatus.failureReason;
+    this.status.lastInboundAt = diagnostics.lastInboundAt;
+    this.status.lastOutboundAt = diagnostics.lastOutboundAt;
+    this.status.lastHeartbeatAt = diagnostics.lastHeartbeatAt;
+  }
+
+  private requestImmediateStatusRefresh(): void {
+    if (this.pendingStatusRefresh) {
+      return;
+    }
+    this.pendingStatusRefresh = true;
+    queueMicrotask(() => {
+      this.pendingStatusRefresh = false;
+      this.publishStatus();
+    });
+  }
+
+  private attachConnectionStatusRefreshHooks(): void {
+    const connection = this.connection as GatewayClient & {
+      on(event: string, listener: (...args: unknown[]) => void): unknown;
+    };
+
+    for (const event of ["stateChange", "inbound", "outbound", "heartbeat", "error"] as const) {
+      connection.on(event, () => {
+        this.requestImmediateStatusRefresh();
+      });
+    }
+  }
+
   private publishStatus(): void {
+    this.syncStatusFromBridgeRuntime();
     updateRuntimeSnapshot(this.options.account.accountId, { ...this.status });
     this.options.setStatus({ ...this.status });
+  }
+
+  private startStatusSyncLoop(): void {
+    if (this.statusSyncTimer) {
+      return;
+    }
+    this.statusSyncTimer = setInterval(() => {
+      this.publishStatus();
+    }, 250);
+    this.statusSyncTimer.unref?.();
+  }
+
+  private stopStatusSyncLoop(): void {
+    if (!this.statusSyncTimer) {
+      return;
+    }
+    clearInterval(this.statusSyncTimer);
+    this.statusSyncTimer = null;
   }
 
   constructor(private readonly options: OpenClawGatewayBridgeOptions) {
@@ -382,14 +462,6 @@ export class OpenClawGatewayBridge {
     this.registerMetadata = options.registerMetadata ?? resolveRegisterMetadata(options.logger);
     warnUnknownToolType(options.logger, this.registerMetadata.toolType, options.account.accountId);
     this.sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
-    this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
-      sendToolError: (message, context) => this.sendToolError(message, context),
-      canReply: () => {
-        const status = this.connection?.getStatus?.();
-        return typeof status?.isReady === "function" ? status.isReady() : true;
-      },
-      getConnectionState: () => this.connection?.getState?.(),
-    });
     this.bridgeRuntime = createBridgeRuntime({
       provider: new OpenClawProviderAdapter({
         account: this.options.account,
@@ -408,43 +480,10 @@ export class OpenClawGatewayBridge {
         this.connection = connection;
         return connection;
       },
-      observer: {
-        onStateChange: (state) => {
-          const now = Date.now();
-          this.options.logger.info("gateway.state.changed", { state });
-          this.status.connected = state === "CONNECTED" || state === "READY";
-          if (state === "READY") {
-            this.status.runtimePhase = "ready";
-            markRuntimePhase(this.options.account.accountId, "ready");
-            this.status.lastReadyAt = now;
-          } else if (state === "CONNECTING" || state === "CONNECTED") {
-            this.status.runtimePhase = "connecting";
-            markRuntimePhase(this.options.account.accountId, "connecting");
-          } else if (state === "DISCONNECTED") {
-            this.status.runtimePhase = this.running ? "connecting" : "idle";
-            markRuntimePhase(this.options.account.accountId, this.running ? "connecting" : "idle");
-          }
-          this.publishStatus();
-        },
-        onInboundFrame: (frame) => {
-          this.status.lastInboundAt = Date.now();
-          this.publishStatus();
-          this.handleInboundFrame(frame);
-        },
-        onOutboundMessage: () => {
-          this.status.lastOutboundAt = Date.now();
-          this.publishStatus();
-        },
-        onHeartbeat: () => {
-          this.status.lastHeartbeatAt = Date.now();
-          this.publishStatus();
-        },
-        onError: (error) => {
-          this.status.lastError = error.message;
-          this.publishStatus();
-        },
-        adaptDownstreamMessage: async (message) => this.applyCompatAdapter(message as DownstreamMessage),
-      },
+    }).then((runtime) => {
+      this.bridgeRuntimeFacade = runtime;
+      this.attachConnectionStatusRefreshHooks();
+      return runtime;
     });
 
     this.status = {
@@ -475,6 +514,7 @@ export class OpenClawGatewayBridge {
       return;
     }
     this.running = true;
+    this.runtimePhaseOverride = null;
     this.status.running = true;
     this.status.runtimePhase = "connecting";
     this.status.lastStartAt = Date.now();
@@ -483,12 +523,16 @@ export class OpenClawGatewayBridge {
     try {
       const runtime = await this.bridgeRuntime;
       await runtime.start();
+      this.startStatusSyncLoop();
+      this.publishStatus();
     } catch (error) {
+      this.stopStatusSyncLoop();
       this.running = false;
       this.status.running = false;
-      this.status.runtimePhase = "idle";
+      this.status.runtimePhase = "failed";
       this.status.lastError = error instanceof Error ? error.message : String(error);
-      markRuntimePhase(this.options.account.accountId, "idle");
+      this.status.connected = false;
+      markRuntimePhase(this.options.account.accountId, "failed");
       this.publishStatus();
       throw error;
     }
@@ -512,13 +556,16 @@ export class OpenClawGatewayBridge {
       return;
     }
     this.running = false;
+    this.runtimePhaseOverride = "stopping";
     this.status.runtimePhase = "stopping";
     markRuntimePhase(this.options.account.accountId, "stopping");
+    this.publishStatus();
     const runtime = await this.bridgeRuntime;
     await runtime.stop();
+    this.runtimePhaseOverride = null;
+    this.stopStatusSyncLoop();
     this.activeToolSessions.clear();
     this.activeRunToSessionKey.clear();
-    this.pendingCreateSessionCompatPayloads.clear();
     this.status.running = false;
     this.status.connected = false;
     this.status.runtimePhase = "idle";
@@ -528,53 +575,6 @@ export class OpenClawGatewayBridge {
     this.options.logger.info("runtime.stop.completed", {
       accountId: this.options.account.accountId,
     });
-  }
-
-  private handleInboundFrame(frame: GatewayInboundFrame): void {
-    this.captureCreateSessionCompatPayload(frame);
-    this.invalidInvokeToolErrorResponder.respond(frame, this.options.logger);
-  }
-
-  private captureCreateSessionCompatPayload(frame: GatewayInboundFrame): void {
-    if (frame.kind !== "business" || frame.message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE) {
-      return;
-    }
-    if (frame.message.action !== INVOKE_ACTION.CREATE_SESSION || frame.rawPayload === undefined) {
-      return;
-    }
-
-    const existing = this.pendingCreateSessionCompatPayloads.get(frame.message.welinkSessionId);
-    if (existing) {
-      existing.push(frame.rawPayload);
-      return;
-    }
-    this.pendingCreateSessionCompatPayloads.set(frame.message.welinkSessionId, [frame.rawPayload]);
-  }
-
-  private takeCreateSessionCompatPayload(welinkSessionId: string): unknown | undefined {
-    const queue = this.pendingCreateSessionCompatPayloads.get(welinkSessionId);
-    if (!queue || queue.length === 0) {
-      return undefined;
-    }
-
-    const payload = queue.shift();
-    if (queue.length === 0) {
-      this.pendingCreateSessionCompatPayloads.delete(welinkSessionId);
-    }
-    return payload;
-  }
-
-  private applyCompatAdapter(message: GatewayBusinessMessage): DownstreamMessage {
-    if (message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE || message.action !== INVOKE_ACTION.CREATE_SESSION) {
-      return message as DownstreamMessage;
-    }
-
-    const compatPayload = this.takeCreateSessionCompatPayload(message.welinkSessionId);
-    const payload = normalizeLegacyCreateSessionPayload(compatPayload ?? message.payload).payload;
-    return {
-      ...message,
-      payload,
-    } as DownstreamMessage;
   }
 
   private async handleInvoke(

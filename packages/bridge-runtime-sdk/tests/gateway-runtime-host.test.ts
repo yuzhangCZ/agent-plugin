@@ -66,9 +66,8 @@ function createGatewayConfig(): GatewayClientConfig {
   };
 }
 
-test('host observer can consume inbound frames and adapt downstream messages', async () => {
+test('host runtime records gateway diagnostics and processes downstream messages', async () => {
   const connection = new HostGatewayClient();
-  const inboundKinds: string[] = [];
   const runtime = await createBridgeRuntime({
     provider: {
       async health() {
@@ -101,23 +100,6 @@ test('host observer can consume inbound frames and adapt downstream messages', a
     },
     gateway: createGatewayConfig(),
     connectionFactory: () => connection,
-    observer: {
-      onInboundFrame(frame) {
-        inboundKinds.push(frame.kind);
-      },
-      adaptDownstreamMessage(message) {
-        if (message.type !== 'invoke' || message.action !== 'create_session') {
-          return message;
-        }
-        return {
-          ...message,
-          payload: {
-            ...message.payload,
-            title: 'adapted-title',
-          },
-        } as typeof message;
-      },
-    },
   });
 
   await runtime.start();
@@ -126,11 +108,10 @@ test('host observer can consume inbound frames and adapt downstream messages', a
     type: 'invoke',
     action: 'create_session',
     welinkSessionId: 'wl-1',
-    payload: {},
+    payload: { title: 'demo' },
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(inboundKinds, ['business']);
   assert.deepEqual(connection.sent[0], {
     type: 'session_created',
     welinkSessionId: 'wl-1',
@@ -139,4 +120,6 @@ test('host observer can consume inbound frames and adapt downstream messages', a
       sessionId: 'tool-1',
     },
   });
+  assert.equal(runtime.getDiagnostics().gatewayState, 'READY');
+  assert.equal(typeof runtime.getDiagnostics().lastInboundAt, 'number');
 });

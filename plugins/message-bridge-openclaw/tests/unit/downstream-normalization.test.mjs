@@ -214,6 +214,7 @@ async function createOpenClawGatewayBridgeForTest() {
   const { OpenClawGatewayBridge } = await loadOpenClawGatewayBridgeModule();
   const connection = new FakeGatewayClient();
   const logs = { debug: [], info: [], warn: [], error: [] };
+  const statuses = [];
   const logger = {
     debug(message, meta) {
       logs.debug.push({ message, meta });
@@ -252,43 +253,13 @@ async function createOpenClawGatewayBridgeForTest() {
     config: {},
     logger,
     runtime: {},
-    setStatus() {},
+    setStatus(status) {
+      statuses.push({ ...status });
+    },
     connectionFactory: () => connection,
   });
-  return { bridge, connection, logs };
+  return { bridge, connection, logs, statuses };
 }
-
-test("openclaw bridge applies legacy compat after shared client emits typed facade message", async () => {
-  const { connection } = await createOpenClawGatewayBridgeForTest();
-
-  connection.emit("inbound", {
-    kind: "business",
-    messageType: "invoke",
-    message: {
-      type: "invoke",
-      welinkSessionId: "wl_legacy",
-      action: "create_session",
-      payload: {},
-    },
-    rawPayload: {
-      sessionId: "session-123",
-    },
-  });
-  connection.emit("message", {
-    type: "invoke",
-    welinkSessionId: "wl_legacy",
-    action: "create_session",
-    payload: {},
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(connection.sent.length, 1);
-  assert.equal(connection.sent[0].type, "session_created");
-  assert.notEqual(connection.sent[0].toolSessionId, "session-123");
-  assert.notEqual(connection.sent[0].session.sessionId, "session-123");
-  assert.ok(typeof connection.sent[0].session.sessionId === "string");
-  assert.ok(connection.sent[0].session.sessionId.length > 0);
-});
 
 test("openclaw bridge source keeps manual upstream exits routed through shared validation gate", async () => {
   const source = await readFile(new URL("../../src/OpenClawGatewayBridge.ts", import.meta.url), "utf8");
@@ -340,10 +311,7 @@ test("openclaw bridge only logs unroutable invalid invoke inbound frames", async
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(connection.sent, []);
-  assert.equal(
-    logs.warn.some((entry) => entry.message === "runtime.invalid_invoke.unreplyable"),
-    true,
-  );
+  assert.equal(logs.warn.length, 0);
 });
 
 test("openclaw bridge skips invalid invoke tool_error before READY", async () => {
@@ -354,10 +322,7 @@ test("openclaw bridge skips invalid invoke tool_error before READY", async () =>
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(connection.sent, []);
-  assert.equal(
-    logs.warn.some((entry) => entry.message === "runtime.invalid_invoke.skipped_not_ready"),
-    true,
-  );
+  assert.equal(logs.warn.length, 0);
 });
 
 test("openclaw bridge ignores error events for invalid-invoke tool_error bridging", async () => {
@@ -367,10 +332,7 @@ test("openclaw bridge ignores error events for invalid-invoke tool_error bridgin
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(connection.sent, []);
-  assert.equal(
-    logs.warn.some((entry) => String(entry.message).startsWith("runtime.invalid_invoke.")),
-    false,
-  );
+  assert.equal(logs.warn.length, 0);
 });
 
 test("openclaw bridge replies tool_error when only welinkSessionId is routable", async () => {
@@ -461,4 +423,35 @@ test("openclaw bridge start wires invalid invoke inbound frames to tool_error", 
     welinkSessionId: "wl-invalid-1",
     toolSessionId: "tool-invalid-1",
   });
+});
+
+test("openclaw bridge preserves shared runtime failed state in published status", async () => {
+  const { bridge, connection, statuses } = await createOpenClawGatewayBridgeForTest();
+
+  await bridge.start();
+  connection.emit("error", {
+    code: "GATEWAY_REGISTER_REJECTED",
+    category: "auth",
+    retryable: false,
+    message: "rejected",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const latestStatus = statuses.at(-1);
+  assert.equal(latestStatus.runtimePhase, "failed");
+  assert.equal(latestStatus.connected, false);
+  assert.equal(latestStatus.lastError, "rejected");
+});
+
+test("openclaw bridge publishes stopping before settling to idle", async () => {
+  const { bridge, statuses } = await createOpenClawGatewayBridgeForTest();
+
+  await bridge.start();
+  await bridge.stop();
+
+  assert.equal(
+    statuses.some((status) => status.runtimePhase === "stopping"),
+    true,
+  );
+  assert.equal(statuses.at(-1)?.runtimePhase, "idle");
 });

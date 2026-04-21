@@ -85,6 +85,14 @@ class FakeGatewayClient extends EventEmitter implements GatewayClient {
     this.emit('message', message);
   }
 
+  emitInbound(frame: unknown): void {
+    this.emit('inbound', frame);
+  }
+
+  emitHeartbeat(message: unknown): void {
+    this.emit('heartbeat', message);
+  }
+
   emitError(error: GatewayClientErrorShape): void {
     this.emit('error', error);
   }
@@ -118,6 +126,38 @@ function flushEvents(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(resolve);
   });
+}
+
+function createInvalidInvokeInboundFrame() {
+  return {
+    kind: 'invalid',
+    messageType: 'invoke',
+    gatewayMessageId: 'gw-invalid-1',
+    action: 'chat',
+    welinkSessionId: 'wl-invalid-1',
+    toolSessionId: 'tool-invalid-1',
+    violation: {
+      violation: {
+        stage: 'payload',
+        code: 'missing_required_field',
+        field: 'payload.text',
+        message: 'payload.text is required',
+        messageType: 'invoke',
+        action: 'chat',
+        welinkSessionId: 'wl-invalid-1',
+        toolSessionId: 'tool-invalid-1',
+      },
+    },
+    rawPreview: {
+      type: 'invoke',
+      messageId: 'gw-invalid-1',
+      action: 'chat',
+      welinkSessionId: 'wl-invalid-1',
+      payload: {
+        toolSessionId: 'tool-invalid-1',
+      },
+    },
+  };
 }
 
 test('runtime starts, consumes downstream messages from gateway-client, and projects uplinks', async () => {
@@ -159,10 +199,7 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   await runtime.start();
   assert.deepEqual(runtime.getStatus(), {
     state: 'ready',
-    connected: true,
-    ready: true,
-    gatewayState: 'READY',
-    lastError: null,
+    failureReason: null,
   });
 
   connection.emitMessage({
@@ -198,7 +235,10 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   );
 
   await runtime.stop();
-  assert.equal(runtime.getStatus().state, 'stopped');
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
 });
 
 test('runtime start rejects and enters failed when provider initialize fails', async () => {
@@ -236,7 +276,10 @@ test('runtime start rejects and enters failed when provider initialize fails', a
   );
 
   await assert.rejects(runtime.start(), /provider_init_failed/);
-  assert.equal(runtime.getStatus().state, 'failed');
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'provider_init_failed',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'startup_failure',
     phase: 'start',
@@ -283,10 +326,7 @@ test('runtime reflects reconnecting and returns to ready after gateway reconnect
   await connection.connect();
   assert.deepEqual(runtime.getStatus(), {
     state: 'ready',
-    connected: true,
-    ready: true,
-    gatewayState: 'READY',
-    lastError: null,
+    failureReason: null,
   });
 });
 
@@ -337,6 +377,7 @@ test('request-level command failures stay ready and record command_execution_fai
     message: 'run_failed',
     code: undefined,
   });
+  assert.equal(runtime.getStatus().failureReason, null);
 });
 
 test('invalid downstream messages stay ready and record inbound_validation_failure', async () => {
@@ -367,25 +408,15 @@ test('invalid downstream messages stay ready and record inbound_validation_failu
         },
       },
       connection,
-      {
-        observer: {
-          adaptDownstreamMessage(message) {
-            return {
-              ...message,
-              action: 'unsupported_action',
-            };
-          },
-        },
-      },
     ),
   );
 
   await runtime.start();
   connection.emitMessage({
     type: 'invoke',
-    action: 'create_session',
+    action: 'unsupported_action',
     welinkSessionId: 'welink-1',
-    payload: {},
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
   });
   await flushEvents();
 
@@ -396,6 +427,62 @@ test('invalid downstream messages stay ready and record inbound_validation_failu
     message: 'Unsupported downstream action: unsupported_action',
     code: undefined,
   });
+  assert.equal(runtime.getStatus().failureReason, null);
+});
+
+test('runtime handles invalid invoke inbound frames and records transport diagnostics', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitInbound(createInvalidInvokeInboundFrame());
+  connection.emitHeartbeat({ type: 'heartbeat' });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    welinkSessionId: 'wl-invalid-1',
+    toolSessionId: 'tool-invalid-1',
+    error: 'gateway_invalid_invoke:missing_required_field',
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'inbound_validation_failure',
+    phase: 'runtime',
+    message: 'payload.text is required',
+    code: 'missing_required_field',
+  });
+  assert.equal(runtime.getDiagnostics().gatewayState, 'READY');
+  assert.equal(typeof runtime.getDiagnostics().lastInboundAt, 'number');
+  assert.equal(typeof runtime.getDiagnostics().lastOutboundAt, 'number');
+  assert.equal(typeof runtime.getDiagnostics().lastHeartbeatAt, 'number');
+  assert.equal(runtime.getStatus().failureReason, null);
 });
 
 test('invalid outbound messages stay ready and record outbound_validation_failure', async () => {
@@ -448,6 +535,7 @@ test('invalid outbound messages stay ready and record outbound_validation_failur
     message: 'text.delta requires an open message',
     code: 'fact_sequence_invalid',
   });
+  assert.equal(runtime.getStatus().failureReason, null);
 });
 
 test('runtime marks non-retryable gateway errors as failed', async () => {
@@ -490,7 +578,10 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
   });
   await flushEvents();
 
-  assert.equal(runtime.getStatus().state, 'failed');
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'rejected',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
     phase: 'runtime',

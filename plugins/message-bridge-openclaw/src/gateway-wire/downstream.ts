@@ -5,9 +5,8 @@ import {
   type WireContractViolation,
 } from "@agent-plugin/gateway-schema";
 
-import { normalizeLegacyCreateSessionPayload } from "../adapters/legacyCreateSessionAdapter.js";
 import type { BridgeLogger } from "../types.js";
-import type { DownstreamMessage, InvokeMessage } from "../contracts/downstream.js";
+import type { DownstreamMessage } from "../contracts/downstream.js";
 import { asRecord, asTrimmedString, hasOwn, type PlainObject } from "../utils/type-guards.js";
 
 export * from "../contracts/downstream.js";
@@ -115,19 +114,6 @@ export function logDownstreamNormalizationFailure(
   });
 }
 
-function mapCreateSessionPayload(raw: unknown, message: InvokeMessage): InvokeMessage {
-  if (message.action !== INVOKE_ACTION.CREATE_SESSION) {
-    return message;
-  }
-
-  const rawMessage = asRecord(raw);
-  const payload = rawMessage ? normalizeLegacyCreateSessionPayload(rawMessage.payload).payload : {};
-  return {
-    ...message,
-    payload,
-  };
-}
-
 export function normalizeDownstreamMessage(
   raw: unknown,
   logger?: BridgeLogger,
@@ -151,7 +137,7 @@ export function normalizeDownstreamMessage(
 
   return {
     ok: true,
-    value: mapCreateSessionPayload(raw, result.value as InvokeMessage),
+    value: result.value as DownstreamMessage,
   };
 }
 

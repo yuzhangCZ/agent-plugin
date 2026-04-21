@@ -11,7 +11,6 @@ export type BridgeRuntimeStatus =
   | 'ready'
   | 'reconnecting'
   | 'stopping'
-  | 'stopped'
   | 'failed';
 
 /**
@@ -19,10 +18,7 @@ export type BridgeRuntimeStatus =
  */
 export interface BridgeRuntimeStatusSnapshot {
   state: BridgeRuntimeStatus;
-  connected: boolean;
-  ready: boolean;
-  gatewayState?: string;
-  lastError: string | null;
+  failureReason: string | null;
 }
 
 /**
