@@ -1,9 +1,8 @@
 import type { CreateSessionPayload } from "../contracts/downstream.js";
-import { asTrimmedString, isPlainObject } from "../utils/type-guards.js";
+import { isPlainObject } from "../utils/type-guards.js";
 
 export interface LegacyCreateSessionPayloadAdapterResult {
   payload: CreateSessionPayload;
-  requestedSessionId?: string;
 }
 
 export function normalizeLegacyCreateSessionPayload(payload: unknown): LegacyCreateSessionPayloadAdapterResult {
@@ -12,10 +11,9 @@ export function normalizeLegacyCreateSessionPayload(payload: unknown): LegacyCre
   }
 
   return {
+    // legacy sessionId 只在兼容层被吸收，不再进入新的会话身份语义。
     payload: {
-      sessionId: asTrimmedString(payload.sessionId),
       metadata: isPlainObject(payload.metadata) ? payload.metadata : undefined,
     },
-    requestedSessionId: asTrimmedString(payload.sessionId),
   };
 }

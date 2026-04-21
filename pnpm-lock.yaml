@@ -8,6 +8,19 @@ importers:
 
   .: {}
 
+  packages/bridge-runtime-sdk:
+    dependencies:
+      '@agent-plugin/gateway-client':
+        specifier: workspace:*
+        version: link:../gateway-client
+      '@agent-plugin/gateway-schema':
+        specifier: workspace:*
+        version: link:../gateway-schema
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
   packages/gateway-client:
     dependencies:
       '@agent-plugin/gateway-schema':
@@ -78,6 +91,9 @@ importers:
 
   plugins/message-bridge-openclaw:
     dependencies:
+      '@agent-plugin/bridge-runtime-sdk':
+        specifier: workspace:*
+        version: link:../../packages/bridge-runtime-sdk
       '@agent-plugin/gateway-schema':
         specifier: workspace:*
         version: link:../../packages/gateway-schema

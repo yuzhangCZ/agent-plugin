@@ -38,6 +38,7 @@
     }
   },
   "dependencies": {
+    "@agent-plugin/bridge-runtime-sdk": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },

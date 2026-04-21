@@ -33,9 +33,6 @@ test("shared upstream validator rejects malformed tool_event envelopes", () => {
 test("OpenClawGatewayBridge validates upstream messages before every send path", async () => {
   const source = await readFile(bridgeSourcePath, "utf8");
 
-  assert.match(source, /const sent = this\.sendValidatedUpstreamMessage\(message, \{/);
-  assert.match(source, /const sent = this\.sendValidatedUpstreamMessage\(response, \{/);
-  assert.match(source, /this\.sendValidatedUpstreamMessage\(message, \{\s*\.\.\.sendContext,\s*eventType,/s);
-  assert.match(source, /this\.sendValidatedUpstreamMessage\(message, sendContext\);/);
-  assert.match(source, /runtime\.upstream_validation_failed/);
+  assert.match(source, /createBridgeRuntime/);
+  assert.doesNotMatch(source, /OpenClawGatewaySink/);
 });

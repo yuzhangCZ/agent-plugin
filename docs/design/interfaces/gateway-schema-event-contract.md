@@ -413,6 +413,258 @@
 
 说明：`question.asked` 仅属于 `opencode` family；`skill` family 使用 `question` 事件并采用独立字段集。
 
+## `text.delta`
+
+用途：`skill` family 文本增量事件。
+
+```json
+{
+  "family": "skill",
+  "type": "text.delta",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "part-001",
+    "content": "he"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `text.delta` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | 文本分片 ID | provider fact | 同上 |
+| `properties.content` | string | 是 | - | 文本增量内容 | provider fact | 同上 |
+
+## `text.done`
+
+用途：`skill` family 文本分片收口事件。
+
+```json
+{
+  "family": "skill",
+  "type": "text.done",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "part-001",
+    "content": "hello"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `text.done` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | 文本分片 ID | provider fact | 同上 |
+| `properties.content` | string | 是 | - | 文本收口内容 | provider fact | 同上 |
+
+## `thinking.delta`
+
+用途：`skill` family thinking 增量事件。
+
+```json
+{
+  "family": "skill",
+  "type": "thinking.delta",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "thinking-001",
+    "content": "thinking..."
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `thinking.delta` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | thinking 分片 ID | provider fact | 同上 |
+| `properties.content` | string | 是 | - | thinking 增量内容 | provider fact | 同上 |
+
+## `thinking.done`
+
+用途：`skill` family thinking 分片收口事件。
+
+```json
+{
+  "family": "skill",
+  "type": "thinking.done",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "thinking-001",
+    "content": "done thinking"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `thinking.done` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | thinking 分片 ID | provider fact | 同上 |
+| `properties.content` | string | 是 | - | thinking 收口内容 | provider fact | 同上 |
+
+## `tool.update`
+
+用途：`skill` family 工具调用状态更新。
+
+```json
+{
+  "family": "skill",
+  "type": "tool.update",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "tool-001",
+    "toolName": "search",
+    "toolCallId": "call-001",
+    "status": "completed"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `tool.update` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | tool part ID | provider fact | 同上 |
+| `properties.toolName` | string | 是 | - | 工具名 | provider fact | 同上 |
+| `properties.status` | string | 是 | `pending` / `running` / `completed` / `error` | 工具状态 | provider fact | 同上 |
+| `properties.toolCallId` | string | 否 | - | 工具调用 ID | provider fact | 同上 |
+| `properties.title` | string | 否 | - | 工具标题 | provider fact | 同上 |
+| `properties.input` | unknown | 否 | - | 工具输入快照 | provider fact | 同上 |
+| `properties.output` | unknown | 否 | - | 工具输出快照 | provider fact | 同上 |
+| `properties.error` | string | 否 | - | 错误消息 | provider fact | 同上 |
+
+## `question`
+
+用途：`skill` family 问题请求。
+
+```json
+{
+  "family": "skill",
+  "type": "question",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "call-001",
+    "toolCallId": "call-001",
+    "question": "Proceed?"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `question` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | 交互 part ID | provider fact | 同上 |
+| `properties.toolCallId` | string | 否 | - | 工具调用 ID | provider fact | 同上 |
+| `properties.question` | string | 是 | - | 问题文本 | provider fact | 同上 |
+| `properties.header` | string | 否 | - | 问题标题 | provider fact | 同上 |
+| `properties.options` | array<string> | 否 | - | 选项列表 | provider fact | 同上 |
+
+## `permission.ask`
+
+用途：`skill` family 权限请求。
+
+```json
+{
+  "family": "skill",
+  "type": "permission.ask",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "perm-001",
+    "permissionId": "perm-001"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `permission.ask` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
+| `properties.partId` | string | 是 | - | 交互 part ID | provider fact | 同上 |
+| `properties.permissionId` | string | 是 | - | 权限请求 ID | provider fact | 同上 |
+| `properties.permType` | string | 否 | - | 权限类型 | provider fact | 同上 |
+| `properties.metadata` | object | 否 | - | 附加元数据 | provider fact | 同上 |
+
+## `permission.reply`
+
+用途：`skill` family 权限回复结果。
+
+```json
+{
+  "family": "skill",
+  "type": "permission.reply",
+  "properties": {
+    "messageId": "msg-001",
+    "partId": "perm-001",
+    "permissionId": "perm-001",
+    "response": "once"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `permission.reply` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | provider / projector | 同上 |
+| `properties.partId` | string | 是 | - | 交互 part ID | provider / projector | 同上 |
+| `properties.permissionId` | string | 是 | - | 权限请求 ID | provider / projector | 同上 |
+| `properties.response` | string | 是 | `once` / `always` / `reject` | 回复结果 | provider / projector | 同上 |
+
+## `step.start`
+
+用途：`skill` family message 生命周期开始事件。
+
+```json
+{
+  "family": "skill",
+  "type": "step.start",
+  "properties": {
+    "messageId": "msg-001"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime 内部派生 | 同上 |
+| `type` | string | 是 | `step.start` | 事件类型 | `message.start` 派生 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | runtime 派生 | 同上 |
+
+## `step.done`
+
+用途：`skill` family message 生命周期收口事件。
+
+```json
+{
+  "family": "skill",
+  "type": "step.done",
+  "properties": {
+    "messageId": "msg-001",
+    "reason": "stop"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime 内部派生 | 同上 |
+| `type` | string | 是 | `step.done` | 事件类型 | `message.done` 派生 | 同上 |
+| `properties.messageId` | string | 是 | - | 消息 ID | runtime 派生 | 同上 |
+| `properties.tokens` | unknown | 否 | - | token 用量 | provider fact | 同上 |
+| `properties.cost` | number | 否 | - | 成本 | provider fact | 同上 |
+| `properties.reason` | string | 否 | - | 收口原因 | provider fact | 同上 |
+
 ## 失败规则
 
 - 未知 `event.type` 必须 fail-closed。

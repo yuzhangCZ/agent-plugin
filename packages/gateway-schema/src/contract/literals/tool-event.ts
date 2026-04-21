@@ -59,8 +59,6 @@ export const SUPPORTED_TOOL_EVENT_TYPES = [
   'permission.reply',
   'step.start',
   'step.done',
-  'session.status',
-  'session.error',
 ] as const;
 
 export type OpencodeToolEventType = (typeof OPENCODE_TOOL_EVENT_TYPES)[number];

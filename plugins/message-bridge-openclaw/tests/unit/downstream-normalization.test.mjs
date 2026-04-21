@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
+import { readFile } from "node:fs/promises";
 import {
   assertInvalidInvokeToolErrorContract,
   createInvalidInvokeInboundFrame,
@@ -254,17 +255,11 @@ async function createOpenClawGatewayBridgeForTest() {
     setStatus() {},
     connectionFactory: () => connection,
   });
-  const originalHandleCreateSession = bridge.handleCreateSession;
-  bridge.lastCompatInput = null;
-  bridge.handleCreateSession = async function patchedHandleCreateSession(message, context) {
-    bridge.lastCompatInput = message;
-    return originalHandleCreateSession.call(this, message, context);
-  };
   return { bridge, connection, logs };
 }
 
 test("openclaw bridge applies legacy compat after shared client emits typed facade message", async () => {
-  const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
+  const { connection } = await createOpenClawGatewayBridgeForTest();
 
   connection.emit("inbound", {
     kind: "business",
@@ -287,11 +282,20 @@ test("openclaw bridge applies legacy compat after shared client emits typed faca
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(bridge.lastCompatInput.type, "invoke");
-  assert.equal(bridge.lastCompatInput.payload.sessionId, "session-123");
   assert.equal(connection.sent.length, 1);
   assert.equal(connection.sent[0].type, "session_created");
-  assert.equal(connection.sent[0].session.sessionId, "session-123");
+  assert.notEqual(connection.sent[0].toolSessionId, "session-123");
+  assert.notEqual(connection.sent[0].session.sessionId, "session-123");
+  assert.ok(typeof connection.sent[0].session.sessionId === "string");
+  assert.ok(connection.sent[0].session.sessionId.length > 0);
+});
+
+test("openclaw bridge source keeps manual upstream exits routed through shared validation gate", async () => {
+  const source = await readFile(new URL("../../src/OpenClawGatewayBridge.ts", import.meta.url), "utf8");
+
+  assert.match(source, /private sendToolEvent[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
+  assert.match(source, /private sendToolDone[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
+  assert.match(source, /private sendToolError[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
 });
 
 test("openclaw bridge replies tool_error for routable invalid invoke inbound frames", async () => {

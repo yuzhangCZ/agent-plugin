@@ -10,6 +10,14 @@ function createOpencodeEvent(base, overrides = {}) {
   };
 }
 
+function createSkillEvent(base, overrides = {}) {
+  return {
+    family: 'skill',
+    ...base,
+    ...overrides,
+  };
+}
+
 export function createInvokeMessage(overrides = {}) {
   return {
     type: 'invoke',
@@ -291,6 +299,124 @@ export function createGatewayWireQuestionAskedEvent(overrides = {}) {
   }, overrides);
 }
 
+export function createGatewayWireTextDeltaEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'text.delta',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'part-skill-text',
+      content: 'he',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireTextDoneEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'text.done',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'part-skill-text',
+      content: 'hello',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireThinkingDeltaEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'thinking.delta',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'part-skill-thinking',
+      content: 'thinking...',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireThinkingDoneEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'thinking.done',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'part-skill-thinking',
+      content: 'done thinking',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireToolUpdateEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'tool.update',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'part-skill-tool',
+      toolName: 'search',
+      toolCallId: 'call-skill-wire',
+      status: 'completed',
+      title: 'Search results',
+      output: { total: 3 },
+    },
+  }, overrides);
+}
+
+export function createGatewayWireQuestionEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'question',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'call-skill-wire',
+      toolCallId: 'call-skill-wire',
+      question: 'Proceed?',
+      options: ['Yes', 'No'],
+    },
+  }, overrides);
+}
+
+export function createGatewayWirePermissionAskEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'permission.ask',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'perm-skill-wire',
+      permissionId: 'perm-skill-wire',
+      permType: 'shell',
+      metadata: {
+        command: 'ls',
+      },
+    },
+  }, overrides);
+}
+
+export function createGatewayWirePermissionReplyEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'permission.reply',
+    properties: {
+      messageId: 'msg-skill-wire',
+      partId: 'perm-skill-wire',
+      permissionId: 'perm-skill-wire',
+      response: 'once',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireStepStartEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'step.start',
+    properties: {
+      messageId: 'msg-skill-wire',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireStepDoneEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'step.done',
+    properties: {
+      messageId: 'msg-skill-wire',
+      reason: 'stop',
+    },
+  }, overrides);
+}
+
 export const GATEWAY_WIRE_TOOL_EVENT_FIXTURES = [
   { type: 'message.updated', build: createGatewayWireMessageUpdatedEvent },
   { type: 'message.part.updated', build: createGatewayWireMessagePartUpdatedEvent },
@@ -303,6 +429,16 @@ export const GATEWAY_WIRE_TOOL_EVENT_FIXTURES = [
   { type: 'permission.updated', build: createGatewayWirePermissionUpdatedEvent },
   { type: 'permission.asked', build: createGatewayWirePermissionAskedEvent },
   { type: 'question.asked', build: createGatewayWireQuestionAskedEvent },
+  { type: 'text.delta', build: createGatewayWireTextDeltaEvent },
+  { type: 'text.done', build: createGatewayWireTextDoneEvent },
+  { type: 'thinking.delta', build: createGatewayWireThinkingDeltaEvent },
+  { type: 'thinking.done', build: createGatewayWireThinkingDoneEvent },
+  { type: 'tool.update', build: createGatewayWireToolUpdateEvent },
+  { type: 'question', build: createGatewayWireQuestionEvent },
+  { type: 'permission.ask', build: createGatewayWirePermissionAskEvent },
+  { type: 'permission.reply', build: createGatewayWirePermissionReplyEvent },
+  { type: 'step.start', build: createGatewayWireStepStartEvent },
+  { type: 'step.done', build: createGatewayWireStepDoneEvent },
 ];
 
 export const GATEWAY_WIRE_SIMPLE_TOOL_EVENT_FIXTURES = [
