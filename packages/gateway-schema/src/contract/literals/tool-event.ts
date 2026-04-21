@@ -24,6 +24,7 @@ export const OPENCODE_TOOL_EVENT_TYPES = [
   'session.error',
   'permission.updated',
   'permission.asked',
+  'permission.replied',
   'question.asked',
 ] as const;
 

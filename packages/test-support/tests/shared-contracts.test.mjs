@@ -11,6 +11,7 @@ import {
   createGatewayWireCreateSessionInvokeMessage,
   createGatewayWireLegacyCreateSessionInvokeMessage,
   createGatewayWirePermissionAskedEvent,
+  createGatewayWirePermissionRepliedEvent,
   createGatewayWireMessagePartUpdatedToolEvent,
   createGatewayWirePermissionUpdatedEvent,
   createGatewayWireSessionStatusEvent,
@@ -48,6 +49,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
   assert.strictEqual(createGatewayWireCreateSessionInvokeMessage().payload.assistantId, 'persona-gateway');
   assert.strictEqual(createGatewayWirePermissionUpdatedEvent().properties.id, 'perm-gateway-wire');
   assert.strictEqual(createGatewayWirePermissionAskedEvent().properties.id, 'perm-gateway-wire');
+  assert.strictEqual(createGatewayWirePermissionRepliedEvent().properties.requestID, 'perm-gateway-wire');
   assert.strictEqual(createGatewayWireQuestionAskedEvent().properties.tool.callID, 'call-gateway-wire');
   assert.deepStrictEqual(
     GATEWAY_WIRE_SIMPLE_TOOL_EVENT_FIXTURES.map((fixture) => fixture.type),
@@ -60,6 +62,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
       'session.error',
       'permission.updated',
       'permission.asked',
+      'permission.replied',
       'question.asked',
     ],
   );

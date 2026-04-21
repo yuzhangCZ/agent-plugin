@@ -116,6 +116,7 @@ test('gateway wire simple tool_event fixtures stay aligned with the shared contr
       'session.error',
       'permission.updated',
       'permission.asked',
+      'permission.replied',
       'question.asked',
     ],
   );

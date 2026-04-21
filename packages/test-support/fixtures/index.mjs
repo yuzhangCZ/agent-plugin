@@ -274,6 +274,17 @@ export function createGatewayWirePermissionAskedEvent(overrides = {}) {
   }, overrides);
 }
 
+export function createGatewayWirePermissionRepliedEvent(overrides = {}) {
+  return createOpencodeEvent({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'tool-gateway-wire',
+      requestID: 'perm-gateway-wire',
+      reply: 'always',
+    },
+  }, overrides);
+}
+
 export function createGatewayWireQuestionAskedEvent(overrides = {}) {
   return createOpencodeEvent({
     type: 'question.asked',
@@ -428,6 +439,7 @@ export const GATEWAY_WIRE_TOOL_EVENT_FIXTURES = [
   { type: 'session.error', build: createGatewayWireSessionErrorEvent },
   { type: 'permission.updated', build: createGatewayWirePermissionUpdatedEvent },
   { type: 'permission.asked', build: createGatewayWirePermissionAskedEvent },
+  { type: 'permission.replied', build: createGatewayWirePermissionRepliedEvent },
   { type: 'question.asked', build: createGatewayWireQuestionAskedEvent },
   { type: 'text.delta', build: createGatewayWireTextDeltaEvent },
   { type: 'text.done', build: createGatewayWireTextDoneEvent },
@@ -450,6 +462,7 @@ export const GATEWAY_WIRE_SIMPLE_TOOL_EVENT_FIXTURES = [
   { type: 'session.error', build: createGatewayWireSessionErrorEvent },
   { type: 'permission.updated', build: createGatewayWirePermissionUpdatedEvent },
   { type: 'permission.asked', build: createGatewayWirePermissionAskedEvent },
+  { type: 'permission.replied', build: createGatewayWirePermissionRepliedEvent },
   { type: 'question.asked', build: createGatewayWireQuestionAskedEvent },
 ];
 

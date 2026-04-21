@@ -11,6 +11,7 @@ import {
   createGatewayWireSessionErrorEvent,
   createGatewayWirePermissionUpdatedEvent,
   createGatewayWirePermissionAskedEvent,
+  createGatewayWirePermissionRepliedEvent,
   createGatewayWireQuestionAskedEvent,
 } from '../../test-support/fixtures/index.mjs';
 import {
@@ -63,6 +64,9 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
   const permissionAskedInput = structuredClone(createGatewayWirePermissionAskedEvent());
   permissionAskedInput.properties.debug = 'drop-me';
   permissionAskedInput.properties.metadata.scope = 'repo';
+
+  const permissionRepliedInput = structuredClone(createGatewayWirePermissionRepliedEvent());
+  permissionRepliedInput.properties.extra = 'drop-me';
 
   const questionAskedInput = structuredClone(createGatewayWireQuestionAskedEvent());
   questionAskedInput.properties.context = 'drop-me';
@@ -181,6 +185,18 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
             source: 'test',
             scope: 'repo',
           },
+        },
+      },
+    },
+    {
+      name: 'permission.replied',
+      input: permissionRepliedInput,
+      expected: {
+        type: 'permission.replied',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          requestID: 'perm-gateway-wire',
+          reply: 'always',
         },
       },
     },

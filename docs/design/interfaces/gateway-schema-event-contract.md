@@ -72,7 +72,7 @@
 
 当前共享包通过 `family` 分层维护事件白名单，并由 `SUPPORTED_TOOL_EVENT_TYPES` 暴露并集：
 
-- `opencode` family：11 个历史兼容事件
+- `opencode` family：12 个历史兼容事件
 - `skill` family：12 个协议收敛事件（不做兼容兜底）
 
 ### opencode family（11）
@@ -87,6 +87,7 @@
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 ### skill family（12）
@@ -375,6 +376,32 @@
 | `properties.status` | string | 否 | - | 审批状态 | 宿主投影 | 同上 |
 | `properties.response` | string | 否 | - | 归一化后的响应结果 | 宿主投影 | 同上 |
 | `properties.resolved` | boolean | 否 | `true` / `false` | 是否已决议 | 宿主投影 | 同上 |
+
+## `permission.replied`
+
+用途：权限请求回复事件。
+
+```json
+{
+  "family": "opencode",
+  "type": "permission.replied",
+  "properties": {
+    "sessionID": "sess-001",
+    "requestID": "perm-001",
+    "reply": "always"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `opencode` | payload family discriminator | 共享协议层 | current-state |
+| `type` | string | 是 | `permission.replied` | 事件类型 | `@opencode-ai/sdk` v2 `EventPermissionReplied` | `@opencode-ai/sdk@1.2.15` |
+| `properties.sessionID` | string | 是 | - | 会话 ID | 宿主事件字段 | 同上 |
+| `properties.requestID` | string | 是 | - | 权限请求 ID | 宿主事件字段 | 同上 |
+| `properties.reply` | string | 是 | `once` / `always` / `reject` | 权限回复结果 | 宿主事件字段 | 同上 |
+
+说明：`permission.replied` 按 OpenCode SDK v2 字段原名冻结为 `requestID` / `reply`，不在 schema 层改写为 `id` / `response`。
 
 ## `question.asked`
 

@@ -29,8 +29,10 @@ import {
 } from './message-part-updated.ts';
 import {
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   permissionUpdatedEventSchema,
   type PermissionAskedEventV1,
+  type PermissionRepliedEventV1,
   type PermissionUpdatedEventV1,
 } from './permission.ts';
 import {
@@ -69,6 +71,7 @@ export const opencodeProviderEventSchema = z.discriminatedUnion('type', [
   sessionErrorEventSchema,
   permissionUpdatedEventSchema,
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   questionAskedEventSchema,
 ]);
 
@@ -93,6 +96,7 @@ export type SessionUpdatedEvent = SessionUpdatedEventV1;
 export type SessionErrorEvent = SessionErrorEventV1;
 export type PermissionUpdatedEvent = PermissionUpdatedEventV1;
 export type PermissionAskedEvent = PermissionAskedEventV1;
+export type PermissionRepliedEvent = PermissionRepliedEventV1;
 export type QuestionAskedOption = QuestionAskedOptionV1;
 export type QuestionAskedItem = QuestionAskedItemV1;
 export type QuestionAskedToolRef = QuestionAskedToolRefV1;
@@ -109,6 +113,7 @@ export {
   sessionErrorEventSchema,
   permissionUpdatedEventSchema,
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   questionAskedEventSchema,
   messagePartSchema,
   messagePartTextSchema,

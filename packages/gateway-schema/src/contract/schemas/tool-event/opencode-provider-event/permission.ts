@@ -127,3 +127,22 @@ export const permissionAskedEventSchema = z
     };
   });
 export type PermissionAskedEventV1 = z.output<typeof permissionAskedEventSchema>;
+
+export const permissionRepliedEventSchema = z
+  .object({
+    type: z.literal('permission.replied'),
+    properties: z.object({
+      sessionID: requiredTrimmedString,
+      requestID: requiredTrimmedString,
+      reply: z.enum(['once', 'always', 'reject']),
+    }),
+  })
+  .transform((event) => ({
+    type: 'permission.replied' as const,
+    properties: {
+      sessionID: event.properties.sessionID,
+      requestID: event.properties.requestID,
+      reply: event.properties.reply,
+    },
+  }));
+export type PermissionRepliedEventV1 = z.output<typeof permissionRepliedEventSchema>;

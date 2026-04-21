@@ -18,7 +18,8 @@ export const TOOL_EVENT_TYPE = {
   SESSION_ERROR: TOOL_EVENT_TYPES[7],
   PERMISSION_UPDATED: TOOL_EVENT_TYPES[8],
   PERMISSION_ASKED: TOOL_EVENT_TYPES[9],
-  QUESTION_ASKED: TOOL_EVENT_TYPES[10],
+  PERMISSION_REPLIED: TOOL_EVENT_TYPES[10],
+  QUESTION_ASKED: TOOL_EVENT_TYPES[11],
 } as const;
 
 export const MESSAGE_PART_TYPE = {
@@ -44,6 +45,7 @@ export type {
   SessionErrorEvent,
   PermissionUpdatedEvent,
   PermissionAskedEvent,
+  PermissionRepliedEvent,
   QuestionAskedEvent,
   SupportedToolEventType,
 } from '@agent-plugin/gateway-schema';

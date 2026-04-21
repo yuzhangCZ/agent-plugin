@@ -32,6 +32,7 @@ const PROTOCOL_LITERALS = [
   'session.error',
   'permission.updated',
   'permission.asked',
+  'permission.replied',
   'question.asked',
   'status_query',
   'invoke',

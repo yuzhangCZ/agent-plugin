@@ -8,6 +8,7 @@ import { messagePartUpdatedEventSchema } from '../../contract/schemas/tool-event
 import { messageUpdatedEventSchema } from '../../contract/schemas/tool-event/opencode-provider-event/message-updated.ts';
 import {
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   permissionUpdatedEventSchema,
 } from '../../contract/schemas/tool-event/opencode-provider-event/permission.ts';
 import { questionAskedEventSchema } from '../../contract/schemas/tool-event/opencode-provider-event/question.ts';
@@ -566,7 +567,11 @@ export class DefaultToolEventValidator implements ToolEventValidatorPort {
         return result.ok ? ok(withFamily('opencode', result.value)) : result;
       }
       case TOOL_EVENT_TYPES[10]: {
-        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[10], questionAskedEventSchema);
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[10], permissionRepliedEventSchema);
+        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+      }
+      case TOOL_EVENT_TYPES[11]: {
+        const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[11], questionAskedEventSchema);
         return result.ok ? ok(withFamily('opencode', result.value)) : result;
       }
       default:

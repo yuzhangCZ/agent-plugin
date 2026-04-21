@@ -6,6 +6,7 @@ import {
   createGatewayWireMessagePartDeltaEvent,
   createGatewayWireMessagePartRemovedEvent,
   createGatewayWirePermissionAskedEvent,
+  createGatewayWirePermissionRepliedEvent,
   createGatewayWirePermissionUpdatedEvent,
   createGatewayWireQuestionAskedEvent,
   createGatewayWireSessionErrorEvent,
@@ -28,6 +29,7 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
       'session.error',
       'permission.updated',
       'permission.asked',
+      'permission.replied',
       'question.asked',
     ],
   );
@@ -181,6 +183,21 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
             source: 'test',
             scope: 'repo',
           },
+        },
+      },
+    },
+    {
+      input: (() => {
+        const event = structuredClone(createGatewayWirePermissionRepliedEvent());
+        event.properties.extra = 'drop-me';
+        return event;
+      })(),
+      expected: {
+        type: 'permission.replied',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          requestID: 'perm-gateway-wire',
+          reply: 'always',
         },
       },
     },

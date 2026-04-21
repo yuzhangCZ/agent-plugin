@@ -11,6 +11,7 @@ import {
   messagePartUpdatedEventSchema,
   messageUpdatedEventSchema,
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   permissionUpdatedEventSchema,
   questionAskedEventSchema,
   questionAskedItemSchema,
@@ -34,6 +35,7 @@ import {
   type MessageUpdatedSummary,
   type MessageUpdatedTime,
   type PermissionAskedEvent,
+  type PermissionRepliedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
   type QuestionAskedItem,
@@ -83,6 +85,7 @@ const opencodeSessionUpdatedEventSchema = withToolEventFamily('opencode', sessio
 const opencodeSessionErrorEventSchema = withToolEventFamily('opencode', sessionErrorEventSchema);
 const opencodePermissionUpdatedEventSchema = withToolEventFamily('opencode', permissionUpdatedEventSchema);
 const opencodePermissionAskedEventSchema = withToolEventFamily('opencode', permissionAskedEventSchema);
+const opencodePermissionRepliedEventSchema = withToolEventFamily('opencode', permissionRepliedEventSchema);
 const opencodeQuestionAskedEventSchema = withToolEventFamily('opencode', questionAskedEventSchema);
 
 /**
@@ -101,6 +104,7 @@ export const opencodeProviderEventSchema = z.union([
   opencodeSessionErrorEventSchema,
   opencodePermissionUpdatedEventSchema,
   opencodePermissionAskedEventSchema,
+  opencodePermissionRepliedEventSchema,
   opencodeQuestionAskedEventSchema,
 ]);
 
@@ -123,6 +127,7 @@ export {
   sessionErrorEventSchema,
   permissionUpdatedEventSchema,
   permissionAskedEventSchema,
+  permissionRepliedEventSchema,
   questionAskedEventSchema,
   messagePartSchema,
   messagePartTextSchema,
@@ -166,6 +171,7 @@ export type {
   SessionErrorEvent,
   PermissionUpdatedEvent,
   PermissionAskedEvent,
+  PermissionRepliedEvent,
   QuestionAskedOption,
   QuestionAskedItem,
   QuestionAskedToolRef,
