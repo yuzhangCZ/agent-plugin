@@ -1340,6 +1340,68 @@ describe('runtime protocol strictness', () => {
     });
   });
 
+  test('keeps seeded empty message.part.updated events and logs delta bytes as zero', async () => {
+    const appLogs = [];
+    const runtime = new BridgeRuntime({
+      client: {
+        app: {
+          log: async (options) => {
+            appLogs.push(options.body);
+            return true;
+          },
+        },
+      },
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['message.part.updated']);
+    runtime.stateManager.setState('READY');
+
+    await runtime.handleEvent({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'tool-seeded-updated',
+        delta: '',
+        part: {
+          sessionID: 'tool-seeded-updated',
+          messageID: 'op-msg-seeded-updated',
+          id: 'part-seeded-updated',
+          type: 'text',
+          text: '',
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const receivedLog = appLogs.find((entry) => entry.message === 'event.received');
+    const forwardingLog = appLogs.find((entry) => entry.message === 'event.forwarding');
+
+    assert.strictEqual(receivedLog.extra.deltaBytes, 0);
+    assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
+    assert.strictEqual(sent.length, 1);
+    assert.deepStrictEqual(sent[0].message, {
+      type: 'tool_event',
+      toolSessionId: 'tool-seeded-updated',
+      event: {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'tool-seeded-updated',
+          delta: '',
+          part: {
+            sessionID: 'tool-seeded-updated',
+            messageID: 'op-msg-seeded-updated',
+            id: 'part-seeded-updated',
+            type: 'text',
+            text: '',
+          },
+        },
+      },
+    });
+  });
+
   test('forwards session.idle as tool_event and emits fallback tool_done', async () => {
     const runtime = new BridgeRuntime({ client: {} });
     const sent = [];

@@ -1379,6 +1379,7 @@ export class OpenClawGatewayBridge {
     if (state.textDisplayed && state.lastDisplayedText === finalText) {
       return;
     }
+    this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
     this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
   }
 

@@ -190,6 +190,15 @@ function findAssistantTextUpdateIndex(events, expectedText, fromIndex = 0) {
   });
 }
 
+function assertSameAssistantTextPart(events, firstIndex, secondIndex) {
+  const firstEvent = events[firstIndex]?.event;
+  const secondEvent = events[secondIndex]?.event;
+  assert.ok(firstEvent);
+  assert.ok(secondEvent);
+  assert.equal(firstEvent.properties?.part?.messageID, secondEvent.properties?.part?.messageID);
+  assert.equal(firstEvent.properties?.part?.id, secondEvent.properties?.part?.id);
+}
+
 test("create_session emits session.updated before session_created", async () => {
   const { bridge, connection } = createBridge();
 
@@ -462,6 +471,37 @@ test("single block stream emits seeded first text update and skips identical fin
   assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "");
 });
 
+test("runtime reply final-only emits seeded first text update before final text", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "hello only final" }, { kind: "final" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_final_only_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_final_only_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const assistantMessageUpdatedIndex = toolEvents.findIndex((message) => {
+    return message.event.type === "message.updated" && message.event.properties?.info?.role === "assistant";
+  });
+  const finalAssistantTextUpdateIndex = findAssistantTextUpdateIndex(
+    toolEvents,
+    "hello only final",
+    assistantMessageUpdatedIndex,
+  );
+
+  assert.notEqual(finalAssistantTextUpdateIndex, -1);
+  assertAssistantTextSeed(toolEvents, finalAssistantTextUpdateIndex);
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final", "");
+});
+
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {
   const { bridge, connection } = createBridge();
 
@@ -534,6 +574,13 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
     },
     {
       type: "tool_event",
+      eventType: "message.part.updated",
+      role: undefined,
+      partType: "text",
+      text: "",
+    },
+    {
+      type: "tool_event",
       eventType: "message.part.delta",
       role: undefined,
       partType: undefined,
@@ -582,6 +629,7 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
   const toolEvents = getToolEvents(connection);
   const fallbackUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "fallback answer");
   assert.notEqual(fallbackUpdateIndex, -1);
+  assertAssistantTextSeed(toolEvents, fallbackUpdateIndex);
   assertAdjacentAssistantTextDelta(toolEvents, fallbackUpdateIndex, "fallback answer", "");
 });
 
@@ -623,7 +671,30 @@ test("subagent fallback emits empty response delta immediately before final text
   const emptyUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "(empty response)");
 
   assert.notEqual(emptyUpdateIndex, -1);
+  assertAssistantTextSeed(toolEvents, emptyUpdateIndex);
   assertAdjacentAssistantTextDelta(toolEvents, emptyUpdateIndex, "(empty response)", "");
+});
+
+test("runtime reply final-only and fallback reuse the same assistant text part identity", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "identity final" }, { kind: "final" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_identity_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_identity_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const identityUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "identity final");
+  assert.notEqual(identityUpdateIndex, -1);
+  assertSameAssistantTextPart(toolEvents, identityUpdateIndex - 2, identityUpdateIndex);
 });
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {

@@ -259,7 +259,7 @@ Current state transitions:
 | assistant first text block | `sendAssistantStreamChunk()` | `tool_event(message.updated)` + `tool_event(message.part.updated type=step-start)` + `tool_event(message.part.updated type=text text="" delta="")` + `tool_event(message.part.delta delta="")` + `tool_event(message.part.updated type=text)` |
 | assistant later text block | `sendAssistantStreamChunk()` | `tool_event(message.part.delta)` |
 | assistant final candidate | dispatcher `deliver(kind=final)` | cached only (no immediate upstream delta) |
-| assistant final text | `reconcileFinalText()` + `sendAssistantFinalResponse()` | `tool_event(message.part.delta delta="")` + `tool_event(message.part.updated type=text)` (skipped when final text is identical to the already displayed first streamed block) |
+| assistant final text | `reconcileFinalText()` + `sendAssistantFinalResponse()` | first text update for the part emits `tool_event(message.part.updated type=text text="" delta="")` + `tool_event(message.part.delta delta="")` + `tool_event(message.part.updated type=text)`; later final-only replays emit `tool_event(message.part.delta delta="")` + `tool_event(message.part.updated type=text)` and are skipped when final text is identical to the already displayed first streamed block |
 | tool start/update | `handleRuntimeAgentEvent()` | `tool_event(message.part.updated type=tool status=running)` |
 | tool completed/error | `handleRuntimeAgentEvent()` | `tool_event(message.part.updated type=tool status=completed/error)` |
 | tool output text | dispatcher `deliver(kind=tool)` | `tool_event(message.part.updated type=tool state.output=...)` |
