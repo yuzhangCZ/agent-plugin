@@ -9,14 +9,13 @@ import type { GatewayClientState } from '../domain/state.ts';
 import { GATEWAY_CLIENT_STATE } from '../domain/state.ts';
 import type { GatewaySendPayload } from '../ports/GatewayClientMessages.ts';
 import { BusinessMessageHandler } from './handlers/BusinessMessageHandler.ts';
-import { ControlMessageHandler } from './handlers/ControlMessageHandler.ts';
-import { InboundFrameDecoder } from './protocol/InboundFrameDecoder.ts';
-import { InboundProtocolAdapter } from './protocol/InboundProtocolAdapter.ts';
 import type { OutboundProtocolGate } from './protocol/OutboundProtocolGate.ts';
 import { GatewayClientTelemetry } from './telemetry/GatewayClientTelemetry.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeSink, GatewayRuntimeStatePort } from './runtime/GatewayRuntimeContracts.ts';
 import { ConnectSession } from './runtime/ConnectSession.ts';
 import { HeartbeatLoop } from './runtime/HeartbeatLoop.ts';
+import { HandshakeFrameProcessor } from './runtime/HandshakeFrameProcessor.ts';
+import { InboundFrameClassifier } from './runtime/InboundFrameClassifier.ts';
 import { InboundFrameRouter } from './runtime/InboundFrameRouter.ts';
 import { OutboundSender } from './runtime/OutboundSender.ts';
 import { ReconnectOrchestrator } from './runtime/ReconnectOrchestrator.ts';
@@ -33,7 +32,6 @@ export interface GatewayClientRuntimeDependencies {
   reconnectPolicy: ReconnectPolicy;
   wireCodec: GatewayWireCodec;
   outboundProtocolGate: OutboundProtocolGate;
-  controlMessageHandler: ControlMessageHandler;
   businessMessageHandler: BusinessMessageHandler;
   authSubprotocolBuilder: (payload: AkSkAuthPayload) => string;
 }
@@ -49,6 +47,8 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
   private readonly outboundSender: OutboundSender;
   private readonly heartbeatLoop: HeartbeatLoop;
   private readonly reconnectOrchestrator: ReconnectOrchestrator;
+  private readonly inboundFrameClassifier: InboundFrameClassifier;
+  private readonly handshakeFrameProcessor: HandshakeFrameProcessor;
   private readonly inboundFrameRouter: InboundFrameRouter;
   private readonly connectSession: ConnectSession;
   private manuallyDisconnected = false;
@@ -87,20 +87,18 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       this,
       dependencies.reconnectEnabled,
     );
+    this.inboundFrameClassifier = new InboundFrameClassifier(this.context, dependencies.wireCodec);
+    this.handshakeFrameProcessor = new HandshakeFrameProcessor();
     this.inboundFrameRouter = new InboundFrameRouter(
-      new InboundFrameDecoder(),
-      new InboundProtocolAdapter(dependencies.wireCodec),
-      dependencies.controlMessageHandler,
       dependencies.businessMessageHandler,
-      dependencies.transport,
-      this.heartbeatLoop,
-      this.reconnectOrchestrator,
       this.context,
       this,
     );
     this.connectSession = new ConnectSession(
       dependencies.transport,
       this.outboundSender,
+      this.inboundFrameClassifier,
+      this.handshakeFrameProcessor,
       this.inboundFrameRouter,
       this.reconnectOrchestrator,
       this.heartbeatLoop,

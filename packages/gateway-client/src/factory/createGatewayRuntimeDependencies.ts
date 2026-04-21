@@ -5,7 +5,6 @@ import { GatewaySchemaCodecAdapter } from '../adapters/GatewaySchemaCodecAdapter
 import { WebSocketGatewayTransport } from '../adapters/WebSocketGatewayTransport.ts';
 import { IntervalHeartbeatScheduler } from '../adapters/IntervalHeartbeatScheduler.ts';
 import { TimeoutReconnectScheduler } from '../adapters/TimeoutReconnectScheduler.ts';
-import { ControlMessageHandler } from '../application/handlers/ControlMessageHandler.ts';
 import { BusinessMessageHandler } from '../application/handlers/BusinessMessageHandler.ts';
 import type { GatewayClientRuntimeDependencies } from '../application/GatewayClientRuntime.ts';
 import { DefaultOutboundProtocolGate } from '../application/protocol/OutboundProtocolGate.ts';
@@ -50,7 +49,6 @@ export function createGatewayRuntimeDependencies(options: GatewayClientOptions):
     reconnectPolicy,
     wireCodec,
     outboundProtocolGate: new DefaultOutboundProtocolGate(wireCodec),
-    controlMessageHandler: new ControlMessageHandler(),
     businessMessageHandler: new BusinessMessageHandler(),
     authSubprotocolBuilder: buildAuthSubprotocol,
   };

@@ -8,7 +8,10 @@ import type { GatewayClientEvents } from './GatewayClientEvents.ts';
  * @remarks 内部 transport/runtime 日志由编排层统一产出，调用方只消费事件与错误。
  */
 export interface GatewayClient {
-  /** 建立连接并完成 register 握手。 */
+  /**
+   * 建立连接并完成 register 握手。
+   * @remarks Promise fulfilled 表示客户端已进入 READY，而不只是底层 transport 已经 open。
+   */
   connect(): Promise<void>;
   /** 主动断开连接并停止重连与心跳。 */
   disconnect(): void;

@@ -11,6 +11,7 @@ class FakeWebSocket {
   sent: unknown[] = [];
   onopen: ((event?: unknown) => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: ((event?: unknown) => void) | null = null;
   readonly url: string;
   readonly protocols?: string[];
 
@@ -26,11 +27,16 @@ class FakeWebSocket {
 
   close(): void {
     this.readyState = 3;
+    this.onclose?.({ code: 1000, reason: 'manual', wasClean: true });
   }
 
   emitOpen(): void {
     this.readyState = FakeWebSocket.OPEN;
     this.onopen?.({});
+  }
+
+  emitMessage(message: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(message) });
   }
 }
 
@@ -55,6 +61,7 @@ test('internal factory accepts overrides without leaking them through stable ent
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
   await connecting;
 
   assert.equal(ws.url, 'ws://localhost:8081/ws/agent');

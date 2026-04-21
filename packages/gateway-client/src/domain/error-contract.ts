@@ -2,6 +2,7 @@ export type GatewayClientErrorCategory = 'transport' | 'state' | 'auth' | 'proto
 
 export type GatewayClientErrorCode =
   | 'GATEWAY_CONNECT_ABORTED'
+  | 'GATEWAY_CONNECT_TIMEOUT'
   | 'GATEWAY_WEBSOCKET_ERROR'
   | 'GATEWAY_CLOSED_BEFORE_OPEN'
   | 'GATEWAY_REGISTER_REJECTED'

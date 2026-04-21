@@ -12,6 +12,7 @@ export interface GatewayClientConfig {
   debug?: boolean;
   reconnect?: GatewayReconnectConfig;
   heartbeatIntervalMs?: number;
+  handshakeTimeoutMs?: number;
   abortSignal?: AbortSignal;
   authPayloadProvider?: () => AkSkAuthPayload;
   registerMessage: RegisterMessage;

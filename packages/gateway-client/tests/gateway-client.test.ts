@@ -11,7 +11,6 @@ import { DefaultOutboundProtocolGate } from '../src/application/protocol/Outboun
 import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import type { GatewayWireCodec } from '../src/ports/GatewayWireCodec.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
-import { ControlMessageHandler } from '../src/application/handlers/ControlMessageHandler.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
 import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
 
@@ -81,6 +80,20 @@ async function flushAsyncHandlers(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+async function assertPromisePending(promise: Promise<unknown>): Promise<void> {
+  let settled = false;
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await flushAsyncHandlers();
+  assert.equal(settled, false);
+}
+
 test('auth provider generates gateway-compatible payload and websocket auth subprotocol', async () => {
   FakeWebSocket.instances = [];
   const provider = createAkSkAuthProvider('ak-1', 'sk-1');
@@ -103,6 +116,7 @@ test('auth provider generates gateway-compatible payload and websocket auth subp
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
   await connecting;
 
   assert.ok(ws.protocols?.[0]?.startsWith('auth.'));
@@ -178,7 +192,6 @@ function buildFakeDependencies(overrides: Partial<GatewayClientRuntimeDependenci
     reconnectPolicy: overrides.reconnectPolicy ?? new FakeReconnectPolicy(),
     wireCodec,
     outboundProtocolGate: overrides.outboundProtocolGate ?? new DefaultOutboundProtocolGate(wireCodec),
-    controlMessageHandler: overrides.controlMessageHandler ?? new ControlMessageHandler(),
     businessMessageHandler: overrides.businessMessageHandler ?? new BusinessMessageHandler(),
     authSubprotocolBuilder: overrides.authSubprotocolBuilder ?? (() => 'auth.test'),
   };
@@ -240,9 +253,14 @@ class FakeTransport {
     this.handlers?.onMessage({ data: JSON.stringify(message) });
   }
 
-  emitClose(event: { code: number; reason: string; wasClean: boolean }): void {
+  // 测试夹具遵循 runtime 契约：终态由 onClose 收口，可注入非标准 close code 验证 fail-closed。
+  emitClose(event: { code?: unknown; reason?: unknown; wasClean?: unknown }): void {
     this.openState = false;
     this.handlers?.onClose(event);
+  }
+
+  emitError(event?: unknown): void {
+    this.handlers?.onError(event);
   }
 }
 
@@ -308,7 +326,7 @@ test('connect sends register and enters READY only after register_ok', async () 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
+  await assertPromisePending(connecting);
 
   assert.equal(client.getState(), 'CONNECTED');
   assert.deepEqual(ws.sent[0], registerMessage());
@@ -319,6 +337,7 @@ test('connect sends register and enters READY only after register_ok', async () 
   assert.equal(messages.length, 0);
 
   ws.emitMessage({ type: 'register_ok' });
+  await connecting;
   await flushAsyncHandlers();
   assert.equal(client.getState(), 'READY');
   assert.deepEqual(inbound.at(-1), {
@@ -340,6 +359,56 @@ test('connect sends register and enters READY only after register_ok', async () 
   client.disconnect();
 });
 
+test('connect reuses the same in-flight attempt until handshake completes', async () => {
+  FakeWebSocket.instances = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  const first = client.connect();
+  const second = client.connect();
+
+  assert.equal(first, second);
+  assert.equal(FakeWebSocket.instances.length, 1);
+
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await assertPromisePending(first);
+
+  const third = client.connect();
+  assert.equal(third, first);
+
+  ws.emitMessage({ type: 'register_ok' });
+  await first;
+  await third;
+
+  client.disconnect();
+});
+
+test('connect resolves immediately when the client is already READY', async () => {
+  FakeWebSocket.instances = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
+  await connecting;
+
+  await client.connect();
+  assert.equal(FakeWebSocket.instances.length, 1);
+
+  client.disconnect();
+});
+
 test('non-json inbound text emits parse_error frame', async () => {
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
@@ -356,6 +425,7 @@ test('non-json inbound text emits parse_error frame', async () => {
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
   await connecting;
 
   ws.emitRawMessage('{"bad":');
@@ -385,6 +455,7 @@ test('binary inbound frame emits decode_error frame', async () => {
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
   await connecting;
 
   const payload = new TextEncoder().encode('{"type":"status_query"}').buffer;
@@ -427,8 +498,8 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
   ws.emitMessage({ type: 'register_ok' });
+  await connecting;
   await flushAsyncHandlers();
 
   ws.emitMessage({
@@ -556,9 +627,8 @@ test('invalid control frame emits protocol error instead of being silently ignor
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
-
   ws.emitMessage({ type: 'register_rejected', reason: 'bad-aksk' });
+  await assert.rejects(connecting, (error) => error instanceof GatewayClientError);
   await flushAsyncHandlers();
 
   assert.equal(errors.length, 1);
@@ -609,8 +679,8 @@ test('business inbound frame preserves rawPayload while business message stays o
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
   ws.emitMessage({ type: 'register_ok' });
+  await connecting;
   await flushAsyncHandlers();
 
   ws.emitMessage({
@@ -663,12 +733,11 @@ test('getStatus derives readiness from the current state snapshot', async () => 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
-
   assert.equal(client.getState(), 'CONNECTED');
   assert.equal(client.getStatus().isReady(), false);
 
   ws.emitMessage({ type: 'register_ok' });
+  await connecting;
   await flushAsyncHandlers();
 
   assert.equal(client.getState(), 'READY');
@@ -715,10 +784,10 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
     const connecting = client.connect();
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
-    await connecting;
     ws.emitMessage({ type: 'register_ok' });
+    await connecting;
     await flushAsyncHandlers();
-    ws.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+    ws.emitClose({ code: 1012, reason: 'service restart', wasClean: false });
 
     assert.equal(timers.scheduled.length, 1);
     assert.equal(timers.scheduled[0]!.delay, 1_000);
@@ -738,7 +807,7 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
   }
 });
 
-test('unexpected close uses injected reconnect scheduler instead of runtime setTimeout', async () => {
+test('unexpected retryable close uses injected reconnect scheduler instead of runtime setTimeout', async () => {
   FakeWebSocket.instances = [];
   const scheduler = new FakeReconnectScheduler();
   const timers = installFakeTimeouts();
@@ -754,10 +823,10 @@ test('unexpected close uses injected reconnect scheduler instead of runtime setT
     const connecting = client.connect();
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
-    await connecting;
     ws.emitMessage({ type: 'register_ok' });
+    await connecting;
     await flushAsyncHandlers();
-    ws.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+    ws.emitClose({ code: 1012, reason: 'service restart', wasClean: false });
 
     assert.equal(scheduler.scheduled.length, 1);
     assert.equal(scheduler.scheduled[0]!.delayMs, 1_000);
@@ -768,6 +837,599 @@ test('unexpected close uses injected reconnect scheduler instead of runtime setT
   } finally {
     timers.restore();
   }
+});
+
+test('abort keeps GATEWAY_CONNECT_ABORTED even when transport close synchronously fires onClose', async () => {
+  class SyncCloseTransport extends FakeTransport {
+    override close(): void {
+      super.close();
+      this.emitClose({ code: 1000, reason: 'abort', wasClean: true });
+    }
+  }
+
+  const transport = new SyncCloseTransport();
+  const controller = new AbortController();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      abortSignal: controller.signal,
+    },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  controller.abort();
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_CONNECT_ABORTED',
+  );
+});
+
+test('manual disconnect ignores late handshake and business frames', async () => {
+  FakeWebSocket.instances = [];
+  const inbound: unknown[] = [];
+  const messages: unknown[] = [];
+  const errors: GatewayClientError[] = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('inbound', (message) => inbound.push(message));
+  client.on('message', (message) => messages.push(message));
+  client.on('error', (error) => errors.push(error as GatewayClientError));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  client.disconnect();
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_UNEXPECTED_CLOSE',
+  );
+  await flushAsyncHandlers();
+
+  ws.emitMessage({ type: 'register_ok' });
+  ws.emitMessage({ type: 'status_query' });
+  await flushAsyncHandlers();
+
+  assert.equal(inbound.length, 0);
+  assert.equal(messages.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(client.getState(), 'DISCONNECTED');
+});
+
+test('websocket error before READY stays pending until close and does not schedule reconnect on non-whitelist code', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport, reconnectScheduler }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitError({ message: 'socket failed' });
+  await assertPromisePending(connecting);
+  transport.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_WEBSOCKET_ERROR',
+  );
+  assert.equal(reconnectScheduler.scheduled.length, 0);
+
+  transport.emitError({ message: 'late socket failed' });
+  assert.equal(reconnectScheduler.scheduled.length, 0);
+});
+
+test('pre-ready whitelist close codes never schedule reconnect and log reconnectPlanned false', async () => {
+  for (const closeCode of [1006, 1012, 1013] as const) {
+    const transport = new FakeTransport();
+    const reconnectScheduler = new FakeReconnectScheduler();
+    const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+    const runtime = new GatewayClientRuntime(
+      {
+        url: 'ws://localhost:8081/ws/agent',
+        registerMessage: registerMessage(),
+        logger: {
+          warn(message, meta) {
+            logs.push({ message, meta });
+          },
+        },
+      },
+      buildFakeDependencies({ transport, reconnectScheduler }),
+      createFakeSink(),
+    );
+
+    const connecting = runtime.connect();
+    transport.emitClose({ code: closeCode, reason: 'pre-ready close', wasClean: false });
+
+    await assert.rejects(
+      connecting,
+      (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_CLOSED_BEFORE_OPEN',
+    );
+    assert.equal(reconnectScheduler.scheduled.length, 0);
+    const closeLog = logs.find((entry) => entry.message === 'gateway.close');
+    assert.equal(closeLog?.meta?.reconnectPlanned, false);
+  }
+});
+
+test('invalid url connect rejects as promise and does not retain active attempt', async () => {
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'not-a-valid-url',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies(),
+    createFakeSink(),
+  );
+
+  await assert.rejects(
+    runtime.connect(),
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_WEBSOCKET_ERROR',
+  );
+  await assert.rejects(
+    runtime.connect(),
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_WEBSOCKET_ERROR',
+  );
+});
+
+test('auth payload and transport open sync failures reject as promises', async () => {
+  class ThrowingTransport extends FakeTransport {
+    override open(): void {
+      throw new Error('socket_factory_failed');
+    }
+  }
+
+  const authRuntime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      authPayloadProvider: () => {
+        throw new Error('auth_payload_failed');
+      },
+    },
+    buildFakeDependencies(),
+    createFakeSink(),
+  );
+
+  await assert.rejects(
+    authRuntime.connect(),
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.message === 'auth_payload_failed',
+  );
+
+  const transportRuntime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport: new ThrowingTransport() }),
+    createFakeSink(),
+  );
+
+  await assert.rejects(
+    transportRuntime.connect(),
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.message === 'socket_factory_failed',
+  );
+});
+
+test('debug mode logs raw onError frame before close-based settlement', async () => {
+  const transport = new FakeTransport();
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      debug: true,
+      logger: {
+        info(message, meta) {
+          logs.push({ message, meta });
+        },
+        error(message, meta) {
+          logs.push({ message, meta });
+        },
+      },
+    },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitError({ type: 'error', message: 'socket failed' });
+  transport.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_WEBSOCKET_ERROR',
+  );
+  assert.equal(logs.some((entry) => entry.message.includes('「onError」')), true);
+});
+
+test('async inbound handler exceptions are emitted as protocol errors', async () => {
+  const transport = new FakeTransport();
+  const errors: GatewayClientError[] = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      wireCodec: {
+        normalizeDownstream() {
+          throw new Error('normalize_failed');
+        },
+        validateGatewayUplinkBusinessMessage(raw) {
+          return new GatewaySchemaCodecAdapter().validateGatewayUplinkBusinessMessage(raw);
+        },
+        validateGatewayUpstreamTransportMessage(raw) {
+          return new GatewaySchemaCodecAdapter().validateGatewayUpstreamTransportMessage(raw);
+        },
+        validateGatewayWireProtocolMessage(raw) {
+          return new GatewaySchemaCodecAdapter().validateGatewayWireProtocolMessage(raw);
+        },
+      },
+    }),
+    {
+      ...createFakeSink(),
+      emitError(error) {
+        errors.push(error);
+      },
+    },
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await connecting;
+
+  transport.emitMessage({ type: 'status_query' });
+  await flushAsyncHandlers();
+
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
+  assert.equal(errors[0]!.message, 'normalize_failed');
+});
+
+test('handshake timeout rejects the active connect attempt', async () => {
+  const transport = new FakeTransport();
+  const timers = installFakeTimeouts();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      handshakeTimeoutMs: 25,
+    },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  try {
+    const connecting = runtime.connect();
+    transport.emitOpen();
+
+    assert.equal(timers.scheduled.length > 0, true);
+    assert.equal(timers.runNext(), true);
+
+    await assert.rejects(
+      connecting,
+      (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_CONNECT_TIMEOUT',
+    );
+  } finally {
+    timers.restore();
+  }
+});
+
+test('invalid handshake control never schedules reconnect after follow-up close', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const fallbackCodec = new GatewaySchemaCodecAdapter();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      reconnectScheduler,
+      wireCodec: {
+        normalizeDownstream(raw) {
+          return fallbackCodec.normalizeDownstream(raw);
+        },
+        validateGatewayUplinkBusinessMessage(raw) {
+          return fallbackCodec.validateGatewayUplinkBusinessMessage(raw);
+        },
+        validateGatewayUpstreamTransportMessage(raw) {
+          if (
+            raw
+            && typeof raw === 'object'
+            && 'type' in raw
+            && (raw as { type?: unknown }).type === 'register_rejected'
+          ) {
+            return {
+              ok: false as const,
+              error: {
+                violation: {
+                  stage: 'transport',
+                  code: 'invalid_payload',
+                  field: 'reason',
+                  message: 'register_rejected reason is invalid',
+                  messageType: 'register_rejected',
+                },
+              },
+            };
+          }
+          return fallbackCodec.validateGatewayUpstreamTransportMessage(raw);
+        },
+        validateGatewayWireProtocolMessage(raw) {
+          return fallbackCodec.validateGatewayWireProtocolMessage(raw);
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  const rejection = assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_PROTOCOL_VIOLATION',
+  );
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_rejected', reason: 'bad-aksk' });
+  await flushAsyncHandlers();
+  transport.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+
+  await rejection;
+  assert.equal(reconnectScheduler.scheduled.length, 0);
+});
+
+test('register send failure never schedules reconnect', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      reconnectScheduler,
+      outboundProtocolGate: {
+        validateBusiness(message) {
+          return message;
+        },
+        validateControl() {
+          throw new GatewayClientError({
+            code: 'GATEWAY_PROTOCOL_VIOLATION',
+            category: 'protocol',
+            retryable: false,
+            message: 'register_invalid',
+          });
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_PROTOCOL_VIOLATION',
+  );
+  assert.equal(reconnectScheduler.scheduled.length, 0);
+});
+
+test('READY close retries on close code 1013', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport, reconnectScheduler }),
+    createFakeSink(),
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await connecting;
+
+  transport.emitClose({ code: 1013, reason: 'try again later', wasClean: false });
+
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+});
+
+test('READY close does not retry on undefined, 1005, 1011, or unknown 4xxx codes', async () => {
+  for (const closeCode of [undefined, 1005, 1011, 4500] as const) {
+    const transport = new FakeTransport();
+    const reconnectScheduler = new FakeReconnectScheduler();
+    const runtime = new GatewayClientRuntime(
+      {
+        url: 'ws://localhost:8081/ws/agent',
+        registerMessage: registerMessage(),
+      },
+      buildFakeDependencies({ transport, reconnectScheduler }),
+      createFakeSink(),
+    );
+
+    const connecting = runtime.connect();
+    transport.emitOpen();
+    transport.emitMessage({ type: 'register_ok' });
+    await connecting;
+
+    transport.emitClose({ code: closeCode, reason: 'not-whitelisted', wasClean: false });
+
+    assert.equal(reconnectScheduler.scheduled.length, 0);
+  }
+});
+
+test('reconnect attempt stops backoff after register_rejected', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport, reconnectScheduler }),
+    createFakeSink(),
+  );
+
+  const initialConnect = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await initialConnect;
+
+  transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+
+  const reconnectTask = reconnectScheduler.scheduled[0]!.task();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_rejected', reason: 'duplicate_connection' });
+  await reconnectTask;
+
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+  assert.equal(runtime.getState(), 'DISCONNECTED');
+});
+
+test('reconnect attempt stops backoff after handshake protocol violation', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  const fallbackCodec = new GatewaySchemaCodecAdapter();
+  let attempt = 0;
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      reconnectScheduler,
+      wireCodec: {
+        normalizeDownstream(raw) {
+          return fallbackCodec.normalizeDownstream(raw);
+        },
+        validateGatewayUplinkBusinessMessage(raw) {
+          return fallbackCodec.validateGatewayUplinkBusinessMessage(raw);
+        },
+        validateGatewayUpstreamTransportMessage(raw) {
+          if (
+            attempt >= 2
+            && raw
+            && typeof raw === 'object'
+            && 'type' in raw
+            && (raw as { type?: unknown }).type === 'register_rejected'
+          ) {
+            return {
+              ok: false as const,
+              error: {
+                violation: {
+                  stage: 'transport',
+                  code: 'invalid_payload',
+                  field: 'reason',
+                  message: 'register_rejected reason is invalid',
+                  messageType: 'register_rejected',
+                },
+              },
+            };
+          }
+          return fallbackCodec.validateGatewayUpstreamTransportMessage(raw);
+        },
+        validateGatewayWireProtocolMessage(raw) {
+          return fallbackCodec.validateGatewayWireProtocolMessage(raw);
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  const initialConnect = runtime.connect();
+  attempt += 1;
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await initialConnect;
+
+  transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+
+  const reconnectTask = reconnectScheduler.scheduled[0]!.task();
+  attempt += 1;
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_rejected', reason: 'bad-aksk' });
+  await flushAsyncHandlers();
+
+  await reconnectTask;
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+  assert.equal(runtime.getState(), 'DISCONNECTED');
+});
+
+test('reconnect attempt stops backoff after register send failure', async () => {
+  const transport = new FakeTransport();
+  const reconnectScheduler = new FakeReconnectScheduler();
+  let validateControlCalls = 0;
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      reconnectScheduler,
+      outboundProtocolGate: {
+        validateBusiness(message) {
+          return message;
+        },
+        validateControl(message) {
+          validateControlCalls += 1;
+          if (validateControlCalls >= 2) {
+            throw new GatewayClientError({
+              code: 'GATEWAY_PROTOCOL_VIOLATION',
+              category: 'protocol',
+              retryable: false,
+              message: 'register_invalid',
+            });
+          }
+          return message;
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  const initialConnect = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await initialConnect;
+
+  transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+
+  const reconnectTask = reconnectScheduler.scheduled[0]!.task();
+  transport.emitOpen();
+
+  await reconnectTask;
+  assert.equal(reconnectScheduler.scheduled.length, 1);
+  assert.equal(runtime.getState(), 'DISCONNECTED');
 });
 
 test('send guards surface structured not-connected and not-ready errors', async () => {
@@ -787,7 +1449,6 @@ test('send guards surface structured not-connected and not-ready errors', async 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
 
   assert.throws(
     () => client.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
@@ -795,6 +1456,10 @@ test('send guards surface structured not-connected and not-ready errors', async 
   );
 
   client.disconnect();
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_UNEXPECTED_CLOSE',
+  );
 });
 
 test('public send rejects heartbeat while internal heartbeat still reaches transport through one gate', async () => {
@@ -833,8 +1498,8 @@ test('internal register and heartbeat use the same outbound validation gate', as
 
   const connecting = runtime.connect();
   transport.emitOpen();
-  await connecting;
   transport.emitMessage({ type: 'register_ok' });
+  await connecting;
   await flushAsyncHandlers();
   heartbeatScheduler.trigger();
 
@@ -975,7 +1640,6 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
           return message;
         },
       },
-      controlMessageHandler: new ControlMessageHandler(),
       businessMessageHandler: new BusinessMessageHandler(),
       authSubprotocolBuilder: () => 'auth.test',
     } satisfies GatewayClientRuntimeDependencies,
@@ -991,6 +1655,7 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
 
   const connecting = runtime.connect();
   transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
   await connecting;
   transport.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
 
@@ -1013,9 +1678,11 @@ test('register_rejected emits non-retryable structured error and disconnects', a
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  await connecting;
-
   ws.emitMessage({ type: 'register_rejected', reason: 'duplicate_connection' });
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_REGISTER_REJECTED',
+  );
   await flushAsyncHandlers();
 
   assert.equal(errors.length, 1);

@@ -4,7 +4,7 @@ import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRu
 import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapper.ts';
 
 /**
- * 重连编排器，负责策略决策、调度触发与失败续退避。
+ * 重连编排器，负责策略决策、调度触发与 attempt 级别日志。
  */
 export class ReconnectOrchestrator {
   private readonly scheduler: ReconnectScheduler;
@@ -79,9 +79,6 @@ export class ReconnectOrchestrator {
           error: getErrorMessage(error),
           ...getErrorDetails(error),
         });
-        if (!this.state.isManuallyDisconnected()) {
-          this.scheduleReconnect();
-        }
       }
     }, reconnectDecision.delayMs);
   }
