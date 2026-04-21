@@ -1316,14 +1316,7 @@ export class OpenClawGatewayBridge {
     if (state.accumulatedText === chunk) {
       this.ensureAssistantMessageStarted(toolSessionId, state, context);
       state.textSeeded = true;
-      this.sendToolEvent({
-        type: "tool_event",
-        toolSessionId,
-        event: buildTextPartUpdated(toolSessionId, state.messageId, state.textPartId, chunk, {
-          delta: chunk,
-          time: Date.now(),
-        }),
-      }, context);
+      this.sendAssistantTextPartUpdated(toolSessionId, state, chunk, context);
       return;
     }
 
@@ -1379,6 +1372,21 @@ export class OpenClawGatewayBridge {
   ): void {
     this.ensureAssistantMessageStarted(toolSessionId, state, context);
     state.textSeeded = true;
+    const finalText = state.accumulatedText || text;
+    this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
+  }
+
+  private sendAssistantTextPartUpdated(
+    toolSessionId: string,
+    state: AssistantStreamState,
+    text: string,
+    context: UpstreamSendContext,
+  ): void {
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, ""),
+    }, context);
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
@@ -1386,7 +1394,7 @@ export class OpenClawGatewayBridge {
         toolSessionId,
         state.messageId,
         state.textPartId,
-        state.accumulatedText || text,
+        text,
         {
           time: Date.now(),
         },

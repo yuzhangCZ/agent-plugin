@@ -86,6 +86,39 @@ describe('protocol chat-stream', () => {
     });
   });
 
+  test('forwards empty message.part.delta as tool_event without dropping the event', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['message.part.delta']);
+    runtime.stateManager.setState('READY');
+
+    const emptyDeltaEvent = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_fixture_delta_empty',
+        messageID: 'msg_fixture_delta_empty',
+        partID: 'prt_fixture_delta_empty',
+        delta: '',
+      },
+    };
+
+    await runtime.handleEvent(emptyDeltaEvent);
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_fixture_delta_empty',
+        event: emptyDeltaEvent,
+      },
+    ]);
+  });
+
   test('session.idle stays upstream as tool_event and does not duplicate tool_done after chat success', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

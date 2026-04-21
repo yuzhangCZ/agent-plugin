@@ -147,6 +147,35 @@ function createBridge({ runtime, connection = new FakeGatewayConnection() } = {}
   return { bridge, connection };
 }
 
+function getToolEvents(connection) {
+  return connection.sent
+    .map(({ message }) => message)
+    .filter((message) => message.type === "tool_event");
+}
+
+function assertAdjacentAssistantTextDelta(events, updatedIndex, expectedText, expectedDelta = "") {
+  const updatedEvent = events[updatedIndex]?.event;
+  assert.ok(updatedEvent);
+  assert.equal(updatedEvent.type, "message.part.updated");
+  assert.equal(updatedEvent.properties?.part?.type, "text");
+  assert.equal(updatedEvent.properties?.part?.text, expectedText);
+
+  const deltaEvent = events[updatedIndex - 1]?.event;
+  assert.ok(deltaEvent);
+  assert.equal(deltaEvent.type, "message.part.delta");
+  assert.equal(deltaEvent.properties?.delta, expectedDelta);
+  assert.equal(deltaEvent.properties?.messageID, updatedEvent.properties?.part?.messageID);
+  assert.equal(deltaEvent.properties?.partID, updatedEvent.properties?.part?.id);
+}
+
+function findAssistantTextUpdateIndex(events, expectedText, fromIndex = 0) {
+  return events.findIndex((message, index) => {
+    return index >= fromIndex
+      && message.event.type === "message.part.updated"
+      && message.event.properties?.part?.text === expectedText;
+  });
+}
+
 test("create_session emits session.updated before session_created", async () => {
   const { bridge, connection } = createBridge();
 
@@ -275,11 +304,19 @@ test("runtime reply chat emits assistant text events in protocol order", async (
     },
     {
       type: "tool_event",
+      eventType: "message.part.delta",
+      role: undefined,
+      partType: undefined,
+      text: undefined,
+      delta: "",
+    },
+    {
+      type: "tool_event",
       eventType: "message.part.updated",
       role: undefined,
       partType: "text",
       text: "hello",
-      delta: "hello",
+      delta: undefined,
     },
     {
       type: "tool_event",
@@ -288,6 +325,14 @@ test("runtime reply chat emits assistant text events in protocol order", async (
       partType: undefined,
       text: undefined,
       delta: " world",
+    },
+    {
+      type: "tool_event",
+      eventType: "message.part.delta",
+      role: undefined,
+      partType: undefined,
+      text: undefined,
+      delta: "",
     },
     {
       type: "tool_event",
@@ -334,9 +379,21 @@ test("runtime reply chat emits assistant text events in protocol order", async (
     },
   ]);
 
-  const deltaEvent = connection.sent[7].message.event;
-  assert.equal(deltaEvent.properties.delta, " world");
-  assert.equal(deltaEvent.properties.field, "text");
+  const toolEvents = getToolEvents(connection);
+  const assistantMessageUpdatedIndex = toolEvents.findIndex((message) => {
+    return message.event.type === "message.updated" && message.event.properties?.info?.role === "assistant";
+  });
+  const firstAssistantTextUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "hello", assistantMessageUpdatedIndex);
+  const finalAssistantTextUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "hello world", assistantMessageUpdatedIndex);
+  assert.notEqual(firstAssistantTextUpdateIndex, -1);
+  assert.notEqual(finalAssistantTextUpdateIndex, -1);
+  assertAdjacentAssistantTextDelta(toolEvents, firstAssistantTextUpdateIndex, "hello", "");
+  const streamedDeltaEvent = toolEvents.find((message) => {
+    return message.event.type === "message.part.delta" && message.event.properties?.delta === " world";
+  });
+  assert.ok(streamedDeltaEvent);
+  assert.equal(streamedDeltaEvent.event.properties.field, "text");
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello world", "");
 
   const updatedPartEvents = connection.sent
     .map(({ message }) => message)
@@ -345,6 +402,41 @@ test("runtime reply chat emits assistant text events in protocol order", async (
   for (const message of updatedPartEvents) {
     assert.equal(typeof message.event.properties.time, "number");
   }
+});
+
+test("single block stream emits placeholder delta before both first and final text updates", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
+    await dispatcherOptions.deliver({ text: "hello" }, { kind: "final" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_single_block_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_single_block_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const assistantMessageUpdatedIndex = toolEvents.findIndex((message) => {
+    return message.event.type === "message.updated" && message.event.properties?.info?.role === "assistant";
+  });
+  const assistantTextUpdateIndexes = toolEvents
+    .map((message, index) => ({ message, index }))
+    .filter(({ message, index }) => {
+      return index >= assistantMessageUpdatedIndex
+        && message.event.type === "message.part.updated"
+        && message.event.properties?.part?.text === "hello";
+    })
+    .map(({ index }) => index);
+
+  assert.equal(assistantTextUpdateIndexes.length, 2);
+  assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "");
+  assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[1], "hello", "");
 });
 
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {
@@ -419,6 +511,13 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
     },
     {
       type: "tool_event",
+      eventType: "message.part.delta",
+      role: undefined,
+      partType: undefined,
+      text: undefined,
+    },
+    {
+      type: "tool_event",
       eventType: "message.part.updated",
       role: undefined,
       partType: "text",
@@ -456,6 +555,52 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
       type: "tool_done",
     },
   ]);
+
+  const toolEvents = getToolEvents(connection);
+  const fallbackUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "fallback answer");
+  assert.notEqual(fallbackUpdateIndex, -1);
+  assertAdjacentAssistantTextDelta(toolEvents, fallbackUpdateIndex, "fallback answer", "");
+});
+
+test("subagent fallback emits empty response delta immediately before final text update", async () => {
+  const runtime = createFallbackRuntime({
+    subagent: {
+      async run() {
+        return { runId: "run_empty" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+            },
+          ],
+        };
+      },
+      async deleteSession() {},
+    },
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_empty_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_empty_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const emptyUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "(empty response)");
+
+  assert.notEqual(emptyUpdateIndex, -1);
+  assertAdjacentAssistantTextDelta(toolEvents, emptyUpdateIndex, "(empty response)", "");
 });
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {
