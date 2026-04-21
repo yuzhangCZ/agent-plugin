@@ -168,6 +168,20 @@ function assertAdjacentAssistantTextDelta(events, updatedIndex, expectedText, ex
   assert.equal(deltaEvent.properties?.partID, updatedEvent.properties?.part?.id);
 }
 
+function assertAssistantTextSeed(events, updatedIndex) {
+  const updatedEvent = events[updatedIndex]?.event;
+  assert.ok(updatedEvent);
+
+  const seedEvent = events[updatedIndex - 2]?.event;
+  assert.ok(seedEvent);
+  assert.equal(seedEvent.type, "message.part.updated");
+  assert.equal(seedEvent.properties?.part?.type, "text");
+  assert.equal(seedEvent.properties?.part?.text, "");
+  assert.equal(seedEvent.properties?.delta, "");
+  assert.equal(seedEvent.properties?.part?.messageID, updatedEvent.properties?.part?.messageID);
+  assert.equal(seedEvent.properties?.part?.id, updatedEvent.properties?.part?.id);
+}
+
 function findAssistantTextUpdateIndex(events, expectedText, fromIndex = 0) {
   return events.findIndex((message, index) => {
     return index >= fromIndex
@@ -304,6 +318,14 @@ test("runtime reply chat emits assistant text events in protocol order", async (
     },
     {
       type: "tool_event",
+      eventType: "message.part.updated",
+      role: undefined,
+      partType: "text",
+      text: "",
+      delta: "",
+    },
+    {
+      type: "tool_event",
       eventType: "message.part.delta",
       role: undefined,
       partType: undefined,
@@ -387,6 +409,7 @@ test("runtime reply chat emits assistant text events in protocol order", async (
   const finalAssistantTextUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "hello world", assistantMessageUpdatedIndex);
   assert.notEqual(firstAssistantTextUpdateIndex, -1);
   assert.notEqual(finalAssistantTextUpdateIndex, -1);
+  assertAssistantTextSeed(toolEvents, firstAssistantTextUpdateIndex);
   assertAdjacentAssistantTextDelta(toolEvents, firstAssistantTextUpdateIndex, "hello", "");
   const streamedDeltaEvent = toolEvents.find((message) => {
     return message.event.type === "message.part.delta" && message.event.properties?.delta === " world";
@@ -404,7 +427,7 @@ test("runtime reply chat emits assistant text events in protocol order", async (
   }
 });
 
-test("single block stream emits placeholder delta before both first and final text updates", async () => {
+test("single block stream emits seeded first text update and skips identical final replay", async () => {
   const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
     await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
     await dispatcherOptions.deliver({ text: "hello" }, { kind: "final" });
@@ -434,9 +457,9 @@ test("single block stream emits placeholder delta before both first and final te
     })
     .map(({ index }) => index);
 
-  assert.equal(assistantTextUpdateIndexes.length, 2);
+  assert.equal(assistantTextUpdateIndexes.length, 1);
+  assertAssistantTextSeed(toolEvents, assistantTextUpdateIndexes[0]);
   assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "");
-  assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[1], "hello", "");
 });
 
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {

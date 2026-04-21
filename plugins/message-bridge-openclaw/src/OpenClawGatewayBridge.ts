@@ -170,10 +170,12 @@ interface AssistantStreamState {
   seeded: boolean;
   stepStarted: boolean;
   stepFinished: boolean;
-  textSeeded: boolean;
+  textSeedUpdated: boolean;
+  textDisplayed: boolean;
   reasoningSeeded: boolean;
   messageCreatedAt: number;
   accumulatedText: string;
+  lastDisplayedText: string | null;
   accumulatedReasoning: string;
   reasoningStartedAt: number | null;
   reasoningMetadata?: Record<string, unknown>;
@@ -193,10 +195,12 @@ function createAssistantStreamState(sessionKey: string): AssistantStreamState {
     seeded: false,
     stepStarted: false,
     stepFinished: false,
-    textSeeded: false,
+    textSeedUpdated: false,
+    textDisplayed: false,
     reasoningSeeded: false,
     messageCreatedAt: createdAt,
     accumulatedText: "",
+    lastDisplayedText: null,
     accumulatedReasoning: "",
     reasoningStartedAt: null,
     reasoningMetadata: undefined,
@@ -1315,7 +1319,7 @@ export class OpenClawGatewayBridge {
 
     if (state.accumulatedText === chunk) {
       this.ensureAssistantMessageStarted(toolSessionId, state, context);
-      state.textSeeded = true;
+      this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
       this.sendAssistantTextPartUpdated(toolSessionId, state, chunk, context);
       return;
     }
@@ -1371,9 +1375,37 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): void {
     this.ensureAssistantMessageStarted(toolSessionId, state, context);
-    state.textSeeded = true;
     const finalText = state.accumulatedText || text;
+    if (state.textDisplayed && state.lastDisplayedText === finalText) {
+      return;
+    }
     this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
+  }
+
+  private sendAssistantTextSeedPartUpdated(
+    toolSessionId: string,
+    state: AssistantStreamState,
+    context: UpstreamSendContext,
+  ): void {
+    if (state.textSeedUpdated) {
+      return;
+    }
+
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildTextPartUpdated(
+        toolSessionId,
+        state.messageId,
+        state.textPartId,
+        "",
+        {
+          delta: "",
+          time: Date.now(),
+        },
+      ),
+    }, context);
+    state.textSeedUpdated = true;
   }
 
   private sendAssistantTextPartUpdated(
@@ -1400,6 +1432,8 @@ export class OpenClawGatewayBridge {
         },
       ),
     }, context);
+    state.textDisplayed = true;
+    state.lastDisplayedText = text;
   }
 
   private sendAssistantCompleted(
