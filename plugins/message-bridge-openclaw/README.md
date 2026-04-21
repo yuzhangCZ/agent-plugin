@@ -261,6 +261,8 @@ Progressive text delivery is enabled by default. Optional controls:
 - `channels.message-bridge.blockStreaming` is removed and no longer supported
 - `agents.defaults.blockStreamingChunk` / `agents.defaults.blockStreamingCoalesce` for chunking cadence overrides
 
+When no explicit block streaming profile is configured, the plugin injects a moderate default profile (`8-24` chars with `sentence` preference and `40ms` coalescing) so streaming stays visible without regressing into a single large block on OpenClaw 2026.3.24. Override `agents.defaults.blockStreamingChunk` and `agents.defaults.blockStreamingCoalesce` if you want a different cadence.
+
 ## Start OpenClaw dev gateway
 
 ```bash

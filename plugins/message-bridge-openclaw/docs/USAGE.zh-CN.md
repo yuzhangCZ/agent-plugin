@@ -346,28 +346,28 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 
 如果你没有显式配置 `runTimeoutMs`，插件会使用这个更保守的默认值；如果你已经在配置里写了该字段，则继续以你的显式值为准。
 
-如果你想进一步调细 block 级 streaming，再按需补充：
+当前未显式配置时，插件默认注入一个更稳的 block streaming profile。在 OpenClaw 2026.3.24 的本地验证里，`8-24` 比此前的极小块配置更稳定，能避免退化成整段一次性输出；如果你想继续调细，再按需覆盖：
 
 ```json
 {
   "agents": {
     "defaults": {
       "blockStreamingChunk": {
-        "minChars": 20,
-        "maxChars": 80,
+        "minChars": 8,
+        "maxChars": 24,
         "breakPreference": "sentence"
       },
       "blockStreamingCoalesce": {
-        "minChars": 20,
-        "maxChars": 80,
-        "idleMs": 150
+        "minChars": 8,
+        "maxChars": 24,
+        "idleMs": 40
       }
     }
   }
 }
 ```
 
-说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。
+说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。默认 `blockStreamingBreak` 仍保持 `text_end`，若你需要继续试验 `message_end`，请显式覆盖 `agents.defaults.blockStreamingBreak`。
 
 当前文本流式行为（v0.7）：
 

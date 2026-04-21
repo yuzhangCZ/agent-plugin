@@ -3,15 +3,15 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 export type StreamingSource = "default_on" | "explicit_on" | "explicit_off";
 
 export const DEFAULT_BLOCK_STREAMING_CHUNK = {
-  minChars: 120,
-  maxChars: 260,
-  breakPreference: "newline",
+  minChars: 8,
+  maxChars: 24,
+  breakPreference: "sentence",
 } as const;
 
 export const DEFAULT_BLOCK_STREAMING_COALESCE = {
-  minChars: 180,
-  maxChars: 360,
-  idleMs: 160,
+  minChars: 8,
+  maxChars: 24,
+  idleMs: 40,
 } as const;
 
 interface ResolveEffectiveReplyConfigResult {
