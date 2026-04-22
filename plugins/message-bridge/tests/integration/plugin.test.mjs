@@ -7,16 +7,14 @@ import { join } from 'node:path';
 import {
   MessageBridgePlugin,
   default as DefaultPlugin,
-  getMessageBridgeStatus,
-  startMessageBridgeRuntime,
-  stopMessageBridgeRuntime,
-  subscribeMessageBridgeStatus,
 } from '../../src/index.ts';
+import * as PluginModule from '../../src/index.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
+const SOURCE_RUNTIME_API = globalThis.__MB_RUNTIME_API__;
 
 function restoreInjectedPluginVersion() {
   if (typeof ORIGINAL_PLUGIN_VERSION === 'undefined') {
@@ -77,6 +75,28 @@ function mockInput(overrides = {}) {
   };
 }
 
+function getRuntimeApi() {
+  const runtimeApi = SOURCE_RUNTIME_API;
+  assert.ok(runtimeApi && typeof runtimeApi === 'object');
+  return runtimeApi;
+}
+
+function getMessageBridgeStatus() {
+  return getRuntimeApi().getMessageBridgeStatus();
+}
+
+function subscribeMessageBridgeStatus(listener) {
+  return getRuntimeApi().subscribeMessageBridgeStatus(listener);
+}
+
+function startMessageBridgeRuntime() {
+  return getRuntimeApi().startMessageBridgeRuntime();
+}
+
+function stopMessageBridgeRuntime() {
+  return getRuntimeApi().stopMessageBridgeRuntime();
+}
+
 function installReadyWebSocket(delayMs = 0) {
   const originalWebSocket = globalThis.WebSocket;
   let websocketCtorCalls = 0;
@@ -125,12 +145,15 @@ describe('plugin contract', () => {
   });
 
   test('exports named and default as same plugin function', () => {
+    assert.deepStrictEqual(Object.keys(PluginModule).sort(), ['MessageBridgePlugin', 'default']);
     assert.strictEqual(typeof MessageBridgePlugin, 'function');
     assert.strictEqual(DefaultPlugin, MessageBridgePlugin);
     assert.strictEqual(typeof getMessageBridgeStatus, 'function');
     assert.strictEqual(typeof startMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof stopMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
+    assert.strictEqual(globalThis.__MB_RUNTIME_API__, SOURCE_RUNTIME_API);
+    assert.strictEqual(Object.isFrozen(getRuntimeApi()), true);
   });
 
   test('explicit start rejects before plugin has been loaded', async () => {
@@ -252,6 +275,16 @@ describe('plugin contract', () => {
     const seen = new Set();
     const hooks = [];
     const pluginFns = new Set([mod.default, mod.MessageBridgePlugin]);
+    const privateApiExportNames = [
+      'getMessageBridgeStatus',
+      'startMessageBridgeRuntime',
+      'stopMessageBridgeRuntime',
+      'subscribeMessageBridgeStatus',
+    ];
+
+    for (const exportName of privateApiExportNames) {
+      assert.strictEqual(Object.hasOwn(mod, exportName), false);
+    }
 
     for (const [, fn] of Object.entries(mod)) {
       if (typeof fn !== 'function') continue;

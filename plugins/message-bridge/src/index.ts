@@ -13,7 +13,22 @@ import {
 } from './runtime/MessageBridgeStatusStore.js';
 import { AppLogger } from './runtime/AppLogger.js';
 import type { Plugin } from './runtime/types.js';
+import type { MessageBridgeStatusSnapshot } from './runtime/MessageBridgeStatus.js';
 import { getErrorDetailsForLog, getErrorMessage } from './utils/error.js';
+
+interface MessageBridgeRuntimeApi {
+  getMessageBridgeStatus(): MessageBridgeStatusSnapshot;
+  subscribeMessageBridgeStatus(
+    listener: (snapshot: MessageBridgeStatusSnapshot) => void,
+  ): () => void;
+  startMessageBridgeRuntime(): Promise<void>;
+  stopMessageBridgeRuntime(): void;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __MB_RUNTIME_API__: MessageBridgeRuntimeApi | undefined;
+}
 
 export const MessageBridgePlugin: Plugin = async (input) => {
   cacheLoadedPluginInput(input);
@@ -58,16 +73,29 @@ export const MessageBridgePlugin: Plugin = async (input) => {
 /**
  * 使用最近一次插件加载时保存的上下文，显式启动或重启 runtime。
  */
-export async function startMessageBridgeRuntime(): Promise<void> {
+async function startMessageBridgeRuntime(): Promise<void> {
   await startRuntimeFromLoadedInput();
 }
 
 /**
  * 显式停止当前 runtime，并将系统置于仅可通过显式 start 恢复的停机态。
  */
-export function stopMessageBridgeRuntime(): void {
+function stopMessageBridgeRuntime(): void {
   stopRuntime();
 }
 
-export { getMessageBridgeStatus, subscribeMessageBridgeStatus };
+const runtimeApi: MessageBridgeRuntimeApi = Object.freeze({
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+  startMessageBridgeRuntime,
+  stopMessageBridgeRuntime,
+});
+
+Object.defineProperty(globalThis, '__MB_RUNTIME_API__', {
+  configurable: true,
+  enumerable: false,
+  value: runtimeApi,
+  writable: false,
+});
+
 export default MessageBridgePlugin;

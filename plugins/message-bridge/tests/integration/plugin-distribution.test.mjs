@@ -56,6 +56,7 @@ function mockInput(overrides = {}) {
 
 async function importArtifact(cacheKey) {
   const artifactPath = resolve('release/message-bridge.plugin.js');
+  delete globalThis.__MB_RUNTIME_API__;
   return import(`${pathToFileURL(artifactPath).href}?cache=${cacheKey}`);
 }
 
@@ -65,8 +66,37 @@ async function readPackageVersion() {
   return packageJson.version;
 }
 
+function assertNoPrivateRuntimeNamedExports(mod) {
+  const privateExportNames = [
+    'getMessageBridgeStatus',
+    'subscribeMessageBridgeStatus',
+    'startMessageBridgeRuntime',
+    'stopMessageBridgeRuntime',
+  ];
+
+  for (const exportName of privateExportNames) {
+    assert.strictEqual(Object.hasOwn(mod, exportName), false);
+    assert.strictEqual(Object.keys(mod).includes(exportName), false);
+  }
+}
+
+function assertRuntimeApiInstalled() {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, '__MB_RUNTIME_API__');
+  assert.ok(descriptor);
+  assert.strictEqual(descriptor.enumerable, false);
+  assert.strictEqual(descriptor.configurable, true);
+  assert.strictEqual(descriptor.writable, false);
+  const runtimeApi = globalThis.__MB_RUNTIME_API__;
+  assert.ok(runtimeApi && typeof runtimeApi === 'object');
+  assert.strictEqual(Object.isFrozen(runtimeApi), true);
+  assert.strictEqual(typeof runtimeApi.getMessageBridgeStatus, 'function');
+  assert.strictEqual(typeof runtimeApi.startMessageBridgeRuntime, 'function');
+  assert.strictEqual(typeof runtimeApi.stopMessageBridgeRuntime, 'function');
+  assert.strictEqual(typeof runtimeApi.subscribeMessageBridgeStatus, 'function');
+}
+
 describe('plugin distribution artifact', () => {
-  test('builds prod artifact without sourcemap and with default and named exports', async () => {
+  test('builds prod artifact without sourcemap and with plugin exports plus global runtime api', async () => {
     const pluginVersion = await readPackageVersion();
     execFileSync('node', ['./scripts/build.mjs'], {
       cwd: process.cwd(),
@@ -86,11 +116,9 @@ describe('plugin distribution artifact', () => {
 
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
-    assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
-    assert.strictEqual(typeof mod.startMessageBridgeRuntime, 'function');
-    assert.strictEqual(typeof mod.stopMessageBridgeRuntime, 'function');
-    assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+    assertNoPrivateRuntimeNamedExports(mod);
+    assertRuntimeApiInstalled();
   });
 
   test('builds artifact with injected default gateway url', async () => {
@@ -139,11 +167,9 @@ describe('plugin distribution artifact', () => {
     const mod = await importArtifact('dev-exports');
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
-    assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
-    assert.strictEqual(typeof mod.startMessageBridgeRuntime, 'function');
-    assert.strictEqual(typeof mod.stopMessageBridgeRuntime, 'function');
-    assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+    assertNoPrivateRuntimeNamedExports(mod);
+    assertRuntimeApiInstalled();
   });
 
   test('built artifact logs injected plugin version during runtime start', async () => {
@@ -204,7 +230,7 @@ describe('plugin distribution artifact', () => {
         process.execPath,
         [
           '-e',
-          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { console.log(typeof mod.default, typeof mod.MessageBridgePlugin, typeof mod.getMessageBridgeStatus, typeof mod.startMessageBridgeRuntime, typeof mod.stopMessageBridgeRuntime, typeof mod.subscribeMessageBridgeStatus, mod.default === mod.MessageBridgePlugin); })`,
+          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { const api = globalThis.__MB_RUNTIME_API__; console.log(typeof mod.default, typeof mod.MessageBridgePlugin, Object.hasOwn(mod, 'getMessageBridgeStatus'), Object.hasOwn(mod, 'startMessageBridgeRuntime'), Object.hasOwn(mod, 'stopMessageBridgeRuntime'), Object.hasOwn(mod, 'subscribeMessageBridgeStatus'), typeof api?.getMessageBridgeStatus, typeof api?.startMessageBridgeRuntime, typeof api?.stopMessageBridgeRuntime, typeof api?.subscribeMessageBridgeStatus, Object.isFrozen(api), Object.getOwnPropertyDescriptor(globalThis, '__MB_RUNTIME_API__')?.enumerable, mod.default === mod.MessageBridgePlugin); })`,
         ],
         {
           cwd: tempDir,
@@ -213,7 +239,7 @@ describe('plugin distribution artifact', () => {
         },
       ).toString().trim();
 
-      assert.strictEqual(stdout, 'function function function function function function true');
+      assert.strictEqual(stdout, 'function function false false false false function function function function true false true');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

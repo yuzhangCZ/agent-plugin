@@ -14,6 +14,7 @@
 - `subscribeMessageBridgeStatus()` 的订阅契约
 - `MessageBridgeStatusSnapshot` 字段与公开语义
 - 私有 status API 与 `status_query/status_response` 的边界
+- 私有 Runtime API 的同进程宿主访问方式
 
 ## Out of Scope
 
@@ -38,18 +39,32 @@
 - 控制接口：启动或停止 runtime
 - 状态接口：读取当前状态或订阅状态变化
 
-公开导出固定为：
+插件模块的运行时导出面只保留插件入口：
+
+- `default export MessageBridgePlugin`
+- `named export MessageBridgePlugin`
+
+私有 Runtime API 通过同进程全局对象暴露：
 
 ```ts
-function startMessageBridgeRuntime(): Promise<void>;
+interface MessageBridgeRuntimeApi {
+  startMessageBridgeRuntime(): Promise<void>;
+  stopMessageBridgeRuntime(): void;
+  getMessageBridgeStatus(): MessageBridgeStatusSnapshot;
+  subscribeMessageBridgeStatus(
+    listener: (snapshot: MessageBridgeStatusSnapshot) => void,
+  ): () => void;
+}
+```
 
-function stopMessageBridgeRuntime(): void;
+旧的 private API named export 不再是受支持的访问方式，避免宿主 loader 枚举模块导出时误将私有函数当作插件入口执行。
 
-function getMessageBridgeStatus(): MessageBridgeStatusSnapshot;
+访问示例：
 
-function subscribeMessageBridgeStatus(
-  listener: (snapshot: MessageBridgeStatusSnapshot) => void,
-): () => void;
+```ts
+const runtimeApi = globalThis.__MB_RUNTIME_API__;
+await runtimeApi.startMessageBridgeRuntime();
+const snapshot = runtimeApi.getMessageBridgeStatus();
 ```
 
 ## 控制接口
@@ -59,12 +74,13 @@ function subscribeMessageBridgeStatus(
 推荐调用顺序：
 
 1. 先调用 `MessageBridgePlugin(input)` 完成插件加载
-2. 需要显式恢复或重新启动时，再调用 `startMessageBridgeRuntime()`
-3. 需要显式停止时，调用 `stopMessageBridgeRuntime()`
-4. 需要展示当前状态或失败原因时，调用 `getMessageBridgeStatus()` 或订阅 `subscribeMessageBridgeStatus()`
+2. 需要显式恢复或重新启动时，通过 `globalThis.__MB_RUNTIME_API__.startMessageBridgeRuntime()` 调用
+3. 需要显式停止时，通过 `globalThis.__MB_RUNTIME_API__.stopMessageBridgeRuntime()` 调用
+4. 需要展示当前状态或失败原因时，通过 `globalThis.__MB_RUNTIME_API__.getMessageBridgeStatus()` 或订阅 `globalThis.__MB_RUNTIME_API__.subscribeMessageBridgeStatus()` 获取
 
 补充规则：
 
+- `src/index.ts` 被 import 时会注册 `globalThis.__MB_RUNTIME_API__`
 - `startMessageBridgeRuntime()` 只能在插件已加载后调用
 - `stopMessageBridgeRuntime()` 可在任意时机幂等调用
 - `stopMessageBridgeRuntime()` 调用后，插件不会自动恢复；如需恢复，必须再次显式调用 `startMessageBridgeRuntime()`
@@ -195,4 +211,4 @@ export interface MessageBridgeStatusSnapshot {
 
 - `status_query` 仍属于 gateway 外部协议
 - `status_response` 仍只承诺返回 `opencodeOnline:boolean`
-- 私有 Runtime API 是插件导出 API，不属于 gateway wire shape
+- 私有 Runtime API 是同进程宿主 API，不属于 gateway wire shape
