@@ -55,7 +55,7 @@ export class FactSequenceValidator {
 
     return {
       accepted: true,
-      projectFact: fact.type !== 'message.start' && fact.type !== 'message.done' && fact.type !== 'session.error',
+      projectFact: fact.type !== 'message.start' && fact.type !== 'message.done',
       derivedEvents: this.deriveEvents(fact),
     };
   }

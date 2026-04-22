@@ -50,6 +50,7 @@ export interface RuntimeTraceFailure {
 
 export interface RuntimeDiagnostics {
   gatewayState?: string;
+  lastReadyAt: number | null;
   lastInboundAt: number | null;
   lastOutboundAt: number | null;
   lastHeartbeatAt: number | null;
@@ -68,6 +69,7 @@ export interface RuntimeDiagnostics {
 export class RuntimeTraceCollector {
   private readonly diagnostics: RuntimeDiagnostics = {
     gatewayState: undefined,
+    lastReadyAt: null,
     lastInboundAt: null,
     lastOutboundAt: null,
     lastHeartbeatAt: null,
@@ -125,6 +127,10 @@ export class RuntimeTraceCollector {
     this.diagnostics.gatewayState = state;
   }
 
+  recordReadyAt(timestamp: number): void {
+    this.diagnostics.lastReadyAt = timestamp;
+  }
+
   recordInboundAt(timestamp: number): void {
     this.diagnostics.lastInboundAt = timestamp;
   }
@@ -140,6 +146,7 @@ export class RuntimeTraceCollector {
   snapshot(): RuntimeDiagnostics {
     return {
       gatewayState: this.diagnostics.gatewayState,
+      lastReadyAt: this.diagnostics.lastReadyAt,
       lastInboundAt: this.diagnostics.lastInboundAt,
       lastOutboundAt: this.diagnostics.lastOutboundAt,
       lastHeartbeatAt: this.diagnostics.lastHeartbeatAt,

@@ -1,4 +1,5 @@
 import type { RuntimeDiagnostics } from './runtime-trace.ts';
+import type { BridgeGatewayProbeResult } from './gateway-host.ts';
 
 /**
  * 对外稳定暴露的 host runtime 状态。
@@ -27,6 +28,7 @@ export interface BridgeRuntimeStatusSnapshot {
 export interface BridgeRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  probe(input?: { timeoutMs: number }): Promise<BridgeGatewayProbeResult>;
   getStatus(): BridgeRuntimeStatusSnapshot;
   getDiagnostics(): RuntimeDiagnostics;
 }

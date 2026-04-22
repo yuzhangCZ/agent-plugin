@@ -2,13 +2,13 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GatewayClient, GatewayClientConfig, GatewayClientState } from '@agent-plugin/gateway-client';
-
 import { createBridgeRuntime } from '../src/index.ts';
+import type { BridgeGatewayHostConfig } from '../src/index.ts';
+import type { BridgeGatewayHostConnection, BridgeGatewayHostState } from '../src/application/gateway-host.ts';
 
-class HostGatewayClient extends EventEmitter implements GatewayClient {
+class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
-  private state: GatewayClientState = 'DISCONNECTED';
+  private state: BridgeGatewayHostState = 'DISCONNECTED';
 
   async connect(): Promise<void> {
     this.state = 'READY';
@@ -29,7 +29,7 @@ class HostGatewayClient extends EventEmitter implements GatewayClient {
     return this.state === 'READY';
   }
 
-  getState(): GatewayClientState {
+  getState(): BridgeGatewayHostState {
     return this.state;
   }
 
@@ -52,16 +52,16 @@ class HostGatewayClient extends EventEmitter implements GatewayClient {
   }
 }
 
-function createGatewayConfig(): GatewayClientConfig {
+function createGatewayConfig(): BridgeGatewayHostConfig {
   return {
     url: 'ws://gateway.local',
-    registerMessage: {
-      type: 'register',
-      mac: '00:00:00:00:00:00',
-      os: 'darwin',
-      toolType: 'openclaw',
+    auth: {
+      ak: 'ak',
+      sk: 'sk',
+    },
+    register: {
+      toolType: 'openx',
       toolVersion: '0.0.0',
-      deviceName: 'runtime-test',
     },
   };
 }
@@ -98,7 +98,7 @@ test('host runtime records gateway diagnostics and processes downstream messages
         return { applied: true };
       },
     },
-    gateway: createGatewayConfig(),
+    gatewayHost: createGatewayConfig(),
     connectionFactory: () => connection,
   });
 

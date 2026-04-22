@@ -20,6 +20,11 @@ export type {
 } from './domain/provider.ts';
 export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
 export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
+export type {
+  BridgeGatewayHostConfig,
+  BridgeGatewayProbeResult,
+  BridgeGatewayToolType,
+} from './application/gateway-host.ts';
 export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
 export type {
   RuntimeDiagnostics,

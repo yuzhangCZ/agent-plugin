@@ -1,11 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  createGatewayClient,
-  type GatewayClient,
-  type GatewayClientConfig,
-  type GatewayClientErrorShape,
-  type GatewayClientState,
   type GatewayInboundFrame,
 } from '@agent-plugin/gateway-client';
 import {
@@ -37,6 +32,17 @@ import {
 import { FactSequenceValidator } from './fact-sequence-validator.ts';
 import { InteractionCoordinator, OutboundCoordinator, RequestRunCoordinator } from './coordinators.ts';
 import { ProviderApiAdapter } from './provider-api-adapter.ts';
+import {
+  createDefaultBridgeGatewayHostConnection,
+  normalizeBridgeGatewayHostConfig,
+  probeBridgeGatewayHost,
+  type BridgeGatewayHostConfig,
+  type BridgeGatewayHostConnection,
+  type BridgeGatewayHostError,
+  type BridgeGatewayHostState,
+  type BridgeGatewayLogger,
+  type BridgeGatewayProbeResult,
+} from './gateway-host.ts';
 import {
   AbortExecutionUseCase,
   CloseSessionUseCase,
@@ -74,10 +80,23 @@ interface InternalBridgeRuntimeCore {
  */
 export interface BridgeRuntimeOptions {
   provider: ThirdPartyAgentProvider;
-  gateway: GatewayClientConfig;
+  gatewayHost: BridgeGatewayHostConfig;
+  logger?: BridgeGatewayLogger;
+  debug?: boolean;
   traceIdFactory?: () => string;
-  connectionFactory?: (config: GatewayClientConfig) => GatewayClient;
+  onTelemetryUpdated?: () => void;
 }
+
+/**
+ * Runtime SDK 内部测试缝。
+ * @remarks connectionFactory 与 onGatewayConnectionCreated 只用于包内测试和装配验证，
+ * 不属于 bridge-runtime-sdk 的 public contract；宿主侧只能通过 gatewayHost 与
+ * createBridgeRuntime 创建 runtime。
+ */
+type BridgeRuntimeInternalOptions = BridgeRuntimeOptions & {
+  connectionFactory?: (config: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+  onGatewayConnectionCreated?: (connection: BridgeGatewayHostConnection) => void;
+};
 
 function normalizeErrorMessage(error: unknown): string {
   if (
@@ -98,12 +117,16 @@ function classifyRequestFailureKind(error: unknown): 'command_execution_failure'
   return 'command_execution_failure';
 }
 
-function isGatewayReady(state: GatewayClientState): boolean {
+function isGatewayReady(state: BridgeGatewayHostState): boolean {
   return state === 'READY';
 }
 
-function isGatewayRecovering(state: GatewayClientState): boolean {
+function isGatewayRecovering(state: BridgeGatewayHostState): boolean {
   return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildInvalidInvokeToolError(code: string): string {
@@ -116,7 +139,7 @@ function shouldReplyToInvalidInvoke(frame: GatewayInboundFrame): frame is Extrac
 
 function handleInvalidInvokeInboundFrame(
   frame: Extract<GatewayInboundFrame, { kind: 'invalid'; messageType: 'invoke' }>,
-  client: GatewayClient,
+  client: BridgeGatewayHostConnection,
   trace: RuntimeTraceCollector,
   sink: GatewayOutboundSink,
 ): void {
@@ -237,36 +260,46 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
 }
 
 function attachGatewayClientObservers(
-  client: GatewayClient,
+  client: BridgeGatewayHostConnection,
   trace: RuntimeTraceCollector,
   sink: GatewayOutboundSink,
-  onGatewayStateChange: (state: GatewayClientState) => void,
+  onGatewayStateChange: (state: BridgeGatewayHostState) => void,
   onBusinessMessage: (message: GatewayDownstreamBusinessRequest) => void,
-  onNonRetryableError: (error: GatewayClientErrorShape) => void,
+  onNonRetryableError: (error: BridgeGatewayHostError) => void,
+  onTelemetryUpdated?: () => void,
 ): () => void {
-  const stateChange = (state: GatewayClientState) => {
+  const stateChange = (state: BridgeGatewayHostState) => {
     trace.recordGatewayState(state);
+    if (state === 'READY') {
+      trace.recordReadyAt(Date.now());
+    }
     onGatewayStateChange(state);
+    onTelemetryUpdated?.();
   };
   const inbound = (frame: GatewayInboundFrame) => {
     trace.recordInboundAt(Date.now());
     if (shouldReplyToInvalidInvoke(frame)) {
       handleInvalidInvokeInboundFrame(frame, client, trace, sink);
     }
+    onTelemetryUpdated?.();
   };
   const outbound = () => {
     trace.recordOutboundAt(Date.now());
+    onTelemetryUpdated?.();
   };
   const heartbeat = () => {
     trace.recordHeartbeatAt(Date.now());
+    onTelemetryUpdated?.();
   };
   const message = (payload: GatewayDownstreamBusinessRequest) => {
     onBusinessMessage(payload);
+    onTelemetryUpdated?.();
   };
-  const error = (gatewayError: GatewayClientErrorShape) => {
+  const error = (gatewayError: BridgeGatewayHostError) => {
     if (!gatewayError.retryable) {
       onNonRetryableError(gatewayError);
     }
+    onTelemetryUpdated?.();
   };
 
   client.on('stateChange', stateChange);
@@ -277,7 +310,7 @@ function attachGatewayClientObservers(
   client.on('error', error);
 
   return () => {
-    const eventEmitter = client as GatewayClient & {
+    const eventEmitter = client as BridgeGatewayHostConnection & {
       off?: (event: string, listener: (...args: unknown[]) => void) => void;
       removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
     };
@@ -300,8 +333,20 @@ function attachGatewayClientObservers(
  * 该入口只负责 host runtime bootstrap；runtime core 仍作为内部实现细节存在。
  */
 export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promise<BridgeRuntime> {
+  const internalOptions = options as BridgeRuntimeInternalOptions;
   const trace = new RuntimeTraceCollector();
-  const currentClient = options.connectionFactory?.(options.gateway) ?? createGatewayClient(options.gateway);
+  const gatewayHost = normalizeBridgeGatewayHostConfig(options.gatewayHost, {
+    logger: options.logger,
+    debug: options.debug,
+  });
+  let currentClient: BridgeGatewayHostConnection | null = null;
+  let detachGatewayObservers: (() => void) | null = null;
+  const ensureCurrentClient = (): BridgeGatewayHostConnection => {
+    if (!currentClient) {
+      throw new Error('gateway_client_not_connected');
+    }
+    return currentClient;
+  };
   const sink: GatewayOutboundSink = {
     send(message) {
       const validation = validateGatewayUplinkBusinessMessage(message);
@@ -314,7 +359,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         });
         return;
       }
-      currentClient.send(validation.value);
+      ensureCurrentClient().send(validation.value);
     },
   };
   const core = createBridgeRuntimeCore({
@@ -330,6 +375,8 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
   };
   let startPromise: Promise<void> | null = null;
   let stopPromise: Promise<void> | null = null;
+  let probePromise: Promise<BridgeGatewayProbeResult> | null = null;
+  let probeAbortController: AbortController | null = null;
   const recordFailure = (
     kind:
       | 'startup_failure'
@@ -360,48 +407,82 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     };
   };
 
-  attachGatewayClientObservers(
-    currentClient,
-    trace,
-    sink,
-    (gatewayState) => {
-      if (status.state === 'idle' || status.state === 'stopping' || status.state === 'failed') {
-        return;
-      }
-      if (isGatewayReady(gatewayState)) {
-        status = {
-          state: 'ready',
-          failureReason: null,
-        };
-        return;
-      }
-      if (status.state !== 'starting' && isGatewayRecovering(gatewayState)) {
-        status = {
-          state: 'reconnecting',
-          failureReason: null,
-        };
-      }
-    },
-    (message) => {
-      void (async () => {
-        try {
-          await core.handleDownstream(message);
-        } catch (error) {
-          recordFailure(
-            error instanceof Error && error.message.startsWith('Unsupported downstream action:')
-              ? 'inbound_validation_failure'
-              : classifyRequestFailureKind(error),
-            'runtime',
-            error,
-            error instanceof RuntimeContractError ? error.code : undefined,
-          );
+  const attachClient = (client: BridgeGatewayHostConnection): void => {
+    if (currentClient === client && detachGatewayObservers) {
+      return;
+    }
+    detachGatewayObservers?.();
+    currentClient = client;
+    internalOptions.onGatewayConnectionCreated?.(client);
+    detachGatewayObservers = attachGatewayClientObservers(
+      client,
+      trace,
+      sink,
+      (gatewayState) => {
+        if (status.state === 'idle' || status.state === 'stopping' || status.state === 'failed') {
+          return;
         }
-      })();
-    },
-    (error) => {
-      setFailed('gateway_runtime_failure', 'runtime', error, error.code);
-    },
-  );
+        if (isGatewayReady(gatewayState)) {
+          status = {
+            state: 'ready',
+            failureReason: null,
+          };
+          options.onTelemetryUpdated?.();
+          return;
+        }
+        if (status.state !== 'starting' && isGatewayRecovering(gatewayState)) {
+          status = {
+            state: 'reconnecting',
+            failureReason: null,
+          };
+          options.onTelemetryUpdated?.();
+        }
+      },
+      (message) => {
+        void (async () => {
+          try {
+            await core.handleDownstream(message);
+          } catch (error) {
+            recordFailure(
+              error instanceof Error && error.message.startsWith('Unsupported downstream action:')
+                ? 'inbound_validation_failure'
+                : classifyRequestFailureKind(error),
+              'runtime',
+              error,
+              error instanceof RuntimeContractError ? error.code : undefined,
+            );
+          }
+        })();
+      },
+      (error) => {
+        setFailed('gateway_runtime_failure', 'runtime', error, error.code);
+        options.onTelemetryUpdated?.();
+      },
+      options.onTelemetryUpdated,
+    );
+  };
+
+  const createConnection = (): BridgeGatewayHostConnection =>
+    internalOptions.connectionFactory?.(options.gatewayHost) ?? createDefaultBridgeGatewayHostConnection(gatewayHost);
+
+  const cancelProbeForStart = async (): Promise<void> => {
+    if (!probePromise || !probeAbortController) {
+      return;
+    }
+    probeAbortController.abort(new Error('probe_cancelled_for_runtime_start'));
+    await probePromise.catch(() => undefined);
+  };
+
+  const detachClient = (): void => {
+    detachGatewayObservers?.();
+    detachGatewayObservers = null;
+    currentClient = null;
+  };
+
+  const disconnectCurrentClient = (): void => {
+    currentClient?.disconnect();
+    detachClient();
+  };
 
   const diagnostics = () => core.getDiagnostics();
 
@@ -418,21 +499,24 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         state: 'starting',
         failureReason: null,
       };
+      options.onTelemetryUpdated?.();
 
       startPromise = (async () => {
         try {
+          await cancelProbeForStart();
           await core.start();
-          await currentClient.connect();
-          const gatewayStatus = currentClient.getStatus();
-          if (!gatewayStatus.isReady()) {
-            throw new Error('gateway_client_not_ready');
-          }
+          const client = createConnection();
+          attachClient(client);
+          await client.connect();
           status = {
             state: 'ready',
             failureReason: null,
           };
+          options.onTelemetryUpdated?.();
         } catch (error) {
+          disconnectCurrentClient();
           setFailed('startup_failure', 'start', error);
+          options.onTelemetryUpdated?.();
           throw error;
         } finally {
           startPromise = null;
@@ -442,6 +526,9 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
       return startPromise;
     },
     async stop(): Promise<void> {
+      if (probePromise) {
+        await cancelProbeForStart();
+      }
       if (status.state === 'idle') {
         return;
       }
@@ -453,20 +540,25 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         state: 'stopping',
         failureReason: null,
       };
+      options.onTelemetryUpdated?.();
 
       stopPromise = (async () => {
         try {
+          await cancelProbeForStart();
           if (startPromise) {
+            currentClient?.disconnect();
             await startPromise.catch(() => undefined);
           }
-          currentClient.disconnect();
+          disconnectCurrentClient();
           await core.stop();
           status = {
             state: 'idle',
             failureReason: null,
           };
+          options.onTelemetryUpdated?.();
         } catch (error) {
           setFailed('gateway_runtime_failure', 'stop', error);
+          options.onTelemetryUpdated?.();
           throw error;
         } finally {
           stopPromise = null;
@@ -477,6 +569,59 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     },
     getStatus(): BridgeRuntimeStatusSnapshot {
       return { ...status };
+    },
+    async probe(input = { timeoutMs: 5_000 }): Promise<BridgeGatewayProbeResult> {
+      const startedAt = Date.now();
+      if (status.state === 'ready') {
+        return {
+          state: 'ready',
+          latencyMs: 0,
+          reason: 'runtime_ready',
+        };
+      }
+
+      if (status.state === 'starting' || status.state === 'reconnecting') {
+        const waitMs = Math.min(input.timeoutMs, 1_000);
+        if (startPromise) {
+          await Promise.race([startPromise.catch(() => undefined), sleep(waitMs)]);
+        } else {
+          await sleep(waitMs);
+        }
+        if (status.state === 'ready') {
+          return {
+            state: 'ready',
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            reason: 'runtime_connected_after_wait',
+          };
+        }
+        return {
+          state: 'connecting',
+          latencyMs: Math.max(0, Date.now() - startedAt),
+          reason: 'runtime_connecting_probe_skipped',
+        };
+      }
+
+      if (probePromise) {
+        return probePromise;
+      }
+
+      probeAbortController = new AbortController();
+      probePromise = probeBridgeGatewayHost(
+        {
+          gatewayHost,
+          timeoutMs: input.timeoutMs,
+          abortSignal: probeAbortController.signal,
+        },
+        {
+          connectionFactory: internalOptions.connectionFactory
+            ? () => internalOptions.connectionFactory!(options.gatewayHost)
+            : undefined,
+        },
+      ).finally(() => {
+        probePromise = null;
+        probeAbortController = null;
+      });
+      return probePromise;
     },
     getDiagnostics() {
       return diagnostics();

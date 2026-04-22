@@ -142,7 +142,15 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
           },
         ];
       case 'session.error':
-        return [];
+        return [
+          {
+            family: 'skill',
+            type: 'session.error',
+            properties: {
+              error: fact.error.message,
+            },
+          },
+        ];
     }
   }
 }

@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 
-import type { GatewayClient, GatewayClientState } from '@agent-plugin/gateway-client';
-
 import { createBridgeRuntime } from '../src/index.ts';
+import type { BridgeGatewayHostConnection, BridgeGatewayHostState } from '../src/application/gateway-host.ts';
 
-class AssemblyGatewayClient extends EventEmitter implements GatewayClient {
-  private state: GatewayClientState = 'DISCONNECTED';
+class AssemblyGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
+  private state: BridgeGatewayHostState = 'DISCONNECTED';
 
   async connect(): Promise<void> {
     this.state = 'READY';
@@ -25,7 +24,7 @@ class AssemblyGatewayClient extends EventEmitter implements GatewayClient {
     return this.state === 'READY';
   }
 
-  getState(): GatewayClientState {
+  getState(): BridgeGatewayHostState {
     return this.state;
   }
 
@@ -71,15 +70,15 @@ test('createBridgeRuntime assembles a host runtime facade', async () => {
         return { applied: true };
       },
     },
-    gateway: {
+    gatewayHost: {
       url: 'ws://gateway.local',
-      registerMessage: {
-        type: 'register',
-        mac: '00:00:00:00:00:00',
-        os: 'darwin',
-        toolType: 'openclaw',
+      auth: {
+        ak: 'ak',
+        sk: 'sk',
+      },
+      register: {
+        toolType: 'openx',
         toolVersion: '0.0.0',
-        deviceName: 'runtime-test',
       },
     },
     connectionFactory: () => new AssemblyGatewayClient(),
@@ -88,9 +87,64 @@ test('createBridgeRuntime assembles a host runtime facade', async () => {
 
   assert.equal(typeof runtime.start, 'function');
   assert.equal(typeof runtime.stop, 'function');
+  assert.equal(typeof runtime.probe, 'function');
   assert.equal(typeof runtime.getStatus, 'function');
   assert.equal(typeof runtime.getDiagnostics, 'function');
 
   await assert.doesNotReject(runtime.start());
   await assert.doesNotReject(runtime.stop());
+});
+
+test('createBridgeRuntime does not create gateway connection during construction', async () => {
+  let factoryCalls = 0;
+  const runtime = await createBridgeRuntime({
+    provider: {
+      async health() {
+        return { online: true };
+      },
+      async createSession() {
+        return { toolSessionId: 'tool-session-1' };
+      },
+      async runMessage() {
+        return {
+          runId: 'run-1',
+          facts: (async function* () {})(),
+          async result() {
+            return { outcome: 'completed' as const };
+          },
+        };
+      },
+      async replyQuestion() {
+        return { applied: true };
+      },
+      async replyPermission() {
+        return { applied: true };
+      },
+      async closeSession() {
+        return { applied: true };
+      },
+      async abortSession() {
+        return { applied: true };
+      },
+    },
+    gatewayHost: {
+      url: 'ws://gateway.local',
+      auth: {
+        ak: 'ak',
+        sk: 'sk',
+      },
+      register: {
+        toolType: 'openx',
+        toolVersion: '0.0.0',
+      },
+    },
+    connectionFactory: () => {
+      factoryCalls += 1;
+      return new AssemblyGatewayClient();
+    },
+  });
+
+  assert.equal(factoryCalls, 0);
+  await runtime.start();
+  assert.equal(factoryCalls, 1);
 });
