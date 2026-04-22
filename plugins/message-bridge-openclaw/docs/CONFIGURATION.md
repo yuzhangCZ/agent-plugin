@@ -12,10 +12,6 @@ The plugin reads channel config under `channels.message-bridge`:
 - `debug` (`boolean`, optional, default `false`; enables raw WebSocket frame logging)
 - `name` (`string`, optional)
 - `gateway.url` (`string`, required, must start with `ws://` or `wss://`)
-- `gateway.heartbeatIntervalMs` (`integer`, optional, default `30000`)
-- `gateway.reconnect.baseMs` (`integer`, optional, default `1000`)
-- `gateway.reconnect.maxMs` (`integer`, optional, default `30000`)
-- `gateway.reconnect.exponential` (`boolean`, optional, default `true`)
 - `auth.ak` (`string`, required)
 - `auth.sk` (`string`, required)
 - `agentIdPrefix` (`string`, optional, default `"message-bridge"`)
@@ -24,6 +20,7 @@ The plugin reads channel config under `channels.message-bridge`:
 Not supported as user config:
 
 - `GatewayUrl` / `gatewayUrl` (non-standard aliases, ignored)
+- `gateway.heartbeatIntervalMs` / `gateway.reconnect.*` (connection policy uses gateway-client defaults)
 - register metadata fields like `toolType`, `toolVersion`, `deviceName`, `macAddress`
 - runtime default `toolType` is `openx`
 - known `toolType` list is `["openx"]`; unknown values only emit `runtime.register.tool_type.unknown` warning and do not block startup

@@ -236,12 +236,6 @@ async function createOpenClawGatewayBridgeForTest() {
       debug: false,
       gateway: {
         url: "ws://localhost:8081/ws/agent",
-        heartbeatIntervalMs: 30000,
-        reconnect: {
-          baseMs: 1,
-          maxMs: 4,
-          exponential: false,
-        },
       },
       auth: {
         ak: "ak-test",
@@ -261,17 +255,20 @@ async function createOpenClawGatewayBridgeForTest() {
   return { bridge, connection, logs, statuses };
 }
 
-test("openclaw bridge source keeps manual upstream exits routed through shared validation gate", async () => {
+test("openclaw bridge source delegates runtime uplink generation to bridge-runtime-sdk", async () => {
   const source = await readFile(new URL("../../src/OpenClawGatewayBridge.ts", import.meta.url), "utf8");
 
-  assert.match(source, /private sendToolEvent[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
-  assert.match(source, /private sendToolDone[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
-  assert.match(source, /private sendToolError[\s\S]*?this\.sendValidatedUpstreamMessage\(/);
+  assert.match(source, /createBridgeRuntime/);
+  assert.doesNotMatch(source, /sendValidatedUpstreamMessage/);
+  assert.doesNotMatch(source, /sendToolDone/);
+  assert.doesNotMatch(source, /sendToolError/);
+  assert.doesNotMatch(source, /onGatewayConnectionCreated/);
 });
 
 test("openclaw bridge replies tool_error for routable invalid invoke inbound frames", async () => {
-  const { connection } = await createOpenClawGatewayBridgeForTest();
+  const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
 
+  await bridge.start();
   connection.emit("inbound", createInvalidInvokeInboundFrame());
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -336,8 +333,9 @@ test("openclaw bridge ignores error events for invalid-invoke tool_error bridgin
 });
 
 test("openclaw bridge replies tool_error when only welinkSessionId is routable", async () => {
-  const { connection } = await createOpenClawGatewayBridgeForTest();
+  const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
 
+  await bridge.start();
   connection.emit(
     "inbound",
     createInvalidInvokeInboundFrame({
@@ -373,8 +371,9 @@ test("openclaw bridge replies tool_error when only welinkSessionId is routable",
 });
 
 test("openclaw bridge replies tool_error when only toolSessionId is routable", async () => {
-  const { connection } = await createOpenClawGatewayBridgeForTest();
+  const { bridge, connection } = await createOpenClawGatewayBridgeForTest();
 
+  await bridge.start();
   connection.emit(
     "inbound",
     createInvalidInvokeInboundFrame({

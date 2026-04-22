@@ -333,7 +333,7 @@ openclaw --dev channels add --channel message-bridge --account secondary --url w
 说明：
 
 - `name` 仅作为账号展示名，不参与注册协议
-- 注册时的 `toolType/deviceName/toolVersion/macAddress` 统一由运行时派生
+- 注册时的 `toolType/toolVersion` 由 OpenClaw 插件侧提供，`deviceName/os/macAddress` 由 gateway-client 统一派生
 
 执行：
 

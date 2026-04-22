@@ -221,9 +221,8 @@ Interactive `setup` / `onboarding` only writes:
 The following register metadata fields are runtime-derived and not user-configurable:
 
 - `toolType` defaults to `openx`
-- `deviceName` comes from `os.hostname()`
 - `toolVersion` comes from the plugin package version at runtime
-- `macAddress` comes from the first usable local network interface, or `""` when unavailable
+- `deviceName`, `os`, and `macAddress` are derived by `gateway-client` when it builds the register payload
 
 Known `toolType` values in this plugin: `openx`.  
 When a non-`openx` value is injected, runtime logs `runtime.register.tool_type.unknown` and continues.

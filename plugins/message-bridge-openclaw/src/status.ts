@@ -6,7 +6,13 @@ import {
   type ChannelStatusIssue,
 } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { createGatewayClient, type GatewayClient } from "@agent-plugin/gateway-client";
+import {
+  createBridgeRuntime,
+  type BridgeGatewayHostConfig,
+  type BridgeGatewayHostConnection,
+  type BridgeRuntime,
+  type ThirdPartyAgentProvider,
+} from "@agent-plugin/bridge-runtime-sdk";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,
@@ -22,15 +28,12 @@ import type {
   MessageBridgeStatusSnapshot,
 } from "./types.js";
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
-import {
-  beginProbeConnect,
-  finishProbeConnect,
-  getConnectionCoord,
-} from "./runtime/ConnectionCoordinator.js";
+import { beginProbeConnect, finishProbeConnect, getConnectionCoord } from "./runtime/ConnectionCoordinator.js";
 import { asRecord } from "./utils/type-guards.js";
-import { buildGatewayClientConfig } from "./gateway-client.js";
+import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./gateway-host.js";
 
 const HEARTBEAT_GRACE_MS = 5_000;
+const GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
 
 const silentLogger: BridgeLogger = {
@@ -39,15 +42,45 @@ const silentLogger: BridgeLogger = {
   error() {},
 };
 
-type ProbeConnectionFactory = (account: MessageBridgeResolvedAccount) => GatewayClient;
+const probeProvider: ThirdPartyAgentProvider = {
+  async health() {
+    return { online: true };
+  },
+  async createSession() {
+    return { toolSessionId: "probe" };
+  },
+  async runMessage() {
+    return {
+      runId: "probe",
+      facts: (async function* () {})(),
+      async result() {
+        return { outcome: "completed" as const };
+      },
+    };
+  },
+  async replyQuestion() {
+    return { applied: false };
+  },
+  async replyPermission() {
+    return { applied: false };
+  },
+  async closeSession() {
+    return { applied: false };
+  },
+  async abortSession() {
+    return { applied: false };
+  },
+};
+
+type ProbeConnectionFactory = (gatewayHost: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+
+type ProbeRuntimeFactory = typeof createBridgeRuntime;
 
 export type MessageBridgeAccountSnapshot = ChannelAccountSnapshot & {
   connected: boolean;
   gatewayUrl: string | null;
   toolType: string;
   toolVersion: string;
-  deviceName: string;
-  heartbeatIntervalMs: number;
   runTimeoutMs: number;
   tokenSource: "config" | "none";
   legacyAccountsConfigured: boolean;
@@ -68,10 +101,6 @@ function getMissingConfigFields(snapshot: MessageBridgeAccountSnapshot): string[
   return Array.isArray(snapshot.missingConfigFields) ? snapshot.missingConfigFields : [];
 }
 
-function isRejectedProbeError(message: string): boolean {
-  return message !== "gateway_websocket_error" && message !== "gateway_not_connected";
-}
-
 function isAuthRejectedReason(reason: string): boolean {
   return /(ak|sk|auth|credential|forbidden|secret|signature|token|unauthor|未授权|鉴权|凭证|密钥|签名)/i.test(
     reason,
@@ -85,13 +114,8 @@ function getProbeReason(probe: Record<string, unknown> | null): string {
   return probe.reason.trim();
 }
 
-function getHeartbeatThresholdMs(snapshot: MessageBridgeAccountSnapshot): number {
-  const heartbeatIntervalMs =
-    typeof snapshot.heartbeatIntervalMs === "number" ? snapshot.heartbeatIntervalMs : 0;
-  if (heartbeatIntervalMs <= 0) {
-    return 0;
-  }
-  return heartbeatIntervalMs * 2 + HEARTBEAT_GRACE_MS;
+function getHeartbeatThresholdMs(): number {
+  return GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS * 2 + HEARTBEAT_GRACE_MS;
 }
 
 function isRuntimeHealthyForDuplicateConnection(
@@ -106,7 +130,7 @@ function isRuntimeHealthyForDuplicateConnection(
     return true;
   }
 
-  const heartbeatThresholdMs = getHeartbeatThresholdMs(snapshot);
+  const heartbeatThresholdMs = getHeartbeatThresholdMs();
   if (heartbeatThresholdMs <= 0) {
     return true;
   }
@@ -116,7 +140,6 @@ function isRuntimeHealthyForDuplicateConnection(
 
 function isRuntimeHealthy(
   runtime: MessageBridgeStatusSnapshot | undefined,
-  heartbeatIntervalMs: number,
   nowAt: number,
 ): boolean {
   if (!runtime || runtime.connected !== true || typeof runtime.lastReadyAt !== "number") {
@@ -125,17 +148,7 @@ function isRuntimeHealthy(
   if (typeof runtime.lastHeartbeatAt !== "number") {
     return true;
   }
-  const heartbeatThresholdMs = heartbeatIntervalMs > 0 ? heartbeatIntervalMs * 2 + HEARTBEAT_GRACE_MS : 0;
-  if (heartbeatThresholdMs <= 0) {
-    return true;
-  }
-  return nowAt - runtime.lastHeartbeatAt <= heartbeatThresholdMs;
-}
-
-function createProbeConnection(account: MessageBridgeResolvedAccount, logger: BridgeLogger): GatewayClient {
-  const registerMetadata = resolveRegisterMetadata(logger);
-  warnUnknownToolType(logger, registerMetadata.toolType, account.accountId);
-  return createGatewayClient(buildGatewayClientConfig(account, logger, registerMetadata));
+  return nowAt - runtime.lastHeartbeatAt <= GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS * 2 + HEARTBEAT_GRACE_MS;
 }
 
 export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSnapshot {
@@ -156,10 +169,12 @@ export async function probeMessageBridgeAccount(
     account: MessageBridgeResolvedAccount;
     timeoutMs: number;
     runtime?: MessageBridgeStatusSnapshot | ChannelAccountSnapshot;
+    activeRuntime?: Pick<BridgeRuntime, "probe">;
     logger?: BridgeLogger;
   },
   deps: {
     connectionFactory?: ProbeConnectionFactory;
+    createRuntime?: ProbeRuntimeFactory;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
   } = {},
@@ -168,10 +183,12 @@ export async function probeMessageBridgeAccount(
   const sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const startedAt = now();
   const logger = params.logger ?? silentLogger;
+  const createRuntime = deps.createRuntime ?? createBridgeRuntime;
   const runtime = params.runtime as MessageBridgeStatusSnapshot | undefined;
   const accountId = params.account.accountId;
   const gatewayUrl = params.account.gateway.url;
-  const runtimeCoord = getConnectionCoord(accountId);
+  const resourceKey = buildMessageBridgeResourceKey(params.account);
+  const runtimeCoord = getConnectionCoord(resourceKey);
   logger.info("probe.requested", {
     accountId,
     gatewayUrl,
@@ -181,6 +198,16 @@ export async function probeMessageBridgeAccount(
     lastReadyAt: runtime?.lastReadyAt ?? null,
     lastHeartbeatAt: runtime?.lastHeartbeatAt ?? null,
   });
+
+  if (params.activeRuntime) {
+    const probeResult = await params.activeRuntime.probe({ timeoutMs: params.timeoutMs });
+    return {
+      ok: probeResult.state === "ready",
+      state: probeResult.state,
+      latencyMs: probeResult.latencyMs,
+      reason: probeResult.reason,
+    };
+  }
 
   if (runtimeCoord.runtimePhase === "ready") {
     const result = {
@@ -206,7 +233,7 @@ export async function probeMessageBridgeAccount(
       waitMs,
     });
     await sleep(waitMs);
-    const afterWaitCoord = getConnectionCoord(accountId);
+    const afterWaitCoord = getConnectionCoord(resourceKey);
     logger.info("probe.wait_runtime.completed", {
       accountId,
       gatewayUrl,
@@ -244,7 +271,7 @@ export async function probeMessageBridgeAccount(
     return result;
   }
 
-  if (isRuntimeHealthy(runtime, params.account.gateway.heartbeatIntervalMs, startedAt)) {
+  if (isRuntimeHealthy(runtime, startedAt)) {
     const result = {
       ok: true,
       state: "ready",
@@ -260,150 +287,59 @@ export async function probeMessageBridgeAccount(
     return result;
   }
 
-  const { abortController } = beginProbeConnect(accountId, now);
-  const connection = deps.connectionFactory?.(params.account) ?? createProbeConnection(params.account, logger);
-
-  return await new Promise((resolve) => {
-    let settled = false;
-
-    const finish = (result: MessageBridgeProbeResult) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      abortController.signal.removeEventListener("abort", onAbort);
-      finishProbeConnect(accountId, abortController);
-      try {
-        connection.disconnect();
-      } catch {
-        // ignore disconnect failures in probe teardown
-      }
-      resolve(result);
-    };
-
-    const onAbort = () => {
-      const result = {
-        ok: false,
-        state: "cancelled",
-        latencyMs: elapsedMs(startedAt, now),
-        reason: "probe_cancelled_for_runtime_start",
-      } satisfies MessageBridgeProbeResult;
-      logger.info("probe.connect.cancelled_for_runtime", {
-        accountId,
-        gatewayUrl,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    };
-
-    abortController.signal.addEventListener("abort", onAbort, { once: true });
-
-    const timer = setTimeout(() => {
-      const result = {
-        ok: false,
-        state: "timeout",
-        latencyMs: elapsedMs(startedAt, now),
-        reason: "probe timed out before READY",
-      } satisfies MessageBridgeProbeResult;
-      logger.warn("probe.connect.timeout", {
-        accountId,
-        gatewayUrl,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    }, params.timeoutMs);
-
-    logger.info("probe.connect.started", {
-      accountId,
-      gatewayUrl,
-      timeoutMs: params.timeoutMs,
-      runtimePhase: getConnectionCoord(accountId).runtimePhase,
-    });
-
-    connection.on("stateChange", (state) => {
-      if (settled) {
-        return;
-      }
-      if (state === "READY") {
-        const result = {
-          ok: true,
-          state: "ready",
-          latencyMs: elapsedMs(startedAt, now),
-          reason: "probe_connected",
-        } satisfies MessageBridgeProbeResult;
-        logger.info("probe.connect.ready", {
-          accountId,
-          gatewayUrl,
-          latencyMs: result.latencyMs,
-          reason: result.reason,
-        });
-        finish(result);
-        return;
-      }
-
-      if (state === "DISCONNECTED") {
-        const result = {
-          ok: false,
-          state: "connect_error",
-          latencyMs: elapsedMs(startedAt, now),
-          reason: "probe disconnected before READY",
-        } satisfies MessageBridgeProbeResult;
-        logger.warn("probe.connect.error", {
-          accountId,
-          gatewayUrl,
-          latencyMs: result.latencyMs,
-          reason: result.reason,
-        });
-        finish(result);
-      }
-    });
-
-    connection.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      const result = {
-        ok: false,
-        state: isRejectedProbeError(message) ? "rejected" : "connect_error",
-        latencyMs: elapsedMs(startedAt, now),
-        reason: message,
-      } satisfies MessageBridgeProbeResult;
-      logger[result.state === "rejected" ? "warn" : "error"](
-        result.state === "rejected" ? "probe.connect.rejected" : "probe.connect.error",
-        {
-          accountId,
-          gatewayUrl,
-          latencyMs: result.latencyMs,
-          reason: result.reason,
-        },
-      );
-      finish(result);
-    });
-
-    connection.connect().catch((error) => {
-      if (settled) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      const result = {
-        ok: false,
-        state: "connect_error",
-        latencyMs: elapsedMs(startedAt, now),
-        reason: message,
-      } satisfies MessageBridgeProbeResult;
-      logger.error("probe.connect.error", {
-        accountId,
-        gatewayUrl,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    });
+  const registerMetadata = resolveRegisterMetadata(logger);
+  warnUnknownToolType(logger, registerMetadata.toolType, accountId);
+  const { abortController } = beginProbeConnect(resourceKey, now);
+  let probeRuntime: BridgeRuntime | null = null;
+  const buildCancelledResult = (): MessageBridgeProbeResult => ({
+    ok: false,
+    state: "cancelled",
+    latencyMs: elapsedMs(startedAt, now),
+    reason: "probe_cancelled_for_runtime_start",
   });
+  const abortProbe = () => {
+    if (!probeRuntime) {
+      return;
+    }
+    void probeRuntime.stop().catch((error) => {
+      logger.warn("probe.cancel_teardown_failed", {
+        accountId,
+        gatewayUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+  abortController.signal.addEventListener("abort", abortProbe, { once: true });
+  try {
+    probeRuntime = await createRuntime({
+      provider: probeProvider,
+      gatewayHost: buildBridgeGatewayHostConfig(params.account, registerMetadata),
+      logger,
+      debug: params.account.debug,
+      connectionFactory: deps.connectionFactory,
+    });
+    if (abortController.signal.aborted) {
+      await probeRuntime.stop().catch((error) => {
+        logger.warn("probe.cancel_teardown_failed", {
+          accountId,
+          gatewayUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      return buildCancelledResult();
+    }
+
+    const probeResult = await probeRuntime.probe({ timeoutMs: params.timeoutMs });
+    return {
+      ok: probeResult.state === "ready",
+      state: probeResult.state,
+      latencyMs: probeResult.latencyMs,
+      reason: probeResult.reason,
+    };
+  } finally {
+    abortController.signal.removeEventListener("abort", abortProbe);
+    finishProbeConnect(resourceKey, abortController);
+  }
 }
 
 export function buildMessageBridgeAccountSnapshot(params: {
@@ -435,8 +371,6 @@ export function buildMessageBridgeAccountSnapshot(params: {
     gatewayUrl: account.gateway.url || null,
     toolType: registerMetadata.toolType,
     toolVersion: registerMetadata.toolVersion,
-    deviceName: registerMetadata.deviceName,
-    heartbeatIntervalMs: account.gateway.heartbeatIntervalMs,
     runTimeoutMs: account.runTimeoutMs,
     tokenSource: resolveTokenSource(account),
     legacyAccountsConfigured,
@@ -518,8 +452,6 @@ export function collectMessageBridgeStatusIssues(
       probeReason === "duplicate_connection" &&
       isRuntimeHealthyForDuplicateConnection(snapshot, nowAt);
     const missingConfigFields = getMissingConfigFields(snapshot);
-    const heartbeatIntervalMs =
-      typeof snapshot.heartbeatIntervalMs === "number" ? snapshot.heartbeatIntervalMs : 0;
     const runTimeoutMs = typeof snapshot.runTimeoutMs === "number" ? snapshot.runTimeoutMs : 0;
     if (snapshot.legacyAccountsConfigured) {
       issues.push(
@@ -567,7 +499,7 @@ export function collectMessageBridgeStatusIssues(
           createRuntimeIssue({
             accountId: snapshot.accountId,
             message: `网关拒绝注册${reason}`,
-            fix: "检查 ai-gateway 的注册策略、toolType/toolVersion、deviceName 与协议兼容性。",
+            fix: "检查 ai-gateway 的注册策略、toolType/toolVersion 与协议兼容性。",
           }),
         );
       }
@@ -619,9 +551,8 @@ export function collectMessageBridgeStatusIssues(
       continue;
     }
 
-    const heartbeatThresholdMs = getHeartbeatThresholdMs(snapshot);
+    const heartbeatThresholdMs = getHeartbeatThresholdMs();
     if (
-      heartbeatIntervalMs > 0 &&
       typeof snapshot.lastHeartbeatAt === "number" &&
       nowAt - snapshot.lastHeartbeatAt > heartbeatThresholdMs
     ) {
@@ -629,7 +560,7 @@ export function collectMessageBridgeStatusIssues(
         createRuntimeIssue({
           accountId: snapshot.accountId,
           message: "心跳超过阈值未更新，可能已与 ai-gateway 断连。",
-          fix: "检查 gateway 连接状态与 heartbeatIntervalMs 配置，必要时重启 channel。",
+          fix: "检查 gateway 连接状态，必要时重启 channel。",
         }),
       );
     }
@@ -637,7 +568,7 @@ export function collectMessageBridgeStatusIssues(
     const latestActivityAt = Math.max(snapshot.lastInboundAt ?? 0, snapshot.lastOutboundAt ?? 0);
     const activityThresholdMs = Math.max(
       runTimeoutMs,
-      heartbeatIntervalMs * 3,
+      GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS * 3,
     );
     if (activityThresholdMs > 0 && latestActivityAt > 0 && nowAt - latestActivityAt > activityThresholdMs) {
       issues.push(

@@ -324,9 +324,8 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 以下注册元数据不允许用户配置，统一由运行时采集：
 
 - `toolType` 默认值为 `openx`
-- `deviceName` 来自 `os.hostname()`
 - `toolVersion` 来自插件运行时包版本
-- `macAddress` 来自首个可用本地网卡，取不到时为空串 `""`
+- `deviceName`、`os`、`macAddress` 由 `gateway-client` 在构造 register payload 时统一派生
 
 当前插件内置已知 `toolType` 仅 `openx`。若注入其他值，会记录 `runtime.register.tool_type.unknown` 警告日志，但不会阻断连接。
 

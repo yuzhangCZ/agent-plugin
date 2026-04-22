@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { KNOWN_TOOL_TYPES, isKnownToolType } from "../../src/contracts/transport.ts";
-import { MESSAGE_BRIDGE_TOOL_TYPE, warnUnknownToolType } from "../../src/runtime/RegisterMetadata.ts";
+import { MESSAGE_BRIDGE_TOOL_TYPE, resolveRegisterMetadata, warnUnknownToolType } from "../../src/runtime/RegisterMetadata.ts";
 
 test("known tool types only include openx", () => {
   assert.deepEqual(KNOWN_TOOL_TYPES, ["openx"]);
@@ -11,6 +11,24 @@ test("known tool types only include openx", () => {
 
 test("register metadata default toolType is openx", () => {
   assert.equal(MESSAGE_BRIDGE_TOOL_TYPE, "openx");
+});
+
+test("register metadata only carries plugin-owned fields", () => {
+  const metadata = resolveRegisterMetadata(
+    {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    { toolVersion: "1.2.3" },
+  );
+
+  assert.deepEqual(metadata, {
+    toolType: "openx",
+    toolVersion: "1.2.3",
+  });
+  assert.equal("deviceName" in metadata, false);
+  assert.equal("macAddress" in metadata, false);
 });
 
 test("warnUnknownToolType emits warning for unknown value and stays non-blocking", () => {

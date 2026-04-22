@@ -34,12 +34,6 @@ export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
   streaming: true,
   gateway: {
     url: resolveBuildDefaultGatewayUrl(),
-    heartbeatIntervalMs: 30_000,
-    reconnect: {
-      baseMs: 1_000,
-      maxMs: 30_000,
-      exponential: true,
-    },
   },
   auth: {
     ak: "",
@@ -51,7 +45,14 @@ export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
 
 type MessageBridgeSetupInput = Pick<ChannelSetupInput, "name" | "password" | "token" | "url" | "useEnv">;
 
-const DEPRECATED_GATEWAY_FIELDS = new Set(["toolType", "toolVersion", "deviceName", "macAddress"]);
+const DEPRECATED_GATEWAY_FIELDS = new Set([
+  "toolType",
+  "toolVersion",
+  "deviceName",
+  "macAddress",
+  "heartbeatIntervalMs",
+  "reconnect",
+]);
 
 function trimOrUndefined(value: unknown): string | undefined {
   return asTrimmedString(value);

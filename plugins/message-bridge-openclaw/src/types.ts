@@ -1,14 +1,5 @@
-import type { GatewayReconnectConfig } from "@agent-plugin/gateway-client";
-
-export type MessageBridgeReconnectConfig = Pick<
-  GatewayReconnectConfig,
-  "baseMs" | "maxMs" | "exponential"
->;
-
 export interface MessageBridgeGatewayConfig {
   url: string;
-  heartbeatIntervalMs: number;
-  reconnect: MessageBridgeReconnectConfig;
 }
 
 export interface MessageBridgeAuthConfig {

@@ -10,10 +10,6 @@
 - `debug`（`boolean`，可选，默认 `false`；开启后打印 WebSocket 原始报文日志）
 - `name`（`string`，可选）
 - `gateway.url`（`string`，必填，必须以 `ws://` 或 `wss://` 开头）
-- `gateway.heartbeatIntervalMs`（`integer`，可选，默认 `30000`）
-- `gateway.reconnect.baseMs`（`integer`，可选，默认 `1000`）
-- `gateway.reconnect.maxMs`（`integer`，可选，默认 `30000`）
-- `gateway.reconnect.exponential`（`boolean`，可选，默认 `true`）
 - `auth.ak`（`string`，必填）
 - `auth.sk`（`string`，必填）
 - `agentIdPrefix`（`string`，可选，默认 `"message-bridge"`）
@@ -22,6 +18,7 @@
 不支持作为用户配置的字段：
 
 - `GatewayUrl` / `gatewayUrl`（非标准别名，忽略）
+- `gateway.heartbeatIntervalMs` / `gateway.reconnect.*`（连接策略使用 gateway-client 默认值）
 - 注册元数据字段：`toolType`、`toolVersion`、`deviceName`、`macAddress`
 - 运行时默认 `toolType` 为 `openx`
 - 已知 `toolType` 列表为 `["openx"]`；注入未知值时只记录 `runtime.register.tool_type.unknown` 警告日志，不阻断启动
