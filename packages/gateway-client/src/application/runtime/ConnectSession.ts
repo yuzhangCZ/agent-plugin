@@ -1,6 +1,7 @@
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
+import type { GatewayClientErrorPhase, GatewayClientErrorSource } from '../../domain/error-contract.ts';
 import { extractWebSocketErrorDetails, getErrorDetails } from '../telemetry/error-detail-mapper.ts';
 import type { InboundClassificationResult, InboundFrameClassifier } from './InboundFrameClassifier.ts';
 import type { HandshakeFrameProcessor, HandshakeResult } from './HandshakeFrameProcessor.ts';
@@ -36,6 +37,7 @@ class ConnectAttempt {
   private readonly state: GatewayRuntimeStatePort;
   private readonly releaseHandshakeOwnership: () => void;
   private readonly onTerminal: () => void;
+  private readonly reconnectAttempt: boolean;
   private readonly connectPromise: Promise<void>;
   private resolveConnect!: () => void;
   private rejectConnect!: (error: GatewayClientError) => void;
@@ -58,6 +60,7 @@ class ConnectAttempt {
     state: GatewayRuntimeStatePort,
     releaseHandshakeOwnership: () => void,
     onTerminal: () => void,
+    reconnectAttempt: boolean,
   ) {
     this.transport = transport;
     this.outboundSender = outboundSender;
@@ -70,6 +73,7 @@ class ConnectAttempt {
     this.state = state;
     this.releaseHandshakeOwnership = releaseHandshakeOwnership;
     this.onTerminal = onTerminal;
+    this.reconnectAttempt = reconnectAttempt;
     this.connectPromise = new Promise<void>((resolve, reject) => {
       this.resolveConnect = resolve;
       this.rejectConnect = reject;
@@ -84,10 +88,30 @@ class ConnectAttempt {
     return this.phase === 'terminal';
   }
 
+  private resolveErrorPhase(): GatewayClientErrorPhase {
+    if (this.context.abortSignal?.aborted || this.state.isManuallyDisconnected()) {
+      return 'stopping';
+    }
+    if (this.reconnectAttempt && this.phase !== 'ready') {
+      return 'reconnecting';
+    }
+    switch (this.phase) {
+      case 'transport-opening':
+        return 'before_open';
+      case 'register-sent':
+        return 'before_ready';
+      case 'ready':
+        return 'ready';
+      case 'terminal':
+        return this.opened ? 'before_ready' : 'before_open';
+    }
+  }
+
   start(url: string, protocols?: string[]): void {
     this.context.telemetry.reset();
     this.state.setState('CONNECTING');
     this.state.setManuallyDisconnected(false);
+    this.state.setReconnecting(this.reconnectAttempt);
     this.bindAbortListener();
     this.transport.open({
       url,
@@ -129,7 +153,8 @@ class ConnectAttempt {
     this.context.logger?.warn?.('gateway.connect.aborted');
     this.rejectHandshake(new GatewayClientError({
       code: 'GATEWAY_CONNECT_ABORTED',
-      category: 'state',
+      source: 'state_gate',
+      phase: 'stopping',
       retryable: false,
       message: 'gateway_connection_aborted',
     }));
@@ -156,7 +181,13 @@ class ConnectAttempt {
       this.phase = 'register-sent';
       this.armHandshakeTimeout();
     } catch (error) {
-      const clientError = this.toClientError(error, 'GATEWAY_PROTOCOL_VIOLATION', 'protocol', false);
+      const clientError = this.toClientError(
+        error,
+        'GATEWAY_PROTOCOL_VIOLATION',
+        'handshake',
+        this.resolveErrorPhase(),
+        false,
+      );
       this.context.logger?.error?.('gateway.register.failed', {
         error: clientError.message,
         ...getErrorDetails(clientError),
@@ -173,7 +204,8 @@ class ConnectAttempt {
     this.handshakeTimer = setTimeout(() => {
       this.failBeforeReady(new GatewayClientError({
         code: 'GATEWAY_CONNECT_TIMEOUT',
-        category: 'transport',
+        source: 'handshake',
+        phase: this.resolveErrorPhase(),
         retryable: true,
         message: 'gateway_handshake_timeout',
         details: { timeoutMs },
@@ -215,7 +247,13 @@ class ConnectAttempt {
     if (this.isTerminal()) {
       return;
     }
-    const clientError = this.toClientError(error, 'GATEWAY_PROTOCOL_VIOLATION', 'protocol', false);
+    const clientError = this.toClientError(
+      error,
+      'GATEWAY_PROTOCOL_VIOLATION',
+      'inbound_protocol',
+      this.resolveErrorPhase(),
+      false,
+    );
     this.context.sink.emitError(clientError);
   }
 
@@ -227,6 +265,7 @@ class ConnectAttempt {
       }
       this.clearHandshakeTimeout();
       this.reconnectOrchestrator.reset();
+      this.state.setReconnecting(false);
       this.context.logger?.info?.('gateway.register.accepted');
       this.phase = 'ready';
       this.state.setState('READY');
@@ -237,15 +276,17 @@ class ConnectAttempt {
     }
 
     if (result.kind === 'rejected') {
-      this.context.logger?.error?.('gateway.register.rejected', result.error.details);
-      this.failBeforeReady(result.error, { emitError: true, closeTransport: true });
+      const error = this.withResolvedPhase(result.error);
+      this.context.logger?.error?.('gateway.register.rejected', error.details);
+      this.failBeforeReady(error, { emitError: true, closeTransport: true });
       return;
     }
 
+    const error = this.withResolvedPhase(result.error);
     this.context.logger?.error?.('gateway.control.validation_failed', {
-      ...result.error.details,
+      ...error.details,
     });
-    this.failBeforeReady(result.error, { emitError: true, closeTransport: true });
+    this.failBeforeReady(error, { emitError: true, closeTransport: true });
   }
 
   private handleError(event?: unknown): void {
@@ -253,19 +294,14 @@ class ConnectAttempt {
       return;
     }
     this.context.telemetry.logRawFrame('onError', event);
-    const error = new GatewayClientError({
+    this.recordTerminalError(new GatewayClientError({
       code: 'GATEWAY_WEBSOCKET_ERROR',
-      category: 'transport',
+      source: 'transport',
+      phase: this.resolveErrorPhase(),
       retryable: true,
       message: 'gateway_websocket_error',
       details: extractWebSocketErrorDetails(event),
-    });
-    this.context.logger?.error?.('gateway.error', {
-      error: error.message,
-      ...error.details,
-    });
-    this.context.sink.emitError(error);
-    this.terminalError = error;
+    }), true);
   }
 
   private handleClose(event?: unknown): void {
@@ -299,7 +335,8 @@ class ConnectAttempt {
     if (!this.opened) {
       this.rejectHandshake(new GatewayClientError({
         code: 'GATEWAY_CLOSED_BEFORE_OPEN',
-        category: 'transport',
+        source: 'transport',
+        phase: this.resolveErrorPhase(),
         retryable: true,
         message: 'gateway_websocket_closed_before_open',
         details: {
@@ -314,7 +351,8 @@ class ConnectAttempt {
     if (this.phase !== 'ready') {
       const terminalError = this.terminalError ?? new GatewayClientError({
         code: 'GATEWAY_UNEXPECTED_CLOSE',
-        category: 'transport',
+        source: rejected ? 'handshake' : 'transport',
+        phase: this.resolveErrorPhase(),
         retryable: !rejected,
         message: 'gateway_unexpected_close_before_ready',
         details: {
@@ -353,10 +391,7 @@ class ConnectAttempt {
     error: GatewayClientError,
     options: { emitError: boolean; closeTransport: boolean },
   ): void {
-    this.terminalError = error;
-    if (options.emitError) {
-      this.context.sink.emitError(error);
-    }
+    this.recordTerminalError(error, options.emitError);
     this.state.setState('DISCONNECTED');
     this.rejectHandshake(error);
     this.enterTerminal();
@@ -389,20 +424,56 @@ class ConnectAttempt {
     if (this.terminalCleanupCompleted) {
       return;
     }
+    const wasReady = this.phase === 'ready';
     this.phase = 'terminal';
     this.terminalCleanupCompleted = true;
     this.clearHandshakeTimeout();
     this.cleanupAbortListener();
     this.heartbeatLoop.stop();
     this.reconnectOrchestrator.stop();
+    if (this.reconnectAttempt && !wasReady) {
+      this.state.setReconnecting(false);
+    }
     this.releaseHandshakeOwnership();
     this.onTerminal();
+  }
+
+  private withResolvedPhase(error: GatewayClientError): GatewayClientError {
+    const phase = this.resolveErrorPhase();
+    if (error.phase === phase) {
+      return error;
+    }
+    return new GatewayClientError({
+      code: error.code,
+      source: error.source,
+      phase,
+      retryable: error.retryable,
+      message: error.message,
+      details: error.details,
+      cause: error.cause,
+    });
+  }
+
+  private recordTerminalError(error: GatewayClientError, emitError: boolean): GatewayClientError {
+    if (!this.terminalError) {
+      this.terminalError = error;
+      this.context.logger?.error?.('gateway.error', {
+        error: error.message,
+        ...error.details,
+      });
+      if (emitError) {
+        this.context.sink.emitError(error);
+      }
+      return error;
+    }
+    return this.terminalError;
   }
 
   private toClientError(
     error: unknown,
     fallbackCode: GatewayClientError['code'],
-    fallbackCategory: GatewayClientError['category'],
+    fallbackSource: GatewayClientErrorSource,
+    fallbackPhase: GatewayClientErrorPhase,
     fallbackRetryable: boolean,
   ): GatewayClientError {
     if (error instanceof GatewayClientError) {
@@ -411,7 +482,8 @@ class ConnectAttempt {
     if (error instanceof Error) {
       return new GatewayClientError({
         code: fallbackCode,
-        category: fallbackCategory,
+        source: fallbackSource,
+        phase: fallbackPhase,
         retryable: fallbackRetryable,
         message: error.message,
         cause: error,
@@ -419,7 +491,8 @@ class ConnectAttempt {
     }
     return new GatewayClientError({
       code: fallbackCode,
-      category: fallbackCategory,
+      source: fallbackSource,
+      phase: fallbackPhase,
       retryable: fallbackRetryable,
       message: String(error),
       cause: error,
@@ -465,7 +538,7 @@ export class ConnectSession {
     this.state = state;
   }
 
-  connect(): Promise<void> {
+  connect(options: { reconnectAttempt: boolean } = { reconnectAttempt: false }): Promise<void> {
     this.context.logger?.info?.('gateway.connect.started', {
       url: this.context.options.url,
       state: this.state.getState(),
@@ -477,7 +550,8 @@ export class ConnectSession {
       this.context.logger?.warn?.('gateway.connect.aborted_precheck');
       return Promise.reject(new GatewayClientError({
         code: 'GATEWAY_CONNECT_ABORTED',
-        category: 'state',
+        source: 'state_gate',
+        phase: 'stopping',
         retryable: false,
         message: 'gateway_connection_aborted',
       }));
@@ -494,8 +568,6 @@ export class ConnectSession {
     try {
       // 对外 connect() 的 fulfilled 语义是握手完成并进入 READY，不是单纯 transport open。
       const parsedUrl = new URL(this.context.options.url).toString();
-      const authPayload = this.context.options.authPayloadProvider?.();
-      const protocols = authPayload ? [this.context.authSubprotocolBuilder(authPayload)] : undefined;
 
       const attempt = new ConnectAttempt(
         this.transport,
@@ -513,19 +585,42 @@ export class ConnectSession {
           }
         },
         () => {},
+        options.reconnectAttempt,
       );
+      const authPayload = this.context.options.authPayloadProvider?.();
+      const protocols = authPayload ? [this.context.authSubprotocolBuilder(authPayload)] : undefined;
       attempt.start(parsedUrl, protocols);
       this.activeAttempt = attempt;
       return attempt.promise;
     } catch (error) {
-      return Promise.reject(this.toClientError(error, 'GATEWAY_WEBSOCKET_ERROR', 'transport', true));
+      if (error instanceof TypeError && error.message.includes('Invalid URL')) {
+        return Promise.reject(
+          this.toClientError(
+            error,
+            'GATEWAY_WEBSOCKET_ERROR',
+            'transport',
+            options.reconnectAttempt ? 'reconnecting' : 'before_open',
+            true,
+          ),
+        );
+      }
+      return Promise.reject(
+        this.toClientError(
+          error,
+          'GATEWAY_WEBSOCKET_ERROR',
+          'handshake',
+          options.reconnectAttempt ? 'reconnecting' : 'before_open',
+          false,
+        ),
+      );
     }
   }
 
   private toClientError(
     error: unknown,
     fallbackCode: GatewayClientError['code'],
-    fallbackCategory: GatewayClientError['category'],
+    fallbackSource: GatewayClientErrorSource,
+    fallbackPhase: GatewayClientErrorPhase,
     fallbackRetryable: boolean,
   ): GatewayClientError {
     if (error instanceof GatewayClientError) {
@@ -534,7 +629,8 @@ export class ConnectSession {
     if (error instanceof Error) {
       return new GatewayClientError({
         code: fallbackCode,
-        category: fallbackCategory,
+        source: fallbackSource,
+        phase: fallbackPhase,
         retryable: fallbackRetryable,
         message: error.message,
         cause: error,
@@ -542,7 +638,8 @@ export class ConnectSession {
     }
     return new GatewayClientError({
       code: fallbackCode,
-      category: fallbackCategory,
+      source: fallbackSource,
+      phase: fallbackPhase,
       retryable: fallbackRetryable,
       message: String(error),
       cause: error,

@@ -33,7 +33,6 @@ export class DefaultGatewayClient extends EventEmitter implements GatewayClient 
         }
       },
     });
-    this.runtime.setReconnectInvoker(() => this.connect());
   }
 
   override on<E extends keyof GatewayClientEvents>(event: E, listener: GatewayClientEvents[E]): this {

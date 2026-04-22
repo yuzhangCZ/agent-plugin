@@ -12,6 +12,7 @@ export class ReconnectOrchestrator {
   private readonly context: GatewayRuntimeContext;
   private readonly state: GatewayRuntimeStatePort;
   private readonly reconnectEnabled: boolean;
+  private readonly reconnect: () => Promise<void>;
 
   constructor(
     scheduler: ReconnectScheduler,
@@ -19,12 +20,14 @@ export class ReconnectOrchestrator {
     context: GatewayRuntimeContext,
     state: GatewayRuntimeStatePort,
     reconnectEnabled: boolean,
+    reconnect: () => Promise<void>,
   ) {
     this.scheduler = scheduler;
     this.policy = policy;
     this.context = context;
     this.state = state;
     this.reconnectEnabled = reconnectEnabled;
+    this.reconnect = reconnect;
   }
 
   stop(): void {
@@ -33,6 +36,7 @@ export class ReconnectOrchestrator {
 
   reset(): void {
     this.policy.reset();
+    this.state.setReconnecting(false);
   }
 
   scheduleReconnect(): void {
@@ -54,14 +58,17 @@ export class ReconnectOrchestrator {
     };
     this.context.logger?.warn?.('gateway.reconnect.scheduled', reconnectLogFields);
     this.context.logger?.info?.('gateway.reconnect.scheduled', reconnectLogFields);
+    this.state.setReconnecting(true);
 
     this.scheduler.schedule(async () => {
       if (this.state.isManuallyDisconnected() || this.context.abortSignal?.aborted) {
+        this.state.setReconnecting(false);
         return;
       }
 
       const exhaustedDecision = this.policy.getExhaustedDecision();
       if (exhaustedDecision) {
+        this.state.setReconnecting(false);
         this.context.telemetry.logReconnectExhausted(exhaustedDecision.elapsedMs, exhaustedDecision.maxElapsedMs);
         return;
       }
@@ -71,8 +78,9 @@ export class ReconnectOrchestrator {
           attempt: reconnectDecision.attempt,
           reconnectAttempts: reconnectDecision.attempt,
         });
-        await this.context.reconnectInvoker();
+        await this.reconnect();
       } catch (error) {
+        this.state.setReconnecting(false);
         this.context.logger?.warn?.('gateway.reconnect.failed', {
           attempt: reconnectDecision.attempt,
           reconnectAttempts: reconnectDecision.attempt,

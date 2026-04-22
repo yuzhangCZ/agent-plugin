@@ -40,7 +40,6 @@ export interface GatewayRuntimeContext {
   sink: GatewayRuntimeSink;
   abortSignal?: AbortSignal;
   reconnectEnabled: boolean;
-  reconnectInvoker: () => Promise<void>;
   authSubprotocolBuilder: (payload: AkSkAuthPayload) => string;
 }
 
@@ -58,4 +57,8 @@ export interface GatewayRuntimeStatePort {
   isManuallyDisconnected(): boolean;
   /** 更新调用方主动终止标记。 */
   setManuallyDisconnected(value: boolean): void;
+  /** 当前是否处于自动重连恢复窗口。 */
+  isReconnecting(): boolean;
+  /** 更新自动重连恢复窗口标记。 */
+  setReconnecting(value: boolean): void;
 }

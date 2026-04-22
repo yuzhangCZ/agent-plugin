@@ -52,6 +52,7 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
   private readonly inboundFrameRouter: InboundFrameRouter;
   private readonly connectSession: ConnectSession;
   private manuallyDisconnected = false;
+  private reconnecting = false;
   private state: GatewayClientState = GATEWAY_CLIENT_STATE.DISCONNECTED;
 
   constructor(options: GatewayClientOptions, dependencies: GatewayClientRuntimeDependencies, sink: GatewayRuntimeSink) {
@@ -64,7 +65,6 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       sink,
       abortSignal: options.abortSignal,
       reconnectEnabled: dependencies.reconnectEnabled,
-      reconnectInvoker: () => this.connect(),
       authSubprotocolBuilder: dependencies.authSubprotocolBuilder,
     };
 
@@ -86,6 +86,7 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       this.context,
       this,
       dependencies.reconnectEnabled,
+      () => this.connectInternal(true),
     );
     this.inboundFrameClassifier = new InboundFrameClassifier(this.context, dependencies.wireCodec);
     this.handshakeFrameProcessor = new HandshakeFrameProcessor();
@@ -105,10 +106,6 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       this.context,
       this,
     );
-  }
-
-  setReconnectInvoker(invoker: () => Promise<void>): void {
-    this.context.reconnectInvoker = invoker;
   }
 
   getState(): GatewayClientState {
@@ -135,13 +132,22 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
     this.manuallyDisconnected = value;
   }
 
+  isReconnecting(): boolean {
+    return this.reconnecting;
+  }
+
+  setReconnecting(value: boolean): void {
+    this.reconnecting = value;
+  }
+
   connect(): Promise<void> {
-    return this.connectSession.connect();
+    return this.connectInternal(false);
   }
 
   disconnect(): void {
     this.context.logger?.info?.('gateway.disconnect.requested', { state: this.state });
     this.setManuallyDisconnected(true);
+    this.setReconnecting(false);
     this.reconnectOrchestrator.reset();
     this.transport.close();
     this.heartbeatLoop.stop();
@@ -151,5 +157,9 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
 
   send(message: GatewaySendPayload, logContext?: GatewaySendContext): void {
     this.outboundSender.send(message, logContext);
+  }
+
+  private connectInternal(reconnectAttempt: boolean): Promise<void> {
+    return this.connectSession.connect({ reconnectAttempt });
   }
 }

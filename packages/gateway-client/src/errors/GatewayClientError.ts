@@ -1,7 +1,8 @@
 import type {
-  GatewayClientErrorCategory,
   GatewayClientErrorCode,
+  GatewayClientErrorPhase,
   GatewayClientErrorShape,
+  GatewayClientErrorSource,
 } from '../domain/error-contract.ts';
 
 export type { GatewayClientErrorCode } from '../domain/error-contract.ts';
@@ -11,7 +12,8 @@ export type { GatewayClientErrorCode } from '../domain/error-contract.ts';
  */
 export interface GatewayClientErrorOptions {
   code: GatewayClientErrorCode;
-  category: GatewayClientErrorCategory;
+  source: GatewayClientErrorSource;
+  phase: GatewayClientErrorPhase;
   retryable: boolean;
   message: string;
   details?: Record<string, unknown>;
@@ -20,11 +22,12 @@ export interface GatewayClientErrorOptions {
 
 /**
  * gateway-client 统一错误实现。
- * @remarks 通过结构化 code/category/retryable 保持跨层错误语义一致。
+ * @remarks 通过稳定的 code/source/phase/retryable 保持跨层错误语义一致。
  */
 export class GatewayClientError extends Error implements GatewayClientErrorShape {
   readonly code: GatewayClientErrorCode;
-  readonly category: GatewayClientErrorCategory;
+  readonly source: GatewayClientErrorSource;
+  readonly phase: GatewayClientErrorPhase;
   readonly retryable: boolean;
   readonly details?: Record<string, unknown>;
   readonly cause?: unknown;
@@ -33,7 +36,8 @@ export class GatewayClientError extends Error implements GatewayClientErrorShape
     super(options.message);
     this.name = 'GatewayClientError';
     this.code = options.code;
-    this.category = options.category;
+    this.source = options.source;
+    this.phase = options.phase;
     this.retryable = options.retryable;
     this.details = options.details;
     this.cause = options.cause;

@@ -38,7 +38,6 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
       emitError() {},
     },
     reconnectEnabled: true,
-    reconnectInvoker: async () => {},
     authSubprotocolBuilder: () => 'auth.test',
     ...overrides,
   };
@@ -47,6 +46,7 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
 function createState(state = 'CONNECTING'): GatewayRuntimeStatePort {
   let currentState = state as ReturnType<GatewayRuntimeStatePort['getState']>;
   let manuallyDisconnected = false;
+  let reconnecting = false;
   return {
     getState() {
       return currentState;
@@ -62,6 +62,12 @@ function createState(state = 'CONNECTING'): GatewayRuntimeStatePort {
     },
     setManuallyDisconnected(value) {
       manuallyDisconnected = value;
+    },
+    isReconnecting() {
+      return reconnecting;
+    },
+    setReconnecting(value) {
+      reconnecting = value;
     },
   };
 }

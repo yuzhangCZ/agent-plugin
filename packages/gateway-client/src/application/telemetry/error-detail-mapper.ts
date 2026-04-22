@@ -18,7 +18,8 @@ export function getErrorDetails(error: unknown): Record<string, unknown> {
   if (error instanceof GatewayClientError) {
     return {
       code: error.code,
-      category: error.category,
+      source: error.source,
+      phase: error.phase,
       retryable: error.retryable,
       ...(error.details ? { details: error.details } : {}),
     };

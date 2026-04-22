@@ -74,7 +74,8 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
   ): GatewayClientError {
     return new GatewayClientError({
       code: 'GATEWAY_PROTOCOL_VIOLATION',
-      category: 'protocol',
+      source: 'outbound_protocol',
+      phase: 'ready',
       retryable: false,
       message: violation.violation.message,
       details: {
@@ -88,7 +89,8 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
   private toUnsupportedMessageTypeError(message: unknown): GatewayClientError {
     return new GatewayClientError({
       code: 'GATEWAY_PROTOCOL_VIOLATION',
-      category: 'protocol',
+      source: 'outbound_protocol',
+      phase: 'ready',
       retryable: false,
       message: `gateway_invalid_message_type:${getMessageType(message)}`,
       details: {

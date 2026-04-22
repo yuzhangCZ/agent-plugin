@@ -11,6 +11,7 @@ import type { GatewayOutboundMessage, GatewaySendPayload } from '../../ports/Gat
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import type { GatewayBusinessOutboundMessage, OutboundProtocolGate } from '../protocol/OutboundProtocolGate.ts';
 import { getMessageType } from '../telemetry/message-log-fields.ts';
+import { resolveGatewayClientPhase } from './error-facts.ts';
 
 /**
  * 统一发送出口。
@@ -35,12 +36,16 @@ export class OutboundSender {
   }
 
   send(message: GatewaySendPayload, logContext?: GatewaySendContext): void {
-    const normalizedMessage = this.outboundProtocolGate.validateBusiness(message);
+    const normalizedMessage = this.normalizeProtocolError(
+      () => this.outboundProtocolGate.validateBusiness(message),
+    );
     this.dispatch(normalizedMessage, true, logContext);
   }
 
   sendInternalControl(message: HeartbeatMessage | RegisterMessage): void {
-    const normalizedMessage = this.outboundProtocolGate.validateControl(message);
+    const normalizedMessage = this.normalizeProtocolError(
+      () => this.outboundProtocolGate.validateControl(message),
+    );
     this.dispatch(normalizedMessage, false);
   }
 
@@ -53,7 +58,8 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_CONNECTED',
-        category: 'state',
+        source: 'state_gate',
+        phase: resolveGatewayClientPhase(this.state),
         retryable: true,
         message: 'gateway_not_connected',
         details: { state: this.state.getState(), messageType },
@@ -68,7 +74,8 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_READY',
-        category: 'state',
+        source: 'state_gate',
+        phase: resolveGatewayClientPhase(this.state),
         retryable: true,
         message: 'Gateway connection is not ready. Cannot send business message.',
         details: { state: this.state.getState(), messageType },
@@ -82,6 +89,25 @@ export class OutboundSender {
     this.context.sink.emitOutbound(message);
     if (messageType === HEARTBEAT_MESSAGE_TYPE) {
       this.context.sink.emitHeartbeat(message as HeartbeatMessage);
+    }
+  }
+
+  private normalizeProtocolError<T>(operation: () => T): T {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof GatewayClientError) {
+        throw new GatewayClientError({
+          code: error.code,
+          source: error.source,
+          phase: resolveGatewayClientPhase(this.state),
+          retryable: error.retryable,
+          message: error.message,
+          details: error.details,
+          cause: error.cause,
+        });
+      }
+      throw error;
     }
   }
 }
