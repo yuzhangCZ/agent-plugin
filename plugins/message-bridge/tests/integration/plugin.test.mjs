@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MessageBridgePlugin, default as DefaultPlugin } from '../../src/index.ts';
-import { __resetRuntimeForTests, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
+import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
 
@@ -150,6 +150,30 @@ describe('plugin contract', () => {
     assert.strictEqual(startLogs[0].extra.pluginVersion, '1.2.0-test');
   });
 
+  test('uses one runtimeTraceId across singleton and runtime logs in one init', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    await MessageBridgePlugin(mockInput({ client }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const singletonLog = logs.find((entry) => entry?.message === 'runtime.singleton.init_first_attempt_started');
+    const runtimeLog = logs.find((entry) => entry?.message === 'runtime.start.requested');
+
+    assert.ok(singletonLog);
+    assert.ok(runtimeLog);
+    assert.strictEqual(typeof singletonLog.extra.runtimeTraceId, 'string');
+    assert.strictEqual(singletonLog.extra.runtimeTraceId, runtimeLog.extra.runtimeTraceId);
+    assert.strictEqual(getCurrentRuntimeTraceId(), singletonLog.extra.runtimeTraceId);
+  });
+
   test('loader semantics: Object.entries + duplicate function references only init once', async () => {
     const mod = await import('../../src/index.ts');
     const seen = new Set();
@@ -226,6 +250,7 @@ describe('plugin contract', () => {
 
       const blockedLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt');
       assert.strictEqual(blockedLogs.length, 1);
+      assert.strictEqual(blockedLogs[0].extra.runtimeTraceId, initFailureLogs[0].extra.runtimeTraceId);
       const initFailureLogsAfterBlocked = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
       assert.strictEqual(initFailureLogsAfterBlocked.length, 1);
 
@@ -233,6 +258,9 @@ describe('plugin contract', () => {
       const hooks = await MessageBridgePlugin(isolatedInputB);
       assert.strictEqual(typeof hooks.event, 'function');
       assert.notStrictEqual(getRuntime(), null);
+      const restartLogs = logs.filter((entry) => entry?.message === 'runtime.start.requested');
+      assert.strictEqual(restartLogs.length, 2);
+      assert.notStrictEqual(restartLogs[1].extra.runtimeTraceId, initFailureLogs[0].extra.runtimeTraceId);
     } finally {
       globalThis.WebSocket = originalWebSocket;
       if (originalHome === undefined) {
@@ -363,11 +391,27 @@ describe('plugin contract', () => {
 
     globalThis.WebSocket = SlowRegisterWebSocket;
     try {
-      const inputA = mockInput({ client: createPluginClient() });
-      const inputB = mockInput({ client: createPluginClient() });
+      const logs = [];
+      const client = createPluginClient({
+        app: {
+          log: async (options) => {
+            logs.push(options?.body);
+            return true;
+          },
+        },
+      });
+      const inputA = mockInput({ client });
+      const inputB = mockInput({ client });
       await Promise.all([getOrCreateRuntime(inputA), getOrCreateRuntime(inputB)]);
       assert.strictEqual(websocketCtorCalls, 1);
       assert.notStrictEqual(getRuntime(), null);
+      await new Promise((r) => setTimeout(r, 10));
+
+      const initLog = logs.find((entry) => entry?.message === 'runtime.singleton.init_first_attempt_started');
+      const waitingLog = logs.find((entry) => entry?.message === 'runtime.singleton.await_initializing');
+      assert.ok(initLog);
+      assert.ok(waitingLog);
+      assert.strictEqual(waitingLog.extra.runtimeTraceId, initLog.extra.runtimeTraceId);
     } finally {
       globalThis.WebSocket = originalWebSocket;
       delete process.env.BRIDGE_AUTH_AK;

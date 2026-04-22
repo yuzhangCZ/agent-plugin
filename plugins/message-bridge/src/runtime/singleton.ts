@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { BridgeRuntime } from './BridgeRuntime.js';
 import type { PluginInput } from './types.js';
 import { AppLogger } from './AppLogger.js';
@@ -11,9 +12,36 @@ let generation = 0;
 type RuntimeInitState = 'never' | 'initializing' | 'succeeded' | 'failed_latched';
 let initState: RuntimeInitState = 'never';
 let latchedInitError: Error | null = null;
+let currentRuntimeTraceId: string | null = null;
+
+function ensureCurrentRuntimeTraceId(): string {
+  if (!currentRuntimeTraceId) {
+    currentRuntimeTraceId = randomUUID();
+  }
+  return currentRuntimeTraceId;
+}
+
+function clearCurrentRuntimeTraceId(): void {
+  currentRuntimeTraceId = null;
+}
+
+/**
+ * 返回当前 runtime 生命周期 traceId，供插件边界在 runtime 尚未可用时复用同一日志链路。
+ */
+export function getCurrentRuntimeTraceId(): string | null {
+  return currentRuntimeTraceId;
+}
 
 export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime | null> {
-  const logger = new AppLogger(input.client, { component: 'singleton' });
+  if (!runtime && !initializing && initState === 'never') {
+    ensureCurrentRuntimeTraceId();
+  }
+
+  const logger = new AppLogger(
+    input.client,
+    { component: 'singleton' },
+    currentRuntimeTraceId ?? undefined,
+  );
   if (runtime) {
     logger.debug('runtime.singleton.reuse_existing');
     return runtime;
@@ -39,6 +67,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
     workspacePath: input.worktree || input.directory,
     hostDirectory: input.worktree || input.directory,
     client: input.client,
+    runtimeTraceId: ensureCurrentRuntimeTraceId(),
   });
   const token = ++generation;
   lifecycleAbortController = new AbortController();
@@ -97,6 +126,7 @@ export function stopRuntime(): void {
     lifecycleAbortController = null;
     initState = 'never';
     latchedInitError = null;
+    clearCurrentRuntimeTraceId();
     return;
   }
 
@@ -105,10 +135,12 @@ export function stopRuntime(): void {
   lifecycleAbortController = null;
   initState = 'never';
   latchedInitError = null;
+  clearCurrentRuntimeTraceId();
 }
 
 export function __resetRuntimeForTests(): void {
   stopRuntime();
   initState = 'never';
   latchedInitError = null;
+  clearCurrentRuntimeTraceId();
 }

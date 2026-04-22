@@ -2038,6 +2038,7 @@ describe('runtime protocol strictness', () => {
   test('uses gatewayMessageId as traceId across downstream invoke handling', async () => {
     const appLogs = [];
     const runtime = new BridgeRuntime({
+      runtimeTraceId: 'runtime-lifecycle-1',
       client: createRuntimeClient({
         app: {
           log: async (options) => {
@@ -2079,6 +2080,8 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(runtimeInvokeReceived.extra.gatewayMessageId, 'gw-msg-1');
     assert.strictEqual(runtimeInvokeReceived.extra.toolSessionId, 'tool-42');
     assert.strictEqual(runtimeInvokeCompleted.extra.runtimeTraceId, runtimeInvokeReceived.extra.runtimeTraceId);
+    assert.strictEqual(runtimeInvokeReceived.extra.runtimeTraceId, 'runtime-lifecycle-1');
+    assert.notStrictEqual(runtimeInvokeReceived.extra.runtimeTraceId, 'gw-msg-1');
   });
 
   test('runtime.start reloads config on restart and uses the latest channel', async () => {
