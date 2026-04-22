@@ -623,7 +623,7 @@ test('request run projects session.error exactly once before terminal tool_error
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
-      family: 'skill',
+      protocol: 'cloud',
       type: 'session.error',
       properties: {
         error: 'agent offline',

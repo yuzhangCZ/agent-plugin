@@ -4,7 +4,6 @@ function withDefault(value, fallback) {
 
 function createOpencodeEvent(base, overrides = {}) {
   return {
-    family: 'opencode',
     ...base,
     ...overrides,
   };
@@ -12,7 +11,7 @@ function createOpencodeEvent(base, overrides = {}) {
 
 function createSkillEvent(base, overrides = {}) {
   return {
-    family: 'skill',
+    protocol: 'cloud',
     ...base,
     ...overrides,
   };

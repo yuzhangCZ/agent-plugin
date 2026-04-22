@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { withToolEventFamily } from '../shared-family.ts';
+import { withCloudProtocol } from '../shared-protocol.ts';
 import { requiredTrimmedString } from '../../shared.ts';
 
 const skillSessionStatusEventBaseSchema = z.object({
@@ -11,7 +11,7 @@ const skillSessionStatusEventBaseSchema = z.object({
   }),
 });
 
-export const skillSessionStatusEventSchema = withToolEventFamily('skill', skillSessionStatusEventBaseSchema);
+export const skillSessionStatusEventSchema = withCloudProtocol(skillSessionStatusEventBaseSchema);
 export type SkillSessionStatusEvent = z.output<typeof skillSessionStatusEventSchema>;
 
 const skillSessionErrorEventBaseSchema = z.object({
@@ -22,5 +22,5 @@ const skillSessionErrorEventBaseSchema = z.object({
   }),
 });
 
-export const skillSessionErrorEventSchema = withToolEventFamily('skill', skillSessionErrorEventBaseSchema);
+export const skillSessionErrorEventSchema = withCloudProtocol(skillSessionErrorEventBaseSchema);
 export type SkillSessionErrorEvent = z.output<typeof skillSessionErrorEventSchema>;

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { withToolEventFamily } from './shared-family.ts';
 
 import {
   messagePartDeltaEventSchema,
@@ -75,46 +74,75 @@ import {
   type SkillToolUpdateEvent,
 } from './skill-provider-event/index.ts';
 
-const opencodeMessageUpdatedEventSchema = withToolEventFamily('opencode', messageUpdatedEventSchema);
-const opencodeMessagePartUpdatedEventSchema = withToolEventFamily('opencode', messagePartUpdatedEventSchema);
-const opencodeMessagePartDeltaEventSchema = withToolEventFamily('opencode', messagePartDeltaEventSchema);
-const opencodeMessagePartRemovedEventSchema = withToolEventFamily('opencode', messagePartRemovedEventSchema);
-const opencodeSessionStatusEventSchema = withToolEventFamily('opencode', sessionStatusEventSchema);
-const opencodeSessionIdleEventSchema = withToolEventFamily('opencode', sessionIdleEventSchema);
-const opencodeSessionUpdatedEventSchema = withToolEventFamily('opencode', sessionUpdatedEventSchema);
-const opencodeSessionErrorEventSchema = withToolEventFamily('opencode', sessionErrorEventSchema);
-const opencodePermissionUpdatedEventSchema = withToolEventFamily('opencode', permissionUpdatedEventSchema);
-const opencodePermissionAskedEventSchema = withToolEventFamily('opencode', permissionAskedEventSchema);
-const opencodePermissionRepliedEventSchema = withToolEventFamily('opencode', permissionRepliedEventSchema);
-const opencodeQuestionAskedEventSchema = withToolEventFamily('opencode', questionAskedEventSchema);
-
 /**
- * 当前态 `tool_event.event` payload family。
- * @remarks current-state 通过显式 `family` 判定 payload 来源；
- * `opencode` 与 `skill` 共存，但仍共享同一 `tool_event.event` 边界。
+ * 当前态 `tool_event.event` opencode provider payload。
+ * @remarks 缺失 `protocol` 时按 opencode canonical shape 判定，不在 payload 内补充额外 discriminator。
  */
 export const opencodeProviderEventSchema = z.union([
-  opencodeMessageUpdatedEventSchema,
-  opencodeMessagePartUpdatedEventSchema,
-  opencodeMessagePartDeltaEventSchema,
-  opencodeMessagePartRemovedEventSchema,
-  opencodeSessionStatusEventSchema,
-  opencodeSessionIdleEventSchema,
-  opencodeSessionUpdatedEventSchema,
-  opencodeSessionErrorEventSchema,
-  opencodePermissionUpdatedEventSchema,
-  opencodePermissionAskedEventSchema,
-  opencodePermissionRepliedEventSchema,
-  opencodeQuestionAskedEventSchema,
-]);
-
-export const gatewayToolEventPayloadSchema = z.union([
-  opencodeProviderEventSchema,
-  skillProviderEventSchema,
+  messageUpdatedEventSchema,
+  messagePartUpdatedEventSchema,
+  messagePartDeltaEventSchema,
+  messagePartRemovedEventSchema,
+  sessionStatusEventSchema,
+  sessionIdleEventSchema,
+  sessionUpdatedEventSchema,
+  sessionErrorEventSchema,
+  permissionUpdatedEventSchema,
+  permissionAskedEventSchema,
+  permissionRepliedEventSchema,
+  questionAskedEventSchema,
 ]);
 
 export type OpencodeProviderEvent = z.output<typeof opencodeProviderEventSchema>;
-export type GatewayToolEventPayload = z.output<typeof gatewayToolEventPayloadSchema>;
+export type GatewayToolEventPayload = OpencodeProviderEvent | SkillProviderEvent;
+export type GatewayToolEventProviderKind = 'cloud' | 'opencode';
+
+function hasOwnProtocolField(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) && Object.hasOwn(raw, 'protocol');
+}
+
+/**
+ * `tool_event.event` provider dispatch 的唯一判定入口。
+ * @remarks current-state 只识别 `protocol: "cloud"`；缺失 `protocol` 视为 opencode；
+ * 任意其它显式 `protocol` 一律 fail-closed，且 cloud 分支不允许回退到 opencode。
+ */
+export function selectGatewayToolEventProviderKind(raw: unknown): GatewayToolEventProviderKind | null {
+  if (hasOwnProtocolField(raw)) {
+    return raw.protocol === 'cloud' ? 'cloud' : null;
+  }
+
+  return 'opencode';
+}
+
+/**
+ * 当前态 `tool_event.event` canonical payload union。
+ * @remarks `protocol: "cloud"` 表示 cloud/skill provider event；
+ * 缺失 `protocol` 表示 opencode provider event。
+ */
+export const gatewayToolEventPayloadSchema: z.ZodType<GatewayToolEventPayload> = z
+  .unknown()
+  .transform((raw, ctx) => {
+    const providerKind = selectGatewayToolEventProviderKind(raw);
+    if (providerKind === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['protocol'],
+        message: 'protocol must be "cloud" or absent',
+      });
+      return z.NEVER;
+    }
+
+    const schema = providerKind === 'cloud' ? skillProviderEventSchema : opencodeProviderEventSchema;
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue(issue);
+      }
+      return z.NEVER;
+    }
+
+    return parsed.data;
+  });
 
 export {
   messageUpdatedEventSchema,

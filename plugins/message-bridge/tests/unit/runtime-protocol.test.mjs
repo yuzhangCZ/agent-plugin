@@ -1358,7 +1358,6 @@ describe('runtime protocol strictness', () => {
       subagentSessionId: 'ses_child_permission_1',
       subagentName: 'research-agent',
       event: {
-        family: 'opencode',
         type: 'permission.asked',
         properties: {
           sessionID: 'ses_child_permission_1',
@@ -1423,7 +1422,6 @@ describe('runtime protocol strictness', () => {
       type: 'tool_event',
       toolSessionId: 'ses_child_permission_retry',
       event: {
-        family: 'opencode',
         ...event,
       },
     });
@@ -1433,7 +1431,6 @@ describe('runtime protocol strictness', () => {
       subagentSessionId: 'ses_child_permission_retry',
       subagentName: 'retry-agent',
       event: {
-        family: 'opencode',
         ...event,
       },
     });
@@ -1476,7 +1473,6 @@ describe('runtime protocol strictness', () => {
       subagentSessionId: 'ses_child_idle_1',
       subagentName: 'idle-agent',
       event: {
-        family: 'opencode',
         type: 'session.idle',
         properties: {
           sessionID: 'ses_child_idle_1',
