@@ -82,19 +82,17 @@ function startMessageBridgeRuntime(): Promise<void>;
 - 若插件尚未加载过，则 Promise reject
 - 每次显式调用都视为新的启动请求
 - 若当前 runtime 已在运行或仍在启动，本次调用会先终止上一轮生命周期，再启动新一轮 runtime
-- 只有 runtime 完成 gateway 握手并进入 `ready` 后，Promise 才会 resolve
-- `disabled`、`config_invalid`、`plugin_failure`、`server_failure`、`network_failure` 都表示本次启动未成功，Promise 会 reject
 - 启动失败时 Promise reject，并同步更新私有状态快照
 - 对外 reject 的错误必须带可读 `message`
-- 调用方应用 Promise reject 判断“本次启动命令失败”
 - 调用方若需要稳定失败分类或展示当前失败状态，应通过 `getMessageBridgeStatus()` 读取，而不是依赖 thrown error 类型
 
-失败事实来源：
+使用方语义：
 
-- 启动前置失败由 runtime 直接发布为 `disabled`、`config_invalid` 或 `plugin_failure`
-- gateway 建连失败由 `@agent-plugin/gateway-client` 的 `error` 事件发布，私有状态 API 只消费该事件流
-- `connect()` reject 的错误与对应 `error` 事件至少在 `code`、`source`、`phase`、`retryable`、`message` 上保持一致
-- 私有 Runtime API 不为“`connect()` reject 但未 emit `error`”的情况定义第二套错误分类
+- Promise resolve 表示本次启动请求已将 runtime 带到 `ready`
+- Promise reject 表示本次启动请求未能进入 `ready`
+- reject error 只用于即时失败提示，不作为稳定分类模型
+- 调用方需要稳定失败分类时，应读取 `getMessageBridgeStatus()`
+- 启动成功后，后续连接状态变化仍应通过 `subscribeMessageBridgeStatus()` 观察
 
 ### `stopMessageBridgeRuntime()`
 
@@ -131,6 +129,7 @@ function stopMessageBridgeRuntime(): void;
 - 插件加载返回的 hooks 在插件生命周期内保持稳定
 - 当 runtime 未启动或不可用时，hooks 收到的事件会被忽略
 - 当 runtime 正在启动但尚未进入 `ready` 时，hooks 收到的事件也会被忽略
+- hooks 不会因为收到事件而隐式启动 runtime
 - 当后续显式 `startMessageBridgeRuntime()` 成功后，同一份 hooks 会恢复事件转发能力
 
 ## 快照结构
@@ -174,7 +173,7 @@ export interface MessageBridgeStatusSnapshot {
 | 值 | 说明 |
 |---|---|
 | `not_ready` | 默认初始态或显式 reset 后的基线态 |
-| `disabled` | 配置明确禁用 bridge |
+| `disabled` | 当前配置禁用了 runtime；`startMessageBridgeRuntime()` 会 reject，hooks 保持可调用但不转发事件 |
 | `config_invalid` | 配置加载或校验失败 |
 | `plugin_failure` | 进入稳定连接生命周期前的非配置类内部失败 |
 | `server_failure` | 服务端拒绝、握手拒绝或明确服务端失败 |
