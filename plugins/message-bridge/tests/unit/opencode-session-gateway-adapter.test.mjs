@@ -468,6 +468,124 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
 });
 
 describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
+  test('openx without bridgeDirectory skips session.get and omits directory in promptSession', async () => {
+    const calls = [];
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(
+      () => ({
+        session: {
+          create: async () => ({}),
+          get: async () => {
+            calls.push({ type: 'get' });
+            return { data: { id: 'ses-openx', directory: '/tmp/should-not-use' } };
+          },
+          prompt: async (options) => {
+            calls.push({ type: 'prompt', options });
+            return { data: { ok: true } };
+          },
+          abort: async () => ({}),
+          delete: async () => ({}),
+        },
+        postSessionIdPermissionsPermissionId: async () => ({}),
+        _client: { get: async () => ({}), post: async () => ({}) },
+      }),
+      () => ({
+        channel: 'openx',
+        bridgeDirectoryConfigured: false,
+      }),
+    );
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-openx',
+      text: 'hello',
+      logger,
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(calls, [
+      {
+        type: 'prompt',
+        options: {
+          sessionID: 'ses-openx',
+          parts: [{ type: 'text', text: 'hello' }],
+        },
+      },
+    ]);
+    assert.deepStrictEqual(entries[0], {
+      level: 'info',
+      message: 'session_directory.policy.openx.directory_omitted',
+      extra: {
+        toolSessionId: 'ses-openx',
+        hasAgent: false,
+      },
+    });
+  });
+
+  test('openx without bridgeDirectory omits directory in question list and reply', async () => {
+    const sessionGetCalls = [];
+    const getCalls = [];
+    const postCalls = [];
+    const adapter = new OpencodeSessionGatewayAdapter(
+      () => ({
+        session: {
+          create: async () => ({}),
+          get: async (options) => {
+            sessionGetCalls.push(options);
+            return { data: { id: 'ses-openx-question', directory: '/tmp/should-not-use' } };
+          },
+          abort: async () => ({}),
+          delete: async () => ({}),
+          prompt: async () => ({}),
+        },
+        postSessionIdPermissionsPermissionId: async () => ({}),
+        _client: {
+          get: async (options) => {
+            getCalls.push(options);
+            return {
+              data: [
+                {
+                  id: 'question-request-openx-1',
+                  sessionID: 'ses-openx-question',
+                  tool: { callID: 'call-openx-1' },
+                },
+              ],
+            };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
+        },
+      }),
+      () => ({
+        channel: 'openx',
+        bridgeDirectoryConfigured: false,
+      }),
+    );
+
+    const result = await adapter.replyQuestion({
+      sessionId: 'ses-openx-question',
+      toolCallId: 'call-openx-1',
+      answer: 'yes',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(sessionGetCalls, []);
+    assert.deepStrictEqual(getCalls, [
+      {
+        url: '/question',
+      },
+    ]);
+    assert.deepStrictEqual(postCalls, [
+      {
+        url: '/question/{requestID}/reply',
+        path: { requestID: 'question-request-openx-1' },
+        body: { answers: [['yes']] },
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ]);
+  });
+
   test('abortSession resolves directory and forwards it to session.abort', async () => {
     const calls = [];
     const adapter = new OpencodeSessionGatewayAdapter(() => ({

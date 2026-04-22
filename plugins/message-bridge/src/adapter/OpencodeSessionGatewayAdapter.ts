@@ -8,12 +8,18 @@ import type {
 } from '../contracts/downstream-messages.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
+import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import type { OpencodeClient } from '../types/sdk.js';
 import { hasError, safeExecute } from '../types/sdk.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type { BridgeLogger } from '../types/logger.js';
 import { getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
 import { SessionDirectoryResolver, type SessionDirectoryResolutionResult } from './SessionDirectoryResolver.js';
+
+export interface SessionDirectoryPolicyContext {
+  channel?: string;
+  bridgeDirectoryConfigured: boolean;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -105,9 +111,21 @@ function readString(value: unknown): string | undefined {
 
 export class OpencodeSessionGatewayAdapter implements SessionCreationPort, SessionScopedActionGatewayPort {
   private readonly sessionDirectoryResolver: SessionDirectoryResolver;
+  private readonly getDirectoryPolicyContext: () => SessionDirectoryPolicyContext;
 
-  constructor(private readonly getClient: () => OpencodeClient | null) {
+  constructor(
+    private readonly getClient: () => OpencodeClient | null,
+    getDirectoryPolicyContext?: () => SessionDirectoryPolicyContext,
+  ) {
     this.sessionDirectoryResolver = new SessionDirectoryResolver(getClient);
+    this.getDirectoryPolicyContext = getDirectoryPolicyContext ?? (() => ({
+      bridgeDirectoryConfigured: true,
+    }));
+  }
+
+  private shouldSkipDirectoryResolution(): boolean {
+    const policyContext = this.getDirectoryPolicyContext();
+    return policyContext.channel === TOOL_TYPE_OPENX && !policyContext.bridgeDirectoryConfigured;
   }
 
   private async withResolvedDirectory<TResult>(parameters: {
@@ -115,9 +133,17 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     failurePrefix: string;
     logger?: BridgeLogger;
     logFields?: Record<string, unknown>;
-    handler: (context: { client: OpencodeClient; directory: string }) => Promise<ActionResult<TResult>>;
+    handler: (context: { client: OpencodeClient; directory?: string }) => Promise<ActionResult<TResult>>;
   }): Promise<ActionResult<TResult>> {
     const client = this.requireClient();
+    if (this.shouldSkipDirectoryResolution()) {
+      parameters.logger?.info('session_directory.policy.openx.directory_omitted', {
+        toolSessionId: parameters.sessionId,
+        ...(parameters.logFields ?? {}),
+      });
+      return parameters.handler({ client });
+    }
+
     const resolution = await this.sessionDirectoryResolver.resolve({
       sessionId: parameters.sessionId,
       logger: parameters.logger,
@@ -225,7 +251,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           sourceOperation: 'session.prompt',
           promiseFactory: () => client.session.prompt({
             sessionID: parameters.sessionId,
-            directory,
+            ...(directory ? { directory } : {}),
             parts: [{ type: 'text', text: parameters.text }],
             ...(parameters.agent ? { agent: parameters.agent } : {}),
           }),
@@ -248,7 +274,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           sourceOperation: 'session.abort',
           promiseFactory: () => client.session.abort({
             sessionID: parameters.sessionId,
-            directory,
+            ...(directory ? { directory } : {}),
           }),
           onSuccess: () => ({
             success: true,
@@ -272,7 +298,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           sourceOperation: 'session.delete',
           promiseFactory: () => client.session.delete({
             sessionID: parameters.sessionId,
-            directory,
+            ...(directory ? { directory } : {}),
           }),
           onSuccess: () => ({
             success: true,
@@ -300,7 +326,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
             sessionID: parameters.sessionId,
             permissionID: parameters.permissionId,
             response: parameters.response,
-            directory,
+            ...(directory ? { directory } : {}),
           }),
           onSuccess: () => ({
             success: true,
@@ -330,7 +356,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           sourceOperation: 'question.list',
           promiseFactory: () => client._client.get({
             url: '/question',
-            query: { directory },
+            ...(directory ? { query: { directory } } : {}),
           }),
           onSuccess: (data) => ({
             success: true,
@@ -386,7 +412,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
             headers: {
               'Content-Type': 'application/json',
             },
-            query: { directory },
+            ...(directory ? { query: { directory } } : {}),
           }),
           onSuccess: () => ({
             success: true,

@@ -46,6 +46,7 @@ import {
 import {
   DOWNSTREAM_MESSAGE_TYPE,
 } from '../gateway-wire/downstream.js';
+import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
 import {
   adaptGatewayBusinessMessage,
@@ -132,6 +133,13 @@ export class BridgeRuntime {
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
+  private sessionDirectoryPolicyContext: {
+    channel?: string;
+    bridgeDirectoryConfigured: boolean;
+  } = {
+    channel: TOOL_TYPE_OPENX,
+    bridgeDirectoryConfigured: true,
+  };
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -145,7 +153,10 @@ export class BridgeRuntime {
       process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
       () => this.logger,
     );
-    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
+    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
+      () => this.sdkClient,
+      () => this.sessionDirectoryPolicyContext,
+    );
     this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
       this.bridgeChannelPort,
       this.assiantDirectoryMappingPort,
@@ -225,11 +236,17 @@ export class BridgeRuntime {
     }
 
     this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.sessionDirectoryPolicyContext = {
+      channel: config.gateway.channel,
+      bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
+    };
     this.logger.info('runtime.directory.resolved', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
       effectiveDirectory: this.effectiveDirectory,
       directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
+      sessionDirectoryPolicyChannel: this.sessionDirectoryPolicyContext.channel,
+      sessionDirectoryPolicyBridgeDirectoryConfigured: this.sessionDirectoryPolicyContext.bridgeDirectoryConfigured,
     });
 
     const startupValidation = await this.validateStartupPrerequisites();
