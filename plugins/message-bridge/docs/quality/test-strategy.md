@@ -1,7 +1,7 @@
 # message-bridge 插件 — 测试验证文档
 
-**Version:** V1.0  
-**Date:** 2026-03-06  
+**Version:** V1.1
+**Date:** 2026-04-04
 **Status:** 评审版  
 **Owner:** message-bridge maintainers  
 **Related:** `../product/prd.md`, `../architecture/overview.md`, `../design/solution-design.md`  
@@ -230,6 +230,8 @@
 | UT-DIR-001 | `effectiveDirectory` 优先级解析 | 单元测试 | P0 | §5 FR-MB-11 |
 | UT-DIR-002 | `workspacePath` 与 `effectiveDirectory` 语义解耦 | 单元测试 | P0 | §5 FR-MB-11 |
 | UT-DIR-003 | `create_session` 仅映射追溯后的正式 payload 字段 | 单元测试 | P0 | §5 FR-MB-11 |
+| UT-DIR-004 | `create_session` 在 `title=im-group*` 时注入 deny 权限列表（含 `playwright*`） | 单元测试 | P0 | §5 FR-MB-11 |
+| UT-DIR-005 | 非 `im-group` 会话不透传 `permission` 字段 | 单元测试 | P0 | §5 FR-MB-11 |
 | INT-DIR-001 | 相关下行 SDK 调用复用同一目录上下文 | 集成测试 | P0 | §5 FR-MB-11 |
 | E2E-DIR-001 | create + chat 在同一目录上下文下执行 | E2E Smoke | P0 | §5 FR-MB-11 |
 | E2E-DIR-002 | permission/question 路径保持目录上下文一致 | E2E Smoke | P1 | §5 FR-MB-11 |
@@ -258,6 +260,8 @@
 - `effectiveDirectory` 优先级解析
 - `workspacePath` 与目录上下文解耦
 - `create_session.payload` 收敛为追溯后的正式字段集合
+- `create_session` 在 `title=im-group*` 时注入 deny 权限列表（含 `playwright*`）
+- 非 `im-group` 会话不透传 `permission` 字段（避免 `permission: undefined` 回归）
 - `create_session` 与后续 chat 共享同一目录上下文
 
 ### 3.1 连接层测试 (UT-CONN)
@@ -1514,6 +1518,7 @@ export class MockOpenCodeSDK {
       "session.error",
       "permission.updated",
       "permission.asked",
+      "permission.replied",
       "question.asked"
     ]
   }

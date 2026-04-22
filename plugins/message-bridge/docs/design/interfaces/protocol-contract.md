@@ -1,10 +1,10 @@
 # 协议契约
 
-**Version:** 2.3
-**Date:** 2026-03-30
+**Version:** 2.4
+**Date:** 2026-04-04
 **Status:** Active
 **Owner:** message-bridge maintainers
-**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`
+**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`, `./private-status-api-contract.md`
 
 ## 1. 边界层
 
@@ -118,6 +118,29 @@ type QuestionReplyPayload = {
 - bridge 类型定义与归一化逻辑已经与 `title?: string` 对齐
 - 其余更宽的历史引用都应视为历史残留，而不是当前协议
 
+### 2.1.2 `create_session` 的 IM 群权限注入规则
+
+在 `create_session.payload.title` 命中 IM 群前缀时，bridge 会在调用 `session.create` 时附加权限 deny 列表：
+
+- 命中条件：`title` 以 `im-group` 开头（正则：`/^im-group/`）
+- 注入字段：`permission: Array<{ permission, pattern, action }>`
+- 注入策略：`pattern='*'`，`action='deny'`
+- 覆盖项：
+  - `bash`
+  - `read`
+  - `glob`
+  - `grep`
+  - `edit`
+  - `write`
+  - `task`
+  - `webfetch`
+  - `myAgentWebFetch`
+  - `meeting*`
+  - `knowledge*`
+  - `playwright*`
+
+非 IM 群会话不会附加 `permission` 字段（而不是传 `permission: undefined`）。
+
 ### 2.2 `status_query`
 
 独立形状：
@@ -127,6 +150,13 @@ type QuestionReplyPayload = {
   type: 'status_query';
 }
 ```
+
+补充边界说明：
+
+- `status_query` 属于 gateway 外部协议
+- `status_response` 仍只承诺返回 `opencodeOnline:boolean`
+- 当前分支新增的私有状态 API 不属于协议契约，不会扩展 `status_response`
+- 如需读取 bridge 自身连接状态，应使用 `private-status-api-contract.md` 中定义的插件私有读取面
 
 ## 3. 上行事件契约
 
@@ -142,6 +172,7 @@ type QuestionReplyPayload = {
 - `session.error`
 - `permission.updated`
 - `permission.asked`
+- `permission.replied`
 - `question.asked`
 
 默认 allowlist 与上述列表完全一致。

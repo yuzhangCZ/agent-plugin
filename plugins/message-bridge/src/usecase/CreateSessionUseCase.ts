@@ -17,6 +17,21 @@ export interface PreparedCreateSession extends ResolvedCreateSessionDirectory {
   resolvedDirectorySource: ResolvedCreateSessionDirectory['source'];
 }
 
+const IM_GROUP_DENY_PERMISSIONS = [
+  'bash',
+  'read',
+  'glob',
+  'grep',
+  'edit',
+  'write',
+  'task',
+  'webfetch',
+  'myAgentWebFetch',
+  'meeting*',
+  'knowledge*',
+  'playwright*',
+] as const;
+
 export class CreateSessionUseCase {
   constructor(
     private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase,
@@ -37,15 +52,30 @@ export class CreateSessionUseCase {
     };
   }
 
+  /** IM 群会话默认收紧高风险工具权限；非 IM 群保持不传 permission 字段。 */
+  resolvePermission(input: CreateSessionUseCaseInput): Array<Record<string, unknown>> | undefined {
+    if (!input.payload.title?.match(/^im-group/)) {
+      return undefined;
+    }
+
+    return IM_GROUP_DENY_PERMISSIONS.map((permission) => ({
+      permission,
+      pattern: '*',
+      action: 'deny',
+    }));
+  }
+
   async execute(
     input: CreateSessionUseCaseInput,
     preparedCreateSession?: PreparedCreateSession,
   ): Promise<ActionResult<CreateSessionResultData>> {
     const prepared = preparedCreateSession ?? await this.resolveCreateSession(input);
+    const permission = this.resolvePermission(input);
 
     return this.sessionCreationPort.createSession({
       title: input.payload.title,
       directory: prepared.resolvedDirectory,
+      ...(permission ? { permission } : {}),
     });
   }
 }
