@@ -203,12 +203,47 @@ function createEventedGatewayConnectionMock(state = 'READY') {
       current.push(listener);
       listeners.set(event, current);
     },
+    off: (event, listener) => {
+      const current = listeners.get(event) ?? [];
+      listeners.set(event, current.filter((candidate) => candidate !== listener));
+    },
     emit: (event, payload) => {
+      if (event === 'stateChange') {
+        currentState = payload;
+      }
       for (const listener of listeners.get(event) ?? []) {
         listener(payload);
       }
     },
   };
+}
+
+function createControlledGatewayConnectionMock(state = 'DISCONNECTED') {
+  const connection = createEventedGatewayConnectionMock(state);
+  let resolveConnect;
+  let rejectConnect;
+  const connectPromise = new Promise((resolve, reject) => {
+    resolveConnect = resolve;
+    rejectConnect = reject;
+  });
+  connection.connect = async () => connectPromise;
+  connection.resolveConnect = () => {
+    resolveConnect();
+  };
+  connection.rejectConnect = (error) => {
+    rejectConnect(error);
+  };
+  return connection;
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('runtime protocol strictness', () => {
@@ -332,6 +367,217 @@ describe('runtime protocol strictness', () => {
     const snapshot = getMessageBridgeStatus();
     assert.strictEqual(snapshot.unavailableReason, 'server_failure');
     assert.strictEqual(snapshot.lastError, 'device conflict');
+  });
+
+  test('stop resets to not_ready and ignores late READY and error from stale connection', async () => {
+    __resetMessageBridgeStatusForTests();
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'READY');
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    runtime.stop();
+    connection.emit('stateChange', 'READY');
+    connection.emit('error', {
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: 'ready',
+      retryable: true,
+      message: 'late socket down',
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'not_ready');
+    assert.strictEqual(snapshot.lastError, null);
+  });
+
+  test('replaced connection ignores late events from previous start attempt', async () => {
+    __resetMessageBridgeStatusForTests();
+    const firstConnection = createControlledGatewayConnectionMock('DISCONNECTED');
+    const secondConnection = createEventedGatewayConnectionMock('DISCONNECTED');
+    secondConnection.connect = async () => {
+      secondConnection.emit('stateChange', 'READY');
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    let createCalls = 0;
+    runtime.createGatewayConnection = () => {
+      createCalls += 1;
+      return createCalls === 1 ? firstConnection : secondConnection;
+    };
+
+    const firstStart = runtime.start();
+    await Promise.resolve();
+    await runtime.start();
+
+    firstConnection.emit('stateChange', 'READY');
+    firstConnection.emit('error', {
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: 'before_ready',
+      retryable: true,
+      message: 'stale connect failed',
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'ready');
+    assert.strictEqual(snapshot.unavailableReason, null);
+
+    firstConnection.resolveConnect();
+    await assert.rejects(firstStart, /runtime_start_aborted/);
+    assert.strictEqual(runtime.getStarted(), true);
+  });
+
+  test('aborted_before_connect disconnects created connection before throwing', async () => {
+    __resetMessageBridgeStatusForTests();
+    const abortController = new AbortController();
+    const connection = {
+      disconnectCalls: 0,
+      connectCalls: 0,
+      disconnect() {
+        this.disconnectCalls += 1;
+      },
+      async connect() {
+        this.connectCalls += 1;
+      },
+      getState: () => 'DISCONNECTED',
+      getStatus: () => ({ isReady: () => false }),
+      on: () => undefined,
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => {
+      abortController.abort();
+      return connection;
+    };
+
+    await assert.rejects(runtime.start({ abortSignal: abortController.signal }), /runtime_start_aborted/);
+
+    assert.strictEqual(connection.disconnectCalls, 1);
+    assert.strictEqual(connection.connectCalls, 0);
+  });
+
+  test('stop prevents stale downstream handler from sending status_response and logs skip', async () => {
+    const logEntries = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            logEntries.push(options.body);
+          },
+        },
+      }),
+    });
+    const connection = createEventedGatewayConnectionMock('READY');
+    const routeDeferred = createDeferred();
+    runtime.gatewayConnection = connection;
+    runtime.actionRouter = {
+      route: async () => routeDeferred.promise,
+    };
+
+    const handling = runtime.handleDownstreamMessage({
+      type: 'status_query',
+      messageId: 'msg-status-stale',
+    });
+    await Promise.resolve();
+    runtime.stop();
+    routeDeferred.resolve({ success: true, data: { opencodeOnline: true } });
+    await handling;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 0);
+    assert.ok(logEntries.some((entry) => entry.message === 'runtime.send.skipped_stale_connection'));
+  });
+
+  test('stop prevents stale downstream handler from sending tool_error', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const connection = createEventedGatewayConnectionMock('READY');
+    const routeDeferred = createDeferred();
+    runtime.gatewayConnection = connection;
+    runtime.actionRouter = {
+      route: async () => routeDeferred.promise,
+    };
+
+    const handling = runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-tool-error-stale',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-error-stale', text: 'hello' },
+    });
+    await Promise.resolve();
+    runtime.stop();
+    routeDeferred.resolve({
+      success: false,
+      errorCode: 'SDK_UNREACHABLE',
+      errorMessage: 'late failure',
+    });
+    await handling;
+
+    assert.strictEqual(connection.sent.length, 0);
+  });
+
+  test('replaced connection prevents stale downstream handler from sending session_created', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const firstConnection = createEventedGatewayConnectionMock('READY');
+    const secondConnection = createEventedGatewayConnectionMock('READY');
+    const routeDeferred = createDeferred();
+    runtime.gatewayConnection = firstConnection;
+    runtime.actionRouter = {
+      route: async () => routeDeferred.promise,
+    };
+
+    const handling = runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-create-stale',
+      action: 'create_session',
+      payload: { title: 'late create' },
+    });
+    await Promise.resolve();
+    runtime.gatewayConnection = secondConnection;
+    routeDeferred.resolve({
+      success: true,
+      data: { sessionId: 'tool-created', directory: '/tmp/tool-created' },
+    });
+    await handling;
+
+    assert.strictEqual(firstConnection.sent.length, 0);
+    assert.strictEqual(secondConnection.sent.length, 0);
+  });
+
+  test('replaced connection prevents stale downstream handler from sending tool_done', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const firstConnection = createEventedGatewayConnectionMock('READY');
+    const secondConnection = createEventedGatewayConnectionMock('READY');
+    const routeDeferred = createDeferred();
+    runtime.gatewayConnection = firstConnection;
+    runtime.actionRouter = {
+      route: async () => routeDeferred.promise,
+    };
+
+    const handling = runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-tool-done-stale',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-done-stale', text: 'hello' },
+    });
+    await Promise.resolve();
+    runtime.gatewayConnection = secondConnection;
+    routeDeferred.resolve({
+      success: true,
+      data: { ok: true },
+    });
+    await handling;
+
+    assert.strictEqual(firstConnection.sent.length, 0);
+    assert.strictEqual(secondConnection.sent.length, 0);
   });
 
   test('connect rejection reuses emitted error semantics for network failure', async () => {
