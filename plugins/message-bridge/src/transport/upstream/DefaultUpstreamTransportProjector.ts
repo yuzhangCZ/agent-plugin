@@ -3,19 +3,12 @@ import type { GatewayProjectedEvent, UpstreamTransportProjector } from './projec
 import { projectMessageUpdatedEvent } from './MessageUpdatedProjector.js';
 import { TOOL_EVENT_TYPE } from '../../gateway-wire/tool-event.js';
 
-function withOpencodeFamily<T extends object>(event: T): GatewayProjectedEvent {
-  return {
-    ...(event as Record<string, unknown>),
-    family: 'opencode',
-  } as GatewayProjectedEvent;
-}
-
 export class DefaultUpstreamTransportProjector implements UpstreamTransportProjector {
   project(normalized: NormalizedUpstreamEvent): GatewayProjectedEvent {
     if (normalized.common.eventType === TOOL_EVENT_TYPE.MESSAGE_UPDATED) {
-      return withOpencodeFamily(projectMessageUpdatedEvent(normalized.raw));
+      return projectMessageUpdatedEvent(normalized.raw) as GatewayProjectedEvent;
     }
 
-    return withOpencodeFamily(normalized.raw);
+    return normalized.raw as GatewayProjectedEvent;
   }
 }

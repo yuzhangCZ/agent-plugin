@@ -2000,14 +2000,13 @@ test('validateBusiness uses uplink business validation instead of the umbrella v
   assert.equal(wireValidateCalls, 0);
 });
 
-test('validateBusiness accepts tool_event payloads from both provider families through wire codec', () => {
+test('validateBusiness accepts tool_event payloads from both canonical provider payload shapes through wire codec', () => {
   const gate = new DefaultOutboundProtocolGate(new GatewaySchemaCodecAdapter());
 
   const opencodeMessage = gate.validateBusiness({
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
-      family: 'opencode',
       type: 'session.idle',
       properties: {
         sessionID: 'session-1',
@@ -2019,7 +2018,7 @@ test('validateBusiness accepts tool_event payloads from both provider families t
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
-      family: 'skill',
+      protocol: 'cloud',
       type: 'session.status',
       properties: {
         sessionStatus: 'idle',
@@ -2028,9 +2027,9 @@ test('validateBusiness accepts tool_event payloads from both provider families t
   });
 
   assert.equal(opencodeMessage.type, 'tool_event');
-  assert.equal(opencodeMessage.event.family, 'opencode');
+  assert.equal('protocol' in opencodeMessage.event, false);
   assert.equal(skillMessage.type, 'tool_event');
-  assert.equal(skillMessage.event.family, 'skill');
+  assert.equal(skillMessage.event.protocol, 'cloud');
 });
 
 test('close logging follows resolved reconnectEnabled instead of raw reconnect config', async () => {

@@ -100,7 +100,6 @@ describe('protocol question-roundtrip', () => {
         type: 'tool_event',
         toolSessionId: 'ses_question_1',
         event: {
-          family: 'opencode',
           ...questionAskedEvent,
         },
       },
@@ -199,7 +198,6 @@ describe('protocol question-roundtrip', () => {
         subagentSessionId: 'ses_child_question_1',
         subagentName: 'planner-agent',
         event: {
-          family: 'opencode',
           ...questionAskedEvent,
         },
       },

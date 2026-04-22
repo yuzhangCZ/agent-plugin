@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
 import { MESSAGE_PART_STATE_STATUSES } from '../../../literals/tool-event.ts';
-import { withToolEventFamily } from '../shared-family.ts';
+import { withCloudProtocol } from '../shared-protocol.ts';
 
 const skillTextDeltaEventBaseSchema = z.object({
   type: z.literal('text.delta'),
@@ -55,11 +55,11 @@ const skillToolUpdateEventBaseSchema = z.object({
   }),
 });
 
-export const skillTextDeltaEventSchema = withToolEventFamily('skill', skillTextDeltaEventBaseSchema);
-export const skillTextDoneEventSchema = withToolEventFamily('skill', skillTextDoneEventBaseSchema);
-export const skillThinkingDeltaEventSchema = withToolEventFamily('skill', skillThinkingDeltaEventBaseSchema);
-export const skillThinkingDoneEventSchema = withToolEventFamily('skill', skillThinkingDoneEventBaseSchema);
-export const skillToolUpdateEventSchema = withToolEventFamily('skill', skillToolUpdateEventBaseSchema);
+export const skillTextDeltaEventSchema = withCloudProtocol(skillTextDeltaEventBaseSchema);
+export const skillTextDoneEventSchema = withCloudProtocol(skillTextDoneEventBaseSchema);
+export const skillThinkingDeltaEventSchema = withCloudProtocol(skillThinkingDeltaEventBaseSchema);
+export const skillThinkingDoneEventSchema = withCloudProtocol(skillThinkingDoneEventBaseSchema);
+export const skillToolUpdateEventSchema = withCloudProtocol(skillToolUpdateEventBaseSchema);
 
 export type SkillTextDeltaEvent = z.output<typeof skillTextDeltaEventSchema>;
 export type SkillTextDoneEvent = z.output<typeof skillTextDoneEventSchema>;

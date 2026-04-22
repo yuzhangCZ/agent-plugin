@@ -19,7 +19,7 @@ function isControlMessageType(messageType: string): boolean {
  * 出站协议闸口。
  * @remarks 统一收口 business/control 的最终协议校验，避免 sender 同时承担协议分支与传输职责。
  * gate 只依赖 `GatewayWireCodec` 做共享协议校验，不感知 `tool_event.event`
- * 的 provider family，也不引入任何 family-specific 分支。
+ * 的 provider discriminator，也不引入任何 provider-specific 分支。
  */
 export interface OutboundProtocolGate {
   validateBusiness(message: GatewaySendPayload): GatewayBusinessOutboundMessage;

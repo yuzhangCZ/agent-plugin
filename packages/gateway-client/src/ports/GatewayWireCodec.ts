@@ -9,8 +9,8 @@ import type {
 /**
  * wire 协议编解码端口。
  * @remarks runtime 只依赖该端口，确保协议实现可替换且可测试。
- * `gateway-client` 不理解 `tool_event.event` 的 provider family；
- * 任何 family 判定都应在共享协议层内完成，而不是泄漏到 client。
+ * `gateway-client` 不理解 `tool_event.event` 的 provider discriminator；
+ * `protocol === "cloud"` 与缺失 `protocol` 的分流都应在共享协议层内完成，而不是泄漏到 client。
  */
 export interface GatewayWireCodec {
   /** 归一化入站消息；失败时返回结构化协议违约信息。 */
