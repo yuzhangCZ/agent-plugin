@@ -136,7 +136,7 @@ export const gatewayToolEventPayloadSchema: z.ZodType<GatewayToolEventPayload> =
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
-        ctx.addIssue({ ...issue });
+        ctx.addIssue(issue);
       }
       return z.NEVER;
     }

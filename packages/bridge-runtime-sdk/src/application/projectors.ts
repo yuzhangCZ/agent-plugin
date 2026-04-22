@@ -51,7 +51,7 @@ export interface RunTerminalSignalProjector {
 }
 
 /**
- * skill family 默认 fact projector。
+ * cloud/skill provider 默认 fact projector。
  */
 export class DefaultFactToSkillEventProjector implements FactToSkillEventProjector {
   project(fact: ProviderFact): SkillProviderEvent[] {
@@ -62,7 +62,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'thinking.done':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: fact.type,
             properties: {
               messageId: fact.messageId,
@@ -74,7 +74,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'tool.update':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'tool.update',
             properties: {
               messageId: fact.messageId,
@@ -92,7 +92,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'question.ask':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'question',
             properties: {
               messageId: fact.messageId,
@@ -107,7 +107,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'permission.ask':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'permission.ask',
             properties: {
               messageId: fact.messageId,
@@ -121,7 +121,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'message.start':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'step.start',
             properties: {
               messageId: fact.messageId,
@@ -131,7 +131,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'message.done':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'step.done',
             properties: {
               messageId: fact.messageId,
@@ -144,7 +144,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       case 'session.error':
         return [
           {
-            family: 'skill',
+            protocol: 'cloud',
             type: 'session.error',
             properties: {
               error: fact.error.message,

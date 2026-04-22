@@ -67,15 +67,6 @@ import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } 
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import {
-  DefaultGatewayLifecycleCoordinator,
-  type GatewayLifecycleCoordinator,
-  type GatewayLifecyclePort,
-} from './GatewayLifecycleCoordinator.js';
-import {
-  DefaultGatewaySessionSender,
-  type GatewaySessionSenderPort,
-} from './GatewaySessionSender.js';
-import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
@@ -114,15 +105,6 @@ interface DownstreamLogFields {
   toolSessionId?: string;
 }
 
-function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && 'disposition' in error
-    && 'stage' in error
-    && 'retryable' in error
-    && 'message' in error;
-}
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 
 export class BridgeRuntime {
@@ -136,6 +118,7 @@ export class BridgeRuntime {
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
 
+  private gatewayConnection: GatewayClient | null = null;
   private eventFilter: EventFilter | null = null;
   private started = false;
   private readonly rawClient: HostClientLike;
@@ -150,9 +133,6 @@ export class BridgeRuntime {
   private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
-  private readonly lifecycleCoordinator: GatewayLifecycleCoordinator;
-  private readonly sessionSender: GatewaySessionSenderPort;
-  private gatewayConnectionOverride: GatewayClient | null = null;
   private sessionDirectoryPolicyContext: {
     channel?: string;
     bridgeDirectoryConfigured: boolean;
@@ -190,13 +170,8 @@ export class BridgeRuntime {
     this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
       sendToolError: (result, welinkSessionId, logOptions) => this.sendToolError(result, welinkSessionId, logOptions),
-      canReply: () => this.getActiveGatewayConnection()?.getStatus().isReady() ?? false,
-      getConnectionState: () => this.getActiveGatewayConnection()?.getState(),
-    });
-    this.lifecycleCoordinator = new DefaultGatewayLifecycleCoordinator(this.createGatewayLifecyclePort());
-    this.sessionSender = new DefaultGatewaySessionSender({
-      getActiveConnection: () => this.getActiveGatewayConnection(),
-      getLogger: () => this.logger,
+      canReply: () => this.gatewayConnection?.getStatus().isReady() ?? false,
+      getConnectionState: () => this.gatewayConnection?.getState(),
     });
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
@@ -208,18 +183,6 @@ export class BridgeRuntime {
 
   protected createGatewayConnection(options: GatewayClientConfig): GatewayClient {
     return createGatewayClient(options);
-  }
-
-  /**
-   * 仅用于现有单测/夹具直连注入 connection。
-   * @remarks 正常运行期始终优先使用 lifecycle coordinator 管理 active connection。
-   */
-  get gatewayConnection(): GatewayClient | null {
-    return this.gatewayConnectionOverride ?? this.lifecycleCoordinator.getActiveConnection();
-  }
-
-  set gatewayConnection(connection: GatewayClient | null) {
-    this.gatewayConnectionOverride = connection;
   }
 
   async start(options: BridgeRuntimeStartOptions = {}): Promise<void> {
@@ -323,25 +286,45 @@ export class BridgeRuntime {
       logger: this.logger.child({ component: 'gateway' }),
     });
 
-    this.gatewayConnectionOverride = null;
+    connection.on('stateChange', (state) => {
+      this.logger.info('gateway.state.changed', { state });
+      this.statusAdapter.publishGatewayState(state);
+    });
+
+    connection.on('error', (error) => {
+      this.statusAdapter.publishGatewayError(error as GatewayClientErrorShape);
+    });
+
+    connection.on('inbound', (frame) => {
+      this.handleInboundFrame(frame as GatewayInboundFrame);
+    });
+
+    connection.on('message', (message) => {
+      const messageType =
+        message && typeof message === 'object' && 'type' in (message as { type?: unknown })
+          ? String((message as { type?: unknown }).type ?? '')
+          : 'unknown';
+      this.logger.debug('gateway.message.received', { messageType });
+      this.handleDownstreamMessage(message as GatewayBusinessMessage).catch((error) => {
+        this.logger.error('runtime.downstream_message_error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+
+    this.gatewayConnection = connection;
     this.statusAdapter.publishConnecting();
     if (options.abortSignal?.aborted) {
-      // connection 尚未交给 lifecycle coordinator 接管，当前分支仍由 runtime 负责释放。
-      connection.disconnect();
+      this.gatewayConnection.disconnect();
+      this.gatewayConnection = null;
       this.logger.warn('runtime.start.aborted_before_connect');
       throw new Error('runtime_start_aborted');
     }
 
-    try {
-      await this.lifecycleCoordinator.startSession(connection, { abortSignal: options.abortSignal });
-    } catch (error) {
-      if (isGatewayClientErrorShape(error)) {
-        this.statusAdapter.publishGatewayError(error);
-      }
-      throw error;
-    }
+    await connection.connect();
     if (options.abortSignal?.aborted) {
-      this.lifecycleCoordinator.stopSession();
+      this.gatewayConnection.disconnect();
+      this.gatewayConnection = null;
       this.logger.warn('runtime.start.aborted_after_connect');
       throw new Error('runtime_start_aborted');
     }
@@ -352,8 +335,11 @@ export class BridgeRuntime {
 
   stop(): void {
     this.logger.info('runtime.stop.requested');
-    this.lifecycleCoordinator.stopSession();
-    this.gatewayConnectionOverride = null;
+    if (this.gatewayConnection) {
+      this.gatewayConnection.disconnect();
+      this.gatewayConnection = null;
+    }
+
     this.started = false;
     resetMessageBridgeStatus();
     this.logger.info('runtime.stop.completed');
@@ -384,7 +370,7 @@ export class BridgeRuntime {
       return;
     }
 
-    const connection = this.getActiveGatewayConnection();
+    const connection = this.gatewayConnection;
     if (!connection || !connection.getStatus().isReady() || !this.eventFilter) {
       eventLogger.debug('event.ignored_not_ready', {
         state: connection?.getState(),
@@ -451,9 +437,8 @@ export class BridgeRuntime {
     if (!validatedEnvelope) {
       return;
     }
-    if (this.sessionSender.sendIfActive(connection, validatedEnvelope, transportLogContext)) {
-      forwardingLogger.debug('event.forwarded');
-    }
+    connection.send(validatedEnvelope, transportLogContext);
+    forwardingLogger.debug('event.forwarded');
 
     // child session 的 idle 仅代表子代理收尾，不能向 parent 额外补发 tool_done。
     if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE && !subagentMapping) {
@@ -463,7 +448,6 @@ export class BridgeRuntime {
       });
       if (decision.emit && decision.source) {
         this.sendToolDone(normalized.common.toolSessionId, undefined, decision.source, {
-          connection,
           logger: forwardingLogger,
           traceId: bridgeMessageId,
           gatewayMessageId: bridgeMessageId,
@@ -509,8 +493,7 @@ export class BridgeRuntime {
   private async handleDownstreamMessage(message: GatewayBusinessMessage): Promise<void> {
     // 这里是 gateway 业务消息进入 runtime 的唯一主链路：
     // 只做业务分发和 fail-closed 错误映射，不再承担共享协议归一化。
-    const connection = this.getActiveGatewayConnection();
-    if (!connection) {
+    if (!this.gatewayConnection) {
       this.logger.warn('runtime.downstream_ignored_no_connection');
       return;
     }
@@ -544,11 +527,10 @@ export class BridgeRuntime {
       const result = await this.actionRouter.route(
         DOWNSTREAM_MESSAGE_TYPE.STATUS_QUERY,
         payload,
-        this.buildActionContext(connection, undefined, statusLogger),
+        this.buildActionContext(this.gatewayConnection, undefined, statusLogger),
       );
       if (!result.success) {
         this.sendToolError(result, undefined, {
-          connection,
           logger: statusLogger,
           traceId,
           gatewayMessageId: downstreamFields.gatewayMessageId,
@@ -575,11 +557,10 @@ export class BridgeRuntime {
       if (!validatedStatusResponse) {
         return;
       }
-      if (this.sessionSender.sendIfActive(connection, validatedStatusResponse, statusLogContext)) {
-        statusLogger.info('runtime.status_query.responded', {
-          latencyMs: Date.now() - startedAt,
-        });
-      }
+      this.gatewayConnection.send(validatedStatusResponse, statusLogContext);
+      statusLogger.info('runtime.status_query.responded', {
+        latencyMs: Date.now() - startedAt,
+      });
       return;
     }
 
@@ -600,9 +581,9 @@ export class BridgeRuntime {
       traceId,
     );
 
-    if (!connection.getStatus().isReady()) {
+    if (!this.gatewayConnection.getStatus().isReady()) {
       invokeLogger.warn('runtime.invoke.ignored_not_ready', {
-        state: connection.getState(),
+        state: this.gatewayConnection.getState(),
       });
       return;
     }
@@ -614,12 +595,11 @@ export class BridgeRuntime {
       const result = await this.actionRouter.route(
         invokeMessage.action,
         invokeMessage.payload,
-        this.buildActionContext(connection, normalizedWelinkSessionId, invokeLogger),
+        this.buildActionContext(this.gatewayConnection, normalizedWelinkSessionId, invokeLogger),
       );
 
       if (!result.success) {
         this.sendToolError(result, welinkSessionId, {
-          connection,
           logger: invokeLogger,
           traceId,
           gatewayMessageId: downstreamFields.gatewayMessageId,
@@ -634,7 +614,6 @@ export class BridgeRuntime {
           { success: false, errorCode: 'SDK_UNREACHABLE', errorMessage: 'create_session returned without sessionId' },
           welinkSessionId,
           {
-            connection,
             logger: invokeLogger,
             traceId,
             gatewayMessageId: downstreamFields.gatewayMessageId,
@@ -666,14 +645,13 @@ export class BridgeRuntime {
       if (!validatedSessionCreated) {
         return;
       }
-      if (this.sessionSender.sendIfActive(connection, validatedSessionCreated, sessionCreatedLogContext)) {
-        invokeLogger.info('runtime.invoke.completed', {
-          action: invokeMessage.action,
-          welinkSessionId: normalizedWelinkSessionId,
-          toolSessionId,
-          latencyMs: Date.now() - startedAt,
-        });
-      }
+      this.gatewayConnection.send(validatedSessionCreated, sessionCreatedLogContext);
+      invokeLogger.info('runtime.invoke.completed', {
+        action: invokeMessage.action,
+        welinkSessionId: normalizedWelinkSessionId,
+        toolSessionId,
+        latencyMs: Date.now() - startedAt,
+      });
       return;
     }
 
@@ -684,7 +662,7 @@ export class BridgeRuntime {
     const result = await this.actionRouter.route(
       invokeMessage.action,
       invokeMessage.payload,
-      this.buildActionContext(connection, welinkSessionId, invokeLogger),
+      this.buildActionContext(this.gatewayConnection, welinkSessionId, invokeLogger),
     );
 
     if (!result.success) {
@@ -693,7 +671,6 @@ export class BridgeRuntime {
         toolSessionId,
       });
       this.sendToolError(result, welinkSessionId, {
-        connection,
         logger: invokeLogger,
         traceId,
         gatewayMessageId: downstreamFields.gatewayMessageId,
@@ -717,7 +694,6 @@ export class BridgeRuntime {
     });
     if (decision.emit && toolSessionId && decision.source) {
       this.sendToolDone(toolSessionId, welinkSessionId, decision.source, {
-        connection,
         logger: invokeLogger,
         traceId,
         gatewayMessageId: downstreamFields.gatewayMessageId,
@@ -898,48 +874,10 @@ export class BridgeRuntime {
     };
   }
 
-  private getActiveGatewayConnection(): GatewayClient | null {
-    return this.gatewayConnectionOverride ?? this.lifecycleCoordinator.getActiveConnection();
-  }
-
-  /**
-   * runtime 到 gateway 生命周期协调器的适配端口。
-   * @remarks 这里只桥接状态发布与事件上抛，避免 coordinator 反向持有业务依赖。
-   */
-  private createGatewayLifecyclePort(): GatewayLifecyclePort {
-    return {
-      publishState: (state) => {
-        this.statusAdapter.publishGatewayState(state);
-      },
-      publishError: (error) => {
-        this.statusAdapter.publishGatewayError(error);
-      },
-      handleInbound: (frame) => {
-        this.handleInboundFrame(frame);
-      },
-      handleMessage: (message) => {
-        const messageType =
-          message && typeof message === 'object' && 'type' in (message as { type?: unknown })
-            ? String((message as { type?: unknown }).type ?? '')
-            : 'unknown';
-        this.logger.debug('gateway.message.received', { messageType });
-        this.handleDownstreamMessage(message).catch((error) => {
-          this.logger.error('runtime.downstream_message_error', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      },
-      log: (level, message, meta) => {
-        this.logger[level](message, meta);
-      },
-    };
-  }
-
   private sendToolError(
     result: ActionResult,
     welinkSessionId?: string,
     logOptions?: {
-      connection?: GatewayClient | null;
       logger?: BridgeLogger;
       traceId?: string;
       gatewayMessageId?: string;
@@ -947,8 +885,7 @@ export class BridgeRuntime {
       toolSessionId?: string;
     },
   ): void {
-    const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
-    if (!connection) {
+    if (!this.gatewayConnection) {
       this.logger.warn('runtime.tool_error.skipped_no_connection', { welinkSessionId });
       return;
     }
@@ -986,7 +923,7 @@ export class BridgeRuntime {
     if (!validatedToolError) {
       return;
     }
-    this.sessionSender.sendIfActive(connection, validatedToolError, toolErrorLogContext);
+    this.gatewayConnection.send(validatedToolError, toolErrorLogContext);
   }
 
   private sendToolDone(
@@ -994,15 +931,13 @@ export class BridgeRuntime {
     welinkSessionId: string | undefined,
     source: ToolDoneSource,
     logOptions?: {
-      connection?: GatewayClient | null;
       logger?: BridgeLogger;
       traceId?: string;
       gatewayMessageId?: string;
       action?: string;
     },
   ): void {
-    const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
-    if (!connection) {
+    if (!this.gatewayConnection) {
       this.logger.warn('runtime.tool_done.skipped_no_connection', { toolSessionId, welinkSessionId, source });
       return;
     }
@@ -1037,7 +972,7 @@ export class BridgeRuntime {
     if (!validatedToolDone) {
       return;
     }
-    this.sessionSender.sendIfActive(connection, validatedToolDone, toolDoneLogContext);
+    this.gatewayConnection.send(validatedToolDone, toolDoneLogContext);
   }
 
   private validateGatewayUplinkBusinessMessageOrLog(
