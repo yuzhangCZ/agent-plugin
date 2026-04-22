@@ -11,6 +11,17 @@ import { reconcileFinalText } from "../reconcileFinalText.js";
 import { resolveEffectiveReplyConfig } from "../resolveEffectiveReplyConfig.js";
 import type { BridgeLogger, MessageBridgeResolvedAccount } from "../types.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
+import {
+  buildMessageDoneFact,
+  buildMessageStartFact,
+  buildPermissionAskFact,
+  buildQuestionAskFact,
+  buildSessionErrorFact,
+  buildTextDeltaFact,
+  buildTextDoneFact,
+  buildToolUpdateFact,
+  createToolSessionId,
+} from "../session/facts.js";
 
 type OpenClawConfig = Record<string, unknown>;
 
@@ -326,7 +337,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async createSession(): Promise<{ toolSessionId: string }> {
-    const toolSessionId = randomUUID();
+    const toolSessionId = createToolSessionId();
     this.options.sessionRegistry.ensure(toolSessionId);
     return { toolSessionId };
   }
@@ -481,15 +492,14 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      state.queue.push({
-        type: "session.error",
+      state.queue.push(buildSessionErrorFact({
         toolSessionId: state.toolSessionId,
         error: {
           code: "internal_error",
           message,
         },
         raw: error,
-      });
+      }));
       state.queue.close();
       state.result.resolve({
         outcome: state.abortRequested ? "aborted" : "failed",
@@ -604,8 +614,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       }
       toolState.output = output;
       this.ensureMessageStarted(state);
-      state.queue.push({
-        type: "tool.update",
+      state.queue.push(buildToolUpdateFact({
         toolSessionId: state.toolSessionId,
         messageId: state.messageId,
         partId: toolState.partId,
@@ -614,7 +623,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         status: toolState.status,
         title: toolState.title,
         output,
-      });
+      }));
       return;
     }
 
@@ -630,14 +639,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     this.ensureMessageStarted(state);
     state.accumulatedText += text;
-    state.queue.push({
-      type: "text.delta",
+    state.queue.push(buildTextDeltaFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: text,
       raw: payload,
-    });
+    }));
   }
 
   private async runWithSubagentFallback(state: ActiveRunState, text: string): Promise<void> {
@@ -670,18 +678,16 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const finalText = extractAssistantText(session.messages) || "(empty response)";
     this.ensureMessageStarted(state);
     state.accumulatedText = finalText;
-    state.queue.push({
-      type: "text.done",
+    state.queue.push(buildTextDoneFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: finalText,
-    });
-    state.queue.push({
-      type: "message.done",
+    }));
+    state.queue.push(buildMessageDoneFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
-    });
+    }));
     state.queue.close();
     state.result.resolve({
       outcome: state.abortRequested ? "aborted" : "completed",
@@ -694,19 +700,17 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const reconciliation = reconcileFinalText(state.accumulatedText, state.pendingFinalText);
     const finalText = reconciliation.finalText || state.accumulatedText || "(empty response)";
     state.accumulatedText = finalText;
-    state.queue.push({
-      type: "text.done",
+    state.queue.push(buildTextDoneFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: finalText,
       raw: state.pendingFinalText,
-    });
-    state.queue.push({
-      type: "message.done",
+    }));
+    state.queue.push(buildMessageDoneFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
-    });
+    }));
     state.queue.close();
   }
 
@@ -715,11 +719,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     state.started = true;
-    state.queue.push({
-      type: "message.start",
+    state.queue.push(buildMessageStartFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
-    });
+    }));
   }
 
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
@@ -782,8 +785,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       toolState.status = "running";
     }
 
-    state.queue.push({
-      type: "tool.update",
+    state.queue.push(buildToolUpdateFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: toolState.partId,
@@ -794,7 +796,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       ...(toolState.output !== undefined ? { output: toolState.output } : {}),
       ...(toolState.error ? { error: toolState.error } : {}),
       raw: payload,
-    });
+    }));
   }
 
   private handleQuestionAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
@@ -807,8 +809,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const options = Array.isArray(payload.options)
       ? payload.options.map((value) => asTrimmedString(value)).filter(Boolean)
       : undefined;
-    state.queue.push({
-      type: "question.ask",
+    state.queue.push(buildQuestionAskFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       toolCallId,
@@ -817,7 +818,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       ...(options && options.length > 0 ? { options: options as string[] } : {}),
       context: payload,
       raw: payload,
-    });
+    }));
   }
 
   private handlePermissionAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
@@ -826,8 +827,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     this.ensureMessageStarted(state);
-    state.queue.push({
-      type: "permission.ask",
+    state.queue.push(buildPermissionAskFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       permissionId,
@@ -835,7 +835,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       ...(asTrimmedString(payload.permissionType) ? { permissionType: asTrimmedString(payload.permissionType) } : {}),
       metadata: payload,
       raw: payload,
-    });
+    }));
   }
 
   private finalizeRun(state: ActiveRunState): void {

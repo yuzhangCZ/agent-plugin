@@ -45,6 +45,22 @@ test("create_session requires welinkSessionId", () => {
   assert.match(result.error.message, /welinkSessionId/);
 });
 
+test("create_session ignores payload.sessionId and keeps bridge-owned toolSessionId", () => {
+  const result = normalizeDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_create_1",
+    action: "create_session",
+    payload: {
+      sessionId: "ses_external_1",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.action, "create_session");
+  assert.equal("sessionId" in result.value.payload, false);
+  assert.equal(result.value.payload.metadata, undefined);
+});
+
 test("permission_reply invalid payload is rejected with action context", () => {
   const result = normalizeDownstreamMessage({
     type: "invoke",

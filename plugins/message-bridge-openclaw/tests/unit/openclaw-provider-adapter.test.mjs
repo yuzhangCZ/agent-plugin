@@ -74,6 +74,14 @@ test("provider adapter fallback emits ordered facts and completed result", async
   assert.deepEqual(await run.result(), { outcome: "completed" });
 });
 
+test("provider adapter createSession generates ses_ prefixed ids", async () => {
+  const provider = createAdapter();
+
+  const created = await provider.createSession();
+
+  assert.match(created.toolSessionId, /^ses_/);
+});
+
 test("provider adapter forwards question replies to runtime reply host", async () => {
   const calls = [];
   const sessionRegistry = new SessionRegistry("agent:acct");
@@ -187,4 +195,63 @@ test("provider adapter abort prefers runtime abort hook over session deletion", 
       runId: "run-1",
     },
   ]);
+});
+
+test("provider adapter question facts keep stable fields on toolSessionId", async () => {
+  const listeners = [];
+  const provider = createAdapter({
+    runtime: {
+      events: {
+        onAgentEvent(listener) {
+          listeners.push(listener);
+          return () => true;
+        },
+      },
+    },
+    getSubagentRuntime: () => ({
+      async run() {
+        return { runId: "sub-1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "done" }],
+        };
+      },
+    }),
+  });
+
+  await provider.initialize();
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "run-1",
+    toolSessionId: "ses_tool_1",
+    text: "hi",
+  });
+
+  listeners[0]({
+    stream: "question",
+    sessionKey: "agent:acct:ses_tool_1",
+    data: {
+      toolCallId: "call-1",
+      question: "continue?",
+      header: "Confirm",
+      options: ["yes", "no"],
+      sessionKey: "agent:acct:ses_tool_1",
+    },
+  });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  const questionFact = facts.find((fact) => fact.type === "question.ask");
+  assert.ok(questionFact);
+  assert.equal(questionFact.toolSessionId, "ses_tool_1");
+  assert.equal(questionFact.messageId, facts[0].messageId);
+  assert.equal(questionFact.toolCallId, "call-1");
+  assert.equal(questionFact.context.sessionKey, "agent:acct:ses_tool_1");
 });
