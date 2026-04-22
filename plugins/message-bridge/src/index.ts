@@ -25,6 +25,8 @@ interface MessageBridgeRuntimeApi {
   stopMessageBridgeRuntime(): void;
 }
 
+const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
+
 declare global {
   // eslint-disable-next-line no-var
   var __MB_RUNTIME_API__: MessageBridgeRuntimeApi | undefined;
@@ -84,12 +86,30 @@ function stopMessageBridgeRuntime(): void {
   stopRuntime();
 }
 
-const runtimeApi: MessageBridgeRuntimeApi = Object.freeze({
+function getInstalledRuntimeApi(): MessageBridgeRuntimeApi | undefined {
+  const carrier = globalThis as typeof globalThis & {
+    [MESSAGE_BRIDGE_RUNTIME_API_KEY]?: MessageBridgeRuntimeApi;
+  };
+  return carrier[MESSAGE_BRIDGE_RUNTIME_API_KEY] ?? globalThis.__MB_RUNTIME_API__;
+}
+
+function installRuntimeApi(api: MessageBridgeRuntimeApi): void {
+  Object.defineProperty(globalThis, MESSAGE_BRIDGE_RUNTIME_API_KEY, {
+    configurable: true,
+    enumerable: false,
+    value: api,
+    writable: false,
+  });
+}
+
+const runtimeApi: MessageBridgeRuntimeApi = getInstalledRuntimeApi() ?? Object.freeze({
   getMessageBridgeStatus,
   subscribeMessageBridgeStatus,
   startMessageBridgeRuntime,
   stopMessageBridgeRuntime,
 });
+
+installRuntimeApi(runtimeApi);
 
 Object.defineProperty(globalThis, '__MB_RUNTIME_API__', {
   configurable: true,

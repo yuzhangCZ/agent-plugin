@@ -15,6 +15,7 @@ import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBri
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
 const SOURCE_RUNTIME_API = globalThis.__MB_RUNTIME_API__;
+const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
 function restoreInjectedPluginVersion() {
   if (typeof ORIGINAL_PLUGIN_VERSION === 'undefined') {
@@ -154,6 +155,35 @@ describe('plugin contract', () => {
     assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(globalThis.__MB_RUNTIME_API__, SOURCE_RUNTIME_API);
     assert.strictEqual(Object.isFrozen(getRuntimeApi()), true);
+  });
+
+  test('prefers symbol-backed runtime api when __MB_RUNTIME_API__ is polluted before reload', async () => {
+    const cleanRuntimeApi = SOURCE_RUNTIME_API;
+    assert.ok(cleanRuntimeApi && typeof cleanRuntimeApi === 'object');
+
+    const pollutedRuntimeApi = Object.freeze({
+      getMessageBridgeStatus: () => ({ phase: 'polluted' }),
+      subscribeMessageBridgeStatus: () => () => {},
+      startMessageBridgeRuntime: async () => {},
+      stopMessageBridgeRuntime: () => {},
+    });
+
+    Object.defineProperty(globalThis, '__MB_RUNTIME_API__', {
+      configurable: true,
+      enumerable: false,
+      value: pollutedRuntimeApi,
+      writable: false,
+    });
+
+    const reloadedModule = await import(`../../src/index.ts?reload=symbol-priority-${Date.now()}`);
+
+    assert.strictEqual(
+      globalThis[MESSAGE_BRIDGE_RUNTIME_API_KEY],
+      cleanRuntimeApi,
+    );
+    assert.strictEqual(globalThis.__MB_RUNTIME_API__, cleanRuntimeApi);
+    assert.notStrictEqual(globalThis.__MB_RUNTIME_API__, pollutedRuntimeApi);
+    assert.strictEqual(reloadedModule.default, reloadedModule.MessageBridgePlugin);
   });
 
   test('explicit start rejects before plugin has been loaded', async () => {
