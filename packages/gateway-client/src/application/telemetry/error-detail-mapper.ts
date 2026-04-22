@@ -18,8 +18,13 @@ export function getErrorDetails(error: unknown): Record<string, unknown> {
   if (error instanceof GatewayClientError) {
     return {
       code: error.code,
+<<<<<<< HEAD
       disposition: error.disposition,
       stage: error.stage,
+=======
+      source: error.source,
+      phase: error.phase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: error.retryable,
       ...(error.details ? { details: error.details } : {}),
     };

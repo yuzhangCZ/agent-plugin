@@ -6,7 +6,11 @@ import {
   createAkSkAuthProvider,
   createGatewayClient,
   GatewayClientError,
+<<<<<<< HEAD
   mapGatewayClientAvailability,
+=======
+  gatewayClientFailureTranslator,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 } from '../src/index.ts';
 import { DefaultOutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
@@ -975,6 +979,7 @@ test('websocket error before READY waits for close and does not schedule reconne
       && error.stage === 'handshake',
   );
   assert.equal(reconnectScheduler.scheduled.length, 0);
+<<<<<<< HEAD
   assert.equal(errors.length, 0);
 
   transport.emitError({ message: 'late socket failed' });
@@ -1040,6 +1045,21 @@ test('startup multiple websocket errors preserve the first pending transport fac
       && error.stage === 'handshake'
       && error.details?.errorDetail === 'first transport error',
   );
+=======
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.source, 'transport');
+  assert.equal(errors[0]!.phase, 'before_ready');
+  assert.deepEqual(gatewayClientFailureTranslator.translate(errors[0]!), {
+    failureClass: 'transport_failure',
+    code: 'GATEWAY_WEBSOCKET_ERROR',
+    phase: 'before_ready',
+    retryable: true,
+  });
+
+  transport.emitError({ message: 'late socket failed' });
+  assert.equal(reconnectScheduler.scheduled.length, 0);
+  assert.equal(errors.length, 1);
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 });
 
 test('pre-ready whitelist close codes never schedule reconnect and log reconnectPlanned false', async () => {
@@ -1090,6 +1110,7 @@ test('invalid url connect rejects as promise and does not retain active attempt'
   let firstRejection: GatewayClientError | undefined;
   await assert.rejects(
     runtime.connect(),
+<<<<<<< HEAD
     (error) => {
       firstRejection = error as GatewayClientError;
       return error instanceof GatewayClientError
@@ -1097,10 +1118,17 @@ test('invalid url connect rejects as promise and does not retain active attempt'
         && error.disposition === 'startup_failure'
         && error.stage === 'pre_open';
     },
+=======
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.source === 'transport'
+      && error.phase === 'before_open',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
   let secondRejection: GatewayClientError | undefined;
   await assert.rejects(
     runtime.connect(),
+<<<<<<< HEAD
     (error) => {
       secondRejection = error as GatewayClientError;
       return error instanceof GatewayClientError
@@ -1108,6 +1136,12 @@ test('invalid url connect rejects as promise and does not retain active attempt'
         && error.disposition === 'startup_failure'
         && error.stage === 'pre_open';
     },
+=======
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.source === 'transport'
+      && error.phase === 'before_open',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
   assert.equal(secondRejection?.code, firstRejection?.code);
 });
@@ -1134,9 +1168,15 @@ test('auth payload and transport open sync failures reject as promises', async (
   await assert.rejects(
     authRuntime.connect(),
     (error) => error instanceof GatewayClientError
+<<<<<<< HEAD
       && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
       && error.disposition === 'startup_failure'
       && error.stage === 'pre_open'
+=======
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.source === 'handshake'
+      && error.phase === 'before_open'
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       && error.message === 'auth_payload_failed',
   );
 
@@ -1152,9 +1192,15 @@ test('auth payload and transport open sync failures reject as promises', async (
   await assert.rejects(
     transportRuntime.connect(),
     (error) => error instanceof GatewayClientError
+<<<<<<< HEAD
       && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
       && error.disposition === 'startup_failure'
       && error.stage === 'pre_open'
+=======
+      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+      && error.source === 'handshake'
+      && error.phase === 'before_open'
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       && error.message === 'socket_factory_failed',
   );
 });
@@ -1236,8 +1282,13 @@ test('async inbound handler exceptions are emitted as protocol errors', async ()
   assert.equal(errors.length, 1);
   assert.equal(errors[0]!.code, 'GATEWAY_INBOUND_PROTOCOL_INVALID');
   assert.equal(errors[0]!.message, 'normalize_failed');
+<<<<<<< HEAD
   assert.equal(errors[0]!.disposition, 'diagnostic');
   assert.equal(errors[0]!.stage, 'ready');
+=======
+  assert.equal(errors[0]!.source, 'inbound_protocol');
+  assert.equal(errors[0]!.phase, 'ready');
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 });
 
 test('handshake timeout rejects the active connect attempt', async () => {
@@ -1269,6 +1320,7 @@ test('handshake timeout rejects the active connect attempt', async () => {
     let rejection: GatewayClientError | undefined;
     await assert.rejects(
       connecting,
+<<<<<<< HEAD
       (error) => {
         rejection = error as GatewayClientError;
         return error instanceof GatewayClientError
@@ -1276,6 +1328,12 @@ test('handshake timeout rejects the active connect attempt', async () => {
           && error.disposition === 'startup_failure'
           && error.stage === 'handshake';
       },
+=======
+      (error) => error instanceof GatewayClientError
+        && error.code === 'GATEWAY_CONNECT_TIMEOUT'
+        && error.source === 'handshake'
+        && error.phase === 'before_ready',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     );
     assert.equal(errors.length, 0);
     assert.equal(rejection?.code, 'GATEWAY_HANDSHAKE_TIMEOUT');
@@ -1436,9 +1494,15 @@ test('register send failure never schedules reconnect', async () => {
         },
         validateControl() {
           throw new GatewayClientError({
+<<<<<<< HEAD
             code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
             disposition: 'diagnostic',
             stage: 'ready',
+=======
+            code: 'GATEWAY_PROTOCOL_VIOLATION',
+            source: 'outbound_protocol',
+            phase: 'ready',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
             retryable: false,
             message: 'register_invalid',
           });
@@ -1602,7 +1666,11 @@ test('reconnect attempt stops backoff after register_rejected', async () => {
   assert.equal(runtime.getState(), 'DISCONNECTED');
 });
 
+<<<<<<< HEAD
 test('reconnect window send guards use current connection stage', async () => {
+=======
+test('reconnect window send guards use reconnecting phase', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const runtime = new GatewayClientRuntime(
@@ -1626,8 +1694,12 @@ test('reconnect window send guards use current connection stage', async () => {
     () => runtime.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_CONNECTED'
+<<<<<<< HEAD
       && error.disposition === 'diagnostic'
       && error.stage === 'pre_open',
+=======
+      && error.phase === 'reconnecting',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
 
   const reconnectTask = reconnectScheduler.scheduled[0]!.task();
@@ -1637,15 +1709,23 @@ test('reconnect window send guards use current connection stage', async () => {
     () => runtime.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_READY'
+<<<<<<< HEAD
       && error.disposition === 'diagnostic'
       && error.stage === 'handshake',
+=======
+      && error.phase === 'reconnecting',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
 
   transport.emitClose({ code: 1011, reason: 'retry open failed', wasClean: false });
   await reconnectTask;
 });
 
+<<<<<<< HEAD
 test('reconnect attempt pre-open close is reported with pre_open startup failure', async () => {
+=======
+test('reconnect attempt pre-open close is reported with reconnecting phase', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
@@ -1674,9 +1754,14 @@ test('reconnect attempt pre-open close is reported with pre_open startup failure
   await reconnectTask;
 
   const failedLog = logs.find((entry) => entry.message === 'gateway.reconnect.failed');
+<<<<<<< HEAD
   assert.equal(failedLog?.meta?.code, 'GATEWAY_TRANSPORT_ERROR');
   assert.equal(failedLog?.meta?.disposition, 'startup_failure');
   assert.equal(failedLog?.meta?.stage, 'pre_open');
+=======
+  assert.equal(failedLog?.meta?.code, 'GATEWAY_CLOSED_BEFORE_OPEN');
+  assert.equal(failedLog?.meta?.phase, 'reconnecting');
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 });
 
 test('reconnect attempt stops backoff after handshake protocol violation', async () => {
@@ -1750,7 +1835,11 @@ test('reconnect attempt stops backoff after handshake protocol violation', async
   assert.equal(runtime.getState(), 'DISCONNECTED');
 });
 
+<<<<<<< HEAD
 test('reconnect attempt handshake failures stay on connect reject path', async () => {
+=======
+test('reconnect attempt handshake failures surface reconnecting phase', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const errors: GatewayClientError[] = [];
@@ -1774,16 +1863,33 @@ test('reconnect attempt handshake failures stay on connect reject path', async (
   await initialConnect;
 
   transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+<<<<<<< HEAD
   const runtimeErrorCount = errors.length;
+=======
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const reconnectTask = reconnectScheduler.scheduled[0]!.task();
   transport.emitOpen();
   transport.emitMessage({ type: 'register_rejected', reason: 'duplicate_connection' });
   await reconnectTask;
 
+<<<<<<< HEAD
   assert.equal(errors.length, runtimeErrorCount);
 });
 
 test('reconnect attempt timeout stays on connect reject path', async () => {
+=======
+  assert.equal(errors.at(-1)?.code, 'GATEWAY_REGISTER_REJECTED');
+  assert.equal(errors.at(-1)?.phase, 'reconnecting');
+  assert.deepEqual(gatewayClientFailureTranslator.translate(errors.at(-1)!), {
+    failureClass: 'handshake_failure',
+    code: 'GATEWAY_REGISTER_REJECTED',
+    phase: 'reconnecting',
+    retryable: false,
+  });
+});
+
+test('reconnect attempt timeout surfaces reconnecting phase', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const errors: GatewayClientError[] = [];
@@ -1810,19 +1916,37 @@ test('reconnect attempt timeout stays on connect reject path', async () => {
     await initialConnect;
 
     transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+<<<<<<< HEAD
     const runtimeErrorCount = errors.length;
+=======
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     const timeoutTask = reconnectScheduler.scheduled[0]!.task();
     transport.emitOpen();
     assert.equal(timers.runNextActive(), true);
     await timeoutTask;
 
+<<<<<<< HEAD
     assert.equal(errors.length, runtimeErrorCount);
+=======
+    assert.equal(errors.at(-1)?.code, 'GATEWAY_CONNECT_TIMEOUT');
+    assert.equal(errors.at(-1)?.phase, 'reconnecting');
+    assert.deepEqual(gatewayClientFailureTranslator.translate(errors.at(-1)!), {
+      failureClass: 'handshake_failure',
+      code: 'GATEWAY_CONNECT_TIMEOUT',
+      phase: 'reconnecting',
+      retryable: true,
+    });
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   } finally {
     timers.restore();
   }
 });
 
+<<<<<<< HEAD
 test('reconnect attempt websocket error stays on connect reject path', async () => {
+=======
+test('reconnect attempt websocket error surfaces reconnecting phase', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const errors: GatewayClientError[] = [];
@@ -1846,6 +1970,7 @@ test('reconnect attempt websocket error stays on connect reject path', async () 
   await initialConnect;
 
   transport.emitClose({ code: 1006, reason: 'network drop', wasClean: false });
+<<<<<<< HEAD
   const runtimeErrorCount = errors.length;
   const reconnectTask = reconnectScheduler.scheduled[0]!.task();
   transport.emitOpen();
@@ -1859,6 +1984,25 @@ test('reconnect attempt websocket error stays on connect reject path', async () 
 });
 
 test('reconnect attempt unexpected close after open stays handshake startup failure', async () => {
+=======
+  const reconnectTask = reconnectScheduler.scheduled[0]!.task();
+  transport.emitOpen();
+  transport.emitError({ message: 'socket failed during reconnect' });
+  transport.emitClose({ code: 1011, reason: 'retry failed', wasClean: false });
+  await reconnectTask;
+
+  assert.equal(errors.at(-1)?.code, 'GATEWAY_WEBSOCKET_ERROR');
+  assert.equal(errors.at(-1)?.phase, 'reconnecting');
+  assert.deepEqual(gatewayClientFailureTranslator.translate(errors.at(-1)!), {
+    failureClass: 'transport_failure',
+    code: 'GATEWAY_WEBSOCKET_ERROR',
+    phase: 'reconnecting',
+    retryable: true,
+  });
+});
+
+test('reconnect attempt unexpected close after open stays reconnecting', async () => {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
@@ -1888,6 +2032,7 @@ test('reconnect attempt unexpected close after open stays handshake startup fail
   await reconnectTask;
 
   const failedLog = logs.find((entry) => entry.message === 'gateway.reconnect.failed');
+<<<<<<< HEAD
   assert.equal(failedLog?.meta?.code, 'GATEWAY_TRANSPORT_ERROR');
   assert.equal(failedLog?.meta?.disposition, 'startup_failure');
   assert.equal(failedLog?.meta?.stage, 'handshake');
@@ -1898,6 +2043,17 @@ test('reconnect attempt unexpected close after open stays handshake startup fail
     retryable: true,
     message: 'gateway_unexpected_close_before_ready',
   }), 'transport_unavailable');
+=======
+  assert.equal(failedLog?.meta?.code, 'GATEWAY_UNEXPECTED_CLOSE');
+  assert.equal(failedLog?.meta?.phase, 'reconnecting');
+  assert.equal(gatewayClientFailureTranslator.translate({
+    code: String(failedLog?.meta?.code) as 'GATEWAY_UNEXPECTED_CLOSE',
+    source: 'transport',
+    phase: String(failedLog?.meta?.phase) as 'reconnecting',
+    retryable: true,
+    message: 'gateway_unexpected_close_before_ready',
+  }).failureClass, 'transport_failure');
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 });
 
 test('reconnect attempt stops backoff after register send failure', async () => {
@@ -1920,9 +2076,15 @@ test('reconnect attempt stops backoff after register send failure', async () => 
           validateControlCalls += 1;
           if (validateControlCalls >= 2) {
             throw new GatewayClientError({
+<<<<<<< HEAD
               code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
               disposition: 'diagnostic',
               stage: 'ready',
+=======
+              code: 'GATEWAY_PROTOCOL_VIOLATION',
+              source: 'outbound_protocol',
+              phase: 'ready',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
               retryable: false,
               message: 'register_invalid',
             });
@@ -1963,8 +2125,13 @@ test('send guards surface structured not-connected and not-ready errors', async 
     () => client.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_CONNECTED'
+<<<<<<< HEAD
       && error.disposition === 'diagnostic'
       && error.stage === 'pre_open',
+=======
+      && error.source === 'state_gate'
+      && error.phase === 'before_open',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
 
   const connecting = client.connect();
@@ -1975,8 +2142,13 @@ test('send guards surface structured not-connected and not-ready errors', async 
     () => client.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_READY'
+<<<<<<< HEAD
       && error.disposition === 'diagnostic'
       && error.stage === 'handshake',
+=======
+      && error.source === 'state_gate'
+      && error.phase === 'before_ready',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
 
   client.disconnect();
@@ -2051,6 +2223,76 @@ test('READY protocol error keeps ready phase', () => {
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_OUTBOUND_PROTOCOL_INVALID'
       && error.stage === 'ready',
+  );
+});
+
+test('READY websocket error keeps ready phase', async () => {
+  const transport = new FakeTransport();
+  const errors: GatewayClientError[] = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport }),
+    {
+      ...createFakeSink(),
+      emitError(error) {
+        errors.push(error);
+      },
+    },
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await connecting;
+
+  transport.emitError({ message: 'socket failed after ready' });
+  assert.equal(errors.at(-1)?.code, 'GATEWAY_WEBSOCKET_ERROR');
+  assert.equal(errors.at(-1)?.phase, 'ready');
+  assert.deepEqual(gatewayClientFailureTranslator.translate(errors.at(-1)!), {
+    failureClass: 'transport_failure',
+    code: 'GATEWAY_WEBSOCKET_ERROR',
+    phase: 'ready',
+    retryable: true,
+  });
+});
+
+test('READY protocol error keeps ready phase', () => {
+  const transport = new FakeTransport();
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({
+      transport,
+      outboundProtocolGate: {
+        validateBusiness() {
+          throw new GatewayClientError({
+            code: 'GATEWAY_PROTOCOL_VIOLATION',
+            source: 'outbound_protocol',
+            phase: 'before_ready',
+            retryable: false,
+            message: 'business_invalid',
+          });
+        },
+        validateControl(message) {
+          return message;
+        },
+      },
+    }),
+    createFakeSink(),
+  );
+
+  runtime.setState('READY');
+
+  assert.throws(
+    () => runtime.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_PROTOCOL_VIOLATION'
+      && error.phase === 'ready',
   );
 });
 
@@ -2276,6 +2518,20 @@ test('register_rejected emits non-retryable structured error and disconnects', a
   );
   await flushAsyncHandlers();
 
+<<<<<<< HEAD
   assert.equal(errors.length, 0);
+=======
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'GATEWAY_REGISTER_REJECTED');
+  assert.equal(errors[0]!.source, 'handshake');
+  assert.equal(errors[0]!.phase, 'before_ready');
+  assert.equal(errors[0]!.retryable, false);
+  assert.deepEqual(gatewayClientFailureTranslator.translate(errors[0]!), {
+    failureClass: 'handshake_failure',
+    code: 'GATEWAY_REGISTER_REJECTED',
+    phase: 'before_ready',
+    retryable: false,
+  });
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   assert.equal(client.getState(), 'DISCONNECTED');
 });

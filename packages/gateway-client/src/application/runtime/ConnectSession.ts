@@ -1,11 +1,15 @@
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
+<<<<<<< HEAD
 import type {
   GatewayClientErrorCode,
   GatewayConnectionDisposition,
   GatewayConnectionStage,
 } from '../../domain/error-contract.ts';
+=======
+import type { GatewayClientErrorPhase, GatewayClientErrorSource } from '../../domain/error-contract.ts';
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 import { extractWebSocketErrorDetails, getErrorDetails } from '../telemetry/error-detail-mapper.ts';
 import type { InboundClassificationResult, InboundFrameClassifier } from './InboundFrameClassifier.ts';
 import type { HandshakeFrameProcessor, HandshakeResult } from './HandshakeFrameProcessor.ts';
@@ -105,6 +109,7 @@ class ConnectAttempt {
     return this.phase === 'terminal';
   }
 
+<<<<<<< HEAD
   private resolveStage(): GatewayConnectionStage {
     switch (this.phase) {
       case 'transport-opening':
@@ -115,6 +120,24 @@ class ConnectAttempt {
         return 'ready';
       case 'terminal':
         return this.opened ? 'handshake' : 'pre_open';
+=======
+  private resolveErrorPhase(): GatewayClientErrorPhase {
+    if (this.context.abortSignal?.aborted || this.state.isManuallyDisconnected()) {
+      return 'stopping';
+    }
+    if (this.reconnectAttempt && this.phase !== 'ready') {
+      return 'reconnecting';
+    }
+    switch (this.phase) {
+      case 'transport-opening':
+        return 'before_open';
+      case 'register-sent':
+        return 'before_ready';
+      case 'ready':
+        return 'ready';
+      case 'terminal':
+        return this.opened ? 'before_ready' : 'before_open';
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     }
   }
 
@@ -164,8 +187,13 @@ class ConnectAttempt {
     this.context.logger?.warn?.('gateway.connect.aborted');
     const error = new GatewayClientError({
       code: 'GATEWAY_CONNECT_ABORTED',
+<<<<<<< HEAD
       disposition: 'cancelled',
       stage: this.resolveStage(),
+=======
+      source: 'state_gate',
+      phase: 'stopping',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: false,
       message: 'gateway_connection_aborted',
     });
@@ -191,7 +219,17 @@ class ConnectAttempt {
       this.phase = 'register-sent';
       this.armHandshakeTimeout();
     } catch (error) {
+<<<<<<< HEAD
       const clientError = this.toStartupParameterError(error, 'handshake');
+=======
+      const clientError = this.toClientError(
+        error,
+        'GATEWAY_PROTOCOL_VIOLATION',
+        'handshake',
+        this.resolveErrorPhase(),
+        false,
+      );
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       this.context.logger?.error?.('gateway.register.failed', {
         error: clientError.message,
         ...getErrorDetails(clientError),
@@ -207,9 +245,15 @@ class ConnectAttempt {
     }
     this.handshakeTimer = setTimeout(() => {
       this.failBeforeReady(new GatewayClientError({
+<<<<<<< HEAD
         code: 'GATEWAY_HANDSHAKE_TIMEOUT',
         disposition: 'startup_failure',
         stage: 'handshake',
+=======
+        code: 'GATEWAY_CONNECT_TIMEOUT',
+        source: 'handshake',
+        phase: this.resolveErrorPhase(),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: true,
         message: 'gateway_handshake_timeout',
         details: { timeoutMs },
@@ -251,7 +295,17 @@ class ConnectAttempt {
     if (this.isTerminal()) {
       return;
     }
+<<<<<<< HEAD
     const clientError = this.toClientError(error, 'GATEWAY_INBOUND_PROTOCOL_INVALID', 'diagnostic', this.resolveStage(), false);
+=======
+    const clientError = this.toClientError(
+      error,
+      'GATEWAY_PROTOCOL_VIOLATION',
+      'inbound_protocol',
+      this.resolveErrorPhase(),
+      false,
+    );
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     this.context.sink.emitError(clientError);
   }
 
@@ -274,6 +328,7 @@ class ConnectAttempt {
     }
 
     if (result.kind === 'rejected') {
+<<<<<<< HEAD
       const error = this.withStage(result.error);
       this.context.logger?.error?.('gateway.register.rejected', error.details);
       this.failBeforeReady(error, { closeTransport: true });
@@ -285,6 +340,19 @@ class ConnectAttempt {
       ...error.details,
     });
     this.failBeforeReady(error, { closeTransport: true });
+=======
+      const error = this.withResolvedPhase(result.error);
+      this.context.logger?.error?.('gateway.register.rejected', error.details);
+      this.failBeforeReady(error, { emitError: true, closeTransport: true });
+      return;
+    }
+
+    const error = this.withResolvedPhase(result.error);
+    this.context.logger?.error?.('gateway.control.validation_failed', {
+      ...error.details,
+    });
+    this.failBeforeReady(error, { emitError: true, closeTransport: true });
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   }
 
   private handleError(event?: unknown): void {
@@ -292,15 +360,26 @@ class ConnectAttempt {
       return;
     }
     this.context.telemetry.logRawFrame('onError', event);
+<<<<<<< HEAD
     const stage = this.resolveStage();
     this.capturePendingTransportError(new GatewayClientError({
       code: 'GATEWAY_TRANSPORT_ERROR',
       disposition: stage === 'ready' ? 'runtime_failure' : 'startup_failure',
       stage,
+=======
+    this.recordTerminalError(new GatewayClientError({
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: this.resolveErrorPhase(),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: true,
       message: stage === 'ready' ? 'gateway_runtime_transport_error' : 'gateway_startup_transport_error',
       details: extractWebSocketErrorDetails(event),
+<<<<<<< HEAD
     }));
+=======
+    }), true);
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   }
 
   private handleClose(event?: unknown): void {
@@ -331,6 +410,7 @@ class ConnectAttempt {
 
     this.state.setState('DISCONNECTED');
 
+<<<<<<< HEAD
     if (this.state.isManuallyDisconnected() || this.context.abortSignal?.aborted) {
       const cancelled = this.commitTerminalError(this.terminalError ?? new GatewayClientError({
         code: 'GATEWAY_CONNECT_ABORTED',
@@ -338,6 +418,15 @@ class ConnectAttempt {
         stage: this.opened && this.phase !== 'ready' ? 'handshake' : this.resolveStage(),
         retryable: false,
         message: 'gateway_connection_aborted',
+=======
+    if (!this.opened) {
+      this.rejectHandshake(new GatewayClientError({
+        code: 'GATEWAY_CLOSED_BEFORE_OPEN',
+        source: 'transport',
+        phase: this.resolveErrorPhase(),
+        retryable: true,
+        message: 'gateway_websocket_closed_before_open',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         details: {
           closeCode: isNumber(close?.code) ? close.code : undefined,
           closeReason: isString(close?.reason) ? close.reason : undefined,
@@ -383,10 +472,17 @@ class ConnectAttempt {
     }
 
     if (this.phase !== 'ready') {
+<<<<<<< HEAD
       const terminalError = this.terminalError ?? this.resolveTransportTerminalError(new GatewayClientError({
         code: 'GATEWAY_TRANSPORT_ERROR',
         disposition: 'startup_failure',
         stage: 'handshake',
+=======
+      const terminalError = this.terminalError ?? new GatewayClientError({
+        code: 'GATEWAY_UNEXPECTED_CLOSE',
+        source: rejected ? 'handshake' : 'transport',
+        phase: this.resolveErrorPhase(),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: !rejected,
         message: 'gateway_unexpected_close_before_ready',
         details: {
@@ -435,7 +531,11 @@ class ConnectAttempt {
     error: GatewayClientError,
     options: { closeTransport: boolean },
   ): void {
+<<<<<<< HEAD
     const terminalError = this.commitTerminalError(error);
+=======
+    this.recordTerminalError(error, options.emitError);
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     this.state.setState('DISCONNECTED');
     this.rejectHandshake(terminalError);
     this.enterTerminal();
@@ -496,15 +596,26 @@ class ConnectAttempt {
     this.onTerminal();
   }
 
+<<<<<<< HEAD
   private withStage(error: GatewayClientError): GatewayClientError {
     const stage = this.resolveStage();
     if (error.stage === stage) {
+=======
+  private withResolvedPhase(error: GatewayClientError): GatewayClientError {
+    const phase = this.resolveErrorPhase();
+    if (error.phase === phase) {
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       return error;
     }
     return new GatewayClientError({
       code: error.code,
+<<<<<<< HEAD
       disposition: error.disposition,
       stage,
+=======
+      source: error.source,
+      phase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: error.retryable,
       message: error.message,
       details: error.details,
@@ -512,6 +623,7 @@ class ConnectAttempt {
     });
   }
 
+<<<<<<< HEAD
   private capturePendingTransportError(error: GatewayClientError): void {
     if (error.code !== 'GATEWAY_TRANSPORT_ERROR') {
       throw new Error(`capturePendingTransportError only accepts GATEWAY_TRANSPORT_ERROR, got ${error.code}`);
@@ -560,13 +672,34 @@ class ConnectAttempt {
       },
       cause: candidate.cause,
     });
+=======
+  private recordTerminalError(error: GatewayClientError, emitError: boolean): GatewayClientError {
+    if (!this.terminalError) {
+      this.terminalError = error;
+      this.context.logger?.error?.('gateway.error', {
+        error: error.message,
+        ...error.details,
+      });
+      if (emitError) {
+        this.context.sink.emitError(error);
+      }
+      return error;
+    }
+    return this.terminalError;
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   }
 
   private toClientError(
     error: unknown,
+<<<<<<< HEAD
     fallbackCode: GatewayClientErrorCode,
     fallbackDisposition: GatewayConnectionDisposition,
     fallbackStage: GatewayConnectionStage,
+=======
+    fallbackCode: GatewayClientError['code'],
+    fallbackSource: GatewayClientErrorSource,
+    fallbackPhase: GatewayClientErrorPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     fallbackRetryable: boolean,
   ): GatewayClientError {
     if (error instanceof GatewayClientError) {
@@ -575,8 +708,13 @@ class ConnectAttempt {
     if (error instanceof Error) {
       return new GatewayClientError({
         code: fallbackCode,
+<<<<<<< HEAD
         disposition: fallbackDisposition,
         stage: fallbackStage,
+=======
+        source: fallbackSource,
+        phase: fallbackPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: fallbackRetryable,
         message: error.message,
         cause: error,
@@ -584,8 +722,13 @@ class ConnectAttempt {
     }
     return new GatewayClientError({
       code: fallbackCode,
+<<<<<<< HEAD
       disposition: fallbackDisposition,
       stage: fallbackStage,
+=======
+      source: fallbackSource,
+      phase: fallbackPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: fallbackRetryable,
       message: String(error),
       cause: error,
@@ -659,8 +802,13 @@ export class ConnectSession {
       this.context.logger?.warn?.('gateway.connect.aborted_precheck');
       const error = new GatewayClientError({
         code: 'GATEWAY_CONNECT_ABORTED',
+<<<<<<< HEAD
         disposition: 'cancelled',
         stage: 'pre_open',
+=======
+        source: 'state_gate',
+        phase: 'stopping',
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: false,
         message: 'gateway_connection_aborted',
       });
@@ -703,6 +851,7 @@ export class ConnectSession {
       this.activeAttempt = attempt;
       return attempt.promise;
     } catch (error) {
+<<<<<<< HEAD
       const clientError = error instanceof TypeError && error.message.includes('Invalid URL')
         ? this.toClientError(
           error,
@@ -719,14 +868,42 @@ export class ConnectSession {
           false,
         );
       return Promise.reject(clientError);
+=======
+      if (error instanceof TypeError && error.message.includes('Invalid URL')) {
+        return Promise.reject(
+          this.toClientError(
+            error,
+            'GATEWAY_WEBSOCKET_ERROR',
+            'transport',
+            options.reconnectAttempt ? 'reconnecting' : 'before_open',
+            true,
+          ),
+        );
+      }
+      return Promise.reject(
+        this.toClientError(
+          error,
+          'GATEWAY_WEBSOCKET_ERROR',
+          'handshake',
+          options.reconnectAttempt ? 'reconnecting' : 'before_open',
+          false,
+        ),
+      );
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     }
   }
 
   private toClientError(
     error: unknown,
+<<<<<<< HEAD
     fallbackCode: GatewayClientErrorCode,
     fallbackDisposition: GatewayConnectionDisposition,
     fallbackStage: GatewayConnectionStage,
+=======
+    fallbackCode: GatewayClientError['code'],
+    fallbackSource: GatewayClientErrorSource,
+    fallbackPhase: GatewayClientErrorPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     fallbackRetryable: boolean,
   ): GatewayClientError {
     if (error instanceof GatewayClientError) {
@@ -735,8 +912,13 @@ export class ConnectSession {
     if (error instanceof Error) {
       return new GatewayClientError({
         code: fallbackCode,
+<<<<<<< HEAD
         disposition: fallbackDisposition,
         stage: fallbackStage,
+=======
+        source: fallbackSource,
+        phase: fallbackPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: fallbackRetryable,
         message: error.message,
         cause: error,
@@ -744,8 +926,13 @@ export class ConnectSession {
     }
     return new GatewayClientError({
       code: fallbackCode,
+<<<<<<< HEAD
       disposition: fallbackDisposition,
       stage: fallbackStage,
+=======
+      source: fallbackSource,
+      phase: fallbackPhase,
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: fallbackRetryable,
       message: String(error),
       cause: error,

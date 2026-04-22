@@ -11,7 +11,11 @@ import type { GatewayOutboundMessage, GatewaySendPayload } from '../../ports/Gat
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import type { GatewayBusinessOutboundMessage, OutboundProtocolGate } from '../protocol/OutboundProtocolGate.ts';
 import { getMessageType } from '../telemetry/message-log-fields.ts';
+<<<<<<< HEAD
 import { resolveGatewayClientStage } from './error-facts.ts';
+=======
+import { resolveGatewayClientPhase } from './error-facts.ts';
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 
 /**
  * 统一发送出口。
@@ -58,8 +62,13 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_CONNECTED',
+<<<<<<< HEAD
         disposition: 'diagnostic',
         stage: resolveGatewayClientStage(this.state),
+=======
+        source: 'state_gate',
+        phase: resolveGatewayClientPhase(this.state),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: true,
         message: 'gateway_not_connected',
         details: { state: this.state.getState(), messageType },
@@ -74,8 +83,13 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_READY',
+<<<<<<< HEAD
         disposition: 'diagnostic',
         stage: resolveGatewayClientStage(this.state),
+=======
+        source: 'state_gate',
+        phase: resolveGatewayClientPhase(this.state),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
         retryable: true,
         message: 'Gateway connection is not ready. Cannot send business message.',
         details: { state: this.state.getState(), messageType },
@@ -99,8 +113,13 @@ export class OutboundSender {
       if (error instanceof GatewayClientError) {
         throw new GatewayClientError({
           code: error.code,
+<<<<<<< HEAD
           disposition: error.disposition,
           stage: resolveGatewayClientStage(this.state),
+=======
+          source: error.source,
+          phase: resolveGatewayClientPhase(this.state),
+>>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
           retryable: error.retryable,
           message: error.message,
           details: error.details,
