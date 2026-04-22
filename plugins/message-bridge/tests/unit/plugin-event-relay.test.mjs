@@ -7,7 +7,7 @@ import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/mess
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 describe('event uplink via hook boundary', () => {
-  test('unsupported upstream events fail closed before forwarding', async () => {
+  test('session.created is handled as an internal control event and is not forwarded', async () => {
     const logs = [];
     const runtime = new BridgeRuntime({
       client: {
@@ -25,12 +25,21 @@ describe('event uplink via hook boundary', () => {
     runtime.eventFilter = new EventFilter(['session.idle']);
     setRuntimeGatewayState(runtime, 'READY');
 
-    await runtime.handleEvent({ type: 'session.created' });
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_1',
+          parentID: 'ses_parent_1',
+          title: 'research-agent',
+        },
+      },
+    });
     await new Promise((r) => setTimeout(r, 10));
 
     assert.strictEqual(sent.length, 0);
     const warnEntry = logs.find((item) => item?.body?.message === 'event.extraction_failed');
-    assert.ok(!!warnEntry);
+    assert.strictEqual(warnEntry, undefined);
   });
 
   test('allowed event sends tool_event', async () => {

@@ -16,11 +16,24 @@ export const toolUsageSchema = z.object({
 });
 export type ToolUsage = z.output<typeof toolUsageSchema>;
 
+const optionalSubagentEnvelopeString = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim() : value),
+  z.string().min(1).optional(),
+);
+
 export const toolEventMessageSchema = z.object({
   type: z.literal(TOOL_EVENT_MESSAGE_TYPE),
   toolSessionId: requiredTrimmedString,
+  subagentSessionId: optionalSubagentEnvelopeString,
+  subagentName: optionalSubagentEnvelopeString,
   event: gatewayToolEventPayloadSchema,
-});
+}).transform((message) => ({
+  type: message.type,
+  toolSessionId: message.toolSessionId,
+  ...(message.subagentSessionId ? { subagentSessionId: message.subagentSessionId } : {}),
+  ...(message.subagentName ? { subagentName: message.subagentName } : {}),
+  event: message.event,
+}));
 export type ToolEventMessage = z.output<typeof toolEventMessageSchema>;
 
 export const toolDoneMessageSchema = z

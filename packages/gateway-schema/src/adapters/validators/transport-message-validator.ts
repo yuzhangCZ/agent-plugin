@@ -27,6 +27,14 @@ import { DefaultToolEventValidator } from './tool-event-validator.ts';
 const toolEventEnvelopeInputSchema = z.object({
   type: z.literal('tool_event'),
   toolSessionId: requiredTrimmedString,
+  subagentSessionId: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() : value),
+    z.string().min(1).optional(),
+  ),
+  subagentName: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() : value),
+    z.string().min(1).optional(),
+  ),
   // 这里保留宽松输入类型：tool_event 外层只负责先校验 envelope，event 本体要交给独立 validator 收窄。
   event: z.unknown(),
 });
@@ -52,6 +60,8 @@ function normalizeToolEventMessage(raw: PlainObject): Result<ToolEventMessage, W
   const normalized = toolEventMessageSchema.safeParse({
     type: parsed.data.type,
     toolSessionId: parsed.data.toolSessionId,
+    ...(parsed.data.subagentSessionId ? { subagentSessionId: parsed.data.subagentSessionId } : {}),
+    ...(parsed.data.subagentName ? { subagentName: parsed.data.subagentName } : {}),
     event: eventResult.value,
   });
   return normalized.success

@@ -11,6 +11,7 @@ import {
   type PermissionRepliedEvent,
   type PermissionUpdatedEvent,
   type QuestionAskedEvent,
+  type SessionCreatedEvent,
   type SessionErrorEvent,
   type SessionIdleEvent,
   type SessionStatusEvent,
@@ -26,6 +27,7 @@ import type {
   MessagePartExtra,
   MessageUpdatedExtra,
   NormalizedUpstreamEvent,
+  SessionCreatedExtra,
   SessionStatusExtra,
 } from './UpstreamEventTypes.js';
 
@@ -44,6 +46,7 @@ type UpstreamExtraByType = {
   'message.part.updated': MessagePartExtra;
   'message.part.delta': MessagePartExtra;
   'message.part.removed': MessagePartExtra;
+  'session.created': SessionCreatedExtra;
   'session.status': SessionStatusExtra;
   'session.idle': undefined;
   'session.updated': undefined;
@@ -301,6 +304,54 @@ function extractMessagePartRemovedExtra(
   });
 }
 
+function extractSessionCreatedCommon(event: SessionCreatedEvent): ExtractResult<CommonUpstreamFields> {
+  const sessionResult = requireNonEmptyString(
+    event.properties.info.id,
+    event.type,
+    'common',
+    'properties.info.id',
+  );
+  if (!sessionResult.ok) return sessionResult;
+  return ok(buildCommon(event.type, sessionResult.value));
+}
+
+function extractSessionCreatedExtra(
+  event: SessionCreatedEvent,
+  common: CommonUpstreamFields,
+): ExtractResult<SessionCreatedExtra> {
+  const titleResult = requireNonEmptyString(
+    event.properties.info.title,
+    event.type,
+    'extra',
+    'properties.info.title',
+    undefined,
+    common.toolSessionId,
+  );
+  if (!titleResult.ok) return titleResult;
+
+  if (event.properties.info.parentID !== undefined) {
+    const parentResult = requireNonEmptyString(
+      event.properties.info.parentID,
+      event.type,
+      'extra',
+      'properties.info.parentID',
+      undefined,
+      common.toolSessionId,
+    );
+    if (!parentResult.ok) return parentResult;
+    return ok({
+      kind: 'session.created',
+      parentSessionId: parentResult.value,
+      agentName: titleResult.value,
+    });
+  }
+
+  return ok({
+    kind: 'session.created',
+    agentName: titleResult.value,
+  });
+}
+
 function extractSessionStatusCommon(event: SessionStatusEvent): ExtractResult<CommonUpstreamFields> {
   const sessionResult = requireNonEmptyString(
     event.properties.sessionID,
@@ -395,6 +446,7 @@ export const UPSTREAM_EVENT_EXTRACTORS: {
   'message.part.updated': { extractCommon: extractMessagePartUpdatedCommon, extractExtra: extractMessagePartUpdatedExtra },
   'message.part.delta': { extractCommon: extractMessagePartDeltaCommon, extractExtra: extractMessagePartDeltaExtra },
   'message.part.removed': { extractCommon: extractMessagePartRemovedCommon, extractExtra: extractMessagePartRemovedExtra },
+  'session.created': { extractCommon: extractSessionCreatedCommon, extractExtra: extractSessionCreatedExtra },
   'session.status': { extractCommon: extractSessionStatusCommon, extractExtra: extractSessionStatusExtra },
   'session.idle': { extractCommon: extractSessionIdleCommon, extractExtra: noExtra },
   'session.updated': { extractCommon: extractSessionUpdatedCommon, extractExtra: noExtra },

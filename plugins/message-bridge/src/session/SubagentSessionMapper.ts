@@ -1,0 +1,145 @@
+import type { OpencodeClient } from '../types/index.js';
+import { hasError } from '../types/sdk.js';
+
+/** child session 到 parent session 的稳定路由映射。 */
+export interface SubagentSessionMapping {
+  childSessionId: string;
+  parentSessionId: string;
+  agentName: string;
+}
+
+/** subagent 映射解析结果；lookup 失败时调用方应按原 session fail-open 转发。 */
+export type SubagentSessionResolution =
+  | {
+      status: 'mapped';
+      mapping: SubagentSessionMapping;
+    }
+  | {
+      status: 'root';
+    }
+  | {
+      status: 'lookup_failed';
+      error: unknown;
+    };
+
+interface SessionCreatedRecord {
+  childSessionId: string;
+  parentSessionId?: string;
+  agentName: string;
+}
+
+type SessionLookupClient = Pick<OpencodeClient, 'session'>;
+type SessionLookupSource = SessionLookupClient | (() => SessionLookupClient | null) | null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/**
+ * 维护 OpenCode subagent child -> parent 映射。
+ *
+ * @remarks
+ * `session.created` 是首选来源；缺失控制事件时才懒查询 `session.get()`。
+ * 查询失败不会写负缓存，避免瞬时 SDK 抖动把 child session 永久误判为 root。
+ */
+export class SubagentSessionMapper {
+  private readonly childToParent = new Map<string, SubagentSessionMapping>();
+  private readonly rootSessions = new Set<string>();
+
+  constructor(private readonly source: SessionLookupSource) {}
+
+  /** 记录 `session.created` 控制事件携带的父子关系。 */
+  recordSessionCreated(record: SessionCreatedRecord): void {
+    if (record.parentSessionId) {
+      this.childToParent.set(record.childSessionId, {
+        childSessionId: record.childSessionId,
+        parentSessionId: record.parentSessionId,
+        agentName: record.agentName,
+      });
+      this.rootSessions.delete(record.childSessionId);
+      return;
+    }
+
+    this.childToParent.delete(record.childSessionId);
+    this.rootSessions.add(record.childSessionId);
+  }
+
+  /** 解析 session 是否属于 subagent；失败时返回 `lookup_failed` 交由 runtime fail-open。 */
+  async resolve(sessionId: string): Promise<SubagentSessionResolution> {
+    const cached = this.childToParent.get(sessionId);
+    if (cached) {
+      return {
+        status: 'mapped',
+        mapping: cached,
+      };
+    }
+
+    if (this.rootSessions.has(sessionId)) {
+      return { status: 'root' };
+    }
+
+    const client = this.getClient();
+    if (!client) {
+      return { status: 'root' };
+    }
+
+    try {
+      const result = await client.session.get({ sessionID: sessionId });
+      if (hasError(result)) {
+        return {
+          status: 'lookup_failed',
+          error: result.error,
+        };
+      }
+
+      const session = isRecord(result) && isRecord(result.data) ? result.data : null;
+      if (!session) {
+        return {
+          status: 'lookup_failed',
+          error: new Error('Invalid session.get response shape'),
+        };
+      }
+
+      const parentSessionId = asNonEmptyString(session.parentID);
+      if (!parentSessionId) {
+        this.rootSessions.add(sessionId);
+        return { status: 'root' };
+      }
+
+      const mapping = {
+        childSessionId: sessionId,
+        parentSessionId,
+        agentName: asNonEmptyString(session.title) ?? 'subagent',
+      } satisfies SubagentSessionMapping;
+      this.childToParent.set(sessionId, mapping);
+      this.rootSessions.delete(sessionId);
+      return {
+        status: 'mapped',
+        mapping,
+      };
+    } catch (error) {
+      return {
+        status: 'lookup_failed',
+        error,
+      };
+    }
+  }
+
+  /** 清空全部缓存，供生命周期重置或测试使用。 */
+  clear(): void {
+    this.childToParent.clear();
+    this.rootSessions.clear();
+  }
+
+  private getClient(): SessionLookupClient | null {
+    if (typeof this.source === 'function') {
+      return this.source();
+    }
+
+    return this.source;
+  }
+}

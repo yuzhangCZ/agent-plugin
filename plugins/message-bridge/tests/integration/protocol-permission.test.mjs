@@ -157,6 +157,84 @@ describe('protocol permission-roundtrip', () => {
     assert.strictEqual(sent.length, 1);
   });
 
+  test('aggregates child permission events under parent and routes permission_reply to the child session', async () => {
+    const permissionCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        postSessionIdPermissionsPermissionId: async (options) => {
+          permissionCalls.push(options);
+          return {};
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['permission.asked']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleEvent({
+      type: 'session.created',
+      properties: {
+        info: {
+          id: 'ses_child_permission_2',
+          parentID: 'ses_parent_permission_2',
+          title: 'research-agent',
+        },
+      },
+    });
+
+    const permissionAskedEvent = {
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child_permission_2',
+        id: 'perm_child_2',
+      },
+    };
+    await runtime.handleEvent(permissionAskedEvent);
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_parent_permission_2',
+        subagentSessionId: 'ses_child_permission_2',
+        subagentName: 'research-agent',
+        event: {
+          family: 'opencode',
+          ...permissionAskedEvent,
+        },
+      },
+    ]);
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-perm-child-2',
+      action: 'permission_reply',
+      payload: {
+        toolSessionId: 'ses_child_permission_2',
+        permissionId: 'perm_child_2',
+        response: 'always',
+      },
+    });
+
+    assert.deepStrictEqual(permissionCalls, [
+      {
+        path: {
+          id: 'ses_child_permission_2',
+          permissionID: 'perm_child_2',
+        },
+        body: {
+          response: 'always',
+        },
+        query: {
+          directory: '/session/default-directory',
+        },
+      },
+    ]);
+  });
+
   test('returns tool_error when invalid permission_reply invoke is rejected before runtime dispatch', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

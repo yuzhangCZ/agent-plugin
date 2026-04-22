@@ -40,6 +40,7 @@ import {
   type MessagePartExtra,
   type MessageUpdatedExtra,
   type NormalizedUpstreamEvent,
+  type SessionCreatedExtra,
   type SessionStatusExtra,
 } from '../protocol/upstream/index.js';
 import {
@@ -56,6 +57,7 @@ import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
+import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
@@ -65,6 +67,7 @@ import {
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
+import { getErrorDetailsForLog } from '../utils/error.js';
 import { asRecord, asString, asTrimmedString } from '../utils/type-guards.js';
 
 export interface BridgeRuntimeOptions {
@@ -128,6 +131,7 @@ export class BridgeRuntime {
   private readonly toolDoneCompat = new ToolDoneCompat();
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
+  private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -326,6 +330,13 @@ export class BridgeRuntime {
     const eventLogger = this.createMessageLogger(eventFields, eventTraceId);
     eventLogger.debug('event.received');
 
+    // session.created 只用于预热父子 session 映射，不参与业务 allowlist 和上行转发。
+    if (normalized.common.eventType === 'session.created') {
+      this.recordSessionCreated(normalized, eventLogger);
+      eventLogger.debug('event.control_session_created');
+      return;
+    }
+
     const connection = this.gatewayConnection;
     if (!connection || !connection.getStatus().isReady() || !this.eventFilter) {
       eventLogger.debug('event.ignored_not_ready', {
@@ -342,24 +353,42 @@ export class BridgeRuntime {
     const bridgeMessageId = randomUUID();
     const forwardingLogger = this.createMessageLogger(eventFields, bridgeMessageId);
     this.logEventForwardingDetail(normalized, forwardingLogger);
+    // child session 的外层 envelope 聚合到 parent，原始 event 内部 session 字段保持 OpenCode 原貌。
+    const subagentResolution = await this.subagentSessionMapper.resolve(normalized.common.toolSessionId);
+    if (subagentResolution.status === 'lookup_failed') {
+      forwardingLogger.warn('event.subagent_lookup_failed', {
+        toolSessionId: normalized.common.toolSessionId,
+        ...getErrorDetailsForLog(subagentResolution.error),
+      });
+    }
+    const subagentMapping = subagentResolution.status === 'mapped' ? subagentResolution.mapping : null;
+    const envelopeToolSessionId = subagentMapping?.parentSessionId ?? normalized.common.toolSessionId;
+    const subagentEnvelopeFields = subagentMapping
+      ? {
+          subagentSessionId: subagentMapping.childSessionId,
+          subagentName: subagentMapping.agentName,
+        }
+      : {};
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
     const rawEvent = withOpencodeFamily(normalized.raw);
     const transportEnvelope: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: transportEvent,
     };
     const originalEnvelope = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
+      ...subagentEnvelopeFields,
       event: rawEvent,
     };
     const transportLogContext: GatewaySendLogContext = {
       traceId: bridgeMessageId,
       runtimeTraceId: this.logger.getTraceId(),
       gatewayMessageId: bridgeMessageId,
-      toolSessionId: normalized.common.toolSessionId,
+      toolSessionId: envelopeToolSessionId,
       eventType: normalized.common.eventType,
       opencodeMessageId: eventFields.opencodeMessageId,
       opencodePartId: eventFields.opencodePartId,
@@ -378,7 +407,8 @@ export class BridgeRuntime {
     connection.send(validatedEnvelope, transportLogContext);
     forwardingLogger.debug('event.forwarded');
 
-    if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE) {
+    // child session 的 idle 仅代表子代理收尾，不能向 parent 额外补发 tool_done。
+    if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE && !subagentMapping) {
       const decision = this.toolDoneCompat.handleSessionIdle({
         toolSessionId: normalized.common.toolSessionId,
         logger: forwardingLogger,
@@ -391,6 +421,20 @@ export class BridgeRuntime {
         });
       }
     }
+  }
+
+  private recordSessionCreated(normalized: NormalizedUpstreamEvent, logger: BridgeLogger): void {
+    const extra = normalized.extra as SessionCreatedExtra | undefined;
+    if (!extra || extra.kind !== 'session.created') {
+      logger.warn('event.control_session_created_invalid_extra');
+      return;
+    }
+
+    this.subagentSessionMapper.recordSessionCreated({
+      childSessionId: normalized.common.toolSessionId,
+      parentSessionId: extra.parentSessionId,
+      agentName: extra.agentName,
+    });
   }
 
   getStarted(): boolean {
