@@ -281,7 +281,14 @@ async function callRuntimeMethod<TArgs>(
 }
 
 async function loadOpenClawPluginSdk(): Promise<OpenClawPluginSdkModule> {
-  return (await import("openclaw/plugin-sdk")) as OpenClawPluginSdkModule;
+  const [channelRuntime, replyPayload] = await Promise.all([
+    import("openclaw/plugin-sdk/channel-runtime"),
+    import("openclaw/plugin-sdk/reply-payload"),
+  ]);
+  return {
+    createReplyPrefixOptions: channelRuntime.createReplyPrefixOptions,
+    normalizeOutboundReplyPayload: replyPayload.normalizeOutboundReplyPayload,
+  } as OpenClawPluginSdkModule;
 }
 
 /**

@@ -196,9 +196,15 @@ async function loadOpenClawGatewayBridgeModule() {
   if (!bridgeModulePromise) {
     registerHooks({
       resolve(specifier, context, nextResolve) {
-        if (specifier === "openclaw/plugin-sdk") {
+        if (specifier === "openclaw/plugin-sdk/channel-runtime") {
           return {
-            url: "data:text/javascript,export const createReplyPrefixOptions = () => ({ onModelSelected: undefined }); export const normalizeOutboundReplyPayload = (value) => value;",
+            url: "data:text/javascript,export const createReplyPrefixOptions = () => ({ onModelSelected: undefined });",
+            shortCircuit: true,
+          };
+        }
+        if (specifier === "openclaw/plugin-sdk/reply-payload") {
+          return {
+            url: "data:text/javascript,export const normalizeOutboundReplyPayload = (value) => value;",
             shortCircuit: true,
           };
         }

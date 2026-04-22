@@ -12,13 +12,13 @@ async function loadChannelModules() {
       resolve(specifier, context, nextResolve) {
         if (specifier === "openclaw/plugin-sdk") {
           return {
-            url: "data:text/javascript,export const emptyPluginConfigSchema = () => ({});",
+            url: "data:text/javascript,",
             shortCircuit: true,
           };
         }
         if (specifier === "openclaw/plugin-sdk/core") {
           return {
-            url: "data:text/javascript,export const applyAccountNameToChannelSection = () => {}; export const deleteAccountFromConfigSection = () => {}; export const setAccountEnabledInConfigSection = () => {};",
+            url: "data:text/javascript,export const applyAccountNameToChannelSection = () => {}; export const deleteAccountFromConfigSection = () => {}; export const emptyPluginConfigSchema = () => ({}); export const setAccountEnabledInConfigSection = () => {};",
             shortCircuit: true,
           };
         }
