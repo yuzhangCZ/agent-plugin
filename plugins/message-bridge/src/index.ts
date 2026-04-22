@@ -7,6 +7,11 @@ export const MessageBridgePlugin: Plugin = async (input) => {
   const logger = new AppLogger(input.client, { component: 'plugin' });
   try {
     const runtime = await getOrCreateRuntime(input);
+    if (!runtime) {
+      return {
+        event: async () => {},
+      };
+    }
 
     return {
       event: async ({ event }) => {

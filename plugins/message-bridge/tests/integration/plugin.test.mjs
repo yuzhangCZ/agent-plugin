@@ -166,14 +166,16 @@ describe('plugin contract', () => {
     assert.notStrictEqual(getRuntime(), undefined);
   });
 
-  test('failed initialization does not poison singleton and can recover on next init', async () => {
+  test('first failed attempt blocks later init across workspaces until stopRuntime resets gate', async () => {
     const originalHome = process.env.HOME;
     const originalGatewayUrl = process.env.BRIDGE_GATEWAY_URL;
     const originalBridgeAuthAk = process.env.BRIDGE_AUTH_AK;
     const originalBridgeAuthSk = process.env.BRIDGE_AUTH_SK;
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-it-home-'));
-    const fakeWorkspace = await mkdtemp(join(tmpdir(), 'mb-it-workspace-'));
+    const fakeWorkspaceA = await mkdtemp(join(tmpdir(), 'mb-it-workspace-a-'));
+    const fakeWorkspaceB = await mkdtemp(join(tmpdir(), 'mb-it-workspace-b-'));
     const logs = [];
+    let websocketCtorCalls = 0;
     const client = createPluginClient({
       app: {
         log: async (options) => {
@@ -184,18 +186,30 @@ describe('plugin contract', () => {
     });
     process.env.HOME = fakeHome;
     process.env.BRIDGE_ENABLED = 'true';
-    delete process.env.BRIDGE_AUTH_AK;
-    delete process.env.BRIDGE_AUTH_SK;
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
     process.env.BRIDGE_GATEWAY_URL = 'not-a-valid-url';
 
+    const originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = class CountingWebSocket {
+      constructor() {
+        websocketCtorCalls += 1;
+      }
+    };
+
     try {
-      const isolatedInput = mockInput({
+      const isolatedInputA = mockInput({
         client,
-        directory: fakeWorkspace,
-        worktree: fakeWorkspace,
+        directory: fakeWorkspaceA,
+        worktree: fakeWorkspaceA,
       });
-      const degradedHooks = await MessageBridgePlugin(isolatedInput);
-      assert.strictEqual(typeof degradedHooks.event, 'function');
+      const isolatedInputB = mockInput({
+        client,
+        directory: fakeWorkspaceB,
+        worktree: fakeWorkspaceB,
+      });
+      const degradedHooksA = await MessageBridgePlugin(isolatedInputA);
+      assert.strictEqual(typeof degradedHooksA.event, 'function');
       assert.strictEqual(getRuntime(), null);
       const initFailureLogs = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
       assert.strictEqual(initFailureLogs.length, 1);
@@ -205,10 +219,22 @@ describe('plugin contract', () => {
 
       process.env.BRIDGE_ENABLED = 'false';
       delete process.env.BRIDGE_GATEWAY_URL;
-      const hooks = await MessageBridgePlugin(isolatedInput);
+      const degradedHooksB = await MessageBridgePlugin(isolatedInputB);
+      assert.strictEqual(typeof degradedHooksB.event, 'function');
+      assert.strictEqual(getRuntime(), null);
+      assert.strictEqual(websocketCtorCalls, 0);
+
+      const blockedLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt');
+      assert.strictEqual(blockedLogs.length, 1);
+      const initFailureLogsAfterBlocked = logs.filter((entry) => entry?.message === 'plugin.init.failed_non_fatal');
+      assert.strictEqual(initFailureLogsAfterBlocked.length, 1);
+
+      stopRuntime();
+      const hooks = await MessageBridgePlugin(isolatedInputB);
       assert.strictEqual(typeof hooks.event, 'function');
       assert.notStrictEqual(getRuntime(), null);
     } finally {
+      globalThis.WebSocket = originalWebSocket;
       if (originalHome === undefined) {
         delete process.env.HOME;
       } else {
@@ -230,7 +256,8 @@ describe('plugin contract', () => {
         process.env.BRIDGE_GATEWAY_URL = originalGatewayUrl;
       }
       await rm(fakeHome, { recursive: true, force: true });
-      await rm(fakeWorkspace, { recursive: true, force: true });
+      await rm(fakeWorkspaceA, { recursive: true, force: true });
+      await rm(fakeWorkspaceB, { recursive: true, force: true });
     }
   });
 
@@ -298,6 +325,49 @@ describe('plugin contract', () => {
       await assert.rejects(initializingPromise);
       await new Promise((r) => setTimeout(r, 80));
       assert.strictEqual(getRuntime(), null);
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'false';
+      __resetRuntimeForTests();
+    }
+  });
+
+  test('concurrent first init calls share single initializing promise', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+
+    const originalWebSocket = globalThis.WebSocket;
+    let websocketCtorCalls = 0;
+    class SlowRegisterWebSocket {
+      static OPEN = 1;
+      constructor() {
+        websocketCtorCalls += 1;
+        this.readyState = 0;
+        setTimeout(() => {
+          this.readyState = SlowRegisterWebSocket.OPEN;
+          this.onopen?.();
+          this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+        }, 10);
+      }
+      send() {}
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    globalThis.WebSocket = SlowRegisterWebSocket;
+    try {
+      const inputA = mockInput({ client: createPluginClient() });
+      const inputB = mockInput({ client: createPluginClient() });
+      await Promise.all([getOrCreateRuntime(inputA), getOrCreateRuntime(inputB)]);
+      assert.strictEqual(websocketCtorCalls, 1);
+      assert.notStrictEqual(getRuntime(), null);
     } finally {
       globalThis.WebSocket = originalWebSocket;
       delete process.env.BRIDGE_AUTH_AK;

@@ -8,8 +8,11 @@ let runtime: BridgeRuntime | null = null;
 let initializing: Promise<BridgeRuntime> | null = null;
 let lifecycleAbortController: AbortController | null = null;
 let generation = 0;
+type RuntimeInitState = 'never' | 'initializing' | 'succeeded' | 'failed_latched';
+let initState: RuntimeInitState = 'never';
+let latchedInitError: Error | null = null;
 
-export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime> {
+export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime | null> {
   const logger = new AppLogger(input.client, { component: 'singleton' });
   if (runtime) {
     logger.debug('runtime.singleton.reuse_existing');
@@ -21,6 +24,15 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
     return initializing;
   }
 
+  if (initState === 'failed_latched' || initState === 'succeeded') {
+    logger.warn('runtime.singleton.init_blocked_after_first_attempt', {
+      initState,
+      latchedError: latchedInitError ? getErrorMessage(latchedInitError) : null,
+    });
+    return null;
+  }
+
+  logger.info('runtime.singleton.init_first_attempt_started');
   logger.info('runtime.singleton.client_shape', buildClientShapeSummary(input.client));
 
   const candidate = new BridgeRuntime({
@@ -30,6 +42,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
   });
   const token = ++generation;
   lifecycleAbortController = new AbortController();
+  initState = 'initializing';
 
   initializing = candidate
     .start({ abortSignal: lifecycleAbortController.signal })
@@ -40,11 +53,21 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
         throw new Error('runtime_initialization_cancelled');
       }
       runtime = candidate;
+      initState = 'succeeded';
+      latchedInitError = null;
       logger.info('runtime.singleton.initialized');
       return candidate;
     })
     .catch((error) => {
+      const cancelled = token !== generation;
       runtime = null;
+      if (cancelled) {
+        initState = 'never';
+        latchedInitError = null;
+      } else {
+        initState = 'failed_latched';
+        latchedInitError = error instanceof Error ? error : new Error(getErrorMessage(error));
+      }
       logger.error('runtime.singleton.initialization_failed', {
         error: getErrorMessage(error),
         ...getErrorDetailsForLog(error),
@@ -72,14 +95,20 @@ export function stopRuntime(): void {
 
   if (!runtime) {
     lifecycleAbortController = null;
+    initState = 'never';
+    latchedInitError = null;
     return;
   }
 
   runtime.stop();
   runtime = null;
   lifecycleAbortController = null;
+  initState = 'never';
+  latchedInitError = null;
 }
 
 export function __resetRuntimeForTests(): void {
   stopRuntime();
+  initState = 'never';
+  latchedInitError = null;
 }
