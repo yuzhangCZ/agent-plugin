@@ -190,6 +190,10 @@ type QuestionReplyPayload = {
 - `GatewayProjectedEvent`
   - 发送到 `tool_event.event` 的传输安全形状
   - 负责 gateway 面向的传输层投影规则，包括 `message.updated` 的裁剪规则
+  - 共享 canonical shape 已切换为：
+    - opencode：`{ type, properties }`
+    - cloud/skill：`{ protocol: 'cloud', type, properties }`
+  - `message-bridge` 只生成 opencode canonical shape，不补 `protocol`
   - 当前实现位于 `src/transport/upstream/*`
 
 当前边界规则为：
@@ -207,6 +211,12 @@ bridge 会从归一化事件中提取 `toolSessionId`，然后发出：
   event: SupportedUpstreamEvent;
 }
 ```
+
+补充约束：
+
+- `toolSessionId` 只属于 `tool_event` envelope，不属于 `event` payload
+- `message-bridge` 上行事件不再注入 `family: 'opencode'`
+- 若后续存在 cloud/skill payload，则必须由对应写出方显式带上 `protocol: 'cloud'`
 
 `message.updated` 是当前唯一会在发送前应用上行投影规则的事件：
 

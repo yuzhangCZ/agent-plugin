@@ -72,7 +72,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
 
   for (const item of cases) {
     const result = validateToolEvent({
-      family: 'skill',
+      protocol: 'cloud',
       type: item.type,
       properties: item.properties,
     });
@@ -82,7 +82,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
     }
 
     assert.deepStrictEqual(result.value, {
-      family: 'skill',
+      protocol: 'cloud',
       type: item.type,
       properties: item.properties,
     });
@@ -111,7 +111,7 @@ test('validateToolEvent rejects skill events outside white-list', () => {
 
   for (const eventType of cases) {
     const result = validateToolEvent({
-      family: 'skill',
+      protocol: 'cloud',
       type: eventType,
       properties: {},
     });
@@ -134,7 +134,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       name: 'permission.reply missing response',
       eventType: 'permission.reply',
       input: {
-        family: 'skill',
+        protocol: 'cloud',
         type: 'permission.reply',
         properties: { permissionId: 'perm-1' },
       },
@@ -143,7 +143,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       name: 'tool.update invalid status',
       eventType: 'tool.update',
       input: {
-        family: 'skill',
+        protocol: 'cloud',
         type: 'tool.update',
         properties: {
           messageId: 'msg-1',
@@ -157,7 +157,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       name: 'session.status missing sessionStatus',
       eventType: 'session.status',
       input: {
-        family: 'skill',
+        protocol: 'cloud',
         type: 'session.status',
         properties: { welinkSessionId: 'wl-1' },
       },

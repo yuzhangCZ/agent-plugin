@@ -231,7 +231,7 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
   for (const { name, input, expected } of cases) {
     const result = validateToolEvent(input);
     assert.equal(result.ok, true, name);
-    assert.deepStrictEqual(result.value, { family: 'opencode', ...expected });
+    assert.deepStrictEqual(result.value, expected);
   }
 });
 
@@ -280,7 +280,6 @@ test('validateToolEvent accepts question.asked top-level callID and messageID fa
   }
 
   assert.deepStrictEqual(result.value, {
-    family: 'opencode',
     type: 'question.asked',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -324,7 +323,6 @@ test('validateToolEvent accepts question.asked mixed tool and top-level fallback
   }
 
   assert.deepStrictEqual(result.value, {
-    family: 'opencode',
     type: 'question.asked',
     properties: {
       sessionID: 'tool-gateway-wire',
@@ -344,7 +342,6 @@ test('validateToolEvent accepts question.asked mixed tool and top-level fallback
 
 test('validateToolEvent rejects malformed events with a shared violation envelope', () => {
   const result = validateToolEvent({
-    family: 'opencode',
     type: 'message.updated',
     properties: {
       info: {
@@ -365,7 +362,6 @@ test('validateToolEvent rejects malformed events with a shared violation envelop
 
 test('validateToolEvent rejects unsupported event types', () => {
   const result = validateToolEvent({
-    family: 'opencode',
     type: 'session.created',
   });
 

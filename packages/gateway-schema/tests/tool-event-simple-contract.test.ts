@@ -252,7 +252,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'session.status missing sessionID',
       {
         input: {
-          family: 'opencode',
           type: 'session.status',
           properties: {
             status: {
@@ -273,7 +272,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'session.status invalid status type',
       {
         input: {
-          family: 'opencode',
           type: 'session.status',
           properties: {
             sessionID: 'tool-gateway-wire',
@@ -295,7 +293,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'session.idle missing sessionID',
       {
         input: {
-          family: 'opencode',
           type: 'session.idle',
           properties: {},
         },
@@ -312,7 +309,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'session.updated missing info.id',
       {
         input: {
-          family: 'opencode',
           type: 'session.updated',
           properties: {
             info: {},
@@ -331,7 +327,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'session.error invalid error.message type',
       {
         input: {
-          family: 'opencode',
           type: 'session.error',
           properties: {
             sessionID: 'tool-gateway-wire',
@@ -353,7 +348,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'permission.updated missing sessionID',
       {
         input: {
-          family: 'opencode',
           type: 'permission.updated',
           properties: {
             status: 'granted',
@@ -372,7 +366,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'permission.updated invalid status type',
       {
         input: {
-          family: 'opencode',
           type: 'permission.updated',
           properties: {
             sessionID: 'tool-gateway-wire',
@@ -393,7 +386,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'permission.asked missing sessionID',
       {
         input: {
-          family: 'opencode',
           type: 'permission.asked',
           properties: {
             id: 'perm-gateway-wire',
@@ -412,7 +404,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'question.asked missing question text',
       {
         input: {
-          family: 'opencode',
           type: 'question.asked',
           properties: {
             sessionID: 'tool-gateway-wire',
@@ -436,7 +427,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'message.part.delta invalid field enum',
       {
         input: {
-          family: 'opencode',
           type: 'message.part.delta',
           properties: {
             sessionID: 'tool-gateway-wire',
@@ -459,7 +449,6 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       'message.part.removed missing partID',
       {
         input: {
-          family: 'opencode',
           type: 'message.part.removed',
           properties: {
             sessionID: 'tool-gateway-wire',

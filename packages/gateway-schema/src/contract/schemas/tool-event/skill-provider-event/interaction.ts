@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
-import { withToolEventFamily } from '../shared-family.ts';
+import { withCloudProtocol } from '../shared-protocol.ts';
 
 export const skillQuestionOptionSchema = requiredTrimmedString;
 
@@ -19,5 +19,5 @@ const skillQuestionEventBaseSchema = z.object({
   }),
 });
 
-export const skillQuestionEventSchema = withToolEventFamily('skill', skillQuestionEventBaseSchema);
+export const skillQuestionEventSchema = withCloudProtocol(skillQuestionEventBaseSchema);
 export type SkillQuestionEvent = z.output<typeof skillQuestionEventSchema>;

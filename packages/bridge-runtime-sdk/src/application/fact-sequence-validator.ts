@@ -168,7 +168,7 @@ export class FactSequenceValidator {
     if (fact.type === 'message.start') {
       return [
         {
-          family: 'skill',
+          protocol: 'cloud',
           type: 'step.start',
           properties: {
             messageId: fact.messageId,
@@ -180,7 +180,7 @@ export class FactSequenceValidator {
     if (fact.type === 'message.done') {
       return [
         {
-          family: 'skill',
+          protocol: 'cloud',
           type: 'step.done',
           properties: {
             messageId: fact.messageId,

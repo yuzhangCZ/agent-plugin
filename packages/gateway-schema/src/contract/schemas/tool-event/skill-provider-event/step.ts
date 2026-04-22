@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
-import { withToolEventFamily } from '../shared-family.ts';
+import { withCloudProtocol } from '../shared-protocol.ts';
 
 const skillStepStartEventBaseSchema = z.object({
   type: z.literal('step.start'),
@@ -20,8 +20,8 @@ const skillStepDoneEventBaseSchema = z.object({
   }),
 });
 
-export const skillStepStartEventSchema = withToolEventFamily('skill', skillStepStartEventBaseSchema);
-export const skillStepDoneEventSchema = withToolEventFamily('skill', skillStepDoneEventBaseSchema);
+export const skillStepStartEventSchema = withCloudProtocol(skillStepStartEventBaseSchema);
+export const skillStepDoneEventSchema = withCloudProtocol(skillStepDoneEventBaseSchema);
 
 export type SkillStepStartEvent = z.output<typeof skillStepStartEventSchema>;
 export type SkillStepDoneEvent = z.output<typeof skillStepDoneEventSchema>;

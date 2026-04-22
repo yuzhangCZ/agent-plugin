@@ -58,7 +58,6 @@ test('validateToolEvent projects message.updated with the canonical white-list s
 
 test('validateToolEvent rejects malformed message.updated payloads with a shared violation envelope', () => {
   const missingIdResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.updated',
     properties: {
       info: {
@@ -84,7 +83,6 @@ test('validateToolEvent rejects malformed message.updated payloads with a shared
   });
 
   const invalidRoleResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.updated',
     properties: {
       info: {
@@ -111,7 +109,6 @@ test('validateToolEvent rejects malformed message.updated payloads with a shared
   });
 
   const invalidCreatedTypeResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.updated',
     properties: {
       info: {
@@ -140,7 +137,6 @@ test('validateToolEvent rejects malformed message.updated payloads with a shared
 
 test('validateToolEvent accepts message.updated top-level sessionID and messageID fallbacks', () => {
   const raw = {
-    family: 'opencode',
     type: 'message.updated',
     properties: {
       sessionID: 'tool-top-level',
@@ -242,7 +238,6 @@ test('validateToolEvent accepts reasoning, step-start, step-finish, and file mes
     {
       name: 'reasoning',
       input: {
-        family: 'opencode',
         type: 'message.part.updated',
         properties: {
           delta: 'think-chunk',
@@ -272,7 +267,6 @@ test('validateToolEvent accepts reasoning, step-start, step-finish, and file mes
     {
       name: 'step-start',
       input: {
-        family: 'opencode',
         type: 'message.part.updated',
         properties: {
           part: {
@@ -298,7 +292,6 @@ test('validateToolEvent accepts reasoning, step-start, step-finish, and file mes
     {
       name: 'step-finish',
       input: {
-        family: 'opencode',
         type: 'message.part.updated',
         properties: {
           part: {
@@ -336,7 +329,6 @@ test('validateToolEvent accepts reasoning, step-start, step-finish, and file mes
     {
       name: 'file',
       input: {
-        family: 'opencode',
         type: 'message.part.updated',
         properties: {
           part: {
@@ -374,13 +366,12 @@ test('validateToolEvent accepts reasoning, step-start, step-finish, and file mes
       continue;
     }
 
-    assert.deepStrictEqual(result.value, { family: 'opencode', ...expected });
+    assert.deepStrictEqual(result.value, expected);
   }
 });
 
 test('validateToolEvent rejects malformed message.part.updated payloads with a shared violation envelope', () => {
   const missingMessageIdResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.part.updated',
     properties: {
       part: {
@@ -405,7 +396,6 @@ test('validateToolEvent rejects malformed message.part.updated payloads with a s
   });
 
   const invalidTypeResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.part.updated',
     properties: {
       part: {
@@ -431,7 +421,6 @@ test('validateToolEvent rejects malformed message.part.updated payloads with a s
   });
 
   const invalidStateStatusResult = validateToolEvent({
-    family: 'opencode',
     type: 'message.part.updated',
     properties: {
       part: {
