@@ -89,30 +89,12 @@ export interface BridgeGatewayProbeResult {
   reason?: string;
 }
 
-function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && 'disposition' in error
-    && 'stage' in error
-    && 'retryable' in error
-    && 'message' in error;
-}
-
 function elapsedMs(startedAt: number, now: () => number): number {
   return Math.max(0, now() - startedAt);
 }
 
-function isRejectedProbeError(error: GatewayClientErrorShape): boolean {
-  switch (error.code) {
-    case 'GATEWAY_AUTH_REJECTED':
-    case 'GATEWAY_HANDSHAKE_TIMEOUT':
-    case 'GATEWAY_HANDSHAKE_REJECTED':
-    case 'GATEWAY_HANDSHAKE_INVALID':
-      return true;
-    default:
-      return false;
-  }
+function isRejectedProbeError(message: string): boolean {
+  return message !== 'gateway_websocket_error' && message !== 'gateway_not_connected';
 }
 
 function logInfo(logger: BridgeGatewayLogger | undefined, message: string, meta: Record<string, unknown>): void {
@@ -253,6 +235,40 @@ export async function probeBridgeGatewayHost(
         finish(result);
         return;
       }
+      if (state === 'DISCONNECTED') {
+        const result = {
+          state: 'connect_error',
+          latencyMs: elapsedMs(startedAt, now),
+          reason: 'probe disconnected before READY',
+        } satisfies BridgeGatewayProbeResult;
+        logWarn(logger, 'probe.connect.error', {
+          connectionKey: gatewayHost.connectionKey,
+          gatewayUrl: gatewayHost.url,
+          latencyMs: result.latencyMs,
+          reason: result.reason,
+        });
+        finish(result);
+      }
+    });
+
+    connection.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error.message ?? error);
+      const result = {
+        state: isRejectedProbeError(message) ? 'rejected' : 'connect_error',
+        latencyMs: elapsedMs(startedAt, now),
+        reason: message,
+      } satisfies BridgeGatewayProbeResult;
+      const log = result.state === 'rejected' ? logWarn : logError;
+      log(logger, result.state === 'rejected' ? 'probe.connect.rejected' : 'probe.connect.error', {
+        connectionKey: gatewayHost.connectionKey,
+        gatewayUrl: gatewayHost.url,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
+      });
+      finish(result);
     });
 
     connection.connect().catch((error) => {
@@ -260,16 +276,12 @@ export async function probeBridgeGatewayHost(
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      const state = isGatewayClientErrorShape(error) && isRejectedProbeError(error)
-        ? 'rejected'
-        : 'connect_error';
       const result = {
-        state,
+        state: 'connect_error',
         latencyMs: elapsedMs(startedAt, now),
         reason: message,
       } satisfies BridgeGatewayProbeResult;
-      const log = result.state === 'rejected' ? logWarn : logError;
-      log(logger, result.state === 'rejected' ? 'probe.connect.rejected' : 'probe.connect.error', {
+      logError(logger, 'probe.connect.error', {
         connectionKey: gatewayHost.connectionKey,
         gatewayUrl: gatewayHost.url,
         latencyMs: result.latencyMs,

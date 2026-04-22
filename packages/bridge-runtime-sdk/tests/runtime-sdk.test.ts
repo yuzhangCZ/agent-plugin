@@ -623,7 +623,7 @@ test('request run projects session.error exactly once before terminal tool_error
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
-      protocol: 'cloud',
+      family: 'skill',
       type: 'session.error',
       properties: {
         error: 'agent offline',
@@ -724,9 +724,8 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
 
   await runtime.start();
   connection.emitError({
-    code: 'GATEWAY_HANDSHAKE_REJECTED',
-    disposition: 'runtime_failure',
-    stage: 'ready',
+    code: 'GATEWAY_REGISTER_REJECTED',
+    category: 'auth',
     retryable: false,
     message: 'rejected',
   });
@@ -740,7 +739,7 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
     kind: 'gateway_runtime_failure',
     phase: 'runtime',
     message: 'rejected',
-    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    code: 'GATEWAY_REGISTER_REJECTED',
   });
 });
 
@@ -1072,36 +1071,4 @@ test('start cancels in-flight probe before creating runtime connection', async (
   assert.equal(probeResult.state, 'cancelled');
   assert.equal(runtimeConnectCalls, 1);
   assert.equal(runtime.getStatus().state, 'ready');
-});
-
-test('probe waits for connect rejection before classifying startup rejection', async () => {
-  const connection = new FakeGatewayClient();
-  connection.connect = async function connect(): Promise<void> {
-    this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
-    this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
-    throw Object.assign(new Error('gateway_register_rejected'), {
-      code: 'GATEWAY_HANDSHAKE_REJECTED',
-      disposition: 'startup_failure',
-      stage: 'handshake',
-      retryable: false,
-      message: 'gateway_register_rejected',
-    });
-  };
-
-  const runtime = await createBridgeRuntime(
-    createRuntimeOptions(createProvider(), connection, {
-      connectionFactory: () => connection,
-    }),
-  );
-
-  const result = await runtime.probe({ timeoutMs: 50 });
-
-  assert.deepEqual(result, {
-    state: 'rejected',
-    latencyMs: result.latencyMs,
-    reason: 'gateway_register_rejected',
-  });
-  assert.equal(result.latencyMs >= 0, true);
 });

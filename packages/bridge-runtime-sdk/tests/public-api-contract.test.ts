@@ -6,7 +6,6 @@ import * as runtimeSdk from '../src/index.ts';
 
 test('stable entry exports executable runtime factory and public contracts', () => {
   assert.equal(typeof runtimeSdk.createBridgeRuntime, 'function');
-  assert.equal(typeof runtimeSdk.resolvePackageVersion, 'function');
 });
 
 test('stable entry does not expose internal facade skeleton symbols', () => {
@@ -27,9 +26,9 @@ test('stable entry source does not re-export gateway connection internals', asyn
   assert.equal(source.includes('BridgeGatewaySendContext'), false);
 });
 
-test('package publish contract keeps gateway-client internal to the SDK facade', async () => {
+test('package keeps gateway-client as main entry dependency instead of companion subpath', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.equal(pkg.exports['./gateway-client'], undefined);
-  assert.equal('@agent-plugin/gateway-client' in (pkg.dependencies ?? {}), false);
+  assert.equal('@agent-plugin/gateway-client' in (pkg.dependencies ?? {}), true);
 });
