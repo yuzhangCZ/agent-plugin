@@ -130,22 +130,66 @@ function compareVersion(a, b) {
   return 0;
 }
 
-export function assertVersionSatisfies(actualVersion, range) {
+function parseVersionComparators(range) {
   const normalizedRange = String(range ?? "").trim();
-  if (!normalizedRange.startsWith(">=")) {
-    throw createFailure("ENV_VERSION_UNSUPPORTED_RANGE", `Unsupported version range: ${normalizedRange}`);
+  if (!normalizedRange) {
+    throw createFailure("ENV_VERSION_UNSUPPORTED_RANGE", "Unsupported version range: <empty>");
   }
 
-  const minVersion = parseVersion(normalizedRange.slice(2));
+  const comparators = normalizedRange
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^(>=|<=|>|<|=)?(\d+\.\d+\.\d+)$/);
+      if (!match) {
+        throw createFailure("ENV_VERSION_UNSUPPORTED_RANGE", `Unsupported version range: ${normalizedRange}`);
+      }
+
+      const operator = match[1] ?? "=";
+      const version = parseVersion(match[2]);
+      if (!version) {
+        throw createFailure("ENV_VERSION_PARSE_FAILED", `Unable to compare versions: ${normalizedRange}`);
+      }
+
+      return { operator, version };
+    });
+
+  if (comparators.length === 0) {
+    throw createFailure("ENV_VERSION_UNSUPPORTED_RANGE", "Unsupported version range: <empty>");
+  }
+
+  return comparators;
+}
+
+export function assertVersionSatisfies(actualVersion, range) {
   const currentVersion = parseVersion(actualVersion);
-  if (!minVersion || !currentVersion) {
-    throw createFailure("ENV_VERSION_PARSE_FAILED", `Unable to compare versions: ${actualVersion} vs ${normalizedRange}`);
+  if (!currentVersion) {
+    throw createFailure("ENV_VERSION_PARSE_FAILED", `Unable to compare versions: ${actualVersion} vs ${range}`);
   }
 
-  if (compareVersion(currentVersion, minVersion) < 0) {
+  const comparators = parseVersionComparators(range);
+  const satisfied = comparators.every(({ operator, version }) => {
+    const result = compareVersion(currentVersion, version);
+    switch (operator) {
+      case ">=":
+        return result >= 0;
+      case "<=":
+        return result <= 0;
+      case ">":
+        return result > 0;
+      case "<":
+        return result < 0;
+      case "=":
+        return result === 0;
+      default:
+        return false;
+    }
+  });
+
+  if (!satisfied) {
     throw createFailure(
       "ENV_VERSION_MISMATCH",
-      `OpenClaw ${actualVersion} does not satisfy required range ${normalizedRange}`,
+      `OpenClaw ${actualVersion} does not satisfy required range ${range}`,
       "ENV_VERSION_MISMATCH",
     );
   }

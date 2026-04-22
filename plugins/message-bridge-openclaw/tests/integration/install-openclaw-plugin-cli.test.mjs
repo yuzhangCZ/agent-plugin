@@ -30,7 +30,7 @@ const pluginInfo = process.env.FAKE_OPENCLAW_PLUGIN_INFO || JSON.stringify({ id:
 appendFileSync(logFile, JSON.stringify(args) + "\\n");
 
 if (args[0] === "--version") {
-  process.stdout.write(process.env.FAKE_OPENCLAW_VERSION || "2026.3.11");
+  process.stdout.write(process.env.FAKE_OPENCLAW_VERSION || "2026.3.24");
   process.exit(0);
 }
 

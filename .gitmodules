@@ -1,4 +1,4 @@
 [submodule "integration/opencode-cui"]
 	path = integration/opencode-cui
 	url = https://github.com/Llllviaaaa/opencode-CUI.git
-	branch = release-0328
+	branch = main

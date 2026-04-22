@@ -1,9 +1,9 @@
 import {
-  applyAccountNameToChannelSection,
   type ChannelConfigSchema,
   type ChannelPlugin,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk";
+import { applyAccountNameToChannelSection } from "openclaw/plugin-sdk/core";
 import {
   applyMessageBridgeSetupConfig,
   CHANNEL_ID,

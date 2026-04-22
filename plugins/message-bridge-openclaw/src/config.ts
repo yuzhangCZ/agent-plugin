@@ -1,8 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { deleteAccountFromConfigSection, setAccountEnabledInConfigSection } from "openclaw/plugin-sdk/core";
 import {
-  deleteAccountFromConfigSection,
-  setAccountEnabledInConfigSection,
   type ChannelSetupInput,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk";
