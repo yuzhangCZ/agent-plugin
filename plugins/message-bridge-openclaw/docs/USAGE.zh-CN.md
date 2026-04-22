@@ -19,6 +19,12 @@
 - 文本输出为 block 级 streaming，不是 token 级 streaming
 - 当前环境里模型首块延迟和超时仍可能影响实际流式体验
 
+OpenClaw 安装兼容窗口：
+
+- 运行时宿主版本：`>=2026.3.24`
+- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
+- `2026.3.31` 起，OpenClaw 插件安装期危险代码扫描默认 fail-closed，当前带 `install.mjs` 的 npm helper 包会被阻断
+
 运行时依赖约束：
 
 - 插件运行时使用宿主 OpenClaw 提供的 `plugin-sdk`
@@ -28,8 +34,8 @@
 ## 1. 当前支持的安装方式
 
 - 正式私有 npm 安装
-  - 首次安装推荐通过 `npx` 显式指定二方仓源拉起 `message-bridge-openclaw-install`
-  - 安装过一次后也可以直接运行 `message-bridge-openclaw-install`
+  - 首次安装推荐通过 `npx` 直接拉起 `@wecode/skill-openclaw-plugin`
+  - 安装过一次后也可以继续通过 `npx @wecode/skill-openclaw-plugin` 运行
   - 自动校验 `openclaw` 是否已安装且版本满足最低要求
   - 自动幂等配置 `@wecode` 二方仓源到用户级 `.npmrc`
   - 自动执行 `openclaw plugins install`
@@ -48,7 +54,7 @@
 
 推荐顺序：
 
-1. 正式安装：`npx --registry ... --package @wecode/skill-openclaw-plugin message-bridge-openclaw-install ...`
+1. 正式安装：`npx --registry ... @wecode/skill-openclaw-plugin ...`
 2. 本地部署或交付验证：bundle 安装
 3. 手动交付或排障：手动复制 bundle
 
@@ -64,7 +70,7 @@
 
 当前本地验证使用：
 
-- OpenClaw `2026.3.11`
+- OpenClaw `2026.3.24`
 - 网关地址：`ws://127.0.0.1:8081/ws/agent`
 - 测试凭据：
   - `ak`: `test-ak-openclaw-001`
@@ -108,8 +114,7 @@ pnpm run install:bundle:dev
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
@@ -120,11 +125,15 @@ npx --yes \
 说明：
 
 - `npx --registry ...` 负责让首次执行时能从私仓下载 helper 自身
-- 命令会先检查 `openclaw --version`
+- helper 会优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
+- helper 会先通过 `which openclaw` / `where.exe openclaw` 检测宿主命令是否存在
+- 命令会先检查 `openclaw --version`，并验证版本位于 npm helper 支持窗口 `>=2026.3.24 <2026.3.31`
+- 当候选为 `openclaw.cmd` 时，helper 会通过 `cmd.exe /d /s /c` 显式执行后续 OpenClaw CLI 命令
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令默认执行 `openclaw gateway restart`
 - 如果确实不希望自动重启，显式追加 `--no-restart`
 - 如果私仓需要认证，执行前要保证 npm 认证环境已可用
+- 如果 Windows 环境自动回退后仍失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`
 
 ## 4. 手动复制 bundle
 
@@ -324,8 +333,9 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 以下注册元数据不允许用户配置，统一由运行时采集：
 
 - `toolType` 默认值为 `openx`
+- `deviceName` 来自 `os.hostname()`
 - `toolVersion` 来自插件运行时包版本
-- `deviceName`、`os`、`macAddress` 由 `gateway-client` 在构造 register payload 时统一派生
+- `macAddress` 来自首个可用本地网卡，取不到时为空串 `""`
 
 当前插件内置已知 `toolType` 仅 `openx`。若注入其他值，会记录 `runtime.register.tool_type.unknown` 警告日志，但不会阻断连接。
 

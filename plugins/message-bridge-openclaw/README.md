@@ -46,13 +46,37 @@ message contract.
 - 手动复制 bundle：复制 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md`
 - 私有 npm 分发：通过 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
 
+### OpenClaw 版本兼容矩阵
+
+以下结论基于同一份 `bundle/` 产物对不同 OpenClaw 版本执行 `openclaw --dev plugins install <bundle-dir>` 的实测结果：
+
+| OpenClaw 版本 | 安装结果 | 说明 |
+| --- | --- | --- |
+| `2026.3.24` | 可安装 | 会提示 `install.mjs` 命中危险代码模式，但不会阻断安装 |
+| `2026.3.28` | 可安装 | 行为与 `2026.3.24` 一致，仍为 warning |
+| `2026.3.31` | 阻断安装 | 开始对插件安装包执行 fail-closed 安全扫描 |
+| `2026.4.12` | 阻断安装 | 与 `2026.3.31` 一致 |
+| `2026.4.14` | 阻断安装 | npm `latest`（验证日期：2026-04-14） |
+
+已确认的版本边界：
+
+- `2026.3.31-beta.1` 起，OpenClaw 发布说明已明确插件安装期危险代码扫描会默认 fail-closed
+- `2026.3.31` 是当前已实测的首个稳定版阻断版本
+- `2026.3.28` 及更早的已测稳定版仍然只告警、不阻断
+
+当前阻断原因不是运行时协议不兼容，而是插件发布产物内包含 `install.mjs`，其中使用了 `child_process`。从 `2026.3.31` 起，OpenClaw 安装阶段会将这类命中视为危险代码并拒绝安装。
+
+版本约束现已拆分为两类：
+
+- 运行时宿主版本：`>=2026.3.24`
+- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
+
 首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起 helper：
 
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
+  @wecode/skill-openclaw-plugin \
   --registry https://your-private-registry.example.com/ \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
@@ -60,21 +84,24 @@ npx --yes \
   --dev
 ```
 
-安装过一次之后，也可以直接使用 `message-bridge-openclaw-install`。该命令会：
+安装过一次之后，也可以直接通过 `npx @wecode/skill-openclaw-plugin` 使用。该命令会：
 
-- 检查 `openclaw` 是否已安装且版本满足 `>=2026.3.11`
+- 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
 - 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
 - 调用 `openclaw channels add --channel message-bridge ...`
 - 默认执行 `openclaw gateway restart`
+- 优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
+
+如果 Windows 环境里自动回退后仍然失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`。
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
 关键约束：
 
 - 不要把 `node_modules/` 复制到 `extensions/skill-openclaw-plugin`
-- 插件运行时必须使用宿主 OpenClaw 提供的 `plugin-sdk`
+- 插件运行时必须使用宿主 OpenClaw 提供的 `plugin-sdk` 公开子入口
 - 如果插件目录里出现 `node_modules/openclaw`，可能会和宿主 `openclaw --version` 解析到的版本冲突
 
 ## V1 scope
@@ -110,7 +137,7 @@ Upgrade path:
 
 Current validated environment:
 
-- OpenClaw `2026.3.11`
+- OpenClaw `2026.3.24`
 - local `ai-gateway`
 - Redis on `127.0.0.1:6379`
 - MariaDB on `127.0.0.1:3306`
@@ -221,8 +248,9 @@ Interactive `setup` / `onboarding` only writes:
 The following register metadata fields are runtime-derived and not user-configurable:
 
 - `toolType` defaults to `openx`
+- `deviceName` comes from `os.hostname()`
 - `toolVersion` comes from the plugin package version at runtime
-- `deviceName`, `os`, and `macAddress` are derived by `gateway-client` when it builds the register payload
+- `macAddress` comes from the first usable local network interface, or `""` when unavailable
 
 Known `toolType` values in this plugin: `openx`.  
 When a non-`openx` value is injected, runtime logs `runtime.register.tool_type.unknown` and continues.
@@ -281,9 +309,7 @@ For first-time private registry installation, prefer an explicit `npx` bootstrap
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  --package @wecode/skill-openclaw-plugin \
-  message-bridge-openclaw-install \
-  --registry https://your-private-registry.example.com/ \
+  @wecode/skill-openclaw-plugin \
   --url ws://127.0.0.1:8081/ws/agent \
   --token <ak> \
   --password <sk> \
@@ -293,8 +319,8 @@ npx --yes \
 Behavior:
 
 - `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
+- the helper always writes `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`, aligned with `message-bridge`
 - checks `openclaw --version` against the package `peerDependencies.openclaw`
-- writes or updates `@wecode:registry=...` in the resolved user `.npmrc`
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
 - runs `openclaw channels add --channel message-bridge ...`
