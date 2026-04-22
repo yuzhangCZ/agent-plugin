@@ -3,6 +3,7 @@ import { BridgeRuntime } from './BridgeRuntime.js';
 import type { PluginInput } from './types.js';
 import { AppLogger } from './AppLogger.js';
 import { buildClientShapeSummary } from './clientShapeSummary.js';
+import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
 let runtime: BridgeRuntime | null = null;
@@ -126,6 +127,7 @@ export function stopRuntime(): void {
     lifecycleAbortController = null;
     initState = 'never';
     latchedInitError = null;
+    resetMessageBridgeStatus();
     clearCurrentRuntimeTraceId();
     return;
   }
@@ -135,6 +137,7 @@ export function stopRuntime(): void {
   lifecycleAbortController = null;
   initState = 'never';
   latchedInitError = null;
+  resetMessageBridgeStatus();
   clearCurrentRuntimeTraceId();
 }
 
@@ -142,5 +145,6 @@ export function __resetRuntimeForTests(): void {
   stopRuntime();
   initState = 'never';
   latchedInitError = null;
+  resetMessageBridgeStatus();
   clearCurrentRuntimeTraceId();
 }

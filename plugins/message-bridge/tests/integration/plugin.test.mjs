@@ -4,8 +4,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MessageBridgePlugin, default as DefaultPlugin } from '../../src/index.ts';
+import {
+  MessageBridgePlugin,
+  default as DefaultPlugin,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/index.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
+import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
 const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
 
@@ -71,6 +77,7 @@ function mockInput(overrides = {}) {
 describe('plugin contract', () => {
   beforeEach(() => {
     __resetRuntimeForTests();
+    __resetMessageBridgeStatusForTests();
     process.env.BRIDGE_ENABLED = 'false';
   });
 
@@ -81,6 +88,24 @@ describe('plugin contract', () => {
   test('exports named and default as same plugin function', () => {
     assert.strictEqual(typeof MessageBridgePlugin, 'function');
     assert.strictEqual(DefaultPlugin, MessageBridgePlugin);
+    assert.strictEqual(typeof getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
+  });
+
+  test('status api defaults to not_ready baseline and supports subscriptions', () => {
+    const initialSnapshot = getMessageBridgeStatus();
+    assert.strictEqual(initialSnapshot.phase, 'unavailable');
+    assert.strictEqual(initialSnapshot.unavailableReason, 'not_ready');
+
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push(snapshot);
+    });
+    stopRuntime();
+    unsubscribe();
+
+    assert.ok(seen.length <= 1);
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'not_ready');
   });
 
   test('PluginInput -> Hooks', async () => {
@@ -178,9 +203,11 @@ describe('plugin contract', () => {
     const mod = await import('../../src/index.ts');
     const seen = new Set();
     const hooks = [];
+    const pluginFns = new Set([mod.default, mod.MessageBridgePlugin]);
 
     for (const [, fn] of Object.entries(mod)) {
       if (typeof fn !== 'function') continue;
+      if (!pluginFns.has(fn)) continue;
       if (seen.has(fn)) continue;
       seen.add(fn);
       hooks.push(await fn(mockInput()));

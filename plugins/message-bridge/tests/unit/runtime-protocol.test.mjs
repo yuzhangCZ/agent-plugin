@@ -9,6 +9,11 @@ import {
 } from '@agent-plugin/test-support/assertions';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
@@ -207,6 +212,123 @@ function createEventedGatewayConnectionMock(state = 'READY') {
 }
 
 describe('runtime protocol strictness', () => {
+  test('status api starts from not_ready baseline', () => {
+    __resetMessageBridgeStatusForTests();
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), {
+      connected: false,
+      phase: 'unavailable',
+      unavailableReason: 'not_ready',
+      willReconnect: false,
+      lastError: null,
+      updatedAt: getMessageBridgeStatus().updatedAt,
+      lastReadyAt: null,
+    });
+  });
+
+  test('start publishes disabled snapshot when config disables runtime', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'disabled');
+    assert.strictEqual(snapshot.lastError, null);
+  });
+
+  test('start publishes config_invalid snapshot when config loading fails', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = new (class extends BridgeRuntime {
+      async resolveConfig() {
+        throw new Error('broken config');
+      }
+    })({
+      client: createRuntimeClient(),
+    });
+
+    await assert.rejects(runtime.start(), /broken config/);
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.lastError, 'broken config');
+  });
+
+  test('start publishes plugin_failure snapshot when startup prerequisites fail', async () => {
+    __resetMessageBridgeStatusForTests();
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        _client: {
+          get: async () => ({ data: { healthy: true } }),
+        },
+      }),
+    });
+
+    await assert.rejects(runtime.start());
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
+    assert.strictEqual(typeof snapshot.lastError, 'string');
+  });
+
+  test('start and stop publish connecting ready and reset snapshots', async () => {
+    __resetMessageBridgeStatusForTests();
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'CONNECTING');
+      connection.emit('stateChange', 'READY');
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push(snapshot.phase);
+    });
+
+    await runtime.start();
+    assert.strictEqual(getMessageBridgeStatus().phase, 'ready');
+
+    runtime.stop();
+    unsubscribe();
+
+    assert.ok(seen.includes('connecting'));
+    assert.ok(seen.includes('ready'));
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'not_ready');
+  });
+
+  test('gateway error fact publishes server failure and keeps precedence over later network failure', async () => {
+    __resetMessageBridgeStatusForTests();
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'READY');
+      connection.emit('error', {
+        code: 'GATEWAY_REGISTER_REJECTED',
+        source: 'handshake',
+        phase: 'before_ready',
+        retryable: false,
+        message: 'device conflict',
+      });
+      connection.emit('error', {
+        code: 'GATEWAY_WEBSOCKET_ERROR',
+        source: 'transport',
+        phase: 'ready',
+        retryable: true,
+        message: 'network jitter',
+      });
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+    assert.strictEqual(snapshot.lastError, 'device conflict');
+  });
+
   test('start wires invalid invoke inbound frames to tool_error best-effort reply', async () => {
     const logEntries = [];
     const connection = createEventedGatewayConnectionMock('READY');

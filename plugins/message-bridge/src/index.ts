@@ -1,9 +1,17 @@
 import { getCurrentRuntimeTraceId, getOrCreateRuntime } from './runtime/singleton.js';
+import {
+  configureMessageBridgeStatusLogger,
+  getMessageBridgeStatus,
+  subscribeMessageBridgeStatus,
+} from './runtime/MessageBridgeStatusStore.js';
 import { AppLogger } from './runtime/AppLogger.js';
 import type { Plugin } from './runtime/types.js';
 import { getErrorDetailsForLog, getErrorMessage } from './utils/error.js';
 
 export const MessageBridgePlugin: Plugin = async (input) => {
+  configureMessageBridgeStatusLogger(input.client, {
+    runtimeTraceIdProvider: getCurrentRuntimeTraceId,
+  });
   try {
     const runtime = await getOrCreateRuntime(input);
     const logger = new AppLogger(
@@ -12,6 +20,9 @@ export const MessageBridgePlugin: Plugin = async (input) => {
       getCurrentRuntimeTraceId() ?? undefined,
     );
     if (!runtime) {
+      logger.info('plugin.init.blocked_reinit_noop', {
+        workspacePath: input.worktree || input.directory,
+      });
       return {
         event: async () => {},
       };
@@ -47,4 +58,5 @@ export const MessageBridgePlugin: Plugin = async (input) => {
   }
 };
 
+export { getMessageBridgeStatus, subscribeMessageBridgeStatus };
 export default MessageBridgePlugin;

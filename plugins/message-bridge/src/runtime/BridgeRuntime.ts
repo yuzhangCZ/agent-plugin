@@ -27,6 +27,7 @@ import {
   createAkSkAuthProvider,
   createGatewayClient,
   type GatewayBusinessMessage,
+  type GatewayClientErrorShape,
   type GatewayInboundFrame,
   type GatewayClient,
   type GatewayClientConfig,
@@ -63,6 +64,8 @@ import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
+import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
+import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
@@ -134,6 +137,7 @@ export class BridgeRuntime {
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
+  private readonly statusAdapter: BridgeRuntimeStatusAdapter;
   private sessionDirectoryPolicyContext: {
     channel?: string;
     bridgeDirectoryConfigured: boolean;
@@ -168,6 +172,7 @@ export class BridgeRuntime {
       this.opencodeSessionGatewayAdapter,
     );
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
       sendToolError: (result, welinkSessionId, logOptions) => this.sendToolError(result, welinkSessionId, logOptions),
       canReply: () => this.gatewayConnection?.getStatus().isReady() ?? false,
@@ -228,9 +233,11 @@ export class BridgeRuntime {
         error: errorMessage,
         workspacePath: this.workspacePath,
       });
+      this.statusAdapter.publishConfigInvalid(errorMessage);
       throw error;
     }
     if (!config.enabled) {
+      this.statusAdapter.publishDisabled();
       this.logger.info('runtime.start.disabled_by_config');
       this.started = true;
       return;
@@ -250,7 +257,13 @@ export class BridgeRuntime {
       sessionDirectoryPolicyBridgeDirectoryConfigured: this.sessionDirectoryPolicyContext.bridgeDirectoryConfigured,
     });
 
-    const startupValidation = await this.validateStartupPrerequisites();
+    let startupValidation;
+    try {
+      startupValidation = await this.validateStartupPrerequisites();
+    } catch (error) {
+      this.statusAdapter.publishPluginFailure(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     this.sdkClient = startupValidation.sdkClient;
     this.eventFilter = new EventFilter(config.events.allowlist);
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
@@ -280,6 +293,11 @@ export class BridgeRuntime {
 
     connection.on('stateChange', (state) => {
       this.logger.info('gateway.state.changed', { state });
+      this.statusAdapter.publishGatewayState(state);
+    });
+
+    connection.on('error', (error) => {
+      this.statusAdapter.publishGatewayError(error as GatewayClientErrorShape);
     });
 
     connection.on('inbound', (frame) => {
@@ -300,6 +318,7 @@ export class BridgeRuntime {
     });
 
     this.gatewayConnection = connection;
+    this.statusAdapter.publishConnecting();
     if (options.abortSignal?.aborted) {
       this.gatewayConnection.disconnect();
       this.gatewayConnection = null;
@@ -327,6 +346,7 @@ export class BridgeRuntime {
     }
 
     this.started = false;
+    resetMessageBridgeStatus();
     this.logger.info('runtime.stop.completed');
   }
 
