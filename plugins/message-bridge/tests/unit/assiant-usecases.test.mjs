@@ -306,12 +306,12 @@ describe('assiant use cases', () => {
     ]);
   });
 
-  test('create session use case does not pass permission for non im-group sessions', async () => {
+  test('create session use case omits permission for non im-group sessions', async () => {
     const calls = [];
     const createSessionUseCase = new CreateSessionUseCase(
       {
         execute: async () => ({
-          directory: '/mapped/normal',
+          directory: '/mapped/tenant-d',
           source: 'mapping',
         }),
       },
@@ -321,8 +321,8 @@ describe('assiant use cases', () => {
           return {
             success: true,
             data: {
-              sessionId: 'created-normal-1',
-              session: { sessionId: 'created-normal-1' },
+              sessionId: 'created-2',
+              session: { sessionId: 'created-2' },
             },
           };
         },
@@ -332,7 +332,7 @@ describe('assiant use cases', () => {
     const result = await createSessionUseCase.execute({
       payload: {
         title: 'tenant session',
-        assistantId: 'tenant-normal',
+        assistantId: 'tenant-d',
       },
       effectiveDirectory: '/fallback',
     });
@@ -341,9 +341,10 @@ describe('assiant use cases', () => {
     assert.deepStrictEqual(calls, [
       {
         title: 'tenant session',
-        directory: '/mapped/normal',
+        directory: '/mapped/tenant-d',
       },
     ]);
+    assert.strictEqual(Object.hasOwn(calls[0], 'permission'), false);
   });
 
   test('chat use case forwards assistantId as agent without directory', async () => {

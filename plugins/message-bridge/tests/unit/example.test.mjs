@@ -32,7 +32,6 @@ function context(state) {
   return {
     client: {},
     connectionState: state,
-    agentId: 'agent-1',
     sessionId: 's-1',
   };
 }

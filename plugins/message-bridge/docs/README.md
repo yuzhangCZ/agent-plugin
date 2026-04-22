@@ -1,7 +1,7 @@
 # Message-Bridge 文档入口
 
-**Version:** 2.5  
-**Date:** 2026-04-01  
+**Version:** 2.2  
+**Date:** 2026-03-10  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `./AGENTS.md`, `./migration/path-mapping.md`
@@ -37,12 +37,9 @@
 1. [方案设计](./design/solution-design.md)
 2. [实施计划](./design/implementation-plan.md)
 3. [协议契约](./design/interfaces/protocol-contract.md)
-4. [私有状态 API 契约](./design/interfaces/private-status-api-contract.md)
-5. [三方应用私有状态 API 接口说明](./operations/third-party-status-api-guide.md)
-6. [私有状态原因收敛规格归档](./design/interfaces/private-status-reason-spec.md)
-7. [端到端消息链路说明](./design/interfaces/end-to-end-message-flow.md)
-8. [配置契约](./design/interfaces/config-contract.md)
-9. [源码目录说明](./architecture/source-layout.md)
+4. [端到端消息链路说明](./design/interfaces/end-to-end-message-flow.md)
+5. [配置契约](./design/interfaces/config-contract.md)
+6. [源码目录说明](./architecture/source-layout.md)
 
 ### 测试
 

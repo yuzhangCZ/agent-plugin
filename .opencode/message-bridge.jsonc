@@ -3,7 +3,8 @@
   "enabled": true,
   "debug": true,
   "gateway": {
-    "url": "ws://localhost:8081/ws/agent"
+    "url": "ws://localhost:8081/ws/agent",
+    "channel": "opencode"
   },
   "auth": {
     "ak": "test-ak-001",

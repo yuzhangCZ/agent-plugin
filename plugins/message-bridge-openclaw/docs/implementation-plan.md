@@ -259,7 +259,7 @@
   - legacy `accounts` 不会再被视为配置成功
   - `setup/onboarding` 仅写入 `name`、`gateway.url`、`auth.ak`、`auth.sk`
   - `name` 只作为账号展示名，不参与注册协议
-  - `toolType=openclaw`、`deviceName`、`toolVersion`、`macAddress` 已收敛为运行时派生元数据
+  - `toolType=openx`、`toolVersion` 由插件侧提供；`deviceName`、`os`、`macAddress` 由 gateway-client 派生
 - 账号生命周期
   - 已支持 `setAccountEnabled`
   - 已支持 `deleteAccount`

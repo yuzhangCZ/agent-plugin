@@ -24,8 +24,8 @@
     "pack:check": "pnpm run build:bundle && node scripts/check-pack.mjs",
     "validate:skill-relay": "node scripts/skill-relay-live-check.mjs",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:unit": "node --import tsx/esm --test tests/unit/*.test.mjs",
-    "test:integration": "node --import tsx/esm --test tests/integration/*.test.mjs",
+    "test:unit": "node --import tsx/esm --test --test-timeout=60000 --test-force-exit tests/unit/*.test.mjs",
+    "test:integration": "node --import tsx/esm --test --test-timeout=60000 --test-force-exit tests/integration/*.test.mjs",
     "verify:openclaw:env": "node ./scripts/verify-openclaw-env.mjs",
     "verify:openclaw:load": "pnpm run build && node ./scripts/verify-openclaw-load.mjs",
     "test:runtime": "pnpm run build && node ./scripts/runtime-smoke.mjs",
@@ -41,6 +41,8 @@
     }
   },
   "dependencies": {
+    "@agent-plugin/bridge-runtime-sdk": "workspace:*",
+    "@agent-plugin/gateway-schema": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {

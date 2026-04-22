@@ -12,6 +12,7 @@ describe('upstream transport projection', () => {
   test('projects message.updated into a lightweight transport shape', () => {
     const projector = createProjector();
     const raw = createLargeMessageUpdatedEvent();
+    raw.properties.info.finish = { reason: 'completed' };
     const projected = projector.project({
       common: {
         eventType: 'message.updated',
@@ -25,6 +26,7 @@ describe('upstream transport projection', () => {
       raw,
     });
 
+    assert.strictEqual(projected.family, 'opencode');
     assert.strictEqual(projected.type, 'message.updated');
     assert.deepStrictEqual(projected.properties.info.summary, {
       additions: 1227,
@@ -49,6 +51,9 @@ describe('upstream transport projection', () => {
     assert.ok(!('after' in projected.properties.info.summary.diffs[0]));
     assert.ok(!('before' in projected.properties.info.summary.diffs[1]));
     assert.ok(!('after' in projected.properties.info.summary.diffs[1]));
+    assert.deepStrictEqual(projected.properties.info.finish, {
+      reason: 'completed',
+    });
   });
 
   test('passes through non-message.updated events unchanged', () => {
@@ -75,7 +80,10 @@ describe('upstream transport projection', () => {
       raw,
     });
 
-    assert.strictEqual(projected, raw);
+    assert.deepStrictEqual(projected, {
+      family: 'opencode',
+      ...raw,
+    });
   });
 
   test('does not mutate the original raw event while projecting message.updated', () => {
@@ -96,6 +104,7 @@ describe('upstream transport projection', () => {
       raw,
     });
 
+    assert.strictEqual(projected.family, 'opencode');
     assert.strictEqual(projected.type, 'message.updated');
     assert.deepStrictEqual(raw, original);
   });

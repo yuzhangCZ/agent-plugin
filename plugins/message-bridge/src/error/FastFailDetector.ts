@@ -1,23 +1,27 @@
-import { CONNECTION_STATES, type ConnectionState, type ErrorCode } from '../types/index.js';
+import {
+  GATEWAY_CLIENT_STATE,
+  type GatewayClientState,
+} from '@agent-plugin/gateway-client';
+import type { ErrorCode } from '../types/index.js';
 
 export class FastFailDetector {
   static readonly connectionCheckTimeoutMs = 100;
 
-  checkState(connectionState: ConnectionState): ErrorCode | null {
+  checkState(connectionState: GatewayClientState): ErrorCode | null {
     switch (connectionState) {
-      case CONNECTION_STATES[0]:
-      case CONNECTION_STATES[1]:
+      case GATEWAY_CLIENT_STATE.DISCONNECTED:
+      case GATEWAY_CLIENT_STATE.CONNECTING:
         return 'GATEWAY_UNREACHABLE';
-      case CONNECTION_STATES[2]:
+      case GATEWAY_CLIENT_STATE.CONNECTED:
         return 'AGENT_NOT_READY';
-      case CONNECTION_STATES[3]:
+      case GATEWAY_CLIENT_STATE.READY:
         return null;
       default:
         return 'AGENT_NOT_READY';
     }
   }
 
-  isGatewayReachable(state: ConnectionState): boolean {
-    return state === CONNECTION_STATES[3] || state === CONNECTION_STATES[2];
+  isGatewayReachable(state: GatewayClientState): boolean {
+    return state === GATEWAY_CLIENT_STATE.READY || state === GATEWAY_CLIENT_STATE.CONNECTED;
   }
 }

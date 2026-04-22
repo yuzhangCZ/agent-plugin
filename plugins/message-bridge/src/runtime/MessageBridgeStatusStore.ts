@@ -8,6 +8,7 @@ import {
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 
 type MessageBridgeStatusListener = (snapshot: MessageBridgeStatusSnapshot) => void;
+
 interface MessageBridgeStatusLoggerOptions {
   runtimeTraceIdProvider?: () => string | null;
 }
@@ -36,19 +37,17 @@ function cloneCurrentSnapshot(): MessageBridgeStatusSnapshot {
 
 function logStatusApi(message: string, extra?: Record<string, unknown>): void {
   const runtimeTraceId = runtimeTraceIdProvider?.() ?? null;
-  const traceOverrides = {
-    runtimeTraceId,
-    traceId: runtimeTraceId,
-  };
   logger?.info(message, {
     ...(extra ?? {}),
-    ...traceOverrides,
+    runtimeTraceId,
+    traceId: runtimeTraceId,
   });
 }
 
 export function configureMessageBridgeStatusLogger(client: unknown, options: MessageBridgeStatusLoggerOptions = {}): void {
   runtimeTraceIdProvider = options.runtimeTraceIdProvider ?? runtimeTraceIdProvider;
   if (!hasAppLog(client)) {
+    logger = null;
     return;
   }
 

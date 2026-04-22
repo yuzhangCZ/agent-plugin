@@ -7,10 +7,7 @@ describe('EventFilter defaults', () => {
   test('default allowlist keeps exact supported events and rejects unsupported variants', () => {
     const filter = new EventFilter();
 
-    assert.strictEqual(filter.isAllowed('permission.replied'), true);
     assert.strictEqual(filter.isAllowed('question.asked'), true);
-    assert.strictEqual(filter.isAllowed('question.replied'), false);
-    assert.strictEqual(filter.isAllowed('question.rejected'), false);
     assert.strictEqual(filter.isAllowed('question.updated'), false);
     assert.strictEqual(filter.isAllowed('requestion.created'), false);
   });

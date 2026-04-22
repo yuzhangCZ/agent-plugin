@@ -4,7 +4,7 @@ import http from 'node:http';
 
 import { WebSocketServer } from 'ws';
 
-import { DefaultGatewayConnection } from '../../src/connection/GatewayConnection.ts';
+import { createGatewayClient } from '@agent-plugin/gateway-client';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/message.updated.large-summary.fixture.mjs';
@@ -95,7 +95,7 @@ async function createConnectedHarness({ maxPayload } = {}) {
   const gateway = await createGatewayServer({ maxPayload });
   const { entries, logger } = createGatewayLogger();
   const runtime = new BridgeRuntime({ client: {} });
-  const connection = new DefaultGatewayConnection({
+  const connection = createGatewayClient({
     url: `ws://127.0.0.1:${gateway.port}/ws/agent`,
     debug: true,
     registerMessage: {
@@ -111,12 +111,9 @@ async function createConnectedHarness({ maxPayload } = {}) {
 
   runtime.gatewayConnection = connection;
   runtime.eventFilter = new EventFilter(['message.updated']);
-  connection.on('stateChange', (state) => {
-    runtime.stateManager.setState(state);
-  });
 
   await connection.connect();
-  await waitFor(() => connection.getState() === 'READY');
+  await waitFor(() => connection.getStatus().isReady());
 
   return {
     runtime,
@@ -152,6 +149,7 @@ describe('protocol message.updated large payload regression', () => {
 
     const toolEvent = harness.gateway.receivedMessages.find((message) => message.type === 'tool_event');
     assert.ok(toolEvent);
+    assert.strictEqual(toolEvent.event.family, 'opencode');
     assert.strictEqual(toolEvent.event.type, 'message.updated');
     assert.deepStrictEqual(toolEvent.event.properties.info.summary.diffs, [
       {
@@ -198,6 +196,7 @@ describe('protocol message.updated large payload regression', () => {
 
     const toolEvent = harness.gateway.receivedMessages.find((message) => message.type === 'tool_event');
     assert.ok(toolEvent);
+    assert.strictEqual(toolEvent.event.family, 'opencode');
     assert.strictEqual(Buffer.byteLength(JSON.stringify(toolEvent), 'utf8') < 1024, true);
     assert.deepStrictEqual(harness.gateway.closeEvents, []);
     assert.strictEqual(harness.connection.getState(), 'READY');

@@ -273,7 +273,6 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `session.error`
 - `permission.updated`
 - `permission.asked`
-- `permission.replied`
 - `question.asked`
 
 不支持通配符事件模式。

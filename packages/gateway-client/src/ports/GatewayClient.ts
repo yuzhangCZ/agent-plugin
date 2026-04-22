@@ -1,0 +1,31 @@
+import type { GatewaySendContext } from '../domain/send-context.ts';
+import type { GatewayClientState, GatewayClientStatus } from '../domain/state.ts';
+import type { GatewaySendPayload } from './GatewayClientMessages.ts';
+import type { GatewayClientEvents } from './GatewayClientEvents.ts';
+
+/**
+ * 插件侧应直接依赖的唯一 facade。
+ * @remarks 内部 transport/runtime 日志由编排层统一产出，调用方只消费事件与错误。
+ */
+export interface GatewayClient {
+  /**
+   * 建立连接并完成 register 握手。
+   * @remarks Promise fulfilled 表示客户端已进入 READY，而不只是底层 transport 已经 open。
+   */
+  connect(): Promise<void>;
+  /** 主动断开连接并停止重连与心跳。 */
+  disconnect(): void;
+  /**
+   * 统一发送出口，只接受业务负载。
+   * @remarks 控制帧由运行时内部编排，外部调用方不应绕过 READY gating。
+   */
+  send(message: GatewaySendPayload, logContext?: GatewaySendContext): void;
+  /** 返回 transport 连接态。 */
+  isConnected(): boolean;
+  /** 返回状态机状态。 */
+  getState(): GatewayClientState;
+  /** 返回当前状态快照的语义视图。 */
+  getStatus(): GatewayClientStatus;
+  /** 订阅 facade 事件。 */
+  on<E extends keyof GatewayClientEvents>(event: E, listener: GatewayClientEvents[E]): this;
+}

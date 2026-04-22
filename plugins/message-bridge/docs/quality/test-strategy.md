@@ -1,7 +1,7 @@
 # message-bridge 插件 — 测试验证文档
 
-**Version:** V1.1  
-**Date:** 2026-04-04  
+**Version:** V1.1
+**Date:** 2026-04-04
 **Status:** 评审版  
 **Owner:** message-bridge maintainers  
 **Related:** `../product/prd.md`, `../architecture/overview.md`, `../design/solution-design.md`  

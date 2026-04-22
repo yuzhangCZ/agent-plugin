@@ -162,7 +162,6 @@ payload: {
 - `session.error`
 - `permission.updated`
 - `permission.asked`
-- `permission.replied`
 - `question.asked`
 
 不再使用 `message.*`、`session.*` 这类 wildcard 默认值。

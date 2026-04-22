@@ -2,9 +2,14 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  assertInvalidInvokeToolErrorContract,
+  createInvalidInvokeInboundFrame,
+} from '@agent-plugin/test-support/assertions';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
@@ -65,7 +70,7 @@ describe('protocol permission-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['permission.replied']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const permissionRepliedEvent = await loadFixture('permission.replied.json');
     await runtime.handleEvent(permissionRepliedEvent);
@@ -74,7 +79,10 @@ describe('protocol permission-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
-        event: permissionRepliedEvent,
+        event: {
+          family: 'opencode',
+          ...permissionRepliedEvent,
+        },
       },
     ]);
   });
@@ -95,7 +103,7 @@ describe('protocol permission-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const permissionAskedEvent = await loadFixture('permission.asked.json');
     await runtime.handleEvent(permissionAskedEvent);
@@ -104,7 +112,20 @@ describe('protocol permission-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
-        event: permissionAskedEvent,
+        event: {
+          family: 'opencode',
+          type: 'permission.asked',
+          properties: {
+            id: 'perm_fixture_1',
+            sessionID: 'ses_permission_1',
+            messageID: 'msg_permission_1',
+            type: 'exec',
+            title: 'Run command',
+            metadata: {
+              command: 'ls',
+            },
+          },
+        },
       },
     ]);
 
@@ -152,7 +173,7 @@ describe('protocol permission-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -169,7 +190,7 @@ describe('protocol permission-roundtrip', () => {
       type: 'permission.asked',
       properties: {
         sessionID: 'ses_child_permission_2',
-        permissionID: 'perm_child_2',
+        id: 'perm_child_2',
       },
     };
     await runtime.handleEvent(permissionAskedEvent);
@@ -180,7 +201,10 @@ describe('protocol permission-roundtrip', () => {
         toolSessionId: 'ses_parent_permission_2',
         subagentSessionId: 'ses_child_permission_2',
         subagentName: 'research-agent',
-        event: permissionAskedEvent,
+        event: {
+          family: 'opencode',
+          ...permissionAskedEvent,
+        },
       },
     ]);
 
@@ -211,7 +235,7 @@ describe('protocol permission-roundtrip', () => {
     ]);
   });
 
-  test('returns tool_error when permission_reply uses an unsupported response enum', async () => {
+  test('returns tool_error when invalid permission_reply invoke is rejected before runtime dispatch', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
     });
@@ -220,27 +244,43 @@ describe('protocol permission-roundtrip', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'wl-perm-invalid',
-      action: 'permission_reply',
-      payload: {
-        toolSessionId: 'ses_permission_1',
-        permissionId: 'perm_fixture_1',
-        response: 'allow',
-      },
-    });
-
-    assert.deepStrictEqual(sent, [
-      {
-        type: 'tool_error',
+    runtime.handleInboundFrame(
+      createInvalidInvokeInboundFrame({
+        action: 'permission_reply',
         welinkSessionId: 'wl-perm-invalid',
         toolSessionId: 'ses_permission_1',
-        error: 'Invalid invoke payload shape',
-        reason: undefined,
-      },
-    ]);
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'invalid_field_value',
+            field: 'payload.response',
+            message: 'payload.response is invalid',
+            messageType: 'invoke',
+            action: 'permission_reply',
+            welinkSessionId: 'wl-perm-invalid',
+            toolSessionId: 'ses_permission_1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          welinkSessionId: 'wl-perm-invalid',
+          action: 'permission_reply',
+          payload: {
+            toolSessionId: 'ses_permission_1',
+            permissionId: 'perm_fixture_1',
+            response: 'allow',
+          },
+        },
+      }),
+    );
+
+    assert.strictEqual(sent.length, 1);
+    assertInvalidInvokeToolErrorContract(sent[0], {
+      code: 'invalid_field_value',
+      welinkSessionId: 'wl-perm-invalid',
+      toolSessionId: 'ses_permission_1',
+    });
   });
 });

@@ -28,7 +28,7 @@ describe('bridge runtime status adapter', () => {
       lastReadyAt: null,
     });
 
-    adapter.publishConnectionState('READY');
+    adapter.publishGatewayState('READY');
     const ready = getMessageBridgeStatus();
     assert.strictEqual(ready.connected, true);
     assert.strictEqual(ready.phase, 'ready');
@@ -37,15 +37,16 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(ready.lastError, null);
     assert.strictEqual(typeof ready.lastReadyAt, 'number');
 
-    adapter.publishConnectionState('DISCONNECTED');
+    adapter.publishGatewayState('DISCONNECTED');
     assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 
   test('publishes disabled, config invalid, server failure and plugin failure states', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishDisabled();
+    adapter.publishDisabled('message_bridge_runtime_disabled');
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'disabled');
+    assert.strictEqual(getMessageBridgeStatus().lastError, 'message_bridge_runtime_disabled');
 
     adapter.publishConfigInvalid('invalid config');
     const configInvalid = getMessageBridgeStatus();
@@ -54,7 +55,13 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(configInvalid.willReconnect, false);
     assert.strictEqual(configInvalid.lastError, 'invalid config');
 
-    adapter.publishServerFailure('device_conflict');
+    adapter.publishGatewayError({
+      code: 'GATEWAY_REGISTER_REJECTED',
+      source: 'handshake',
+      phase: 'before_ready',
+      retryable: false,
+      message: 'device_conflict',
+    });
     const rejected = getMessageBridgeStatus();
     assert.strictEqual(rejected.unavailableReason, 'server_failure');
     assert.strictEqual(rejected.willReconnect, false);
@@ -67,81 +74,102 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(failed.lastError, 'startup boom');
   });
 
-  test('publishes server_failure when server closes without reconnect', () => {
+  test('uses gateway-client translator semantics for handshake and transport failures', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishConnectionState('READY');
-    adapter.publishConnectionClosed({
-      opened: true,
-      manuallyDisconnected: false,
-      aborted: false,
-      rejected: true,
-      code: 4403,
-      reason: 'server shutdown',
-      wasClean: true,
-      willReconnect: false,
+    adapter.publishGatewayError({
+      code: 'GATEWAY_PROTOCOL_VIOLATION',
+      source: 'handshake',
+      phase: 'before_ready',
+      retryable: false,
+      message: 'register violated',
     });
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
 
-    const closed = getMessageBridgeStatus();
-    assert.strictEqual(closed.phase, 'unavailable');
-    assert.strictEqual(closed.unavailableReason, 'server_failure');
-    assert.strictEqual(closed.willReconnect, false);
-    assert.strictEqual(closed.lastError, 'server shutdown');
+    adapter.publishGatewayError({
+      code: 'GATEWAY_CONNECT_TIMEOUT',
+      source: 'transport',
+      phase: 'before_open',
+      retryable: true,
+      message: 'timeout',
+    });
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
   });
 
-  test('publishes server_failure when handshake is rejected before open', () => {
+  test('keeps server failure precedence over later network failure', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishConnectionClosed({
-      opened: false,
-      manuallyDisconnected: false,
-      aborted: false,
-      rejected: true,
-      code: 4403,
-      reason: 'auth rejected',
-      wasClean: true,
-      willReconnect: false,
+    adapter.publishGatewayError({
+      code: 'GATEWAY_REGISTER_REJECTED',
+      source: 'handshake',
+      phase: 'before_ready',
+      retryable: false,
+      message: 'auth rejected',
     });
 
-    const closed = getMessageBridgeStatus();
-    assert.strictEqual(closed.phase, 'unavailable');
-    assert.strictEqual(closed.unavailableReason, 'server_failure');
-    assert.strictEqual(closed.willReconnect, false);
-    assert.strictEqual(closed.lastError, 'auth rejected');
+    adapter.publishGatewayError({
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: 'ready',
+      retryable: true,
+      message: 'socket down',
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+    assert.strictEqual(snapshot.lastError, 'auth rejected');
   });
 
-  test('publishes network_failure when connect fails without rejection evidence', () => {
+  test('publishes network failure for transport-side gateway errors', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishConnectFailure('connect timeout');
+    adapter.publishGatewayState('READY');
+    adapter.publishGatewayError({
+      code: 'GATEWAY_UNEXPECTED_CLOSE',
+      source: 'transport',
+      phase: 'ready',
+      retryable: true,
+      message: 'network jitter',
+    });
 
     const failed = getMessageBridgeStatus();
     assert.strictEqual(failed.phase, 'unavailable');
     assert.strictEqual(failed.unavailableReason, 'network_failure');
     assert.strictEqual(failed.willReconnect, false);
-    assert.strictEqual(failed.lastError, 'connect timeout');
+    assert.strictEqual(failed.lastError, 'network jitter');
   });
 
-  test('publishes connecting when connection closes but runtime will reconnect', () => {
+  test('state gate errors do not overwrite current public snapshot', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishConnectionState('READY');
-    adapter.publishConnectionClosed({
-      opened: true,
-      manuallyDisconnected: false,
-      aborted: false,
-      rejected: false,
-      code: 1006,
-      reason: 'network jitter',
-      wasClean: false,
-      willReconnect: true,
+    adapter.publishGatewayState('READY');
+    const ready = getMessageBridgeStatus();
+
+    adapter.publishGatewayError({
+      code: 'GATEWAY_NOT_READY',
+      source: 'state_gate',
+      phase: 'before_ready',
+      retryable: false,
+      message: 'not ready',
     });
 
-    const reconnecting = getMessageBridgeStatus();
-    assert.strictEqual(reconnecting.connected, false);
-    assert.strictEqual(reconnecting.phase, 'connecting');
-    assert.strictEqual(reconnecting.unavailableReason, null);
-    assert.strictEqual(reconnecting.willReconnect, true);
-    assert.strictEqual(reconnecting.lastError, null);
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+  });
+
+  test('protocol diagnostic errors do not overwrite current public snapshot', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishGatewayState('READY');
+    const ready = getMessageBridgeStatus();
+
+    adapter.publishGatewayError({
+      code: 'GATEWAY_PROTOCOL_VIOLATION',
+      source: 'inbound_protocol',
+      phase: 'ready',
+      retryable: false,
+      message: 'unexpected frame',
+    });
+
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 });

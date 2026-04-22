@@ -1,12 +1,14 @@
 import type { OpencodeClient } from '../types/index.js';
 import { hasError } from '../types/sdk.js';
 
+/** child session 到 parent session 的稳定路由映射。 */
 export interface SubagentSessionMapping {
   childSessionId: string;
   parentSessionId: string;
   agentName: string;
 }
 
+/** subagent 映射解析结果；lookup 失败时调用方应按原 session fail-open 转发。 */
 export type SubagentSessionResolution =
   | {
       status: 'mapped';
@@ -37,14 +39,21 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+/**
+ * 维护 OpenCode subagent child -> parent 映射。
+ *
+ * @remarks
+ * `session.created` 是首选来源；缺失控制事件时才懒查询 `session.get()`。
+ * 查询失败不会写负缓存，避免瞬时 SDK 抖动把 child session 永久误判为 root。
+ */
 export class SubagentSessionMapper {
   private readonly childToParent = new Map<string, SubagentSessionMapping>();
   private readonly rootSessions = new Set<string>();
 
   constructor(private readonly source: SessionLookupSource) {}
 
+  /** 记录 `session.created` 控制事件携带的父子关系。 */
   recordSessionCreated(record: SessionCreatedRecord): void {
-    // session.created 能明确告诉我们这是 child 还是 root，优先用它建立稳定缓存，避免后续事件走懒查询。
     if (record.parentSessionId) {
       this.childToParent.set(record.childSessionId, {
         childSessionId: record.childSessionId,
@@ -59,6 +68,7 @@ export class SubagentSessionMapper {
     this.rootSessions.add(record.childSessionId);
   }
 
+  /** 解析 session 是否属于 subagent；失败时返回 `lookup_failed` 交由 runtime fail-open。 */
   async resolve(sessionId: string): Promise<SubagentSessionResolution> {
     const cached = this.childToParent.get(sessionId);
     if (cached) {
@@ -96,7 +106,6 @@ export class SubagentSessionMapper {
 
       const parentSessionId = asNonEmptyString(session.parentID);
       if (!parentSessionId) {
-        // 只有在官方 session.get 成功且明确不存在 parentID 时，才把它负缓存为 root session。
         this.rootSessions.add(sessionId);
         return { status: 'root' };
       }
@@ -120,6 +129,7 @@ export class SubagentSessionMapper {
     }
   }
 
+  /** 清空全部缓存，供生命周期重置或测试使用。 */
   clear(): void {
     this.childToParent.clear();
     this.rootSessions.clear();

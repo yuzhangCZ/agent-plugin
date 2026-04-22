@@ -23,6 +23,6 @@ const plugin: {
 export default plugin;
 export { messageBridgePlugin };
 export * from "./OpenClawGatewayBridge.js";
-export * from "./protocol/downstream.js";
+export * from "./gateway-wire/index.js";
 export * from "./config.js";
 export * from "./runtime/RegisterMetadata.js";

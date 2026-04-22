@@ -65,6 +65,26 @@ describe('downstream message normalizer', () => {
     });
   });
 
+  test('rejects create_session without welinkSessionId via shared schema and logs once', () => {
+    const { logger, entries } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'create_session',
+        payload: {
+          title: 'missing session',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.error.code, 'missing_required_field');
+    assert.strictEqual(result.error.field, 'welinkSessionId');
+    assert.strictEqual(entries.length, 1);
+    assert.strictEqual(entries[0].message, 'downstream.normalization_failed');
+  });
+
   test('normalizes optional assistantId for chat and create_session payloads', () => {
     const { logger } = createLogger();
     const chatResult = normalizeDownstreamMessage(
@@ -105,47 +125,6 @@ describe('downstream message normalizer', () => {
     assert.deepStrictEqual(createResult.value.payload, {
       title: 'assistant session',
       assistantId: 'persona-b',
-    });
-  });
-
-  test('ignores legacy assiantId payload values without failing normalization', () => {
-    const { logger } = createLogger();
-    const chatResult = normalizeDownstreamMessage(
-      {
-        type: 'invoke',
-        welinkSessionId: 'skill-legacy-chat',
-        action: 'chat',
-        payload: {
-          toolSessionId: 'tool-legacy-chat',
-          text: 'hello',
-          assiantId: 'persona-a',
-        },
-      },
-      logger,
-    );
-
-    assert.strictEqual(chatResult.ok, true);
-    assert.deepStrictEqual(chatResult.value.payload, {
-      toolSessionId: 'tool-legacy-chat',
-      text: 'hello',
-    });
-
-    const createResult = normalizeDownstreamMessage(
-      {
-        type: 'invoke',
-        welinkSessionId: 'skill-legacy-create',
-        action: 'create_session',
-        payload: {
-          title: 'legacy session',
-          assiantId: 'persona-b',
-        },
-      },
-      logger,
-    );
-
-    assert.strictEqual(createResult.ok, true);
-    assert.deepStrictEqual(createResult.value.payload, {
-      title: 'legacy session',
     });
   });
 
@@ -193,9 +172,8 @@ describe('downstream message normalizer', () => {
     );
 
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.error.code, 'missing_required_field');
+    assert.strictEqual(result.error.code, 'unsupported_action');
     assert.strictEqual(result.error.messageType, 'invoke');
-    assert.strictEqual(result.error.welinkSessionId, '42');
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].message, 'downstream.normalization_failed');
   });
@@ -331,7 +309,6 @@ describe('downstream message normalizer', () => {
     assert.strictEqual(result.error.code, 'missing_required_field');
     assert.strictEqual(result.error.action, 'create_session');
     assert.strictEqual(result.error.field, 'welinkSessionId');
-    assert.strictEqual(result.error.welinkSessionId, '   ');
   });
 
   test('normalizes create_session title payload and drops empty title', () => {

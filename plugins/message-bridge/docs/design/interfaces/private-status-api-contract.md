@@ -1,70 +1,173 @@
-# 私有状态 API 契约
+# 私有 Runtime API 契约
 
-**Version:** 1.2  
-**Date:** 2026-04-03  
-**Status:** Active  
-**Owner:** message-bridge maintainers  
-**Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./protocol-contract.md`, `../../operations/opencode-integration-guide.md`
+**Version:** 1.1
+**Date:** 2026-04-22
+**Status:** Active
+**Owner:** message-bridge maintainers
+**Related:** `./protocol-contract.md`, `../../product/prd.md`, `../../architecture/overview.md`
 
-## 1. 背景
+## In Scope
 
-`message-bridge` 当前补充了一套**插件私有**连接状态 API，供与 OpenCode 同进程集成的宿主读取插件连接状态，并在 UI 中提示“连接中 / 已连接 / 不可用”。
+- 私有 Runtime API 的同进程宿主访问方式
+- `startMessageBridgeRuntime()` 的控制契约
+- `stopMessageBridgeRuntime()` 的控制契约
+- `getMessageBridgeStatus()` 的读取契约
+- `subscribeMessageBridgeStatus()` 的订阅契约
+- `MessageBridgeStatusSnapshot` 字段与公开语义
 
-该接口有两个边界必须保持稳定：
+## Out of Scope
 
-1. 它不属于 `ai-gateway` 外部协议，不替代 `status_query -> status_response`
-2. 它不定义宿主通用能力，只描述 `message-bridge` 当前实现暴露的私有读取面
+- `gateway-client` 内部状态机实现细节
+- `BridgeRuntimeStatusAdapter` 的内部输入类型
+- 动态 hooks 的内部实现细节
+- 服务端状态聚合逻辑
+- gateway wire 协议扩展
 
-因此，本文件描述的是**插件进程内私有接口契约**，不是 gateway 协议契约。
+## External Dependencies
 
-## 2. In Scope
+- `@agent-plugin/gateway-client` 提供连接状态与错误事实
+- `@agent-plugin/gateway-client` 保证启动期 `connect()` reject 的失败已进入 `error` 事件流，且二者语义一致
+- 宿主 `app.log()` 提供可选状态 API 日志出口
 
-- 定义 `message-bridge` 私有状态 API 的导出函数
-- 定义状态快照字段、默认值与不变量
-- 定义 runtime 内部状态到状态快照的映射语义
-- 定义集成方读取该状态 API 的使用方式
+## 概述
 
-## 3. Out of Scope
+私有 Runtime API 面向同进程宿主调用方，用于控制 `message-bridge` runtime 的启动、停止，并读取或订阅 runtime 状态。
 
-- 不修改 `status_query` / `status_response` 的协议语义
-- 不定义跨插件共享的宿主状态中心
-- 不定义跨进程共享、持久化或远程查询状态的机制
-- 不改服务端业务逻辑或 gateway 关闭连接的判定规则
+这组接口分成两类：
 
-## 4. External Dependencies
+- 控制接口：启动或停止 runtime
+- 状态接口：读取当前状态或订阅状态变化
 
-- OpenCode 与 `message-bridge` 必须运行在同一进程，宿主才能直接读取该 API
-- gateway 是否重连、何时断开，仍由现有连接层与服务端行为共同决定
-- 幂等与一致性仍由服务端负责；本 API 只反映本地 runtime 当前观测到的状态
+插件模块的运行时导出面只保留插件入口：
 
-## 5. 对外导出
+- `default export MessageBridgePlugin`
+- `named export MessageBridgePlugin`
 
-当前插件模块新增以下命名导出：
+## 快速接入
+
+`src/index.ts` 被 import 时会注册 `globalThis.__MB_RUNTIME_API__`。宿主应从该全局对象读取私有 Runtime API。
+
+```ts
+interface MessageBridgeRuntimeApi {
+  getMessageBridgeStatus(): MessageBridgeStatusSnapshot;
+  subscribeMessageBridgeStatus(
+    listener: (snapshot: MessageBridgeStatusSnapshot) => void,
+  ): () => void;
+  startMessageBridgeRuntime(): Promise<void>;
+  stopMessageBridgeRuntime(): void;
+}
+```
+
+最小调用示例：
+
+```ts
+const runtimeApi = globalThis.__MB_RUNTIME_API__;
+
+await runtimeApi.startMessageBridgeRuntime();
+const snapshot = runtimeApi.getMessageBridgeStatus();
+```
+
+推荐调用顺序：
+
+1. 先调用 `MessageBridgePlugin(input)` 完成插件加载。
+2. 需要展示当前状态时，调用 `getMessageBridgeStatus()` 或 `subscribeMessageBridgeStatus()`。
+3. 需要显式恢复或重新启动时，调用 `startMessageBridgeRuntime()`。
+4. 需要显式停止时，调用 `stopMessageBridgeRuntime()`。
+
+注意事项：
+
+- `startMessageBridgeRuntime()` 只能在插件已加载后调用。
+- `stopMessageBridgeRuntime()` 可在任意时机幂等调用。
+- 旧的 private API named export 不再是受支持的访问方式，避免宿主 loader 枚举模块导出时误将私有函数当作插件入口执行。
+
+## API Reference
+
+### `startMessageBridgeRuntime()`
+
+```ts
+function startMessageBridgeRuntime(): Promise<void>;
+```
+
+用途：
+
+- 使用插件最近一次加载时提供的上下文显式启动或重启 runtime。
+
+调用语义：
+
+- 无参接口。
+- 若插件尚未加载过，则 Promise reject。
+- 每次显式调用都视为新的启动请求。
+- 若当前 runtime 已在运行或仍在启动，本次调用会先终止上一轮生命周期，再启动新一轮 runtime。
+- Promise resolve 表示本次启动请求已将 runtime 带到 `ready`。
+- Promise reject 表示本次启动请求未能进入 `ready`。
+
+失败处理：
+
+- 对外 reject 的错误必须带可读 `message`。
+- reject error 只用于即时失败提示，不作为稳定分类模型。
+- 调用方需要稳定失败分类或展示当前失败状态时，应读取 `getMessageBridgeStatus()`。
+- 启动成功后，后续连接状态变化仍应通过 `subscribeMessageBridgeStatus()` 观察。
+
+### `stopMessageBridgeRuntime()`
+
+```ts
+function stopMessageBridgeRuntime(): void;
+```
+
+用途：
+
+- 显式停止当前 runtime。
+
+调用语义：
+
+- 同步 stop。
+- 若当前存在连接或启动流程，会被立即停止。
+- 无 runtime 时允许幂等调用。
+- 调用后状态重置为默认 `not_ready`。
+- 调用后插件不会自动恢复 runtime；只有再次显式调用 `startMessageBridgeRuntime()` 才能恢复。
+
+### `getMessageBridgeStatus()`
 
 ```ts
 function getMessageBridgeStatus(): MessageBridgeStatusSnapshot;
+```
 
+用途：
+
+- 读取当前最新完整状态快照。
+
+调用语义：
+
+- 不抛异常。
+- 返回快照副本。
+- `startMessageBridgeRuntime()` 失败后，调用方应优先通过该接口判断稳定失败类别。
+
+### `subscribeMessageBridgeStatus(listener)`
+
+```ts
 function subscribeMessageBridgeStatus(
   listener: (snapshot: MessageBridgeStatusSnapshot) => void,
 ): () => void;
 ```
 
-说明：
+用途：
 
-- `getMessageBridgeStatus()` 返回当前最新快照，不抛异常
-- `subscribeMessageBridgeStatus()` 返回取消订阅函数
-- 若状态语义没有变化，订阅者不会收到重复通知
-- 对于一次建链失败或一次连接关闭，状态发布会尽量收敛为一次最终可消费的状态变化，不对外暴露仅用于内部拼装原因的临时中间态
-- 这两个接口的调用与状态变化会输出 `status_api.*` 日志，便于宿主排障
+- 订阅 runtime 状态的语义变化。
 
-## 6. 状态模型
+调用语义：
 
-### 6.1 类型定义
+- 监听器接收当前完整快照。
+- 返回取消订阅函数。
+- 订阅只接收语义变化后的快照。
+- 若仅 `updatedAt` 变化、其余语义字段不变，则不重复通知。
+- 监听器抛错不会中断其他监听器。
+
+## 状态快照
 
 ```ts
-type MessageBridgePhase = 'connecting' | 'ready' | 'unavailable';
+export type MessageBridgePhase = 'connecting' | 'ready' | 'unavailable';
 
-type MessageBridgeUnavailableReason =
+export type MessageBridgeUnavailableReason =
   | 'not_ready'
   | 'disabled'
   | 'config_invalid'
@@ -72,7 +175,7 @@ type MessageBridgeUnavailableReason =
   | 'server_failure'
   | 'network_failure';
 
-interface MessageBridgeStatusSnapshot {
+export interface MessageBridgeStatusSnapshot {
   connected: boolean;
   phase: MessageBridgePhase;
   unavailableReason: MessageBridgeUnavailableReason | null;
@@ -83,138 +186,74 @@ interface MessageBridgeStatusSnapshot {
 }
 ```
 
-### 6.2 字段说明
+字段语义：
 
-| 字段 | 类型 | 默认值 | 可配置 | 说明 |
-|---|---|---|---|---|
-| `connected` | `boolean` | `false` | 否 | 当前是否已经完成 gateway `READY` |
-| `phase` | `'connecting' \| 'ready' \| 'unavailable'` | `'unavailable'` | 否 | 对 UI 暴露的主状态分类 |
-| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | `'not_ready'` | 否 | 当前不可用时的原因；非 `unavailable` 状态为 `null` |
-| `willReconnect` | `boolean \| null` | `false` | 否 | 当前状态下是否会自动恢复；`ready` 为 `null` |
-| `lastError` | `string \| null` | `null` | 否 | 最近一次可诊断错误文案 |
-| `updatedAt` | `number` | `Date.now()` | 否 | 最近一次语义变化时间戳，单位毫秒 |
-| `lastReadyAt` | `number \| null` | `null` | 否 | 最近一次进入 `ready` 的时间戳，单位毫秒 |
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `connected` | `boolean` | 当前是否已进入 bridge 对外可用的 ready 态 |
+| `phase` | `connecting \| ready \| unavailable` | 公开连接阶段 |
+| `unavailableReason` | `MessageBridgeUnavailableReason \| null` | 仅 `phase='unavailable'` 时存在 |
+| `willReconnect` | `boolean \| null` | `connecting` 时为 `true`，`ready` 时为 `null`，`unavailable` 时为 `false` |
+| `lastError` | `string \| null` | 最近一次不可用原因对应的公开错误文本 |
+| `updatedAt` | `number` | 当前快照发布时间戳，单位毫秒 |
+| `lastReadyAt` | `number \| null` | 最近一次进入 `ready` 的时间戳 |
 
-### 6.3 状态不变量
+状态组合约束：
 
-- `phase='ready'` 时：
-  - `connected=true`
-  - `unavailableReason=null`
-  - `willReconnect=null`
-- `phase='connecting'` 时：
-  - `connected=false`
-  - `unavailableReason=null`
-  - `willReconnect=true`
-- `phase='unavailable'` 时：
-  - `connected=false`
-  - `unavailableReason!=null`
-  - `willReconnect=false`
-
-连接成功的唯一判定为：**gateway 进入 `READY`，即收到 `register_ok`**。
-
-## 7. 状态映射规则
-
-| 运行时场景 | `phase` | `unavailableReason` | `willReconnect` | 说明 |
-|---|---|---|---|---|
-| runtime 尚未创建 | `unavailable` | `not_ready` | `false` | 默认初始态 |
-| 配置显式禁用 | `unavailable` | `disabled` | `false` | `enabled=false` |
-| 配置解析或校验失败 | `unavailable` | `config_invalid` | `false` | 启动前失败 |
-| 首次连接或自动重连中 | `connecting` | `null` | `true` | 尚未进入 `READY` |
-| 收到 `register_ok` | `ready` | `null` | `null` | 唯一可视为已连接的状态 |
-| 运行中断连且不会重连 | `unavailable` | `network_failure` 或 `server_failure` | `false` | 直接发布最终不可用状态；取决于是否存在明确拒绝证据 |
-| register 被拒绝 | `unavailable` | `server_failure` | `false` | `register_rejected` 场景 |
-| 启动流程抛错 | `unavailable` | `plugin_failure` | `false` | runtime 启动失败 |
-
-关闭路径补充约束：
-
-- 当连接关闭后 runtime 仍会自动重连时，订阅方应直接收到 `connecting`
-- 当连接关闭后 runtime 明确不会自动重连时，订阅方应直接收到最终 `unavailable`
-- 连接关闭链路不应先对外发布一个临时 `network_failure`，再补发 `connecting` 或 `server_failure`
-
-## 8. 为什么需要 `willReconnect`
-
-如果只保留 `unavailableReason`，则下面两类状态无法稳定区分：
-
-- 当前已经断开，但 runtime 仍会自动重连
-- 当前已经断开，且 runtime 明确不会重连
-
-若把这两层语义都压进 `reason`，枚举会膨胀成：
-
-- `network_failure_reconnecting`
-- `server_failure_no_reconnect`
-- `server_rejected_no_reconnect`
-
-这会让一个字段同时承担“原因”和“后续动作”两个职责。  
-当前实现将其拆分为：
-
-- `unavailableReason`：为什么不可用
-- `willReconnect`：后续是否自动恢复
-
-## 9. 服务端主动断开示例
-
-当出现“服务端主动断开，且当前不会重连”时，状态快照应为：
-
-```json
-{
-  "connected": false,
-  "phase": "unavailable",
-  "unavailableReason": "server_failure",
-  "willReconnect": false,
-  "lastError": "gateway closed the connection",
-  "updatedAt": 1711814400000,
-  "lastReadyAt": 1711814300000
-}
-```
-
-如果运行时判断当前断连后会自动恢复，则状态应为：
-
-```json
-{
-  "connected": false,
-  "phase": "connecting",
-  "unavailableReason": null,
-  "willReconnect": true,
-  "lastError": null,
-  "updatedAt": 1711814400000,
-  "lastReadyAt": 1711814300000
-}
-```
-
-## 10. 与 `status_query` 的关系
-
-两者的职责完全不同：
-
-| 能力 | 作用域 | 读取方式 | 主要用途 |
+| `phase` | `connected` | `unavailableReason` | `willReconnect` |
 |---|---|---|---|
-| `status_query -> status_response` | gateway 外部协议 | 远端报文交互 | 查询 OpenCode 在线状态 |
-| 私有状态 API | 插件进程内私有接口 | 本地函数调用与订阅 | 查询 bridge 连接状态并驱动宿主 UI |
+| `ready` | `true` | `null` | `null` |
+| `connecting` | `false` | `null` | `true` |
+| `unavailable` | `false` | 非空 | `false` |
 
-兼容约束：
+推荐展示方式：
 
-- `status_response` 仍只承诺 `opencodeOnline:boolean`
-- 私有状态 API 不得向 gateway 透出 `unavailableReason`、`willReconnect` 等字段
+- 判断 bridge 是否可用时优先使用 `connected`。
+- 展示当前阶段时使用 `phase`。
+- 展示稳定失败分类时使用 `unavailableReason`。
+- 展示即时错误文本时使用 `lastError`。
 
-## 11. 集成示例
+## 失败处理建议
 
-```js
-import {
-  getMessageBridgeStatus,
-  subscribeMessageBridgeStatus,
-} from '@wecode/skill-opencode-plugin';
+`startMessageBridgeRuntime()` 的 reject error 只用于即时提示。调用方需要稳定分类时，应读取状态快照中的 `phase`、`unavailableReason` 和 `lastError`。
 
-const initialSnapshot = getMessageBridgeStatus();
-console.log(initialSnapshot.phase);
+不可用原因语义：
 
-const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
-  console.log(snapshot.phase, snapshot.unavailableReason, snapshot.willReconnect);
-});
+| 值 | 说明 |
+|---|---|
+| `not_ready` | 默认初始态或显式 reset 后的基线态 |
+| `disabled` | 当前配置禁用了 runtime；`startMessageBridgeRuntime()` 会 reject，hooks 保持可调用但不转发事件 |
+| `config_invalid` | 配置加载或校验失败 |
+| `plugin_failure` | 进入稳定连接生命周期前的非配置类内部失败 |
+| `server_failure` | 服务端拒绝、握手拒绝或明确服务端失败 |
+| `network_failure` | transport 超时、socket 错误、异常 close、连接失败 |
 
-// 需要停止监听时调用
-unsubscribe();
-```
+补充规则：
 
-使用约束：
+- `not_ready` 只用于默认初始态和显式 reset 后。
+- 运行中失败不会回落为 `not_ready`。
+- `server_failure` 优先级高于后续 `network_failure`。
 
-- 仅适用于与插件运行在同一进程内的集成方式
-- 不应把该私有 API 误当作跨插件通用接口
-- 若需要跨进程或跨宿主统一状态接口，应单独立项设计
+## 生命周期语义
+
+`MessageBridgePlugin(input)` 仍是宿主标准加载入口。对宿主可依赖的行为如下：
+
+- 插件加载时会尝试一次自动启动。
+- 若当前 runtime 已在运行或仍在启动，再次加载不会额外创建第二个 runtime。
+- 插件加载失败后，后续仍可通过 `startMessageBridgeRuntime()` 显式恢复。
+- 插件加载返回的 hooks 在插件生命周期内保持稳定。
+- 当 runtime 未启动或不可用时，hooks 收到的事件会被忽略。
+- 当 runtime 正在启动但尚未进入 `ready` 时，hooks 收到的事件也会被忽略。
+- hooks 不会因为收到事件而隐式启动 runtime。
+- 当后续显式 `startMessageBridgeRuntime()` 成功后，同一份 hooks 会恢复事件转发能力。
+- `stopMessageBridgeRuntime()` 调用后，插件不会自动恢复；如需恢复，必须再次显式调用 `startMessageBridgeRuntime()`。
+
+## 调用方检查清单
+
+- [ ] 通过 `globalThis.__MB_RUNTIME_API__` 获取私有 Runtime API。
+- [ ] 不依赖 private API named export。
+- [ ] 在调用 `startMessageBridgeRuntime()` 前，已至少完成一次 `MessageBridgePlugin(input)` 加载。
+- [ ] 将 `startMessageBridgeRuntime()` 的 reject error 仅用于即时提示。
+- [ ] 使用 `getMessageBridgeStatus()` 或 `subscribeMessageBridgeStatus()` 读取稳定状态。
+- [ ] 使用 `unavailableReason` 做失败分类，使用 `lastError` 做用户可见错误文本。
+- [ ] 显式 stop 后，如需恢复，重新调用 `startMessageBridgeRuntime()`。

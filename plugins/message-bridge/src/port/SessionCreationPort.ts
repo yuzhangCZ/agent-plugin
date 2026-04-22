@@ -5,6 +5,6 @@ export interface SessionCreationPort {
   createSession(parameters: {
     title?: string;
     directory?: string;
-    permission?: Array<Record<string, unknown>>
+    permission?: Array<Record<string, unknown>>;
   }): Promise<ActionResult<CreateSessionResultData>>;
 }

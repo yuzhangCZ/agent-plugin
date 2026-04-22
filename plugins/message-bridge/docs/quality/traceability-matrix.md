@@ -39,7 +39,6 @@
 | `session.error` | same | same |
 | `permission.updated` | same | same |
 | `permission.asked` | same | same |
-| `permission.replied` | same | same |
 | `question.asked` | same | same |
 
 ## 4. Verification Mapping
@@ -69,7 +68,6 @@
 | `session.error` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
 | `permission.updated` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
 | `permission.asked` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
-| `permission.replied` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
 | `question.asked` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` | Passes through unchanged |
 
 ## 6. PRD Alignment Addendum

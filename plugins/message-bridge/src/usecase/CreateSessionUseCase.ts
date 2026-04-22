@@ -17,6 +17,21 @@ export interface PreparedCreateSession extends ResolvedCreateSessionDirectory {
   resolvedDirectorySource: ResolvedCreateSessionDirectory['source'];
 }
 
+const IM_GROUP_DENY_PERMISSIONS = [
+  'bash',
+  'read',
+  'glob',
+  'grep',
+  'edit',
+  'write',
+  'task',
+  'webfetch',
+  'myAgentWebFetch',
+  'meeting*',
+  'knowledge*',
+  'playwright*',
+] as const;
+
 export class CreateSessionUseCase {
   constructor(
     private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase,
@@ -37,26 +52,17 @@ export class CreateSessionUseCase {
     };
   }
 
+  /** IM 群会话默认收紧高风险工具权限；非 IM 群保持不传 permission 字段。 */
   resolvePermission(input: CreateSessionUseCaseInput): Array<Record<string, unknown>> | undefined {
-    const isIMGroup = input.payload.title?.match(/^im-group/);
-    if (!isIMGroup) {
+    if (!input.payload.title?.match(/^im-group/)) {
       return undefined;
     }
 
-    return [
-      { "permission": "bash", "pattern": "*", "action": "deny" },
-      { "permission": "read", "pattern": "*", "action": "deny" },
-      { "permission": "glob", "pattern": "*", "action": "deny" },
-      { "permission": "grep", "pattern": "*", "action": "deny" },
-      { "permission": "edit", "pattern": "*", "action": "deny" },
-      { "permission": "write", "pattern": "*", "action": "deny" },
-      { "permission": "task", "pattern": "*", "action": "deny" },
-      { "permission": "webfetch", "pattern": "*", "action": "deny" },
-      { "permission": "myAgentWebFetch", "pattern": "*", "action": "deny" },
-      { "permission": "meeting*", "pattern": "*", "action": "deny" },
-      { "permission": "knowledge*", "pattern": "*", "action": "deny" },
-      { "permission": "playwright*", "pattern": "*", "action": "deny" },
-    ];
+    return IM_GROUP_DENY_PERMISSIONS.map((permission) => ({
+      permission,
+      pattern: '*',
+      action: 'deny',
+    }));
   }
 
   async execute(

@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os, { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  assertInvalidInvokeToolErrorContract,
+  createInvalidInvokeInboundFrame,
+} from '@agent-plugin/test-support/assertions';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import {
@@ -11,6 +15,7 @@ import {
   subscribeMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient(overrides = {}) {
   const base = {
@@ -161,8 +166,53 @@ function createRegisterCaptureWebSocket() {
   };
 }
 
+function createGatewayConnectionMock(state = 'DISCONNECTED') {
+  let currentState = state;
+  return {
+    send: () => undefined,
+    disconnect: () => undefined,
+    getState: () => currentState,
+    getStatus: () => ({
+      isReady: () => currentState === 'READY',
+    }),
+    setState: (next) => {
+      currentState = next;
+    },
+    on: () => undefined,
+  };
+}
+
+function createEventedGatewayConnectionMock(state = 'READY') {
+  let currentState = state;
+  const listeners = new Map();
+  const sent = [];
+  return {
+    sent,
+    send: (message) => sent.push(message),
+    disconnect: () => undefined,
+    connect: async () => undefined,
+    getState: () => currentState,
+    getStatus: () => ({
+      isReady: () => currentState === 'READY',
+    }),
+    setState: (next) => {
+      currentState = next;
+    },
+    on: (event, listener) => {
+      const current = listeners.get(event) ?? [];
+      current.push(listener);
+      listeners.set(event, current);
+    },
+    emit: (event, payload) => {
+      for (const listener of listeners.get(event) ?? []) {
+        listener(payload);
+      }
+    },
+  };
+}
+
 describe('runtime protocol strictness', () => {
-  test('status api defaults to unavailable and not_ready before runtime start', () => {
+  test('status api starts from not_ready baseline', () => {
     __resetMessageBridgeStatusForTests();
 
     assert.deepStrictEqual(getMessageBridgeStatus(), {
@@ -176,20 +226,24 @@ describe('runtime protocol strictness', () => {
     });
   });
 
-  test('start publishes disabled when config disables bridge', async () => {
+  test('start publishes disabled snapshot when config disables runtime', async () => {
     __resetMessageBridgeStatusForTests();
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
 
-    await runtime.start();
+    let rejection;
+    await assert.rejects(runtime.start(), (error) => {
+      rejection = error;
+      return true;
+    });
 
     const snapshot = getMessageBridgeStatus();
-    assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
     assert.strictEqual(snapshot.unavailableReason, 'disabled');
-    assert.strictEqual(snapshot.willReconnect, false);
+    assert.strictEqual(snapshot.lastError, 'message_bridge_runtime_disabled');
+    assert.strictEqual(rejection.message, snapshot.lastError);
   });
 
-  test('start publishes config_invalid when config resolution fails', async () => {
+  test('start publishes config_invalid snapshot when config loading fails', async () => {
     __resetMessageBridgeStatusForTests();
     const runtime = new (class extends BridgeRuntime {
       async resolveConfig() {
@@ -202,26 +256,17 @@ describe('runtime protocol strictness', () => {
     await assert.rejects(runtime.start(), /broken config/);
 
     const snapshot = getMessageBridgeStatus();
-    assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
     assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
-    assert.strictEqual(snapshot.willReconnect, false);
     assert.strictEqual(snapshot.lastError, 'broken config');
   });
 
-  test('start publishes plugin_failure when startup prerequisites fail', async () => {
+  test('start publishes plugin_failure snapshot when startup prerequisites fail', async () => {
     __resetMessageBridgeStatusForTests();
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
       client: createRuntimeClient({
-        global: undefined,
         _client: {
-          get: async (options) => {
-            if (options?.url === '/global/health') {
-              throw new Error('startup boom');
-            }
-            return { data: [] };
-          },
-          post: async () => ({ data: undefined }),
+          get: async () => ({ data: { healthy: true } }),
         },
       }),
     });
@@ -229,246 +274,423 @@ describe('runtime protocol strictness', () => {
     await assert.rejects(runtime.start());
 
     const snapshot = getMessageBridgeStatus();
-    assert.strictEqual(snapshot.connected, false);
     assert.strictEqual(snapshot.phase, 'unavailable');
     assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
-    assert.strictEqual(snapshot.willReconnect, false);
-    assert.strictEqual(snapshot.lastError, 'OpenCode global.health check failed during startup');
+    assert.strictEqual(typeof snapshot.lastError, 'string');
   });
 
-  test('start publishes server_failure when gateway closes and will not reconnect', async () => {
+  test('start and stop publish connecting ready and reset snapshots', async () => {
     __resetMessageBridgeStatusForTests();
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'CONNECTING');
+      connection.emit('stateChange', 'READY');
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
     const seen = [];
     const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
-      seen.push({
-        phase: snapshot.phase,
-        unavailableReason: snapshot.unavailableReason,
-        lastError: snapshot.lastError,
-      });
+      seen.push(snapshot.phase);
     });
-    const originalWebSocket = globalThis.WebSocket;
-    class RejectedCloseWebSocket {
-      static OPEN = 1;
 
-      constructor() {
-        this.readyState = 0;
-        setTimeout(() => {
-          this.readyState = RejectedCloseWebSocket.OPEN;
-          this.onopen?.();
-          setTimeout(() => {
-            this.readyState = 3;
-            this.onclose?.({ code: 4403, reason: 'server closed', wasClean: true });
-          }, 0);
-        }, 0);
-      }
+    await runtime.start();
+    assert.strictEqual(getMessageBridgeStatus().phase, 'ready');
 
-      send() {}
+    runtime.stop();
+    unsubscribe();
 
-      close() {
-        this.readyState = 3;
-      }
-    }
-
-    globalThis.WebSocket = RejectedCloseWebSocket;
-
-    try {
-      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
-
-      await runtime.start();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const snapshot = getMessageBridgeStatus();
-      assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
-      assert.strictEqual(snapshot.willReconnect, false);
-      assert.strictEqual(snapshot.lastError, 'server closed');
-      assert.deepStrictEqual(seen, [
-        {
-          phase: 'connecting',
-          unavailableReason: null,
-          lastError: null,
-        },
-        {
-          phase: 'unavailable',
-          unavailableReason: 'server_failure',
-          lastError: 'server closed',
-        },
-      ]);
-    } finally {
-      unsubscribe();
-      globalThis.WebSocket = originalWebSocket;
-    }
+    assert.ok(seen.includes('connecting'));
+    assert.ok(seen.includes('ready'));
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'not_ready');
   });
 
-  test('start keeps server_failure when close follows rejection', async () => {
+  test('gateway error fact publishes server failure and keeps precedence over later network failure', async () => {
     __resetMessageBridgeStatusForTests();
-    const originalWebSocket = globalThis.WebSocket;
-    class RegisterRejectedWebSocket {
-      static OPEN = 1;
-
-      constructor() {
-        this.readyState = 0;
-        setTimeout(() => {
-          this.readyState = RegisterRejectedWebSocket.OPEN;
-          this.onopen?.();
-          setTimeout(() => {
-            this.onmessage?.({
-              data: JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }),
-            });
-          }, 0);
-        }, 0);
-      }
-
-      send() {}
-
-      close() {
-        this.readyState = 3;
-        this.onclose?.({ code: 4403, reason: 'device_conflict', wasClean: true });
-      }
-    }
-
-    globalThis.WebSocket = RegisterRejectedWebSocket;
-
-    try {
-      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
-
-      await runtime.start();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const snapshot = getMessageBridgeStatus();
-      assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
-      assert.strictEqual(snapshot.willReconnect, false);
-      assert.strictEqual(snapshot.lastError, 'device_conflict');
-    } finally {
-      globalThis.WebSocket = originalWebSocket;
-    }
-  });
-
-  test('start publishes network_failure when connect fails without rejection evidence', async () => {
-    __resetMessageBridgeStatusForTests();
-    const originalWebSocket = globalThis.WebSocket;
-    class FailingHandshakeWebSocket {
-      constructor() {
-        setTimeout(() => {
-          this.onclose?.({ code: 1006, reason: 'connect timeout', wasClean: false });
-        }, 0);
-      }
-
-      send() {}
-
-      close() {}
-    }
-
-    globalThis.WebSocket = FailingHandshakeWebSocket;
-
-    try {
-      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
-
-      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
-
-      const snapshot = getMessageBridgeStatus();
-      assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'network_failure');
-      assert.strictEqual(snapshot.willReconnect, false);
-      assert.strictEqual(snapshot.lastError, 'gateway_websocket_closed_before_open');
-    } finally {
-      globalThis.WebSocket = originalWebSocket;
-    }
-  });
-
-  test('start publishes connecting once when gateway closes and will reconnect', async () => {
-    __resetMessageBridgeStatusForTests();
-    const seen = [];
-    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
-      seen.push({
-        phase: snapshot.phase,
-        unavailableReason: snapshot.unavailableReason,
-        lastError: snapshot.lastError,
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'READY');
+      connection.emit('error', {
+        code: 'GATEWAY_REGISTER_REJECTED',
+        source: 'handshake',
+        phase: 'before_ready',
+        retryable: false,
+        message: 'device conflict',
       });
-    });
-    const originalWebSocket = globalThis.WebSocket;
-    class ReconnectingCloseWebSocket {
-      static OPEN = 1;
+      connection.emit('error', {
+        code: 'GATEWAY_WEBSOCKET_ERROR',
+        source: 'transport',
+        phase: 'ready',
+        retryable: true,
+        message: 'network jitter',
+      });
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
 
-      constructor() {
-        this.readyState = 0;
-        setTimeout(() => {
-          this.readyState = ReconnectingCloseWebSocket.OPEN;
-          this.onopen?.();
-          setTimeout(() => {
-            this.readyState = 3;
-            this.onclose?.({ code: 1006, reason: 'network jitter', wasClean: false });
-          }, 0);
-        }, 0);
-      }
+    await runtime.start();
 
-      send() {}
-
-      close() {
-        this.readyState = 3;
-      }
-    }
-
-    globalThis.WebSocket = ReconnectingCloseWebSocket;
-
-    let runtime = null;
-    try {
-      runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
-
-      await runtime.start();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const snapshot = getMessageBridgeStatus();
-      assert.strictEqual(snapshot.phase, 'connecting');
-      assert.strictEqual(snapshot.unavailableReason, null);
-      assert.strictEqual(snapshot.willReconnect, true);
-      assert.strictEqual(snapshot.lastError, null);
-      assert.deepStrictEqual(seen, [
-        {
-          phase: 'connecting',
-          unavailableReason: null,
-          lastError: null,
-        },
-      ]);
-    } finally {
-      runtime?.stop();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      unsubscribe();
-      globalThis.WebSocket = originalWebSocket;
-    }
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+    assert.strictEqual(snapshot.lastError, 'device conflict');
   });
 
-  test('start publishes server_failure when handshake closes with rejection evidence before open', async () => {
+  test('connect rejection reuses emitted error semantics for network failure', async () => {
     __resetMessageBridgeStatusForTests();
-    const originalWebSocket = globalThis.WebSocket;
-    class RejectedHandshakeWebSocket {
-      constructor() {
-        setTimeout(() => {
-          this.onclose?.({ code: 4403, reason: 'auth rejected', wasClean: true });
-        }, 0);
-      }
+    const emittedError = {
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: 'before_ready',
+      retryable: true,
+      message: 'socket down',
+    };
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'CONNECTING');
+      connection.emit('error', emittedError);
+      throw Object.assign(new Error('socket down'), emittedError);
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
 
-      send() {}
+    let rejection;
+    await assert.rejects(runtime.start(), (error) => {
+      rejection = error;
+      return true;
+    });
 
-      close() {}
-    }
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+    assert.strictEqual(snapshot.lastError, 'socket down');
+    assert.strictEqual(rejection.message, snapshot.lastError);
+  });
 
-    globalThis.WebSocket = RejectedHandshakeWebSocket;
+  test('start wires invalid invoke inbound frames to tool_error best-effort reply', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
 
-    try {
-      const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    await runtime.start();
+    connection.emit('inbound', createInvalidInvokeInboundFrame());
+    await new Promise((resolve) => setImmediate(resolve));
 
-      await assert.rejects(runtime.start(), /gateway_websocket_closed_before_open/);
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: 'wl-invalid-1',
+      toolSessionId: 'tool-invalid-1',
+    });
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.replying_tool_error'),
+      true,
+    );
 
-      const snapshot = getMessageBridgeStatus();
-      assert.strictEqual(snapshot.phase, 'unavailable');
-      assert.strictEqual(snapshot.unavailableReason, 'server_failure');
-      assert.strictEqual(snapshot.willReconnect, false);
-      assert.strictEqual(snapshot.lastError, 'auth rejected');
-    } finally {
-      globalThis.WebSocket = originalWebSocket;
-    }
+    runtime.stop();
+  });
+
+  test('start logs unroutable invalid invoke inbound frames without sending tool_error', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        welinkSessionId: undefined,
+        toolSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          action: 'chat',
+          payload: {},
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.unreplyable'),
+      true,
+    );
+
+    runtime.stop();
+  });
+
+  test('start skips tool_error reply for invalid invoke inbound frames before READY', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('CONNECTED');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit('inbound', createInvalidInvokeInboundFrame());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'runtime.invalid_invoke.skipped_not_ready'),
+      true,
+    );
+
+    runtime.stop();
+  });
+
+  test('start ignores error events for invalid-invoke tool_error bridging', async () => {
+    const logEntries = [];
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit('error', new Error('gateway protocol error'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(connection.sent, []);
+    assert.strictEqual(
+      logEntries.some((entry) => String(entry.message).startsWith('runtime.invalid_invoke.')),
+      false,
+    );
+
+    runtime.stop();
+  });
+
+  test('start replies tool_error when only welinkSessionId is routable', async () => {
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient(),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        toolSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-invalid-1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          messageId: 'gw-invalid-1',
+          action: 'chat',
+          welinkSessionId: 'wl-invalid-1',
+          payload: {},
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: 'wl-invalid-1',
+      toolSessionId: undefined,
+    });
+
+    runtime.stop();
+  });
+
+  test('start replies tool_error when only toolSessionId is routable', async () => {
+    const connection = createEventedGatewayConnectionMock('READY');
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig(), {
+      client: createRuntimeClient(),
+    });
+    runtime.createGatewayConnection = () => connection;
+
+    await runtime.start();
+    connection.emit(
+      'inbound',
+      createInvalidInvokeInboundFrame({
+        welinkSessionId: undefined,
+        violation: {
+          violation: {
+            stage: 'payload',
+            code: 'missing_required_field',
+            field: 'payload.text',
+            message: 'payload.text is required',
+            messageType: 'invoke',
+            action: 'chat',
+            toolSessionId: 'tool-invalid-1',
+          },
+        },
+        rawPreview: {
+          type: 'invoke',
+          messageId: 'gw-invalid-1',
+          action: 'chat',
+          payload: {
+            toolSessionId: 'tool-invalid-1',
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(connection.sent.length, 1);
+    assertInvalidInvokeToolErrorContract(connection.sent[0], {
+      code: 'missing_required_field',
+      welinkSessionId: undefined,
+      toolSessionId: 'tool-invalid-1',
+    });
+
+    runtime.stop();
+  });
+
+  test('handleDownstreamMessage does not emit downstream normalization failure for typed status_query facade messages', async () => {
+    const logEntries = [];
+    const sent = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.gatewayConnection = {
+      send: (msg) => sent.push(msg),
+      getState: () => 'ready',
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'status_query',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].type, 'status_response');
+    assert.deepStrictEqual(
+      logEntries
+        .filter((entry) => entry.message === 'downstream.normalization_failed')
+        .map((entry) => entry.message),
+      [],
+    );
+  });
+
+  test('handleDownstreamMessage fails closed when adapter rejects spoofed typed facade action', async () => {
+    const logEntries = [];
+    const sent = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            if (options?.body) {
+              logEntries.push(options.body);
+            }
+          },
+        },
+      }),
+    });
+    runtime.gatewayConnection = {
+      send: (msg) => sent.push(msg),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-invalid-2',
+      action: 'delete_session',
+      payload: {},
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].type, 'tool_error');
+    assert.strictEqual(sent[0].welinkSessionId, 'wl-invalid-2');
+    assert.strictEqual(
+      logEntries.some((entry) => entry.message === 'downstream.normalization_failed'),
+      false,
+    );
+  });
+
+  test('gates invoke handling through gateway status view instead of local state manager', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    let routeCalls = 0;
+    const connection = createGatewayConnectionMock('CONNECTING');
+    connection.send = (msg) => sent.push(msg);
+    runtime.gatewayConnection = connection;
+    runtime.actionRouter = {
+      route: async () => {
+        routeCalls += 1;
+        return { success: true, data: { sessionId: 'unexpected' } };
+      },
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'not-ready-chat',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-not-ready', text: 'hello' },
+    });
+
+    assert.strictEqual(routeCalls, 0);
+    assert.deepStrictEqual(sent, []);
   });
 
   test('ignores invoke messages until runtime state is READY', async () => {
@@ -485,7 +707,7 @@ describe('runtime protocol strictness', () => {
         return { success: true, data: { sessionId: 'unexpected' } };
       },
     };
-    runtime.stateManager.setState('CONNECTING');
+    setRuntimeGatewayState(runtime, 'CONNECTING');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -504,30 +726,6 @@ describe('runtime protocol strictness', () => {
     assert.deepStrictEqual(sent, []);
   });
 
-  test('rejects non-baseline nested invoke payload and returns tool_error without code', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: '42',
-      payload: {
-        action: 'chat',
-        payload: { toolSessionId: 'tool-1', text: 'hello' },
-      },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, '42');
-    assert.strictEqual('code' in sent[0], false);
-  });
-
   test('chat session-not-found failure adds tool_error reason for auto-rebuild', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -535,7 +733,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -572,7 +770,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -600,7 +798,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -632,7 +830,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -664,7 +862,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
     runtime.actionRouter = {
       route: async () => ({
         success: false,
@@ -704,7 +902,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -725,27 +923,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].type, 'tool_done');
     assert.strictEqual(sent[0].toolSessionId, 'tool-100');
     assert.strictEqual(sent[0].welinkSessionId, '100');
-  });
-
-  test('rejects permission_reply payloads with unsupported response values', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'perm-42',
-      action: 'permission_reply',
-      payload: { toolSessionId: 'tool-42', permissionId: 'perm-1', response: 'allow' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'perm-42');
   });
 
   test('accepts question_reply invoke shape and routes answer via question API', async () => {
@@ -779,7 +956,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -834,7 +1011,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -863,7 +1040,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -909,7 +1086,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -946,7 +1123,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -960,56 +1137,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].welinkSessionId, 'q-46');
   });
 
-  test('rejects question_reply payloads missing toolSessionId', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          prompt: async () => ({ data: { ok: true } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'q-44',
-      action: 'question_reply',
-      payload: { toolCallId: 'call-44', answer: 'Vite' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'q-44');
-  });
-
-  test('rejects question_reply payloads missing answer', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          prompt: async () => ({ data: { ok: true } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'q-45',
-      action: 'question_reply',
-      payload: { toolSessionId: 'tool-45', toolCallId: 'call-45' },
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'q-45');
-  });
-
   test('responds to standalone status_query with envelope-free status_response', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
@@ -1017,7 +1144,7 @@ describe('runtime protocol strictness', () => {
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'status_query',
@@ -1029,123 +1156,6 @@ describe('runtime protocol strictness', () => {
       type: 'status_response',
       opencodeOnline: true,
     });
-  });
-
-  test('rejects create_session without welinkSessionId', async () => {
-    const createCalls = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          create: async (options) => {
-            createCalls.push(options);
-            return { data: { id: 'created-1' } };
-          },
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      action: 'create_session',
-      payload: {},
-    });
-
-    assert.strictEqual((createCalls).length, 0);
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, undefined);
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('rejects blank create_session welinkSessionId', async () => {
-    const createCalls = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          create: async (options) => {
-            createCalls.push(options);
-            return { data: { id: 'created-1' } };
-          },
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: '   ',
-      action: 'create_session',
-      payload: {},
-    });
-
-    assert.strictEqual((createCalls).length, 0);
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, '   ');
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('create_session missing welinkSessionId does not call SDK and does not emit warning-only success', async () => {
-    const appLogs = [];
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        app: {
-          log: async (options) => {
-            appLogs.push(options.body);
-            return true;
-          },
-        },
-        session: {
-          create: async () => ({ data: { id: 'created-1' } }),
-        },
-      }),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      messageId: 'gw-create-1',
-      action: 'create_session',
-      payload: {},
-    });
-    await new Promise((r) => setTimeout(r, 10));
-
-    const warningLog = appLogs.find((entry) => entry.message === 'runtime.create_session.missing_welink_session_id');
-    assert.strictEqual(warningLog, undefined);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, undefined);
-    assert.strictEqual(sent[0].error, 'welinkSessionId is required');
-  });
-
-  test('rejects invoke status_query compatibility variant', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: 'status-compat',
-      action: 'status_query',
-      payload: {},
-    });
-
-    assert.strictEqual((sent).length, 1);
-    assert.strictEqual(sent[0].type, 'tool_error');
-    assert.strictEqual(sent[0].welinkSessionId, 'status-compat');
   });
 
   test('applies config.debug to runtime fallback logging after config load', async () => {
@@ -1167,9 +1177,9 @@ describe('runtime protocol strictness', () => {
         client: {},
       });
 
-      await runtime.start();
+      await assert.rejects(runtime.start(), /message_bridge_runtime_disabled/);
 
-      assert.strictEqual(runtime.getStarted(), true);
+      assert.strictEqual(runtime.getStarted(), false);
       assert.ok(debugCalls.some((args) => args.includes('runtime.start.disabled_by_config')));
     } finally {
       console.debug = originalDebug;
@@ -1245,7 +1255,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['message.part.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'message.part.updated',
@@ -1256,6 +1266,7 @@ describe('runtime protocol strictness', () => {
           messageID: 'op-msg-1',
           id: 'part-1',
           type: 'text',
+          text: '你好，bridge',
         },
       },
     });
@@ -1296,7 +1307,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.idle',
@@ -1320,7 +1331,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -1336,7 +1347,7 @@ describe('runtime protocol strictness', () => {
       type: 'permission.asked',
       properties: {
         sessionID: 'ses_child_permission_1',
-        permissionID: 'perm-child-1',
+        id: 'perm-child-1',
       },
     });
 
@@ -1347,10 +1358,11 @@ describe('runtime protocol strictness', () => {
       subagentSessionId: 'ses_child_permission_1',
       subagentName: 'research-agent',
       event: {
+        family: 'opencode',
         type: 'permission.asked',
         properties: {
           sessionID: 'ses_child_permission_1',
-          permissionID: 'perm-child-1',
+          id: 'perm-child-1',
         },
       },
     });
@@ -1393,13 +1405,13 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const event = {
       type: 'permission.asked',
       properties: {
         sessionID: 'ses_child_permission_retry',
-        permissionID: 'perm-retry-1',
+        id: 'perm-retry-1',
       },
     };
 
@@ -1410,52 +1422,24 @@ describe('runtime protocol strictness', () => {
     assert.deepStrictEqual(sent[0].message, {
       type: 'tool_event',
       toolSessionId: 'ses_child_permission_retry',
-      event,
+      event: {
+        family: 'opencode',
+        ...event,
+      },
     });
     assert.deepStrictEqual(sent[1].message, {
       type: 'tool_event',
       toolSessionId: 'ses_parent_permission_retry',
       subagentSessionId: 'ses_child_permission_retry',
       subagentName: 'retry-agent',
-      event,
+      event: {
+        family: 'opencode',
+        ...event,
+      },
     });
     const warnEntry = logs.find((item) => item?.body?.message === 'event.subagent_lookup_failed');
     assert.ok(!!warnEntry);
     assert.strictEqual(warnEntry.body.extra.toolSessionId, 'ses_child_permission_retry');
-  });
-
-  test('does not emit duplicate tool_done when session.idle follows chat success', async () => {
-    const runtime = new BridgeRuntime({
-      client: createRuntimeClient({
-        session: {
-          prompt: async () => ({ data: { ok: true } }),
-        },
-      }),
-    });
-    const sent = [];
-
-    runtime.gatewayConnection = {
-      send: (message, context) => sent.push({ message, context }),
-    };
-    runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleDownstreamMessage({
-      type: 'invoke',
-      welinkSessionId: '42',
-      action: 'chat',
-      payload: { toolSessionId: 'tool-idle-2', text: 'hello' },
-    });
-
-    await runtime.handleEvent({
-      type: 'session.idle',
-      properties: {
-        sessionID: 'tool-idle-2',
-      },
-    });
-
-    assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
-    assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
   });
 
   test('child session.idle does not emit tool_done compat messages', async () => {
@@ -1466,7 +1450,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -1492,12 +1476,47 @@ describe('runtime protocol strictness', () => {
       subagentSessionId: 'ses_child_idle_1',
       subagentName: 'idle-agent',
       event: {
+        family: 'opencode',
         type: 'session.idle',
         properties: {
           sessionID: 'ses_child_idle_1',
         },
       },
     });
+  });
+
+  test('does not emit duplicate tool_done when session.idle follows chat success', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: '42',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-idle-2', text: 'hello' },
+    });
+
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-idle-2',
+      },
+    });
+
+    assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
+    assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
   });
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {
@@ -1521,7 +1540,7 @@ describe('runtime protocol strictness', () => {
       send: (message, context) => sent.push({ message, context }),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const invokeTask = runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1562,7 +1581,7 @@ describe('runtime protocol strictness', () => {
     const sent = [];
 
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1608,7 +1627,7 @@ describe('runtime protocol strictness', () => {
 
     runtime.effectiveDirectory = '/env/bridge-root';
     runtime.gatewayConnection = { send: () => {} };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1799,7 +1818,7 @@ describe('runtime protocol strictness', () => {
     }
   });
 
-  test('runtime.start sends empty macAddress when no usable interface is available', async () => {
+  test('runtime.start omits macAddress when no usable interface is available', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-runtime-register-empty-mac-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
     process.env.HOME = fakeHome;
@@ -1884,7 +1903,7 @@ describe('runtime protocol strictness', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       const ws = RegisterCaptureWebSocket.instances[0];
-      assert.strictEqual(ws.sent[0].macAddress, '');
+      assert.strictEqual('macAddress' in ws.sent[0], false);
 
       runtime.stop();
     } finally {
@@ -2176,6 +2195,7 @@ describe('runtime protocol strictness', () => {
   test('uses gatewayMessageId as traceId across downstream invoke handling', async () => {
     const appLogs = [];
     const runtime = new BridgeRuntime({
+      runtimeTraceId: 'runtime-lifecycle-1',
       client: createRuntimeClient({
         app: {
           log: async (options) => {
@@ -2190,7 +2210,7 @@ describe('runtime protocol strictness', () => {
     });
 
     runtime.gatewayConnection = { send: () => {} };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -2217,6 +2237,8 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(runtimeInvokeReceived.extra.gatewayMessageId, 'gw-msg-1');
     assert.strictEqual(runtimeInvokeReceived.extra.toolSessionId, 'tool-42');
     assert.strictEqual(runtimeInvokeCompleted.extra.runtimeTraceId, runtimeInvokeReceived.extra.runtimeTraceId);
+    assert.strictEqual(runtimeInvokeReceived.extra.runtimeTraceId, 'runtime-lifecycle-1');
+    assert.notStrictEqual(runtimeInvokeReceived.extra.runtimeTraceId, 'gw-msg-1');
   });
 
   test('runtime.start reloads config on restart and uses the latest channel', async () => {
@@ -2433,6 +2455,37 @@ describe('runtime protocol strictness', () => {
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime.start does not inject custom reconnect policy override into gateway client factory', async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
+    globalThis.WebSocket = RegisterCaptureWebSocket;
+    const calls = [];
+
+    try {
+      const runtime = new (class extends BridgeRuntime {
+        async resolveConfig() {
+          return createResolvedConfig();
+        }
+
+        createGatewayConnection(options) {
+          calls.push({ options });
+          return super.createGatewayConnection(options);
+        }
+      })({
+        client: createRuntimeClient(),
+      });
+
+      await runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      runtime.stop();
+
+      assert.strictEqual(calls.length, 1);
+      assert.deepStrictEqual(calls[0].options.reconnect, createResolvedConfig().gateway.reconnect);
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
     }
   });
 });

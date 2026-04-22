@@ -522,13 +522,17 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
   });
 
   test('openx without bridgeDirectory omits directory in question list and reply', async () => {
+    const sessionGetCalls = [];
     const getCalls = [];
     const postCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(
       () => ({
         session: {
           create: async () => ({}),
-          get: async () => ({ data: { id: 'ses-question', directory: '/tmp/question-dir' } }),
+          get: async (options) => {
+            sessionGetCalls.push(options);
+            return { data: { id: 'ses-openx-question', directory: '/tmp/should-not-use' } };
+          },
           abort: async () => ({}),
           delete: async () => ({}),
           prompt: async () => ({}),
@@ -540,9 +544,9 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
             return {
               data: [
                 {
-                  id: 'question-request-1',
-                  sessionID: 'ses-question',
-                  tool: { callID: 'call-1' },
+                  id: 'question-request-openx-1',
+                  sessionID: 'ses-openx-question',
+                  tool: { callID: 'call-openx-1' },
                 },
               ],
             };
@@ -560,17 +564,22 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     );
 
     const result = await adapter.replyQuestion({
-      sessionId: 'ses-question',
-      toolCallId: 'call-1',
+      sessionId: 'ses-openx-question',
+      toolCallId: 'call-openx-1',
       answer: 'yes',
     });
 
     assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(getCalls, [{ url: '/question' }]);
+    assert.deepStrictEqual(sessionGetCalls, []);
+    assert.deepStrictEqual(getCalls, [
+      {
+        url: '/question',
+      },
+    ]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-1' },
+        path: { requestID: 'question-request-openx-1' },
         body: { answers: [['yes']] },
         headers: { 'Content-Type': 'application/json' },
       },

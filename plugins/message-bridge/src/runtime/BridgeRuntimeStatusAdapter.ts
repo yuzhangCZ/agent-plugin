@@ -1,5 +1,9 @@
-import type { ConnectionState } from '../types/index.js';
-import type { GatewayConnectionCloseDetail } from '../connection/GatewayConnection.js';
+import {
+  translateGatewayClientFailure,
+  type GatewayClientErrorShape,
+  type GatewayClientFailureSignal,
+  type GatewayClientState,
+} from '@agent-plugin/gateway-client';
 import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
@@ -12,13 +16,23 @@ import {
 
 export interface BridgeRuntimeStatusAdapter {
   publishConnecting(): void;
-  publishDisabled(): void;
+  publishDisabled(errorMessage: string): void;
   publishConfigInvalid(errorMessage: string): void;
   publishPluginFailure(errorMessage: string): void;
-  publishServerFailure(errorMessage?: string): void;
-  publishConnectFailure(errorMessage: string): void;
-  publishConnectionState(state: ConnectionState): void;
-  publishConnectionClosed(detail: GatewayConnectionCloseDetail): void;
+  publishGatewayState(state: GatewayClientState): void;
+  publishGatewayError(error: GatewayClientErrorShape): void;
+}
+
+function mapFailureSignalToReason(signal: GatewayClientFailureSignal): 'server_failure' | 'network_failure' | null {
+  switch (signal.failureClass) {
+    case 'handshake_failure':
+      return 'server_failure';
+    case 'transport_failure':
+      return 'network_failure';
+    case 'protocol_diagnostic':
+    case 'state_gate':
+      return null;
+  }
 }
 
 export function createBridgeRuntimeStatusAdapter(
@@ -35,114 +49,72 @@ export function createBridgeRuntimeStatusAdapter(
   return {
     publishConnecting() {
       const current = read();
-      const updatedAt = now();
-      publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
+      publish(createConnectingStatus({
+        updatedAt: now(),
+        lastReadyAt: current.lastReadyAt,
+      }));
     },
 
-    publishDisabled() {
+    publishDisabled(errorMessage: string) {
       const current = read();
-      const updatedAt = now();
       publish(createUnavailableStatus({
         reason: 'disabled',
-        lastError: null,
-        updatedAt,
+        lastError: errorMessage,
+        updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));
     },
 
     publishConfigInvalid(errorMessage: string) {
       const current = read();
-      const updatedAt = now();
       publish(createUnavailableStatus({
         reason: 'config_invalid',
         lastError: errorMessage,
-        updatedAt,
+        updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));
     },
 
     publishPluginFailure(errorMessage: string) {
       const current = read();
-      const updatedAt = now();
       publish(createUnavailableStatus({
         reason: 'plugin_failure',
         lastError: errorMessage,
-        updatedAt,
+        updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));
     },
 
-    publishServerFailure(errorMessage?: string) {
+    publishGatewayState(state: GatewayClientState) {
       const current = read();
-      const updatedAt = now();
-      publish(createUnavailableStatus({
-        reason: 'server_failure',
-        lastError: errorMessage ?? 'server failure',
-        updatedAt,
-        lastReadyAt: current.lastReadyAt,
-      }));
-    },
-
-    publishConnectFailure(errorMessage: string) {
-      const current = read();
-      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
-        return;
-      }
-
-      const updatedAt = now();
-      publish(createUnavailableStatus({
-        reason: 'network_failure',
-        lastError: errorMessage,
-        updatedAt,
-        lastReadyAt: current.lastReadyAt,
-      }));
-    },
-
-    publishConnectionState(state: ConnectionState) {
-      const current = read();
-
       if (state === 'READY') {
-        const updatedAt = now();
-        publish(createReadyStatus({ updatedAt }));
+        publish(createReadyStatus({ updatedAt: now() }));
         return;
       }
 
       if (state === 'CONNECTING' || state === 'CONNECTED') {
-        const updatedAt = now();
-        publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
-        return;
+        publish(createConnectingStatus({
+          updatedAt: now(),
+          lastReadyAt: current.lastReadyAt,
+        }));
       }
-
-      // DISCONNECTED 只是底层连接状态，最终对外状态由 close/connect failure
-      // 统一收口，避免先发布 unavailable 中间态、再补最终原因。
     },
 
-    publishConnectionClosed(detail: GatewayConnectionCloseDetail) {
+    publishGatewayError(error: GatewayClientErrorShape) {
       const current = read();
-
-      if (detail.willReconnect) {
-        const updatedAt = now();
-        publish(createConnectingStatus({ updatedAt, lastReadyAt: current.lastReadyAt }));
+      const failureSignal = translateGatewayClientFailure(error);
+      const reason = mapFailureSignalToReason(failureSignal);
+      if (!reason) {
+        return;
+      }
+      if (reason === 'network_failure' && current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
         return;
       }
 
-      if (detail.manuallyDisconnected || detail.aborted) {
-        return;
-      }
-
-      if (!detail.opened && !detail.rejected) {
-        return;
-      }
-
-      if (current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
-        return;
-      }
-
-      const updatedAt = now();
       publish(createUnavailableStatus({
-        reason: detail.rejected ? 'server_failure' : 'network_failure',
-        lastError: detail.reason ?? null,
-        updatedAt,
+        reason,
+        lastError: error.message,
+        updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));
     },

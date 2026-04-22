@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
@@ -65,7 +66,7 @@ describe('protocol chat-stream', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['message.part.delta', 'message.part.updated']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const deltaEvent = await loadFixture('message.part.delta.json');
     const updatedEvent = await loadFixture('message.part.updated.text.json');
@@ -77,12 +78,18 @@ describe('protocol chat-stream', () => {
     assert.deepStrictEqual(sent[0], {
       type: 'tool_event',
       toolSessionId: 'ses_fixture_delta',
-      event: deltaEvent,
+      event: {
+        family: 'opencode',
+        ...deltaEvent,
+      },
     });
     assert.deepStrictEqual(sent[1], {
       type: 'tool_event',
       toolSessionId: 'ses_32c9fea15ffe2Rnv8tITmfmGmQ',
-      event: updatedEvent,
+      event: {
+        family: 'opencode',
+        ...updatedEvent,
+      },
     });
   });
 
@@ -96,7 +103,7 @@ describe('protocol chat-stream', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -118,6 +125,7 @@ describe('protocol chat-stream', () => {
         type: 'tool_event',
         toolSessionId: 'tool-chat-1',
         event: {
+          family: 'opencode',
           type: 'session.idle',
           properties: {
             sessionID: 'tool-chat-1',

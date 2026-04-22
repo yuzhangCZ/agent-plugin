@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
@@ -89,7 +90,7 @@ describe('protocol question-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['question.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     const questionAskedEvent = await loadFixture('question.asked.json');
     await runtime.handleEvent(questionAskedEvent);
@@ -98,7 +99,10 @@ describe('protocol question-roundtrip', () => {
       {
         type: 'tool_event',
         toolSessionId: 'ses_question_1',
-        event: questionAskedEvent,
+        event: {
+          family: 'opencode',
+          ...questionAskedEvent,
+        },
       },
     ]);
 
@@ -167,7 +171,7 @@ describe('protocol question-roundtrip', () => {
       send: (message) => sent.push(message),
     };
     runtime.eventFilter = new EventFilter(['question.asked']);
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -194,7 +198,10 @@ describe('protocol question-roundtrip', () => {
         toolSessionId: 'ses_parent_question_1',
         subagentSessionId: 'ses_child_question_1',
         subagentName: 'planner-agent',
-        event: questionAskedEvent,
+        event: {
+          family: 'opencode',
+          ...questionAskedEvent,
+        },
       },
     ]);
 
@@ -252,7 +259,7 @@ describe('protocol question-roundtrip', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -270,7 +277,6 @@ describe('protocol question-roundtrip', () => {
         welinkSessionId: 'wl-question-ambiguous',
         toolSessionId: 'ses_question_1',
         error: 'Unable to resolve a unique pending question request for toolSessionId=ses_question_1',
-        reason: undefined,
       },
     ]);
   });
@@ -302,7 +308,7 @@ describe('protocol question-roundtrip', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -321,7 +327,6 @@ describe('protocol question-roundtrip', () => {
         welinkSessionId: 'wl-question-miss',
         toolSessionId: 'ses_question_1',
         error: 'Unable to resolve pending question request for toolSessionId=ses_question_1, toolCallId=call_question_1',
-        reason: undefined,
       },
     ]);
   });

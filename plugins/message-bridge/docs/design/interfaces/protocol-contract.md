@@ -1,7 +1,7 @@
 # 协议契约
 
-**Version:** 2.5
-**Date:** 2026-04-07
+**Version:** 2.4
+**Date:** 2026-04-04
 **Status:** Active
 **Owner:** message-bridge maintainers
 **Related:** `../../product/prd.md`, `../../architecture/overview.md`, `./config-contract.md`, `./private-status-api-contract.md`
@@ -95,7 +95,6 @@ type QuestionReplyPayload = {
 - `assistantId` 在 `chat` 和 `create_session` 中均为可选字段
 - 当最终解析后的 `gateway.channel === 'uniassistant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
 - `chat` 在存在 `assistantId` 时，会把它透传到 SDK 的 `session.prompt(...).agent`
-- OpenX 兼容策略：当 `gateway.channel === 'openx'` 且 `bridgeDirectory` 缺省时，`chat/close_session/abort_session/permission_reply/question_reply` 省略 `directory`，并跳过前置 `session.get` 目录回查
 - `assistantId` 仅接受字符串；`null` 视为无效 payload
 - 旧字段 `assiantId` 已废弃；当前会被当作未知字段静默忽略，不会触发 `agent` 透传，也不会触发目录映射
 
@@ -283,13 +282,11 @@ type StatusResponseMessage = {
 |---|---|---|
 | `chat` 执行前置探测 | `session.get` 返回 `NotFoundError` | `session_not_found` |
 | `chat` 执行前置探测 | `session.get` 返回其他错误或抛出其他异常 | `undefined` |
-| `chat` 执行（OpenX 兼容路径） | `gateway.channel='openx' && bridgeDirectory 缺省`，未执行 `session.get` | `undefined` |
 | 其他 action（`create_session/close_session/abort_session/permission_reply/question_reply`） | 无会话缺失强证据 | `undefined` |
 | `chat` prompt 阶段错误 | 不命中 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` | `undefined` |
 
 补充说明：
 
-1. `session.get` 是启动必选能力；`chat` 默认执行时若前置 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
-2. OpenX 兼容路径（`gateway.channel='openx' && bridgeDirectory 缺省`）不走前置 `session.get`，因此该路径不会产出 `session_not_found` 证据。
-3. 当前 `session_not_found` 只允许由 `chat` 前置 `session.get` 上报，不允许靠文案、泛化 `404` 或 `session.prompt` 错误推断。
-4. 分类器做“action + 结构化证据”映射：仅 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` 命中 `reason=session_not_found`。
+1. `session.get` 是启动必选能力；`chat` 执行时若前置 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
+2. 当前 `session_not_found` 只允许由 `chat` 前置 `session.get` 上报，不允许靠文案、泛化 `404` 或 `session.prompt` 错误推断。
+3. 分类器做“action + 结构化证据”映射：仅 `action=chat && sourceOperation=session.get && sourceErrorCode=session_not_found*` 命中 `reason=session_not_found`。

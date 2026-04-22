@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { getRuntimeGatewayState, setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 function createRuntimeClient(overrides = {}) {
   const base = {
@@ -89,7 +90,7 @@ function createRegisterCaptureWebSocket() {
 
 async function waitForReady(runtime, timeoutMs = 250) {
   const startedAt = Date.now();
-  while (runtime.stateManager.getState() !== 'READY') {
+  while (getRuntimeGatewayState(runtime) !== 'READY') {
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error(`runtime did not become READY within ${timeoutMs}ms`);
     }
@@ -138,7 +139,7 @@ describe('protocol directory-context integration', () => {
     runtime.gatewayConnection = {
       send: (message) => sent.push(message),
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -188,9 +189,6 @@ describe('protocol directory-context integration', () => {
       toolSessionId: 'dir-session-1',
       session: {
         sessionId: 'dir-session-1',
-        session: {
-          id: 'dir-session-1',
-        },
       },
     });
     assert.strictEqual(sent[1].type, 'tool_done');
@@ -244,6 +242,7 @@ describe('protocol directory-context integration', () => {
       'BRIDGE_GATEWAY_CHANNEL',
       'BRIDGE_AUTH_AK',
       'BRIDGE_AUTH_SK',
+      'BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE',
     ]);
     delete process.env.BRIDGE_ENABLED;
     delete process.env.BRIDGE_DEBUG;
@@ -252,18 +251,19 @@ describe('protocol directory-context integration', () => {
     delete process.env.BRIDGE_GATEWAY_CHANNEL;
     delete process.env.BRIDGE_AUTH_AK;
     delete process.env.BRIDGE_AUTH_SK;
+    delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
 
     try {
+      const sessionGetCalls = [];
       const promptCalls = [];
       const abortCalls = [];
       const deleteCalls = [];
       const permissionCalls = [];
-      const listCalls = [];
+      const questionListCalls = [];
       const replyCalls = [];
-      const sessionGetCalls = [];
       const runtime = new BridgeRuntime({
         workspacePath: workspace,
-        hostDirectory: '/workspace/current',
+        hostDirectory: '/host/fallback-directory',
         client: createRuntimeClient({
           session: {
             get: async (options) => {
@@ -297,7 +297,7 @@ describe('protocol directory-context integration', () => {
               if (options?.url === '/global/health') {
                 return { data: { healthy: true, version: '9.9.9' } };
               }
-              listCalls.push(options);
+              questionListCalls.push(options);
               return {
                 data: [
                   {
@@ -315,7 +315,6 @@ describe('protocol directory-context integration', () => {
           },
         }),
       });
-
       await runtime.start();
       await waitForReady(runtime);
 
@@ -388,7 +387,11 @@ describe('protocol directory-context integration', () => {
           body: { response: 'once' },
         },
       ]);
-      assert.deepStrictEqual(listCalls, [{ url: '/question' }]);
+      assert.deepStrictEqual(questionListCalls, [
+        {
+          url: '/question',
+        },
+      ]);
       assert.deepStrictEqual(replyCalls, [
         {
           url: '/question/{requestID}/reply',
@@ -468,7 +471,7 @@ describe('protocol directory-context integration', () => {
     runtime.gatewayConnection = {
       send: () => {},
     };
-    runtime.stateManager.setState('READY');
+    setRuntimeGatewayState(runtime, 'READY');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -793,7 +796,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -934,7 +937,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -1118,7 +1121,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -1245,7 +1248,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -1323,7 +1326,7 @@ describe('protocol directory-context integration', () => {
       runtime.gatewayConnection = {
         send: () => {},
       };
-      runtime.stateManager.setState('READY');
+      setRuntimeGatewayState(runtime, 'READY');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',

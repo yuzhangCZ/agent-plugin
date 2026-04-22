@@ -10,7 +10,6 @@ Completed:
 - `message-bridge` migrated with history
 - `message-bridge-openclaw` migrated with history
 - `integration/opencode-cui` submodule connected as fixture
-- fixture submodule default branch aligned to `main`
 - root verification commands established
 - hosted CI established for `verify:workspace` and `verify:integration:fixture`
 - dedicated self-hosted workflow established for `test:openclaw:runtime`

@@ -1,7 +1,7 @@
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultGatewayConnection } from '../../src/connection/GatewayConnection.ts';
+import { createGatewayClient } from '@agent-plugin/gateway-client';
 
 class FakeWebSocket {
   static OPEN = 1;
@@ -49,7 +49,7 @@ describe('gateway connection contract', () => {
   });
 
   test('connect sends register with required fields', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       heartbeatIntervalMs: 1000,
       registerMessage: {
@@ -78,7 +78,7 @@ describe('gateway connection contract', () => {
   });
 
   test('heartbeat uses timestamp field', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       heartbeatIntervalMs: 5,
       registerMessage: {
@@ -106,7 +106,7 @@ describe('gateway connection contract', () => {
   test('connect rejects when websocket closes before open', async () => {
     FakeWebSocket.mode = 'close';
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: {
         baseMs: 5,

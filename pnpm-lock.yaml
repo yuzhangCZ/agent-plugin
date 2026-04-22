@@ -8,6 +8,39 @@ importers:
 
   .: {}
 
+  packages/bridge-runtime-sdk:
+    dependencies:
+      '@agent-plugin/gateway-client':
+        specifier: workspace:*
+        version: link:../gateway-client
+      '@agent-plugin/gateway-schema':
+        specifier: workspace:*
+        version: link:../gateway-schema
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
+  packages/gateway-client:
+    dependencies:
+      '@agent-plugin/gateway-schema':
+        specifier: workspace:*
+        version: link:../gateway-schema
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
+  packages/gateway-schema:
+    dependencies:
+      zod:
+        specifier: ^4.1.8
+        version: 4.1.8
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+
   packages/test-support:
     dependencies:
       ws:
@@ -16,6 +49,12 @@ importers:
 
   plugins/message-bridge:
     devDependencies:
+      '@agent-plugin/gateway-client':
+        specifier: workspace:*
+        version: link:../../packages/gateway-client
+      '@agent-plugin/gateway-schema':
+        specifier: workspace:*
+        version: link:../../packages/gateway-schema
       '@agent-plugin/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -52,6 +91,12 @@ importers:
 
   plugins/message-bridge-openclaw:
     dependencies:
+      '@agent-plugin/bridge-runtime-sdk':
+        specifier: workspace:*
+        version: link:../../packages/bridge-runtime-sdk
+      '@agent-plugin/gateway-schema':
+        specifier: workspace:*
+        version: link:../../packages/gateway-schema
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

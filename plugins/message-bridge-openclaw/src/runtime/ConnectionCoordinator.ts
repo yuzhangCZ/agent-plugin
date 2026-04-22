@@ -8,6 +8,8 @@ export interface MessageBridgeConnectionCoord {
   probePhase: MessageBridgeProbePhase;
   probeStartedAt: number | null;
   probeAbortController: AbortController | null;
+  probeSettledPromise: Promise<void> | null;
+  resolveProbeSettled: (() => void) | null;
   runtimeSnapshot: MessageBridgeStatusSnapshot | null;
   logger: BridgeLogger | null;
 }
@@ -21,6 +23,8 @@ function createDefaultState(): MessageBridgeConnectionCoord {
     probePhase: "idle",
     probeStartedAt: null,
     probeAbortController: null,
+    probeSettledPromise: null,
+    resolveProbeSettled: null,
     runtimeSnapshot: null,
     logger: null,
   };
@@ -79,9 +83,14 @@ export function beginProbeConnect(
 ): { state: MessageBridgeConnectionCoord; abortController: AbortController } {
   const state = getMutableState(accountId);
   const abortController = new AbortController();
+  let resolveProbeSettled: () => void = () => {};
   state.probePhase = "connecting";
   state.probeStartedAt = now();
   state.probeAbortController = abortController;
+  state.probeSettledPromise = new Promise((resolve) => {
+    resolveProbeSettled = resolve;
+  });
+  state.resolveProbeSettled = resolveProbeSettled;
   return {
     state: { ...state },
     abortController,
@@ -91,9 +100,12 @@ export function beginProbeConnect(
 export function finishProbeConnect(accountId: string, abortController?: AbortController | null): MessageBridgeConnectionCoord {
   const state = getMutableState(accountId);
   if (!abortController || state.probeAbortController === abortController) {
+    state.resolveProbeSettled?.();
     state.probePhase = "idle";
     state.probeStartedAt = null;
     state.probeAbortController = null;
+    state.probeSettledPromise = null;
+    state.resolveProbeSettled = null;
   }
   maybeCleanup(accountId, state);
   return { ...state };
@@ -107,6 +119,19 @@ export function cancelProbeForRuntimeStart(accountId: string): boolean {
   }
   state.probeAbortController.abort(new Error("probe_cancelled_for_runtime_start"));
   return true;
+}
+
+export async function waitForProbeSettlement(accountId: string, timeoutMs = 1_000): Promise<void> {
+  const probeSettledPromise = getMutableState(accountId).probeSettledPromise;
+  if (!probeSettledPromise) {
+    return;
+  }
+  await Promise.race([
+    probeSettledPromise,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, timeoutMs);
+    }),
+  ]);
 }
 
 export function updateRuntimeSnapshot(accountId: string, snapshot: MessageBridgeStatusSnapshot): MessageBridgeConnectionCoord {

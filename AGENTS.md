@@ -45,6 +45,16 @@
 - 提 Issue 时使用 `.github/ISSUE_TEMPLATE/` 下对应表单
 - PR 详细流程、字段要求、检查项统一维护在 `docs/operations/pull-request-process.md`
 
+## 注释规则
+
+- TypeScript 导出接口、导出类、导出函数默认使用 TSDoc 注释块 `/** ... */`
+- 关键流程接口、跨层边界入口、统一发送出口必须补充简洁中文注释，说明职责边界、输入输出语义或 fail-closed 约束
+- 优先注释 `facade`、`port`、`validator`、runtime 协作对象、统一发送/校验入口，不要求为简单 getter、纯数据字段或显而易见的实现细节补注释
+- 注释应优先解释“为什么这里存在”“边界是什么”“为什么这样做”，避免重复代码字面含义
+- 关键分支允许使用 1-2 行中文行注释 `//`，用于说明非直观决策、兼容约束、重连/状态机/READY gating 等关键行为
+- 推荐使用精简 TSDoc 标签：`@remarks`、`@param`、`@returns`、`@throws`、`@deprecated`
+- 禁止空洞或翻译式注释，例如“设置变量”“发送消息”“判断状态”
+
 ## 语言规则
 
 - 用户可见输出、仓库文档、注释默认使用简体中文

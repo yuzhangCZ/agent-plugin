@@ -1,0 +1,51 @@
+import {
+  MESSAGE_PART_TYPES,
+  SESSION_STATUS_TYPES,
+  TOOL_EVENT_TYPES,
+  validateToolEvent,
+} from '@agent-plugin/gateway-schema';
+
+export { TOOL_EVENT_TYPES, validateToolEvent } from '@agent-plugin/gateway-schema';
+
+export const TOOL_EVENT_TYPE = {
+  MESSAGE_UPDATED: TOOL_EVENT_TYPES[0],
+  MESSAGE_PART_UPDATED: TOOL_EVENT_TYPES[1],
+  MESSAGE_PART_DELTA: TOOL_EVENT_TYPES[2],
+  MESSAGE_PART_REMOVED: TOOL_EVENT_TYPES[3],
+  SESSION_STATUS: TOOL_EVENT_TYPES[4],
+  SESSION_IDLE: TOOL_EVENT_TYPES[5],
+  SESSION_UPDATED: TOOL_EVENT_TYPES[6],
+  SESSION_ERROR: TOOL_EVENT_TYPES[7],
+  PERMISSION_UPDATED: TOOL_EVENT_TYPES[8],
+  PERMISSION_ASKED: TOOL_EVENT_TYPES[9],
+  PERMISSION_REPLIED: TOOL_EVENT_TYPES[10],
+  QUESTION_ASKED: TOOL_EVENT_TYPES[11],
+} as const;
+
+export const MESSAGE_PART_TYPE = {
+  TEXT: MESSAGE_PART_TYPES[0],
+  TOOL: MESSAGE_PART_TYPES[1],
+} as const;
+
+export const SESSION_STATUS_TYPE = {
+  BUSY: SESSION_STATUS_TYPES[0],
+} as const;
+
+export type {
+  GatewayToolEventPayload,
+  MessageUpdatedEvent,
+  MessageUpdatedSummaryDiff,
+  MessageUpdatedSummary,
+  MessagePartUpdatedEvent,
+  MessagePartDeltaEvent,
+  MessagePartRemovedEvent,
+  SessionStatusEvent,
+  SessionIdleEvent,
+  SessionUpdatedEvent,
+  SessionErrorEvent,
+  PermissionUpdatedEvent,
+  PermissionAskedEvent,
+  PermissionRepliedEvent,
+  QuestionAskedEvent,
+  SupportedToolEventType,
+} from '@agent-plugin/gateway-schema';

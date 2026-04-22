@@ -27,6 +27,7 @@ import {
   markRuntimePhase,
   resetRuntimeCoord,
   setAccountLogger,
+  waitForProbeSettlement,
 } from "./runtime/ConnectionCoordinator.js";
 import { getPluginRuntime } from "./runtime/store.js";
 import type { MessageBridgeResolvedAccount } from "./types.js";
@@ -37,8 +38,10 @@ import {
   createDefaultMessageBridgeRuntimeState,
   probeMessageBridgeAccount,
 } from "./status.js";
+import { buildMessageBridgeResourceKey } from "./gateway-host.js";
 
 const activeBridges = new Map<string, OpenClawGatewayBridge>();
+const activeBridgeResourcesByAccount = new Map<string, string>();
 
 const messageBridgeConfigSchema: ChannelConfigSchema = {
   schema: {
@@ -54,16 +57,6 @@ const messageBridgeConfigSchema: ChannelConfigSchema = {
         additionalProperties: false,
         properties: {
           url: { type: "string", minLength: 1 },
-          heartbeatIntervalMs: { type: "integer", minimum: 1 },
-          reconnect: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              baseMs: { type: "integer", minimum: 1 },
-              maxMs: { type: "integer", minimum: 1 },
-              exponential: { type: "boolean" },
-            },
-          },
         },
         required: ["url"],
       },
@@ -158,13 +151,16 @@ export const messageBridgePlugin: ChannelPlugin<MessageBridgeResolvedAccount> = 
   status: {
     defaultRuntime: createDefaultMessageBridgeRuntimeState(),
     buildChannelSummary: ({ snapshot }) => buildMessageBridgeChannelSummary(snapshot),
-    probeAccount: async ({ account, timeoutMs }) =>
-      await probeMessageBridgeAccount({
+    probeAccount: async ({ account, timeoutMs }) => {
+      const resourceKey = buildMessageBridgeResourceKey(account);
+      return await probeMessageBridgeAccount({
         account,
         timeoutMs,
-        runtime: getRuntimeSnapshot(account.accountId),
+        runtime: getRuntimeSnapshot(resourceKey),
+        activeRuntime: activeBridges.get(resourceKey),
         logger: getAccountLogger(account.accountId) ?? console,
-      }),
+      });
+    },
     buildAccountSnapshot: ({ account, cfg, runtime, probe }) =>
       buildMessageBridgeAccountSnapshot({
         account,
@@ -178,9 +174,12 @@ export const messageBridgePlugin: ChannelPlugin<MessageBridgeResolvedAccount> = 
     startAccount: async (ctx) => {
       const account = resolveAccount(ctx.cfg, ctx.accountId);
       const logger = ctx.log ?? console;
+      const resourceKey = buildMessageBridgeResourceKey(account);
       setAccountLogger(account.accountId, logger);
-      markRuntimePhase(account.accountId, "connecting");
-      cancelProbeForRuntimeStart(account.accountId);
+      markRuntimePhase(resourceKey, "connecting");
+      if (cancelProbeForRuntimeStart(resourceKey)) {
+        await waitForProbeSettlement(resourceKey);
+      }
       const bridge = new OpenClawGatewayBridge({
         account,
         config: ctx.cfg,
@@ -188,7 +187,8 @@ export const messageBridgePlugin: ChannelPlugin<MessageBridgeResolvedAccount> = 
         logger,
         setStatus: (status) => ctx.setStatus(status),
       });
-      activeBridges.set(account.accountId, bridge);
+      activeBridges.set(resourceKey, bridge);
+      activeBridgeResourcesByAccount.set(account.accountId, resourceKey);
       try {
         await bridge.start();
         await new Promise<void>((resolve) => {
@@ -199,22 +199,27 @@ export const messageBridgePlugin: ChannelPlugin<MessageBridgeResolvedAccount> = 
           ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
         });
       } finally {
-        activeBridges.delete(account.accountId);
+        activeBridges.delete(resourceKey);
+        if (activeBridgeResourcesByAccount.get(account.accountId) === resourceKey) {
+          activeBridgeResourcesByAccount.delete(account.accountId);
+        }
         try {
           await bridge.stop();
         } finally {
-          resetRuntimeCoord(account.accountId);
+          resetRuntimeCoord(resourceKey);
           setAccountLogger(account.accountId, null);
         }
       }
     },
     stopAccount: async (ctx) => {
       const account = resolveAccount(ctx.cfg, ctx.accountId);
-      const bridge = activeBridges.get(account.accountId);
+      const resourceKey = activeBridgeResourcesByAccount.get(account.accountId) ?? buildMessageBridgeResourceKey(account);
+      const bridge = activeBridges.get(resourceKey);
       if (!bridge) {
         return;
       }
-      activeBridges.delete(account.accountId);
+      activeBridges.delete(resourceKey);
+      activeBridgeResourcesByAccount.delete(account.accountId);
       await bridge.stop();
     },
   },

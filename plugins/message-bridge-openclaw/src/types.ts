@@ -1,13 +1,5 @@
-export interface MessageBridgeReconnectConfig {
-  baseMs: number;
-  maxMs: number;
-  exponential: boolean;
-}
-
 export interface MessageBridgeGatewayConfig {
   url: string;
-  heartbeatIntervalMs: number;
-  reconnect: MessageBridgeReconnectConfig;
 }
 
 export interface MessageBridgeAuthConfig {
@@ -32,7 +24,7 @@ export interface MessageBridgeResolvedAccount extends MessageBridgeAccountConfig
 
 export type MessageBridgeProbeState = "ready" | "rejected" | "connect_error" | "timeout" | "connecting" | "cancelled";
 
-export type MessageBridgeRuntimePhase = "idle" | "connecting" | "ready" | "stopping";
+export type MessageBridgeRuntimePhase = "idle" | "connecting" | "ready" | "stopping" | "failed";
 
 export interface MessageBridgeProbeResult {
   ok: boolean;

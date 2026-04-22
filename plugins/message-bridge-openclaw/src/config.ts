@@ -6,6 +6,7 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk";
 import type { MessageBridgeAccountConfig, MessageBridgeResolvedAccount } from "./types.js";
+import { asRecord, asTrimmedString } from "./utils/type-guards.js";
 
 export const CHANNEL_ID = "message-bridge";
 export const DEFAULT_ACCOUNT_ID = "default";
@@ -32,12 +33,6 @@ export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
   streaming: true,
   gateway: {
     url: resolveBuildDefaultGatewayUrl(),
-    heartbeatIntervalMs: 30_000,
-    reconnect: {
-      baseMs: 1_000,
-      maxMs: 30_000,
-      exponential: true,
-    },
   },
   auth: {
     ak: "",
@@ -47,62 +42,61 @@ export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
   runTimeoutMs: 300_000,
 };
 
-type GenericRecord = Record<string, unknown>;
 type MessageBridgeSetupInput = Pick<ChannelSetupInput, "name" | "password" | "token" | "url" | "useEnv">;
 
-const DEPRECATED_GATEWAY_FIELDS = new Set(["toolType", "toolVersion", "deviceName", "macAddress"]);
-
-function isRecord(value: unknown): value is GenericRecord {
-  return value !== null && typeof value === "object";
-}
+const DEPRECATED_GATEWAY_FIELDS = new Set([
+  "toolType",
+  "toolVersion",
+  "deviceName",
+  "macAddress",
+  "heartbeatIntervalMs",
+  "reconnect",
+]);
 
 function trimOrUndefined(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
+  return asTrimmedString(value);
 }
 
-function readChannelSection(cfg: OpenClawConfig): GenericRecord | undefined {
-  const channels = (cfg as GenericRecord).channels;
-  if (!isRecord(channels)) {
+function readChannelSection(cfg: OpenClawConfig): Record<string, unknown> | undefined {
+  const channels = asRecord((cfg as Record<string, unknown>).channels);
+  if (!channels) {
     return undefined;
   }
   const section = channels[CHANNEL_ID];
-  return isRecord(section) ? section : undefined;
+  return asRecord(section) ?? undefined;
 }
 
-function stripLegacyAccounts(section: GenericRecord | undefined): GenericRecord | undefined {
+function stripLegacyAccounts(section: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!section) {
     return undefined;
   }
 
   const { accounts: _accounts, gateway, ...rest } = section;
-  const nextGateway = isRecord(gateway)
+  const nextGateway = asRecord(gateway)
     ? Object.fromEntries(Object.entries(gateway).filter(([key]) => !DEPRECATED_GATEWAY_FIELDS.has(key)))
     : gateway;
   return {
     ...rest,
-    ...(isRecord(nextGateway) ? { gateway: nextGateway } : {}),
+    ...(asRecord(nextGateway) ? { gateway: nextGateway } : {}),
   };
 }
 
-function getSectionField(section: GenericRecord | undefined, key: string): GenericRecord | undefined {
+function getSectionField(section: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
   const value = section?.[key];
-  return isRecord(value) ? value : undefined;
+  return asRecord(value) ?? undefined;
 }
 
-function deepMerge<T extends GenericRecord>(base: T, override: GenericRecord | undefined): T {
+function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<string, unknown> | undefined): T {
   if (!override) {
     return structuredClone(base);
   }
 
-  const next: GenericRecord = structuredClone(base);
+  const next: Record<string, unknown> = structuredClone(base);
   for (const [key, value] of Object.entries(override)) {
-    if (isRecord(next[key]) && isRecord(value)) {
-      next[key] = deepMerge(next[key] as GenericRecord, value);
+    const baseValue = asRecord(next[key]);
+    const overrideValue = asRecord(value);
+    if (baseValue && overrideValue) {
+      next[key] = deepMerge(baseValue, overrideValue);
       continue;
     }
     next[key] = value;
@@ -110,8 +104,8 @@ function deepMerge<T extends GenericRecord>(base: T, override: GenericRecord | u
   return next as T;
 }
 
-function normalizeAccountConfig(raw: GenericRecord | undefined): MessageBridgeAccountConfig {
-  return deepMerge(DEFAULT_ACCOUNT_CONFIG as unknown as GenericRecord, raw) as unknown as MessageBridgeAccountConfig;
+function normalizeAccountConfig(raw: Record<string, unknown> | undefined): MessageBridgeAccountConfig {
+  return deepMerge(DEFAULT_ACCOUNT_CONFIG as unknown as Record<string, unknown>, raw) as unknown as MessageBridgeAccountConfig;
 }
 
 export function listAccountIds(cfg: OpenClawConfig): string[] {
@@ -121,7 +115,7 @@ export function listAccountIds(cfg: OpenClawConfig): string[] {
 
 export function hasLegacyAccountsConfig(cfg: OpenClawConfig): boolean {
   const section = readChannelSection(cfg);
-  return isRecord(section?.accounts);
+  return !!asRecord(section?.accounts);
 }
 
 export function resolveNonDefaultAccountError(accountId: string): Error {

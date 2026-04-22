@@ -29,15 +29,13 @@ describe('subagent session mapper', () => {
       agentName: 'research-agent',
     });
 
-    await assert.doesNotReject(async () => {
-      assert.deepStrictEqual(await mapper.resolve('ses_child_1'), {
-        status: 'mapped',
-        mapping: {
-          childSessionId: 'ses_child_1',
-          parentSessionId: 'ses_parent_1',
-          agentName: 'research-agent',
-        },
-      });
+    assert.deepStrictEqual(await mapper.resolve('ses_child_1'), {
+      status: 'mapped',
+      mapping: {
+        childSessionId: 'ses_child_1',
+        parentSessionId: 'ses_parent_1',
+        agentName: 'research-agent',
+      },
     });
     assert.strictEqual(getCalls.length, 0);
   });

@@ -55,7 +55,6 @@ Validated upstream default allowlist:
 - `session.error`
 - `permission.updated`
 - `permission.asked`
-- `permission.replied`
 - `question.asked`
 
 ## 4. Verification Evidence

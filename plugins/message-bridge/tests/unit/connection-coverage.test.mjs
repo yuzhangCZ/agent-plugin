@@ -1,7 +1,7 @@
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultGatewayConnection } from '../../src/connection/GatewayConnection.ts';
+import { createGatewayClient } from '@agent-plugin/gateway-client';
 
 class ScriptedWebSocket {
   static OPEN = 1;
@@ -20,6 +20,10 @@ class ScriptedWebSocket {
     setTimeout(() => {
       if (this.script.errorOnOpen) {
         this.onerror?.(this.script.errorEvent ?? new Error('socket error'));
+        if (this.script.closeAfterError !== false) {
+          this.readyState = ScriptedWebSocket.CLOSED;
+          this.onclose?.(this.script.closeEvent);
+        }
         return;
       }
       if (this.script.closeBeforeOpen) {
@@ -117,6 +121,89 @@ function createLoggerRecorder() {
   return { logger, entries };
 }
 
+function createMessagePartUpdatedToolEventMessage({
+  toolSessionId,
+  messageId = 'op-msg-1',
+  partId = 'part-1',
+  text = 'hello',
+}) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      family: 'opencode',
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: partId,
+          sessionID: toolSessionId,
+          messageID: messageId,
+          type: 'text',
+          text,
+        },
+      },
+    },
+  };
+}
+
+function createMessageUpdatedToolEventMessage({
+  toolSessionId,
+  messageId = 'msg-1',
+  finishReason,
+}) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      family: 'opencode',
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: messageId,
+          sessionID: toolSessionId,
+          role: 'assistant',
+          time: { created: 1 },
+          ...(finishReason ? { finish: { reason: finishReason } } : {}),
+        },
+      },
+    },
+  };
+}
+
+function createSessionUpdatedToolEventMessage(toolSessionId) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      family: 'opencode',
+      type: 'session.updated',
+      properties: {
+        sessionID: toolSessionId,
+        info: {
+          id: toolSessionId,
+        },
+      },
+    },
+  };
+}
+
+function createSessionStatusToolEventMessage(toolSessionId) {
+  return {
+    type: 'tool_event',
+    toolSessionId,
+    event: {
+      family: 'opencode',
+      type: 'session.status',
+      properties: {
+        sessionID: toolSessionId,
+        status: {
+          type: 'busy',
+        },
+      },
+    },
+  };
+}
+
 function waitForReady(conn, states, timeoutMs = 200) {
   if (conn.getState() === 'READY') {
     return Promise.resolve();
@@ -191,7 +278,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('rejects on aborted signal before connect', async () => {
     const controller = new AbortController();
     controller.abort();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       abortSignal: controller.signal,
       registerMessage: registerMessage(),
@@ -201,7 +288,7 @@ describe('DefaultGatewayConnection coverage', () => {
   });
 
   test('connect/disconnect lifecycle and send guard', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       heartbeatIntervalMs: 5,
       registerMessage: registerMessage(),
@@ -210,14 +297,58 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.strictEqual(conn.getState(), 'READY');
     assert.strictEqual(conn.isConnected(), true);
 
-    assert.doesNotThrow(() => conn.send({ type: 'x', payload: 1 }));
+    assert.doesNotThrow(() => conn.send({ type: 'tool_done', toolSessionId: 'tool-1', welinkSessionId: 'wl-1' }));
     conn.disconnect();
     assert.strictEqual(conn.getState(), 'DISCONNECTED');
-    assert.throws(() => conn.send({ type: 'x' }));
+    assert.throws(() => conn.send({ type: 'tool_done', toolSessionId: 'tool-1', welinkSessionId: 'wl-1' }), /gateway_not_connected/);
+  });
+
+  test('connect rejects invalid register control messages before sending', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = createGatewayClient({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: {
+        type: 'register',
+        deviceName: '   ',
+        macAddress: 'aa:bb:cc:dd:ee:ff',
+        os: 'darwin',
+        toolType: 'channel',
+        toolVersion: '1.0.0',
+      },
+      logger,
+    });
+
+    await assert.rejects(conn.connect(), /deviceName is required/);
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.register.failed'), true);
+    assert.deepStrictEqual(ScriptedWebSocket.instances[0]?.sent ?? [], []);
+  });
+
+  test('send rejects invalid heartbeat control messages', async () => {
+    const { logger, entries } = createLoggerRecorder();
+    const conn = createGatewayClient({
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    await conn.connect();
+
+    assert.throws(
+      () =>
+        conn.send({
+          type: 'heartbeat',
+          timestamp: '',
+        }),
+      /gateway_invalid_message_type:heartbeat/,
+    );
+    assert.strictEqual(
+      entries.some((entry) => entry.message === 'gateway.send' && entry.extra?.messageType === 'heartbeat'),
+      false,
+    );
   });
 
   test('passes gateway auth via websocket subprotocol instead of query params', async () => {
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       authPayloadProvider: () => ({
         ak: 'test-ak-001',
@@ -251,25 +382,27 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({ autoRegisterOk: false });
     const states = [];
     const messages = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
     conn.on('stateChange', (state) => states.push(state));
     conn.on('message', (message) => messages.push(message));
 
-    await conn.connect();
+    const connecting = conn.connect();
+    await new Promise((r) => setTimeout(r, 0));
 
     const ws = ScriptedWebSocket.instances[0];
     assert.strictEqual(conn.getState(), 'CONNECTED');
-    assert.ok(ws.sent.some(e => JSON.stringify(e) === JSON.stringify(registerMessage())));
+    const outboundRegister = ws.sent.find((entry) => entry.type === 'register');
+    assert.deepStrictEqual(outboundRegister, registerMessage());
     assert.throws(() => conn.send({ type: 'tool_event', payload: 1 }));
 
     ws.emitMessage(JSON.stringify({ type: 'invoke', action: 'chat', payload: { toolSessionId: 's-1', text: 'hi' } }));
     assert.deepStrictEqual(messages, []);
 
     ws.emitMessage(JSON.stringify({ type: 'register_ok' }));
-    await new Promise((r) => setTimeout(r, 0));
+    await connecting;
 
     assert.strictEqual(conn.getState(), 'READY');
     assert.deepStrictEqual(states, ['CONNECTING', 'CONNECTED', 'READY']);
@@ -281,18 +414,19 @@ describe('DefaultGatewayConnection coverage', () => {
     ScriptedWebSocket.scripts.push({ autoRegisterOk: false });
     const { logger, entries } = createLoggerRecorder();
     const states = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
     });
     conn.on('stateChange', (state) => states.push(state));
 
-    await conn.connect();
+    const connecting = conn.connect();
+    await new Promise((r) => setTimeout(r, 0));
 
     const ws = ScriptedWebSocket.instances[0];
     ws.emitMessage(JSON.stringify({ type: 'register_rejected', reason: 'device_conflict' }));
-    await new Promise((r) => setTimeout(r, 0));
+    await assert.rejects(connecting);
 
     assert.strictEqual(conn.getState(), 'DISCONNECTED');
     assert.deepStrictEqual(states, ['CONNECTING', 'CONNECTED', 'DISCONNECTED']);
@@ -328,13 +462,13 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     };
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnectPolicy,
       registerMessage: registerMessage(),
     });
 
-    await conn.connect();
+    await assert.rejects(conn.connect());
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.strictEqual(conn.getState(), 'DISCONNECTED');
@@ -343,14 +477,14 @@ describe('DefaultGatewayConnection coverage', () => {
   });
 
   test('rejects on invalid url and websocket error', async () => {
-    const badUrl = new DefaultGatewayConnection({
+    const badUrl = createGatewayClient({
       url: 'not-a-valid-url',
       registerMessage: registerMessage(),
     });
     await assert.rejects(badUrl.connect());
 
     ScriptedWebSocket.scripts.push({ errorOnOpen: true });
-    const errorConn = new DefaultGatewayConnection({
+    const errorConn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
@@ -363,7 +497,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('logs websocket error details when the runtime provides them', async () => {
     const errorLogs = [];
     ScriptedWebSocket.scripts.push({ errorOnOpen: true });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger: {
@@ -385,17 +519,13 @@ describe('DefaultGatewayConnection coverage', () => {
 
     await assert.rejects(conn.connect());
 
-    assert.ok(errorLogs.some(e => JSON.stringify(e) === JSON.stringify({
-      message: 'gateway.error',
-      extra: {
-        error: 'gateway_websocket_error',
-        state: 'CONNECTING',
-        errorDetail: 'socket error',
-        errorName: 'Error',
-        errorType: 'Error',
-        rawType: 'Error',
-      },
-    })));
+    assert.ok(errorLogs.some((entry) =>
+      entry.message === 'gateway.error'
+      && entry.extra?.error === 'gateway_websocket_error'
+      && entry.extra?.errorDetail === 'socket error'
+      && entry.extra?.errorType === 'Error'
+      && entry.extra?.rawType === 'Error',
+    ));
     conn.disconnect();
   });
 
@@ -409,7 +539,7 @@ describe('DefaultGatewayConnection coverage', () => {
         target: { readyState: 0 },
       },
     });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger: {
@@ -431,25 +561,22 @@ describe('DefaultGatewayConnection coverage', () => {
 
     await assert.rejects(conn.connect());
 
-    assert.ok(errorLogs.some(e => JSON.stringify(e) === JSON.stringify({
-      message: 'gateway.error',
-      extra: {
-        error: 'gateway_websocket_error',
-        state: 'CONNECTING',
-        errorDetail: 'socket error',
-        errorType: 'error',
-        rawType: 'Object',
-        eventType: 'error',
-        readyState: 0,
-      },
-    })));
+    assert.ok(errorLogs.some((entry) =>
+      entry.message === 'gateway.error'
+      && entry.extra?.error === 'gateway_websocket_error'
+      && entry.extra?.errorDetail === 'socket error'
+      && entry.extra?.errorType === 'error'
+      && entry.extra?.rawType === 'Object'
+      && entry.extra?.eventType === 'error'
+      && entry.extra?.readyState === 0,
+    ));
     conn.disconnect();
   });
 
   test('reconnects after opened connection closes unexpectedly', async () => {
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 }, { open: true });
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 10, closeCode: 1013 }, { open: true });
     const states = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
@@ -472,7 +599,7 @@ describe('DefaultGatewayConnection coverage', () => {
         closeReason: `rejected-${closeCode}`,
         wasClean: true,
       });
-      const conn = new DefaultGatewayConnection({
+      const conn = createGatewayClient({
         url: 'ws://localhost:8081/ws/agent',
         reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
         registerMessage: registerMessage(),
@@ -500,7 +627,7 @@ describe('DefaultGatewayConnection coverage', () => {
   test('does not reconnect when aborted after open', async () => {
     const controller = new AbortController();
     ScriptedWebSocket.scripts.push({ open: true });
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       abortSignal: controller.signal,
@@ -514,16 +641,19 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
-  test('parses downstream messages and ignores non-json', async () => {
+  test('emits structured inbound frames and ignores invalid business payloads', async () => {
+    const inbound = [];
     const messages = [];
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
     });
+    conn.on('inbound', (frame) => inbound.push(frame));
     conn.on('message', (msg) => messages.push(msg));
     await conn.connect();
 
     const ws = ScriptedWebSocket.instances[0];
+    ws.emitMessage('{"type":"status_query"}');
     ws.emitMessage('{"x":1}');
     ws.emitMessage(new Uint8Array([123, 34, 121, 34, 58, 50, 125])); // {"y":2}
     ws.emitMessage(Uint8Array.from([123, 34, 122, 34, 58, 51, 125]).buffer); // {"z":3}
@@ -531,13 +661,20 @@ describe('DefaultGatewayConnection coverage', () => {
     ws.emitMessage('not-json');
     await new Promise((r) => setTimeout(r, 10));
 
-    assert.deepStrictEqual(messages, [{ x: 1 }, { y: 2 }, { z: 3 }, { k: 4 }]);
+    assert.deepStrictEqual(messages, [{ type: 'status_query' }]);
+    assert.deepStrictEqual(
+      inbound.map((frame) => frame.kind),
+      ['control', 'business', 'invalid', 'decode_error', 'decode_error', 'decode_error', 'parse_error'],
+    );
+    assert.strictEqual(inbound[2].messageType, 'unknown');
+    assert.deepStrictEqual(inbound[2].rawPreview, { x: 1 });
+    assert.strictEqual(inbound.at(-1).rawPreview, 'not-json');
     conn.disconnect();
   });
 
   test('logs payload bytes and message ids when sending', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -545,12 +682,11 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
 
     conn.send(
-      {
-        type: 'tool_event',
-        sessionId: 'skill-1',
-        event: { type: 'message.part.updated' },
-        envelope: { messageId: 'bridge-1' },
-      },
+      createMessagePartUpdatedToolEventMessage({
+        toolSessionId: 'tool-1',
+        messageId: 'op-msg-1',
+        partId: 'part-1',
+      }),
       {
         traceId: 'bridge-1',
         runtimeTraceId: 'runtime-trace-1',
@@ -590,7 +726,7 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     });
 
-    const connectFailingConn = new DefaultGatewayConnection({
+    const connectFailingConn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: true,
       registerMessage: registerMessage(),
@@ -599,7 +735,7 @@ describe('DefaultGatewayConnection coverage', () => {
     connectFailingConn.on('error', () => {});
     await assert.rejects(connectFailingConn.connect());
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: true,
       registerMessage: registerMessage(),
@@ -633,7 +769,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('does not emit raw websocket frame logs when debug is disabled', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       debug: false,
       registerMessage: registerMessage(),
@@ -655,7 +791,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs frame bytes and gatewayMessageId for received frames', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -687,25 +823,24 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('logs minimal last-message summary on close', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
     });
     await conn.connect();
 
+    const lastMessage = createMessageUpdatedToolEventMessage({
+      toolSessionId: 'tool-last-1',
+      messageId: 'op-msg-last-1',
+    });
     conn.send(
-      {
-        type: 'tool_event',
-        sessionId: 'skill-1',
-        event: { type: 'message.updated' },
-        envelope: { messageId: 'bridge-last-1' },
-      },
+      lastMessage,
       {
         traceId: 'bridge-last-1',
         runtimeTraceId: 'runtime-trace-1',
         bridgeMessageId: 'bridge-last-1',
-        sessionId: 'skill-1',
+        toolSessionId: 'tool-last-1',
         eventType: 'message.updated',
         opencodeMessageId: 'op-msg-last-1',
       },
@@ -723,24 +858,16 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.deepStrictEqual(closeLog.extra.recentOutboundMessages, [
       {
         eventType: 'message.updated',
-        toolSessionId: undefined,
+        toolSessionId: 'tool-last-1',
         opencodeMessageId: 'op-msg-last-1',
-        payloadBytes: Buffer.byteLength(
-          JSON.stringify({
-            type: 'tool_event',
-            sessionId: 'skill-1',
-            event: { type: 'message.updated' },
-            envelope: { messageId: 'bridge-last-1' },
-          }),
-          'utf8',
-        ),
+        payloadBytes: Buffer.byteLength(JSON.stringify(lastMessage), 'utf8'),
       },
     ]);
   });
 
   test('keeps only the latest three outbound message summaries in close logs', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -748,15 +875,19 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
 
     for (const [index, eventType] of ['message.updated', 'session.updated', 'session.status'].entries()) {
+      const toolSessionId = `tool-${index}`;
+      const message =
+        eventType === 'message.updated'
+          ? createMessageUpdatedToolEventMessage({ toolSessionId, messageId: `op-msg-${index}` })
+          : eventType === 'session.updated'
+            ? createSessionUpdatedToolEventMessage(toolSessionId)
+            : createSessionStatusToolEventMessage(toolSessionId);
       conn.send(
-        {
-          type: 'tool_event',
-          event: { type: eventType },
-        },
+        message,
         {
           traceId: `bridge-${index}`,
           gatewayMessageId: `bridge-${index}`,
-          toolSessionId: `tool-${index}`,
+          toolSessionId,
           eventType,
           opencodeMessageId: `op-msg-${index}`,
         },
@@ -771,26 +902,29 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'message.updated',
         toolSessionId: 'tool-0',
         opencodeMessageId: 'op-msg-0',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'message.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify(createMessageUpdatedToolEventMessage({ toolSessionId: 'tool-0', messageId: 'op-msg-0' })),
+          'utf8',
+        ),
       },
       {
         eventType: 'session.updated',
         toolSessionId: 'tool-1',
         opencodeMessageId: 'op-msg-1',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(JSON.stringify(createSessionUpdatedToolEventMessage('tool-1')), 'utf8'),
       },
       {
         eventType: 'session.status',
         toolSessionId: 'tool-2',
         opencodeMessageId: 'op-msg-2',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(JSON.stringify(createSessionStatusToolEventMessage('tool-2')), 'utf8'),
       },
     ]);
   });
 
   test('warns when outbound payload exceeds the large payload threshold', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -800,7 +934,20 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.send(
       {
         type: 'tool_event',
-        event: { type: 'message.updated', content: 'x'.repeat(1024 * 1024) },
+        toolSessionId: 'tool-large',
+        event: {
+          family: 'opencode',
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'msg-large',
+              sessionID: 'tool-large',
+              role: 'assistant',
+              time: { created: 1 },
+              finish: { reason: 'x'.repeat(1024 * 1024) },
+            },
+          },
+        },
       },
       {
         traceId: 'bridge-large',
@@ -821,7 +968,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('excludes control messages from recent outbound summaries', async () => {
     const { logger, entries } = createLoggerRecorder();
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
       logger,
@@ -831,7 +978,17 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.send(
       {
         type: 'tool_event',
-        event: { type: 'session.updated' },
+        toolSessionId: 'tool-business-1',
+        event: {
+          family: 'opencode',
+          type: 'session.updated',
+          properties: {
+            sessionID: 'tool-business-1',
+            info: {
+              id: 'tool-business-1',
+            },
+          },
+        },
       },
       {
         gatewayMessageId: 'business-1',
@@ -849,7 +1006,23 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'session.updated',
         toolSessionId: 'tool-business-1',
         opencodeMessageId: 'op-msg-business-1',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.updated' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify({
+            type: 'tool_event',
+            toolSessionId: 'tool-business-1',
+            event: {
+              family: 'opencode',
+              type: 'session.updated',
+              properties: {
+                sessionID: 'tool-business-1',
+                info: {
+                  id: 'tool-business-1',
+                },
+              },
+            },
+          }),
+          'utf8',
+        ),
       },
     ]);
   });
@@ -858,10 +1031,10 @@ describe('DefaultGatewayConnection coverage', () => {
     const { logger, entries } = createLoggerRecorder();
     const states = [];
     ScriptedWebSocket.scripts.push(
-      { closeAfterOpenMs: 0, closeCode: 1009, closeReason: 'too-big', wasClean: false },
+      { closeAfterOpenMs: 10, closeCode: 1013, closeReason: 'retry-later', wasClean: false },
       { open: true },
     );
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
       registerMessage: registerMessage(),
@@ -872,7 +1045,22 @@ describe('DefaultGatewayConnection coverage', () => {
     await conn.connect();
     states.length = 0;
     conn.send(
-      { type: 'tool_event', event: { type: 'message.updated' } },
+      {
+        type: 'tool_event',
+        toolSessionId: 'tool-before',
+        event: {
+          family: 'opencode',
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'msg-before',
+              sessionID: 'tool-before',
+              role: 'assistant',
+              time: { created: 1 },
+            },
+          },
+        },
+      },
       {
         gatewayMessageId: 'before-reconnect',
         toolSessionId: 'tool-before',
@@ -885,7 +1073,20 @@ describe('DefaultGatewayConnection coverage', () => {
     await waitForReady(conn, states);
 
     conn.send(
-      { type: 'tool_event', event: { type: 'session.status' } },
+      {
+        type: 'tool_event',
+        toolSessionId: 'tool-after',
+        event: {
+          family: 'opencode',
+          type: 'session.status',
+          properties: {
+            sessionID: 'tool-after',
+            status: {
+              type: 'busy',
+            },
+          },
+        },
+      },
       {
         gatewayMessageId: 'after-reconnect',
         toolSessionId: 'tool-after',
@@ -904,14 +1105,30 @@ describe('DefaultGatewayConnection coverage', () => {
         eventType: 'session.status',
         toolSessionId: 'tool-after',
         opencodeMessageId: 'op-msg-after',
-        payloadBytes: Buffer.byteLength(JSON.stringify({ type: 'tool_event', event: { type: 'session.status' } }), 'utf8'),
+        payloadBytes: Buffer.byteLength(
+          JSON.stringify({
+            type: 'tool_event',
+            toolSessionId: 'tool-after',
+            event: {
+              family: 'opencode',
+              type: 'session.status',
+              properties: {
+                sessionID: 'tool-after',
+                status: {
+                  type: 'busy',
+                },
+              },
+            },
+          }),
+          'utf8',
+        ),
       },
     ]);
   });
 
   test('logs reconnect exhaustion and stops before opening a new socket', async () => {
     const { logger, entries } = createLoggerRecorder();
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 10, closeCode: 1013 });
 
     const reconnectPolicy = {
       reset() {},
@@ -933,7 +1150,7 @@ describe('DefaultGatewayConnection coverage', () => {
       },
     };
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnectPolicy,
       registerMessage: registerMessage(),
@@ -950,9 +1167,9 @@ describe('DefaultGatewayConnection coverage', () => {
 
   test('stops immediately when the next retry would exceed the remaining reconnect budget', async () => {
     const { logger, entries } = createLoggerRecorder();
-    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 0 });
+    ScriptedWebSocket.scripts.push({ closeAfterOpenMs: 10, closeCode: 1013 });
 
-    const conn = new DefaultGatewayConnection({
+    const conn = createGatewayClient({
       url: 'ws://localhost:8081/ws/agent',
       reconnect: reconnectConfig({ baseMs: 20, maxMs: 20, jitter: 'none', maxElapsedMs: 5 }),
       registerMessage: registerMessage(),

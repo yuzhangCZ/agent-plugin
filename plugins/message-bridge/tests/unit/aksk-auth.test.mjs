@@ -2,13 +2,13 @@ import { createHmac } from 'crypto';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultAkSkAuth } from '../../src/connection/AkSkAuth.ts';
+import { createAkSkAuthProvider } from '@agent-plugin/gateway-client';
 
-describe('DefaultAkSkAuth', () => {
+describe('createAkSkAuthProvider', () => {
   test('generates gateway-compatible auth payload', () => {
     const ak = 'test-ak-001';
     const sk = 'test-sk-secret-001';
-    const auth = new DefaultAkSkAuth(ak, sk);
+    const auth = createAkSkAuthProvider(ak, sk);
 
     const payload = auth.generateAuthPayload();
     const { ts, nonce, sign } = payload;
@@ -29,7 +29,7 @@ describe('DefaultAkSkAuth', () => {
   });
 
   test('auth payload can be encoded as base64url websocket subprotocol content', () => {
-    const auth = new DefaultAkSkAuth('test-ak-001', 'test-sk-secret-001');
+    const auth = createAkSkAuthProvider('test-ak-001', 'test-sk-secret-001');
     const payload = auth.generateAuthPayload();
 
     const encoded = Buffer.from(JSON.stringify(payload), 'utf8')
