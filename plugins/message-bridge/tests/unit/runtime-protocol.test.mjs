@@ -230,12 +230,17 @@ describe('runtime protocol strictness', () => {
     __resetMessageBridgeStatusForTests();
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig({ enabled: false }));
 
-    await runtime.start();
+    let rejection;
+    await assert.rejects(runtime.start(), (error) => {
+      rejection = error;
+      return true;
+    });
 
     const snapshot = getMessageBridgeStatus();
     assert.strictEqual(snapshot.phase, 'unavailable');
     assert.strictEqual(snapshot.unavailableReason, 'disabled');
-    assert.strictEqual(snapshot.lastError, null);
+    assert.strictEqual(snapshot.lastError, 'message_bridge_runtime_disabled');
+    assert.strictEqual(rejection.message, snapshot.lastError);
   });
 
   test('start publishes config_invalid snapshot when config loading fails', async () => {
@@ -327,6 +332,36 @@ describe('runtime protocol strictness', () => {
     const snapshot = getMessageBridgeStatus();
     assert.strictEqual(snapshot.unavailableReason, 'server_failure');
     assert.strictEqual(snapshot.lastError, 'device conflict');
+  });
+
+  test('connect rejection reuses emitted error semantics for network failure', async () => {
+    __resetMessageBridgeStatusForTests();
+    const emittedError = {
+      code: 'GATEWAY_WEBSOCKET_ERROR',
+      source: 'transport',
+      phase: 'before_ready',
+      retryable: true,
+      message: 'socket down',
+    };
+    const connection = createEventedGatewayConnectionMock('DISCONNECTED');
+    connection.connect = async () => {
+      connection.emit('stateChange', 'CONNECTING');
+      connection.emit('error', emittedError);
+      throw Object.assign(new Error('socket down'), emittedError);
+    };
+    const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());
+    runtime.createGatewayConnection = () => connection;
+
+    let rejection;
+    await assert.rejects(runtime.start(), (error) => {
+      rejection = error;
+      return true;
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+    assert.strictEqual(snapshot.lastError, 'socket down');
+    assert.strictEqual(rejection.message, snapshot.lastError);
   });
 
   test('start wires invalid invoke inbound frames to tool_error best-effort reply', async () => {
@@ -1142,9 +1177,9 @@ describe('runtime protocol strictness', () => {
         client: {},
       });
 
-      await runtime.start();
+      await assert.rejects(runtime.start(), /message_bridge_runtime_disabled/);
 
-      assert.strictEqual(runtime.getStarted(), true);
+      assert.strictEqual(runtime.getStarted(), false);
       assert.ok(debugCalls.some((args) => args.includes('runtime.start.disabled_by_config')));
     } finally {
       console.debug = originalDebug;

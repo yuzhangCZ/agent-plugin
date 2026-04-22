@@ -151,13 +151,15 @@ class ConnectAttempt {
     this.state.setManuallyDisconnected(true);
     this.state.setState('DISCONNECTED');
     this.context.logger?.warn?.('gateway.connect.aborted');
-    this.rejectHandshake(new GatewayClientError({
+    const error = new GatewayClientError({
       code: 'GATEWAY_CONNECT_ABORTED',
       source: 'state_gate',
       phase: 'stopping',
       retryable: false,
       message: 'gateway_connection_aborted',
-    }));
+    });
+    this.recordTerminalError(error, true);
+    this.rejectHandshake(error);
     this.enterTerminal();
     this.transport.close();
   };
@@ -548,13 +550,15 @@ export class ConnectSession {
       this.state.setManuallyDisconnected(true);
       this.state.setState('DISCONNECTED');
       this.context.logger?.warn?.('gateway.connect.aborted_precheck');
-      return Promise.reject(new GatewayClientError({
+      const error = new GatewayClientError({
         code: 'GATEWAY_CONNECT_ABORTED',
         source: 'state_gate',
         phase: 'stopping',
         retryable: false,
         message: 'gateway_connection_aborted',
-      }));
+      });
+      this.context.sink.emitError(error);
+      return Promise.reject(error);
     }
 
     if (this.state.getState() === 'READY') {
@@ -593,26 +597,23 @@ export class ConnectSession {
       this.activeAttempt = attempt;
       return attempt.promise;
     } catch (error) {
-      if (error instanceof TypeError && error.message.includes('Invalid URL')) {
-        return Promise.reject(
-          this.toClientError(
-            error,
-            'GATEWAY_WEBSOCKET_ERROR',
-            'transport',
-            options.reconnectAttempt ? 'reconnecting' : 'before_open',
-            true,
-          ),
-        );
-      }
-      return Promise.reject(
-        this.toClientError(
+      const clientError = error instanceof TypeError && error.message.includes('Invalid URL')
+        ? this.toClientError(
+          error,
+          'GATEWAY_WEBSOCKET_ERROR',
+          'transport',
+          options.reconnectAttempt ? 'reconnecting' : 'before_open',
+          true,
+        )
+        : this.toClientError(
           error,
           'GATEWAY_WEBSOCKET_ERROR',
           'handshake',
           options.reconnectAttempt ? 'reconnecting' : 'before_open',
           false,
-        ),
-      );
+        );
+      this.context.sink.emitError(clientError);
+      return Promise.reject(clientError);
     }
   }
 

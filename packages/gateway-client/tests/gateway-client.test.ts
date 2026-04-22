@@ -640,10 +640,19 @@ test('invalid control frame emits protocol error instead of being silently ignor
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
   ws.emitMessage({ type: 'register_rejected', reason: 'bad-aksk' });
-  await assert.rejects(connecting, (error) => error instanceof GatewayClientError);
+  let rejection: GatewayClientError | undefined;
+  await assert.rejects(connecting, (error) => {
+    rejection = error as GatewayClientError;
+    return error instanceof GatewayClientError;
+  });
   await flushAsyncHandlers();
 
   assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, rejection?.code);
+  assert.equal(errors[0]!.source, rejection?.source);
+  assert.equal(errors[0]!.phase, rejection?.phase);
+  assert.equal(errors[0]!.retryable, rejection?.retryable);
+  assert.equal(errors[0]!.message, rejection?.message);
   assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
   assert.equal(errors[0]!.retryable, false);
   assert.equal(errors[0]!.details?.stage, 'transport');
@@ -861,6 +870,7 @@ test('abort keeps GATEWAY_CONNECT_ABORTED even when transport close synchronousl
 
   const transport = new SyncCloseTransport();
   const controller = new AbortController();
+  const errors: GatewayClientError[] = [];
   const runtime = new GatewayClientRuntime(
     {
       url: 'ws://localhost:8081/ws/agent',
@@ -868,17 +878,32 @@ test('abort keeps GATEWAY_CONNECT_ABORTED even when transport close synchronousl
       abortSignal: controller.signal,
     },
     buildFakeDependencies({ transport }),
-    createFakeSink(),
+    {
+      ...createFakeSink(),
+      emitError(error) {
+        errors.push(error);
+      },
+    },
   );
 
   const connecting = runtime.connect();
   transport.emitOpen();
   controller.abort();
 
+  let rejection: GatewayClientError | undefined;
   await assert.rejects(
     connecting,
-    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_CONNECT_ABORTED',
+    (error) => {
+      rejection = error as GatewayClientError;
+      return error instanceof GatewayClientError && error.code === 'GATEWAY_CONNECT_ABORTED';
+    },
   );
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.code, rejection?.code);
+  assert.equal(errors[0]?.source, rejection?.source);
+  assert.equal(errors[0]?.phase, rejection?.phase);
+  assert.equal(errors[0]?.retryable, rejection?.retryable);
+  assert.equal(errors[0]?.message, rejection?.message);
 });
 
 test('manual disconnect ignores late handshake and business frames', async () => {
@@ -994,29 +1019,55 @@ test('pre-ready whitelist close codes never schedule reconnect and log reconnect
 });
 
 test('invalid url connect rejects as promise and does not retain active attempt', async () => {
+  const errors: GatewayClientError[] = [];
   const runtime = new GatewayClientRuntime(
     {
       url: 'not-a-valid-url',
       registerMessage: registerMessage(),
     },
     buildFakeDependencies(),
-    createFakeSink(),
+    {
+      ...createFakeSink(),
+      emitError(error) {
+        errors.push(error);
+      },
+    },
   );
 
+  let firstRejection: GatewayClientError | undefined;
   await assert.rejects(
     runtime.connect(),
-    (error) => error instanceof GatewayClientError
-      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
-      && error.source === 'transport'
-      && error.phase === 'before_open',
+    (error) => {
+      firstRejection = error as GatewayClientError;
+      return error instanceof GatewayClientError
+        && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+        && error.source === 'transport'
+        && error.phase === 'before_open';
+    },
   );
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.code, firstRejection?.code);
+  assert.equal(errors[0]?.source, firstRejection?.source);
+  assert.equal(errors[0]?.phase, firstRejection?.phase);
+  assert.equal(errors[0]?.retryable, firstRejection?.retryable);
+  assert.equal(errors[0]?.message, firstRejection?.message);
+  let secondRejection: GatewayClientError | undefined;
   await assert.rejects(
     runtime.connect(),
-    (error) => error instanceof GatewayClientError
-      && error.code === 'GATEWAY_WEBSOCKET_ERROR'
-      && error.source === 'transport'
-      && error.phase === 'before_open',
+    (error) => {
+      secondRejection = error as GatewayClientError;
+      return error instanceof GatewayClientError
+        && error.code === 'GATEWAY_WEBSOCKET_ERROR'
+        && error.source === 'transport'
+        && error.phase === 'before_open';
+    },
   );
+  assert.equal(errors.length, 2);
+  assert.equal(errors[1]?.code, secondRejection?.code);
+  assert.equal(errors[1]?.source, secondRejection?.source);
+  assert.equal(errors[1]?.phase, secondRejection?.phase);
+  assert.equal(errors[1]?.retryable, secondRejection?.retryable);
+  assert.equal(errors[1]?.message, secondRejection?.message);
 });
 
 test('auth payload and transport open sync failures reject as promises', async () => {
@@ -1150,6 +1201,7 @@ test('async inbound handler exceptions are emitted as protocol errors', async ()
 test('handshake timeout rejects the active connect attempt', async () => {
   const transport = new FakeTransport();
   const timers = installFakeTimeouts();
+  const errors: GatewayClientError[] = [];
   const runtime = new GatewayClientRuntime(
     {
       url: 'ws://localhost:8081/ws/agent',
@@ -1157,7 +1209,12 @@ test('handshake timeout rejects the active connect attempt', async () => {
       handshakeTimeoutMs: 25,
     },
     buildFakeDependencies({ transport }),
-    createFakeSink(),
+    {
+      ...createFakeSink(),
+      emitError(error) {
+        errors.push(error);
+      },
+    },
   );
 
   try {
@@ -1167,13 +1224,23 @@ test('handshake timeout rejects the active connect attempt', async () => {
     assert.equal(timers.scheduled.length > 0, true);
     assert.equal(timers.runNext(), true);
 
+    let rejection: GatewayClientError | undefined;
     await assert.rejects(
       connecting,
-      (error) => error instanceof GatewayClientError
-        && error.code === 'GATEWAY_CONNECT_TIMEOUT'
-        && error.source === 'handshake'
-        && error.phase === 'before_ready',
+      (error) => {
+        rejection = error as GatewayClientError;
+        return error instanceof GatewayClientError
+          && error.code === 'GATEWAY_CONNECT_TIMEOUT'
+          && error.source === 'handshake'
+          && error.phase === 'before_ready';
+      },
     );
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]?.code, rejection?.code);
+    assert.equal(errors[0]?.source, rejection?.source);
+    assert.equal(errors[0]?.phase, rejection?.phase);
+    assert.equal(errors[0]?.retryable, rejection?.retryable);
+    assert.equal(errors[0]?.message, rejection?.message);
   } finally {
     timers.restore();
   }

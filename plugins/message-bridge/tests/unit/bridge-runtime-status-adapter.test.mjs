@@ -44,8 +44,9 @@ describe('bridge runtime status adapter', () => {
   test('publishes disabled, config invalid, server failure and plugin failure states', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
-    adapter.publishDisabled();
+    adapter.publishDisabled('message_bridge_runtime_disabled');
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'disabled');
+    assert.strictEqual(getMessageBridgeStatus().lastError, 'message_bridge_runtime_disabled');
 
     adapter.publishConfigInvalid('invalid config');
     const configInvalid = getMessageBridgeStatus();

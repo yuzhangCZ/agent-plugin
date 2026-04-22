@@ -149,6 +149,20 @@ describe('message bridge status store', () => {
     assert.strictEqual(changedLogs[0].extra.toUnavailableReason, null);
   });
 
+  test('clears previous logger when next client has no app.log', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+    getMessageBridgeStatus();
+    await flushLogs();
+    assert.strictEqual(logs.filter((entry) => entry?.message === 'status_api.query').length, 1);
+
+    configureMessageBridgeStatusLogger({});
+    getMessageBridgeStatus();
+    await flushLogs();
+
+    assert.strictEqual(logs.filter((entry) => entry?.message === 'status_api.query').length, 1);
+  });
+
   test('enforces snapshot invariants', () => {
     assert.throws(() => publishMessageBridgeStatus({
       connected: true,

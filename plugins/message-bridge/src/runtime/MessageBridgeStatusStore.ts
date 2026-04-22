@@ -47,6 +47,7 @@ function logStatusApi(message: string, extra?: Record<string, unknown>): void {
 export function configureMessageBridgeStatusLogger(client: unknown, options: MessageBridgeStatusLoggerOptions = {}): void {
   runtimeTraceIdProvider = options.runtimeTraceIdProvider ?? runtimeTraceIdProvider;
   if (!hasAppLog(client)) {
+    logger = null;
     return;
   }
 

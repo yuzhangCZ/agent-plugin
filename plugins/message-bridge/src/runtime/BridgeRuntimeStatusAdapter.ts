@@ -16,7 +16,7 @@ import {
 
 export interface BridgeRuntimeStatusAdapter {
   publishConnecting(): void;
-  publishDisabled(): void;
+  publishDisabled(errorMessage: string): void;
   publishConfigInvalid(errorMessage: string): void;
   publishPluginFailure(errorMessage: string): void;
   publishGatewayState(state: GatewayClientState): void;
@@ -55,11 +55,11 @@ export function createBridgeRuntimeStatusAdapter(
       }));
     },
 
-    publishDisabled() {
+    publishDisabled(errorMessage: string) {
       const current = read();
       publish(createUnavailableStatus({
         reason: 'disabled',
-        lastError: null,
+        lastError: errorMessage,
         updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));

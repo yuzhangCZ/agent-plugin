@@ -87,6 +87,8 @@ describe('plugin distribution artifact', () => {
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
     assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof mod.startMessageBridgeRuntime, 'function');
+    assert.strictEqual(typeof mod.stopMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
   });
@@ -138,6 +140,8 @@ describe('plugin distribution artifact', () => {
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
     assert.strictEqual(typeof mod.getMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof mod.startMessageBridgeRuntime, 'function');
+    assert.strictEqual(typeof mod.stopMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof mod.subscribeMessageBridgeStatus, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
   });
@@ -200,7 +204,7 @@ describe('plugin distribution artifact', () => {
         process.execPath,
         [
           '-e',
-          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { console.log(typeof mod.default, typeof mod.MessageBridgePlugin, typeof mod.getMessageBridgeStatus, typeof mod.subscribeMessageBridgeStatus, mod.default === mod.MessageBridgePlugin); })`,
+          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { console.log(typeof mod.default, typeof mod.MessageBridgePlugin, typeof mod.getMessageBridgeStatus, typeof mod.startMessageBridgeRuntime, typeof mod.stopMessageBridgeRuntime, typeof mod.subscribeMessageBridgeStatus, mod.default === mod.MessageBridgePlugin); })`,
         ],
         {
           cwd: tempDir,
@@ -209,7 +213,7 @@ describe('plugin distribution artifact', () => {
         },
       ).toString().trim();
 
-      assert.strictEqual(stdout, 'function function function function true');
+      assert.strictEqual(stdout, 'function function function function function function true');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

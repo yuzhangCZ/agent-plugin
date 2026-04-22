@@ -71,7 +71,7 @@ import {
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
 import type { HostClientLike, OpencodeClient } from '../types/index.js';
-import { getErrorDetailsForLog } from '../utils/error.js';
+import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { asRecord, asString, asTrimmedString } from '../utils/type-guards.js';
 
 export interface BridgeRuntimeOptions {
@@ -111,6 +111,8 @@ function withOpencodeFamily<T extends object>(event: T): T & { family: 'opencode
     family: 'opencode',
   };
 }
+
+const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 
 export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
@@ -228,7 +230,7 @@ export class BridgeRuntime {
         bridgeDirectory: config.bridgeDirectory,
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       this.logger.error('runtime.config.loading_failed', {
         error: errorMessage,
         workspacePath: this.workspacePath,
@@ -237,10 +239,10 @@ export class BridgeRuntime {
       throw error;
     }
     if (!config.enabled) {
-      this.statusAdapter.publishDisabled();
+      const disabledError = new Error(MESSAGE_BRIDGE_RUNTIME_DISABLED);
+      this.statusAdapter.publishDisabled(disabledError.message);
       this.logger.info('runtime.start.disabled_by_config');
-      this.started = true;
-      return;
+      throw disabledError;
     }
 
     this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
@@ -261,7 +263,7 @@ export class BridgeRuntime {
     try {
       startupValidation = await this.validateStartupPrerequisites();
     } catch (error) {
-      this.statusAdapter.publishPluginFailure(error instanceof Error ? error.message : String(error));
+      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
       throw error;
     }
     this.sdkClient = startupValidation.sdkClient;

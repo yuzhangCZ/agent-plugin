@@ -23,6 +23,7 @@ test('gateway-wire facade exposes the current transport contract constants', () 
     'session.error',
     'permission.updated',
     'permission.asked',
+    'permission.replied',
     'question.asked',
   ]);
 

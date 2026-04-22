@@ -77,6 +77,42 @@ function mockInput(overrides = {}) {
   };
 }
 
+function installReadyWebSocket(delayMs = 0) {
+  const originalWebSocket = globalThis.WebSocket;
+  let websocketCtorCalls = 0;
+
+  class ReadyWebSocket {
+    static OPEN = 1;
+
+    constructor() {
+      websocketCtorCalls += 1;
+      this.readyState = 0;
+      setTimeout(() => {
+        this.readyState = ReadyWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({ type: 'register_ok' }) });
+      }, delayMs);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+
+  globalThis.WebSocket = ReadyWebSocket;
+  return {
+    restore() {
+      globalThis.WebSocket = originalWebSocket;
+    },
+    getCtorCalls() {
+      return websocketCtorCalls;
+    },
+  };
+}
+
 describe('plugin contract', () => {
   beforeEach(() => {
     __resetRuntimeForTests();
@@ -280,8 +316,8 @@ describe('plugin contract', () => {
       assert.strictEqual(typeof initFailureLogs[0].extra.errorType, 'string');
       assert.strictEqual(typeof initFailureLogs[0].extra.runtimeTraceId, 'string');
 
-      process.env.BRIDGE_ENABLED = 'false';
-      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'true';
+      process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
       const degradedHooksB = await MessageBridgePlugin(isolatedInputB);
       assert.strictEqual(typeof degradedHooksB.event, 'function');
       assert.strictEqual(getRuntime(), null);
@@ -297,8 +333,10 @@ describe('plugin contract', () => {
       assert.strictEqual(typeof hooks.event, 'function');
       assert.strictEqual(getRuntime(), null);
 
+      const readySocket = installReadyWebSocket();
       await assert.doesNotReject(startMessageBridgeRuntime());
       assert.notStrictEqual(getRuntime(), null);
+      readySocket.restore();
       const restartLogs = logs.filter((entry) => entry?.message === 'runtime.start.requested');
       assert.strictEqual(restartLogs.length, 2);
       assert.notStrictEqual(restartLogs[1].extra.runtimeTraceId, initFailureLogs[0].extra.runtimeTraceId);
@@ -363,12 +401,12 @@ describe('plugin contract', () => {
 
       await assert.doesNotReject(hooks.event({ event: { type: 'message.updated' } }));
 
-      process.env.BRIDGE_ENABLED = 'false';
-      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
 
+      const readySocket = installReadyWebSocket();
       await assert.doesNotReject(startMessageBridgeRuntime());
       assert.notStrictEqual(getRuntime(), null);
-      assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'disabled');
+      assert.strictEqual(getMessageBridgeStatus().phase, 'ready');
 
       const runtime = getRuntime();
       const receivedEvents = [];
@@ -382,6 +420,7 @@ describe('plugin contract', () => {
         assert.deepStrictEqual(receivedEvents, [{ type: 'message.updated', payload: 'after-recover' }]);
       } finally {
         runtime.handleEvent = originalHandleEvent;
+        readySocket.restore();
       }
     } finally {
       if (originalBridgeEnabled === undefined) {
@@ -409,26 +448,42 @@ describe('plugin contract', () => {
   });
 
   test('stop locks auto init until explicit start is called again', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
     const client = createPluginClient();
+    const readySocket = installReadyWebSocket();
 
-    const hooks = await MessageBridgePlugin(mockInput({ client }));
-    assert.strictEqual(typeof hooks.event, 'function');
-    assert.notStrictEqual(getRuntime(), null);
+    try {
+      const hooks = await MessageBridgePlugin(mockInput({ client }));
+      assert.strictEqual(typeof hooks.event, 'function');
+      assert.notStrictEqual(getRuntime(), null);
 
-    stopMessageBridgeRuntime();
-    assert.strictEqual(getRuntime(), null);
-    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'not_ready');
+      stopMessageBridgeRuntime();
+      assert.strictEqual(getRuntime(), null);
+      assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'not_ready');
 
-    const hooksAfterReload = await MessageBridgePlugin(mockInput({ client }));
-    assert.strictEqual(typeof hooksAfterReload.event, 'function');
-    assert.strictEqual(getRuntime(), null);
+      const hooksAfterReload = await MessageBridgePlugin(mockInput({ client }));
+      assert.strictEqual(typeof hooksAfterReload.event, 'function');
+      assert.strictEqual(getRuntime(), null);
 
-    await assert.doesNotReject(startMessageBridgeRuntime());
-    assert.notStrictEqual(getRuntime(), null);
+      await assert.doesNotReject(startMessageBridgeRuntime());
+      assert.notStrictEqual(getRuntime(), null);
+    } finally {
+      readySocket.restore();
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'false';
+    }
   });
 
   test('explicit start uses latest loaded input and does not auto restart on reload', async () => {
     const originalBridgeEnabled = process.env.BRIDGE_ENABLED;
+    const originalBridgeAuthAk = process.env.BRIDGE_AUTH_AK;
+    const originalBridgeAuthSk = process.env.BRIDGE_AUTH_SK;
+    const originalGatewayUrl = process.env.BRIDGE_GATEWAY_URL;
     const workspaceA = await mkdtemp(join(tmpdir(), 'mb-it-input-a-'));
     const workspaceB = await mkdtemp(join(tmpdir(), 'mb-it-input-b-'));
     const logsA = [];
@@ -450,7 +505,11 @@ describe('plugin contract', () => {
       },
     });
 
-    process.env.BRIDGE_ENABLED = 'false';
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+    const readySocket = installReadyWebSocket();
 
     try {
       await MessageBridgePlugin(mockInput({
@@ -478,18 +537,26 @@ describe('plugin contract', () => {
       assert.ok(latestStartLog);
       assert.strictEqual(latestStartLog.extra.workspacePath, workspaceB);
     } finally {
-      if (originalBridgeEnabled === undefined) {
-        delete process.env.BRIDGE_ENABLED;
-      } else {
-        process.env.BRIDGE_ENABLED = originalBridgeEnabled;
-      }
+      readySocket.restore();
+      if (originalBridgeEnabled === undefined) delete process.env.BRIDGE_ENABLED;
+      else process.env.BRIDGE_ENABLED = originalBridgeEnabled;
+      if (originalBridgeAuthAk === undefined) delete process.env.BRIDGE_AUTH_AK;
+      else process.env.BRIDGE_AUTH_AK = originalBridgeAuthAk;
+      if (originalBridgeAuthSk === undefined) delete process.env.BRIDGE_AUTH_SK;
+      else process.env.BRIDGE_AUTH_SK = originalBridgeAuthSk;
+      if (originalGatewayUrl === undefined) delete process.env.BRIDGE_GATEWAY_URL;
+      else process.env.BRIDGE_GATEWAY_URL = originalGatewayUrl;
       await rm(workspaceA, { recursive: true, force: true });
       await rm(workspaceB, { recursive: true, force: true });
     }
   });
 
   test('explicit start failure keeps reject message equal to lastError', async () => {
-    process.env.BRIDGE_ENABLED = 'false';
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+    const readySocket = installReadyWebSocket();
 
     await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
     assert.notStrictEqual(getRuntime(), null);
@@ -516,6 +583,31 @@ describe('plugin contract', () => {
     assert.ok(rejection instanceof Error);
     assert.strictEqual(rejection.message, getMessageBridgeStatus().lastError);
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'plugin_failure');
+    readySocket.restore();
+    delete process.env.BRIDGE_AUTH_AK;
+    delete process.env.BRIDGE_AUTH_SK;
+    delete process.env.BRIDGE_GATEWAY_URL;
+    process.env.BRIDGE_ENABLED = 'false';
+  });
+
+  test('explicit start disabled failure keeps reject message equal to lastError', async () => {
+    let rejection;
+
+    await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
+    assert.strictEqual(getRuntime(), null);
+
+    await assert.rejects(
+      startMessageBridgeRuntime(),
+      (error) => {
+        rejection = error;
+        return true;
+      },
+    );
+
+    assert.ok(rejection instanceof Error);
+    assert.strictEqual(rejection.message, 'message_bridge_runtime_disabled');
+    assert.strictEqual(rejection.message, getMessageBridgeStatus().lastError);
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'disabled');
   });
 
   test('explicit start config_invalid failure keeps reject message equal to lastError', async () => {
@@ -565,7 +657,11 @@ describe('plugin contract', () => {
       },
     });
 
-    process.env.BRIDGE_ENABLED = 'false';
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+    const readySocket = installReadyWebSocket();
     await MessageBridgePlugin(mockInput({ client: createPluginClient() }));
     assert.notStrictEqual(getRuntime(), null);
 
@@ -588,6 +684,11 @@ describe('plugin contract', () => {
       logs.filter((entry) => entry?.message === 'runtime.singleton.init_blocked_after_first_attempt').length,
       1,
     );
+    readySocket.restore();
+    delete process.env.BRIDGE_AUTH_AK;
+    delete process.env.BRIDGE_AUTH_SK;
+    delete process.env.BRIDGE_GATEWAY_URL;
+    process.env.BRIDGE_ENABLED = 'false';
   });
 
   test('explicit start while another explicit start is initializing restarts with a new lifecycle attempt', async () => {
@@ -656,6 +757,10 @@ describe('plugin contract', () => {
   });
 
   test('runtime event failures are non-fatal and logged by plugin boundary', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
     const logs = [];
     const client = createPluginClient({
       app: {
@@ -666,6 +771,7 @@ describe('plugin contract', () => {
       },
     });
 
+    const readySocket = installReadyWebSocket();
     const hooks = await MessageBridgePlugin(mockInput({ client }));
     const runtime = getRuntime();
     assert.ok(runtime !== null);
@@ -686,6 +792,11 @@ describe('plugin contract', () => {
       assert.strictEqual(eventFailureLogs[0].extra.eventType, 'message.updated');
     } finally {
       runtime.handleEvent = originalHandleEvent;
+      readySocket.restore();
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'false';
     }
   });
 
