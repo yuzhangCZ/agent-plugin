@@ -56,9 +56,9 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(configInvalid.lastError, 'invalid config');
 
     adapter.publishGatewayError({
-      code: 'GATEWAY_REGISTER_REJECTED',
-      source: 'handshake',
-      phase: 'before_ready',
+      code: 'GATEWAY_HANDSHAKE_REJECTED',
+      disposition: 'startup_failure',
+      stage: 'handshake',
       retryable: false,
       message: 'device_conflict',
     });
@@ -74,43 +74,46 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(failed.lastError, 'startup boom');
   });
 
-  test('uses gateway-client translator semantics for handshake and transport failures', () => {
+  test('uses shared availability mapper semantics for handshake and transport failures', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
     adapter.publishGatewayError({
-      code: 'GATEWAY_PROTOCOL_VIOLATION',
-      source: 'handshake',
-      phase: 'before_ready',
+      code: 'GATEWAY_HANDSHAKE_INVALID',
+      disposition: 'startup_failure',
+      stage: 'handshake',
       retryable: false,
       message: 'register violated',
     });
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_CONNECT_TIMEOUT',
-      source: 'transport',
-      phase: 'before_open',
+    __resetMessageBridgeStatusForTests();
+    const anotherAdapter = createBridgeRuntimeStatusAdapter();
+
+    anotherAdapter.publishGatewayError({
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'startup_failure',
+      stage: 'pre_open',
       retryable: true,
       message: 'timeout',
     });
-    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'network_failure');
   });
 
   test('keeps server failure precedence over later network failure', () => {
     const adapter = createBridgeRuntimeStatusAdapter();
 
     adapter.publishGatewayError({
-      code: 'GATEWAY_REGISTER_REJECTED',
-      source: 'handshake',
-      phase: 'before_ready',
+      code: 'GATEWAY_HANDSHAKE_REJECTED',
+      disposition: 'startup_failure',
+      stage: 'handshake',
       retryable: false,
       message: 'auth rejected',
     });
 
     adapter.publishGatewayError({
-      code: 'GATEWAY_WEBSOCKET_ERROR',
-      source: 'transport',
-      phase: 'ready',
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'runtime_failure',
+      stage: 'ready',
       retryable: true,
       message: 'socket down',
     });
@@ -125,9 +128,9 @@ describe('bridge runtime status adapter', () => {
 
     adapter.publishGatewayState('READY');
     adapter.publishGatewayError({
-      code: 'GATEWAY_UNEXPECTED_CLOSE',
-      source: 'transport',
-      phase: 'ready',
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'runtime_failure',
+      stage: 'ready',
       retryable: true,
       message: 'network jitter',
     });
@@ -147,8 +150,8 @@ describe('bridge runtime status adapter', () => {
 
     adapter.publishGatewayError({
       code: 'GATEWAY_NOT_READY',
-      source: 'state_gate',
-      phase: 'before_ready',
+      disposition: 'diagnostic',
+      stage: 'handshake',
       retryable: false,
       message: 'not ready',
     });
@@ -163,13 +166,30 @@ describe('bridge runtime status adapter', () => {
     const ready = getMessageBridgeStatus();
 
     adapter.publishGatewayError({
-      code: 'GATEWAY_PROTOCOL_VIOLATION',
-      source: 'inbound_protocol',
-      phase: 'ready',
+      code: 'GATEWAY_INBOUND_PROTOCOL_INVALID',
+      disposition: 'diagnostic',
+      stage: 'ready',
       retryable: false,
       message: 'unexpected frame',
     });
 
     assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+  });
+
+  test('startup parameter invalid is projected to config_invalid locally', () => {
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishGatewayError({
+      code: 'GATEWAY_CONNECT_PARAMETER_INVALID',
+      disposition: 'startup_failure',
+      stage: 'pre_open',
+      retryable: false,
+      message: 'invalid auth config',
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
+    assert.strictEqual(snapshot.lastError, 'invalid auth config');
   });
 });

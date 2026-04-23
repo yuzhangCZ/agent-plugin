@@ -1,7 +1,6 @@
 import {
-  translateGatewayClientFailure,
+  mapGatewayClientAvailability,
   type GatewayClientErrorShape,
-  type GatewayClientFailureSignal,
   type GatewayClientState,
 } from '@agent-plugin/gateway-client';
 import {
@@ -23,14 +22,15 @@ export interface BridgeRuntimeStatusAdapter {
   publishGatewayError(error: GatewayClientErrorShape): void;
 }
 
-function mapFailureSignalToReason(signal: GatewayClientFailureSignal): 'server_failure' | 'network_failure' | null {
-  switch (signal.failureClass) {
-    case 'handshake_failure':
+function mapGatewayAvailabilityToReason(
+  availability: ReturnType<typeof mapGatewayClientAvailability>,
+): 'server_failure' | 'network_failure' | null {
+  switch (availability) {
+    case 'remote_unavailable':
       return 'server_failure';
-    case 'transport_failure':
+    case 'transport_unavailable':
       return 'network_failure';
-    case 'protocol_diagnostic':
-    case 'state_gate':
+    case null:
       return null;
   }
 }
@@ -102,8 +102,17 @@ export function createBridgeRuntimeStatusAdapter(
 
     publishGatewayError(error: GatewayClientErrorShape) {
       const current = read();
-      const failureSignal = translateGatewayClientFailure(error);
-      const reason = mapFailureSignalToReason(failureSignal);
+      if (error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID' && error.disposition === 'startup_failure') {
+        publish(createUnavailableStatus({
+          reason: 'config_invalid',
+          lastError: error.message,
+          updatedAt: now(),
+          lastReadyAt: current.lastReadyAt,
+        }));
+        return;
+      }
+
+      const reason = mapGatewayAvailabilityToReason(mapGatewayClientAvailability(error));
       if (!reason) {
         return;
       }

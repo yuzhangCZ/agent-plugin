@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { gatewayClientFailureTranslator, translateGatewayClientFailure } from '../src/index.ts';
+import { mapGatewayClientAvailability } from '../src/index.ts';
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -87,7 +87,7 @@ test('public api negative type fixture rejects importing config assembly helper 
   );
 });
 
-test('public api exports stable neutral failure translator helper', () => {
+test('public api exports stable gateway availability mapper', () => {
   const error = {
     code: 'GATEWAY_NOT_READY',
     disposition: 'diagnostic',
@@ -96,20 +96,7 @@ test('public api exports stable neutral failure translator helper', () => {
     message: 'gateway_not_ready',
   } as const;
 
-  assert.deepEqual(gatewayClientFailureTranslator.translate(error), {
-    failureClass: 'state_gate',
-    code: 'GATEWAY_NOT_READY',
-    disposition: 'diagnostic',
-    stage: 'handshake',
-    retryable: true,
-  });
-  assert.deepEqual(translateGatewayClientFailure(error), {
-    failureClass: 'state_gate',
-    code: 'GATEWAY_NOT_READY',
-    disposition: 'diagnostic',
-    stage: 'handshake',
-    retryable: true,
-  });
+  assert.equal(mapGatewayClientAvailability(error), null);
 });
 
 test('public api negative type fixture rejects legacy category-based error shape', async () => {
@@ -152,51 +139,49 @@ test('public api negative type fixture rejects legacy category-based error shape
   );
 });
 
-test('failure signal is sufficient for upper-layer neutral consumption', () => {
-  function consumeFailureSignal(
-    signal: ReturnType<typeof gatewayClientFailureTranslator.translate>,
-  ): 'retry_handshake' | 'halt_handshake' | 'ready_transport_drop' | 'protocol_fail_closed' | 'queue_user_action' {
-    if (signal.failureClass === 'handshake_failure') {
-      return signal.retryable ? 'retry_handshake' : 'halt_handshake';
+test('availability mapper is sufficient for upper-layer neutral consumption', () => {
+  function consumeAvailability(
+    availability: ReturnType<typeof mapGatewayClientAvailability>,
+  ): 'queue_user_action' | 'server_unavailable' | 'network_unavailable' {
+    switch (availability) {
+      case 'remote_unavailable':
+        return 'server_unavailable';
+      case 'transport_unavailable':
+        return 'network_unavailable';
+      case null:
+        return 'queue_user_action';
     }
-    if (signal.failureClass === 'transport_failure') {
-      return signal.stage === 'ready' ? 'ready_transport_drop' : 'queue_user_action';
-    }
-    if (signal.failureClass === 'protocol_diagnostic') {
-      return signal.code === 'GATEWAY_OUTBOUND_PROTOCOL_INVALID' ? 'protocol_fail_closed' : 'queue_user_action';
-    }
-    return signal.disposition === 'diagnostic' ? 'queue_user_action' : 'halt_handshake';
   }
 
-  assert.equal(consumeFailureSignal(gatewayClientFailureTranslator.translate({
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_HANDSHAKE_TIMEOUT',
     disposition: 'startup_failure',
     stage: 'handshake',
     retryable: true,
     message: 'gateway_handshake_timeout',
-  })), 'retry_handshake');
-  assert.equal(consumeFailureSignal(gatewayClientFailureTranslator.translate({
+  })), 'server_unavailable');
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_HANDSHAKE_REJECTED',
     disposition: 'startup_failure',
     stage: 'handshake',
     retryable: false,
     message: 'gateway_register_rejected',
-  })), 'halt_handshake');
-  assert.equal(consumeFailureSignal(gatewayClientFailureTranslator.translate({
+  })), 'server_unavailable');
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_TRANSPORT_ERROR',
     disposition: 'runtime_failure',
     stage: 'ready',
     retryable: true,
     message: 'gateway_websocket_error',
-  })), 'ready_transport_drop');
-  assert.equal(consumeFailureSignal(gatewayClientFailureTranslator.translate({
+  })), 'network_unavailable');
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
     disposition: 'diagnostic',
     stage: 'ready',
     retryable: false,
     message: 'gateway_invalid_message_type:heartbeat',
-  })), 'protocol_fail_closed');
-  assert.equal(consumeFailureSignal(translateGatewayClientFailure({
+  })), 'queue_user_action');
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_NOT_READY',
     disposition: 'diagnostic',
     stage: 'handshake',

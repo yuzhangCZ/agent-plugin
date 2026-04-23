@@ -1,10 +1,10 @@
 import {
+  type GatewayClientAvailability,
   type GatewayBusinessMessage,
   type GatewayClientErrorShape,
-  type GatewayClientFailureSignal,
   type GatewayInboundFrame,
   type GatewaySendPayload,
-  gatewayClientFailureTranslator,
+  mapGatewayClientAvailability,
 } from '../../src/index.ts';
 
 const inbound: GatewayInboundFrame = { kind: 'parse_error', rawPreview: '{"bad":' };
@@ -17,9 +17,9 @@ const error: GatewayClientErrorShape = {
   retryable: false,
   message: 'gateway_register_rejected',
 };
-const signal: GatewayClientFailureSignal = gatewayClientFailureTranslator.translate(error);
+const availability: GatewayClientAvailability = mapGatewayClientAvailability(error);
 
 void inbound;
 void outbound;
 void business;
-void signal;
+void availability;

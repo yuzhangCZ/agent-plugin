@@ -23,11 +23,14 @@ export type GatewayConnectionStage =
   | 'handshake'
   | 'ready';
 
-export type GatewayClientFailureClass =
-  | 'handshake_failure'
-  | 'transport_failure'
-  | 'protocol_diagnostic'
-  | 'state_gate';
+/**
+ * 宿主侧可复用的 gateway 可用性语义。
+ * @remarks 只表达 gateway 是否可被视为 unavailable，不承载产品态细节。
+ */
+export type GatewayClientAvailability =
+  | 'transport_unavailable'
+  | 'remote_unavailable'
+  | null;
 
 /**
  * gateway-client 错误的诊断上下文。
@@ -57,22 +60,4 @@ export interface GatewayClientErrorShape {
   readonly message: string;
   readonly details?: GatewayClientErrorDetails;
   readonly cause?: unknown;
-}
-
-/**
- * gateway-client 对外暴露的最小稳定中性失败信号。
- */
-export interface GatewayClientFailureSignal {
-  readonly failureClass: GatewayClientFailureClass;
-  readonly code: GatewayClientErrorCode;
-  readonly disposition: GatewayConnectionDisposition;
-  readonly stage: GatewayConnectionStage;
-  readonly retryable: boolean;
-}
-
-/**
- * 将错误事实层翻译为中性失败信号的统一入口。
- */
-export interface GatewayClientFailureTranslator {
-  translate(error: GatewayClientErrorShape): GatewayClientFailureSignal;
 }

@@ -724,8 +724,9 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
 
   await runtime.start();
   connection.emitError({
-    code: 'GATEWAY_REGISTER_REJECTED',
-    category: 'auth',
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    disposition: 'runtime_failure',
+    stage: 'ready',
     retryable: false,
     message: 'rejected',
   });
@@ -739,7 +740,7 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
     kind: 'gateway_runtime_failure',
     phase: 'runtime',
     message: 'rejected',
-    code: 'GATEWAY_REGISTER_REJECTED',
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
   });
 });
 

@@ -345,16 +345,16 @@ describe('runtime protocol strictness', () => {
     connection.connect = async () => {
       connection.emit('stateChange', 'READY');
       connection.emit('error', {
-        code: 'GATEWAY_REGISTER_REJECTED',
-        source: 'handshake',
-        phase: 'before_ready',
+        code: 'GATEWAY_HANDSHAKE_REJECTED',
+        disposition: 'startup_failure',
+        stage: 'handshake',
         retryable: false,
         message: 'device conflict',
       });
       connection.emit('error', {
-        code: 'GATEWAY_WEBSOCKET_ERROR',
-        source: 'transport',
-        phase: 'ready',
+        code: 'GATEWAY_TRANSPORT_ERROR',
+        disposition: 'runtime_failure',
+        stage: 'ready',
         retryable: true,
         message: 'network jitter',
       });
@@ -382,9 +382,9 @@ describe('runtime protocol strictness', () => {
     runtime.stop();
     connection.emit('stateChange', 'READY');
     connection.emit('error', {
-      code: 'GATEWAY_WEBSOCKET_ERROR',
-      source: 'transport',
-      phase: 'ready',
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'runtime_failure',
+      stage: 'ready',
       retryable: true,
       message: 'late socket down',
     });
@@ -415,9 +415,9 @@ describe('runtime protocol strictness', () => {
 
     firstConnection.emit('stateChange', 'READY');
     firstConnection.emit('error', {
-      code: 'GATEWAY_WEBSOCKET_ERROR',
-      source: 'transport',
-      phase: 'before_ready',
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'startup_failure',
+      stage: 'pre_open',
       retryable: true,
       message: 'stale connect failed',
     });
@@ -580,19 +580,18 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(secondConnection.sent.length, 0);
   });
 
-  test('connect rejection reuses emitted error semantics for network failure', async () => {
+  test('connect rejection publishes startup transport failure from connect reject path', async () => {
     __resetMessageBridgeStatusForTests();
     const emittedError = {
-      code: 'GATEWAY_WEBSOCKET_ERROR',
-      source: 'transport',
-      phase: 'before_ready',
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'startup_failure',
+      stage: 'pre_open',
       retryable: true,
       message: 'socket down',
     };
     const connection = createEventedGatewayConnectionMock('DISCONNECTED');
     connection.connect = async () => {
       connection.emit('stateChange', 'CONNECTING');
-      connection.emit('error', emittedError);
       throw Object.assign(new Error('socket down'), emittedError);
     };
     const runtime = createRuntimeWithResolvedConfig(createResolvedConfig());

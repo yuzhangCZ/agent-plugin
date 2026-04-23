@@ -6,7 +6,7 @@ import {
   createAkSkAuthProvider,
   createGatewayClient,
   GatewayClientError,
-  gatewayClientFailureTranslator,
+  mapGatewayClientAvailability,
 } from '../src/index.ts';
 import { DefaultOutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
@@ -1891,13 +1891,13 @@ test('reconnect attempt unexpected close after open stays handshake startup fail
   assert.equal(failedLog?.meta?.code, 'GATEWAY_TRANSPORT_ERROR');
   assert.equal(failedLog?.meta?.disposition, 'startup_failure');
   assert.equal(failedLog?.meta?.stage, 'handshake');
-  assert.equal(gatewayClientFailureTranslator.translate({
+  assert.equal(mapGatewayClientAvailability({
     code: String(failedLog?.meta?.code) as 'GATEWAY_TRANSPORT_ERROR',
     disposition: 'startup_failure',
     stage: 'handshake',
     retryable: true,
     message: 'gateway_unexpected_close_before_ready',
-  }).failureClass, 'transport_failure');
+  }), 'transport_unavailable');
 });
 
 test('reconnect attempt stops backoff after register send failure', async () => {
@@ -2014,13 +2014,7 @@ test('READY websocket error keeps ready phase', async () => {
   assert.equal(errors.at(-1)?.code, 'GATEWAY_TRANSPORT_ERROR');
   assert.equal(errors.at(-1)?.disposition, 'runtime_failure');
   assert.equal(errors.at(-1)?.stage, 'ready');
-  assert.deepEqual(gatewayClientFailureTranslator.translate(errors.at(-1)!), {
-    failureClass: 'transport_failure',
-    code: 'GATEWAY_TRANSPORT_ERROR',
-    disposition: 'runtime_failure',
-    stage: 'ready',
-    retryable: true,
-  });
+  assert.equal(mapGatewayClientAvailability(errors.at(-1)!), 'transport_unavailable');
 });
 
 test('READY protocol error keeps ready phase', () => {

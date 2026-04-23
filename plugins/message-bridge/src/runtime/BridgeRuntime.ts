@@ -121,6 +121,16 @@ function withOpencodeFamily<T extends object>(event: T): T & { family: 'opencode
   };
 }
 
+function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && 'disposition' in error
+    && 'stage' in error
+    && 'retryable' in error
+    && 'message' in error;
+}
+
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 
 export class BridgeRuntime {
@@ -330,7 +340,14 @@ export class BridgeRuntime {
       throw new Error('runtime_start_aborted');
     }
 
-    await this.lifecycleCoordinator.startSession(connection, { abortSignal: options.abortSignal });
+    try {
+      await this.lifecycleCoordinator.startSession(connection, { abortSignal: options.abortSignal });
+    } catch (error) {
+      if (isGatewayClientErrorShape(error)) {
+        this.statusAdapter.publishGatewayError(error);
+      }
+      throw error;
+    }
     if (options.abortSignal?.aborted) {
       this.lifecycleCoordinator.stopSession();
       this.logger.warn('runtime.start.aborted_after_connect');
