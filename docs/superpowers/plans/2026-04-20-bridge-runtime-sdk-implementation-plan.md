@@ -1,6 +1,6 @@
 # bridge-runtime-sdk 首版实施方案
 
-> **面向 AI 代理的工作者：** 如按本文实施，优先把本文视为“首版落地决策与执行边界”真源；架构边界仍以 `docs/architecture/bridge-runtime-sdk-architecture.md` 为准，对外接口仍以 `docs/design/interfaces/third-party-agent-provider-v2.md` 为准。
+> **面向 AI 代理的工作者：** 如按本文实施，优先把本文视为“首版落地决策与执行边界”真源；架构边界仍以 `docs/architecture/bridge-runtime-sdk-architecture.md` 为准，对外接口仍以 `docs/design/interfaces/bridge-runtime-sdk-integration.md` 为准。
 
 **目标：** 在 `packages/bridge-runtime-sdk` 落地首版 runtime SDK，使其承接统一的命令编排、上行投影与状态协调能力；首个接入方为 `message-bridge-openclaw`，现有 `message-bridge` 主 runtime 不在本轮迁移范围内。
 
@@ -9,7 +9,7 @@
 - `bridge-runtime-sdk` 不内置具体 agent/provider 集成适配器；OpenClaw 等宿主适配逻辑归属各自插件。
 - SDK 对外可先提供方法式 `ThirdPartyAgentProvider`，但 core 内部只依赖显式时序 contract，不直接依赖隐含时序的方法语义。
 - `ProviderFact` 是有序事实流；`SkillProviderEvent` 不是 `ProviderFact` 的一一映射，部分 lifecycle facts 只驱动 runtime 状态。
-- `gateway-schema` 继续作为协议层真源，`third-party-agent-provider-v2.md` 继续作为对外 Provider 契约真源。
+- `gateway-schema` 继续作为协议层真源，`bridge-runtime-sdk-integration.md` 继续作为对外集成契约真源。
 
 **技术栈：** TypeScript、Node.js test runner、workspace packages、`@agent-plugin/gateway-schema`、`@agent-plugin/gateway-client`
 
