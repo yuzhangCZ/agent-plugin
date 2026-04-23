@@ -221,4 +221,58 @@ describe('event uplink via hook boundary', () => {
     assert.ok(validationFailure);
     assert.strictEqual(validationFailure.body.extra.field, 'properties.info.time');
   });
+
+  test('runtime forwards empty-string text payloads without upstream validation failure', async () => {
+    const logs = [];
+    const runtime = new BridgeRuntime({
+      client: {
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+      },
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.eventFilter = new EventFilter(['message.part.updated', 'message.part.delta']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleEvent({
+      type: 'message.part.updated',
+      properties: {
+        delta: '',
+        part: {
+          sessionID: 'tool-empty-text',
+          messageID: 'msg-empty-text',
+          id: 'part-empty-text',
+          type: 'text',
+          text: '',
+        },
+      },
+    });
+
+    await runtime.handleEvent({
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'tool-empty-text',
+        messageID: 'msg-empty-text',
+        partID: 'part-empty-text',
+        field: 'text',
+        delta: '',
+      },
+    });
+
+    assert.strictEqual(sent.length, 2);
+    assert.strictEqual(sent[0].type, 'tool_event');
+    assert.strictEqual(sent[0].event.properties.part.text, '');
+    assert.strictEqual(sent[0].event.properties.delta, '');
+    assert.strictEqual(sent[1].type, 'tool_event');
+    assert.strictEqual(sent[1].event.properties.delta, '');
+
+    const validationFailure = logs.find((item) => item?.body?.message === 'runtime.upstream_validation_failed');
+    assert.strictEqual(validationFailure, undefined);
+  });
 });

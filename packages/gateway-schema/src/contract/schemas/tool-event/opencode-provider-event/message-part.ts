@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MESSAGE_PART_DELTA_FIELDS } from '../../../literals/tool-event.ts';
-import { requiredTrimmedString } from '../../shared.ts';
+import { requiredLooseTrimmedStringPreservingEmpty, requiredTrimmedString } from '../../shared.ts';
 
 export const messagePartDeltaEventSchema = z
   .object({
@@ -10,7 +10,7 @@ export const messagePartDeltaEventSchema = z
       messageID: requiredTrimmedString,
       partID: requiredTrimmedString,
       field: z.enum(MESSAGE_PART_DELTA_FIELDS),
-      delta: requiredTrimmedString,
+      delta: requiredLooseTrimmedStringPreservingEmpty,
     }),
   })
   .transform((event) => ({

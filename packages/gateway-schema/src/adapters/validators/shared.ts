@@ -1,7 +1,7 @@
 import { createWireViolation, type WireErrorCode, type WireViolation, type WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import { DOWNSTREAM_MESSAGE_TYPES } from '../../contract/literals/downstream.ts';
 import type { Result } from '../../shared/result.ts';
-import { isPlainObject, readTrimmedString } from '../../shared/type-guards.ts';
+import { isPlainObject, readLooseTrimmedStringPreservingEmpty, readTrimmedString } from '../../shared/type-guards.ts';
 import type { PlainObject, UnknownBoundaryInput } from '../../shared/boundary-types.ts';
 
 export type RecordLike = PlainObject;
@@ -64,6 +64,50 @@ export function requireNonEmptyString(
       toolSessionId: params.toolSessionId,
     });
   }
+  return ok(normalized);
+}
+
+export function requireStringPreservingEmpty(
+  value: UnknownBoundaryInput,
+  params: {
+    stage: WireViolation['stage'];
+    field: string;
+    messageType?: string;
+    action?: string;
+    eventType?: string;
+    welinkSessionId?: string;
+    toolSessionId?: string;
+    expected?: string;
+  },
+): Result<string, WireContractViolation> {
+  if (value === undefined) {
+    return fail({
+      stage: params.stage,
+      code: 'missing_required_field',
+      field: params.field,
+      message: `${params.field} is required`,
+      messageType: params.messageType,
+      action: params.action,
+      eventType: params.eventType,
+      welinkSessionId: params.welinkSessionId,
+      toolSessionId: params.toolSessionId,
+    });
+  }
+
+  const normalized = readLooseTrimmedStringPreservingEmpty(value);
+  if (normalized === undefined) {
+    return invalidFieldType({
+      stage: params.stage,
+      field: params.field,
+      expected: params.expected ?? 'a string',
+      messageType: params.messageType,
+      action: params.action,
+      eventType: params.eventType,
+      welinkSessionId: params.welinkSessionId,
+      toolSessionId: params.toolSessionId,
+    });
+  }
+
   return ok(normalized);
 }
 

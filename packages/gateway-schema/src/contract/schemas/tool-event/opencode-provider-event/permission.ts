@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { jsonValueSchema } from './json.ts';
-import { optionalLooseTrimmedString, requiredTrimmedString } from '../../shared.ts';
+import {
+  optionalLooseTrimmedString,
+  optionalLooseTrimmedStringPreservingEmpty,
+  requiredTrimmedString,
+} from '../../shared.ts';
 
 const permissionMetadataSchema = z
   .preprocess(
@@ -52,12 +56,12 @@ export const permissionUpdatedEventSchema = z
       messageID: optionalLooseTrimmedString,
       type: optionalLooseTrimmedString,
       permission: optionalLooseTrimmedString,
-      title: optionalLooseTrimmedString,
+      title: optionalLooseTrimmedStringPreservingEmpty,
       metadata: permissionMetadataSchema,
       status: permissionStatusSchema,
-      response: optionalLooseTrimmedString,
-      decision: optionalLooseTrimmedString,
-      answer: optionalLooseTrimmedString,
+      response: optionalLooseTrimmedStringPreservingEmpty,
+      decision: optionalLooseTrimmedStringPreservingEmpty,
+      answer: optionalLooseTrimmedStringPreservingEmpty,
       resolved: z.boolean().optional(),
       isResolved: z.boolean().optional(),
       result: permissionResolvedSchema.optional(),
@@ -76,10 +80,10 @@ export const permissionUpdatedEventSchema = z
         ...(id ? { id } : {}),
         ...(event.properties.messageID ? { messageID: event.properties.messageID } : {}),
         ...(type ? { type } : {}),
-        ...(event.properties.title ? { title: event.properties.title } : {}),
+        ...(event.properties.title !== undefined ? { title: event.properties.title } : {}),
         ...(event.properties.metadata ? { metadata: event.properties.metadata } : {}),
         ...(event.properties.status ? { status: event.properties.status } : {}),
-        ...(response ? { response } : {}),
+        ...(response !== undefined ? { response } : {}),
         ...(resolved !== undefined ? { resolved } : {}),
       },
     };
@@ -95,12 +99,12 @@ export const permissionAskedEventSchema = z
       messageID: optionalLooseTrimmedString,
       type: optionalLooseTrimmedString,
       permission: optionalLooseTrimmedString,
-      title: optionalLooseTrimmedString,
+      title: optionalLooseTrimmedStringPreservingEmpty,
       metadata: permissionMetadataSchema,
       status: permissionStatusSchema,
-      response: optionalLooseTrimmedString,
-      decision: optionalLooseTrimmedString,
-      answer: optionalLooseTrimmedString,
+      response: optionalLooseTrimmedStringPreservingEmpty,
+      decision: optionalLooseTrimmedStringPreservingEmpty,
+      answer: optionalLooseTrimmedStringPreservingEmpty,
       resolved: z.boolean().optional(),
       isResolved: z.boolean().optional(),
       result: permissionResolvedSchema.optional(),
@@ -118,10 +122,10 @@ export const permissionAskedEventSchema = z
         ...(event.properties.id ? { id: event.properties.id } : {}),
         ...(event.properties.messageID ? { messageID: event.properties.messageID } : {}),
         ...(type ? { type } : {}),
-        ...(event.properties.title ? { title: event.properties.title } : {}),
+        ...(event.properties.title !== undefined ? { title: event.properties.title } : {}),
         ...(event.properties.metadata ? { metadata: event.properties.metadata } : {}),
         ...(event.properties.status ? { status: event.properties.status } : {}),
-        ...(response ? { response } : {}),
+        ...(response !== undefined ? { response } : {}),
         ...(resolved !== undefined ? { resolved } : {}),
       },
     };
