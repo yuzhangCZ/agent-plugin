@@ -253,20 +253,6 @@ export async function probeBridgeGatewayHost(
         finish(result);
         return;
       }
-      if (state === 'DISCONNECTED') {
-        const result = {
-          state: 'connect_error',
-          latencyMs: elapsedMs(startedAt, now),
-          reason: 'probe disconnected before READY',
-        } satisfies BridgeGatewayProbeResult;
-        logWarn(logger, 'probe.connect.error', {
-          connectionKey: gatewayHost.connectionKey,
-          gatewayUrl: gatewayHost.url,
-          latencyMs: result.latencyMs,
-          reason: result.reason,
-        });
-        finish(result);
-      }
     });
 
     connection.connect().catch((error) => {
