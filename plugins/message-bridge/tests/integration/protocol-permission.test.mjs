@@ -80,7 +80,6 @@ describe('protocol permission-roundtrip', () => {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
         event: {
-          family: 'opencode',
           ...permissionRepliedEvent,
         },
       },
@@ -113,7 +112,6 @@ describe('protocol permission-roundtrip', () => {
         type: 'tool_event',
         toolSessionId: 'ses_permission_1',
         event: {
-          family: 'opencode',
           type: 'permission.asked',
           properties: {
             id: 'perm_fixture_1',
@@ -202,7 +200,6 @@ describe('protocol permission-roundtrip', () => {
         subagentSessionId: 'ses_child_permission_2',
         subagentName: 'research-agent',
         event: {
-          family: 'opencode',
           ...permissionAskedEvent,
         },
       },

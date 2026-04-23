@@ -31,7 +31,9 @@ import type {
   MessagePartToolState,
   MessagePartUpdatedEvent,
   MessageUpdatedEvent,
+  GatewayToolEventProviderKind,
 } from '../../contract/schemas/tool-event/index.ts';
+import { selectGatewayToolEventProviderKind } from '../../contract/schemas/tool-event/index.ts';
 import { skillProviderEventSchema } from '../../contract/schemas/tool-event/skill-provider-event/index.ts';
 import type { Result } from '../../shared/result.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
@@ -456,16 +458,6 @@ function normalizeMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartU
   return parseProjectedEvent(projected.value, eventType, messagePartUpdatedEventSchema);
 }
 
-function withFamily<Family extends GatewayToolEventPayload['family'], T extends object>(
-  family: Family,
-  event: T,
-): T & { family: Family } {
-  return {
-    family,
-    ...event,
-  };
-}
-
 function parseSkillProviderEvent(raw: PlainObject): Result<GatewayToolEventPayload, WireContractViolation> {
   const parsed = skillProviderEventSchema.safeParse(raw);
   return parsed.success
@@ -479,27 +471,16 @@ function parseSkillProviderEvent(raw: PlainObject): Result<GatewayToolEventPaylo
       );
 }
 
-function readRequiredToolEventFamily(raw: PlainObject): Result<'opencode' | 'skill', WireContractViolation> {
-  const family = readTrimmedString(raw.family);
-  if (!family) {
-    return fail({
-      stage: 'event',
-      code: 'missing_required_field',
-      field: 'family',
-      message: 'family is required',
-      messageType: readString(raw.type) ?? 'tool_event',
-      eventType: readString(raw.type) ?? 'tool_event',
-    });
-  }
-
-  if (family === 'opencode' || family === 'skill') {
-    return ok(family);
+function readToolEventProviderKind(raw: PlainObject): Result<GatewayToolEventProviderKind, WireContractViolation> {
+  const providerKind = selectGatewayToolEventProviderKind(raw);
+  if (providerKind) {
+    return ok(providerKind);
   }
 
   return invalidFieldType({
     stage: 'event',
-    field: 'family',
-    expected: '"opencode" or "skill"',
+    field: 'protocol',
+    expected: '"cloud" or absent',
     eventType: readString(raw.type) as OpencodeToolEventType | undefined,
     code: 'invalid_field_value',
   });
@@ -516,63 +497,63 @@ export class DefaultToolEventValidator implements ToolEventValidatorPort {
       });
     }
 
-    const family = readRequiredToolEventFamily(raw);
-    if (!family.ok) {
-      return family;
+    const providerKind = readToolEventProviderKind(raw);
+    if (!providerKind.ok) {
+      return providerKind;
     }
 
-    if (family.value === 'skill') {
+    if (providerKind.value === 'cloud') {
       return parseSkillProviderEvent(raw);
     }
 
     switch (raw.type as OpencodeToolEventType) {
       case TOOL_EVENT_TYPES[0]: {
         const result = normalizeMessageUpdatedEvent(raw);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[1]: {
         const result = normalizeMessagePartUpdatedEvent(raw);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[2]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[2], messagePartDeltaEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[3]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[3], messagePartRemovedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[4]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[4], sessionStatusEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[5]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[5], sessionIdleEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[6]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[6], sessionUpdatedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[7]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[7], sessionErrorEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[8]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[8], permissionUpdatedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[9]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[9], permissionAskedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[10]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[10], permissionRepliedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       case TOOL_EVENT_TYPES[11]: {
         const result = parseSimpleEvent(raw, TOOL_EVENT_TYPES[11], questionAskedEventSchema);
-        return result.ok ? ok(withFamily('opencode', result.value)) : result;
+        return result.ok ? ok(result.value) : result;
       }
       default:
         return unsupportedEventType(readString(raw.type) ?? String(raw.type));

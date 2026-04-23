@@ -114,13 +114,6 @@ interface DownstreamLogFields {
   toolSessionId?: string;
 }
 
-function withOpencodeFamily<T extends object>(event: T): T & { family: 'opencode' } {
-  return {
-    ...event,
-    family: 'opencode',
-  };
-}
-
 function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
   return typeof error === 'object'
     && error !== null
@@ -130,7 +123,6 @@ function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorS
     && 'retryable' in error
     && 'message' in error;
 }
-
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 
 export class BridgeRuntime {
@@ -426,7 +418,7 @@ export class BridgeRuntime {
       : {};
     forwardingLogger.info('event.forwarding');
     const transportEvent = this.upstreamTransportProjector.project(normalized);
-    const rawEvent = withOpencodeFamily(normalized.raw);
+    const rawEvent = normalized.raw;
     const transportEnvelope: GatewaySendPayload = {
       type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
       toolSessionId: envelopeToolSessionId,

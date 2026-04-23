@@ -58,7 +58,8 @@ import {
 
 /**
  * 当前态 `tool_event.event` 的唯一共享来源。
- * @remarks 它承接已落地的 legacy/current-state event family，不代表目标态统一事件来源已落地。
+ * @remarks 缺失 `protocol` 时按该 opencode canonical union 判定，
+ * 不在 payload 内补入 `family` 或其它来源 discriminator。
  */
 export const opencodeProviderEventSchema = z.discriminatedUnion('type', [
   messageUpdatedEventSchema,

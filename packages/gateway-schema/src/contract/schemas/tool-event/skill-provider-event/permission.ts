@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
-import { withToolEventFamily } from '../shared-family.ts';
+import { withCloudProtocol } from '../shared-protocol.ts';
 
 const skillPermissionAskEventBaseSchema = z.object({
   type: z.literal('permission.ask'),
@@ -26,8 +26,8 @@ const skillPermissionReplyEventBaseSchema = z.object({
   }),
 });
 
-export const skillPermissionAskEventSchema = withToolEventFamily('skill', skillPermissionAskEventBaseSchema);
+export const skillPermissionAskEventSchema = withCloudProtocol(skillPermissionAskEventBaseSchema);
 export type SkillPermissionAskEvent = z.output<typeof skillPermissionAskEventSchema>;
 
-export const skillPermissionReplyEventSchema = withToolEventFamily('skill', skillPermissionReplyEventBaseSchema);
+export const skillPermissionReplyEventSchema = withCloudProtocol(skillPermissionReplyEventBaseSchema);
 export type SkillPermissionReplyEvent = z.output<typeof skillPermissionReplyEventSchema>;

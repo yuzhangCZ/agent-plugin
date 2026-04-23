@@ -96,6 +96,8 @@ export function assertToolEventShape(message, expected = {}) {
   assert.strictEqual(message.type, 'tool_event');
   if ('toolSessionId' in expected) assert.strictEqual(message.toolSessionId, expected.toolSessionId);
   if ('eventType' in expected) assert.strictEqual(message.event?.type, expected.eventType);
+  if ('protocol' in expected) assert.strictEqual(message.event?.protocol, expected.protocol);
+  if (expected.hasProtocol === false) assertNoField(message.event, 'protocol');
 }
 
 export function assertSimpleToolEventShape(message, expected = {}) {

@@ -33,8 +33,8 @@ import {
 } from './step.ts';
 
 /**
- * `SkillProviderEvent` 是当前协议层 skill family 白名单。
- * `family: "skill"` 负责 family 路由，`type` 负责 family 内部事件判定。
+ * `SkillProviderEvent` 是当前协议层 cloud/skill provider event 白名单。
+ * `protocol: "cloud"` 负责 provider 分流，`type` 负责 cloud provider 内部事件判定。
  */
 export const skillProviderEventSchema = z.union([
   skillTextDeltaEventSchema,

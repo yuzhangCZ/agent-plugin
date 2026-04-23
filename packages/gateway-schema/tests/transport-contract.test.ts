@@ -213,7 +213,6 @@ test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envel
     type: 'tool_event',
     toolSessionId: 'tool-invalid',
     event: {
-      family: 'opencode',
       type: 'session.status',
       properties: {},
     },
@@ -229,12 +228,12 @@ test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envel
   });
 });
 
-test('validateGatewayUpstreamTransportMessage rejects unknown explicit tool_event families instead of guessing by shape', () => {
+test('validateGatewayUpstreamTransportMessage rejects unknown explicit tool_event protocols instead of guessing by shape', () => {
   const result = validateGatewayUpstreamTransportMessage({
     type: 'tool_event',
     toolSessionId: 'tool-skill',
     event: {
-      family: 'other',
+      protocol: 'other',
       type: 'session.status',
       properties: {
         sessionStatus: 'idle',
@@ -246,11 +245,11 @@ test('validateGatewayUpstreamTransportMessage rejects unknown explicit tool_even
   assertWireViolationShape(result.error, {
     stage: 'event',
     code: 'invalid_field_value',
-    field: 'family',
+    field: 'protocol',
   });
 });
 
-test('validateGatewayUpstreamTransportMessage accepts tool_event envelopes for both payload families', () => {
+test('validateGatewayUpstreamTransportMessage accepts tool_event envelopes for both canonical payload shapes', () => {
   const opencodeResult = validateGatewayUpstreamTransportMessage({
     type: 'tool_event',
     toolSessionId: 'tool-1',
@@ -261,7 +260,7 @@ test('validateGatewayUpstreamTransportMessage accepts tool_event envelopes for b
     type: 'tool_event',
     toolSessionId: 'tool-1',
     event: {
-      family: 'skill',
+      protocol: 'cloud',
       type: 'session.status',
       properties: {
         sessionStatus: 'idle',
