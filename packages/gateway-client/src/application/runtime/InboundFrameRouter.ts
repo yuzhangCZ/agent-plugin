@@ -3,7 +3,7 @@ import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import type { InboundClassificationResult } from './InboundFrameClassifier.ts';
 import { buildProtocolViolationError } from './buildProtocolViolationError.ts';
-import { resolveGatewayClientPhase } from './error-facts.ts';
+import { resolveGatewayClientStage } from './error-facts.ts';
 
 function logDebug(logger: GatewayRuntimeContext['logger'], message: string, meta?: Record<string, unknown>): void {
   if (!logger) {
@@ -68,8 +68,9 @@ export class InboundFrameRouter {
     inboundFrame: Extract<InboundClassificationResult, { kind: 'invalid-business' }>['frame'],
   ): GatewayClientError {
     return buildProtocolViolationError(inboundFrame, {
-      source: 'inbound_protocol',
-      phase: resolveGatewayClientPhase(this.state),
+      code: 'GATEWAY_INBOUND_PROTOCOL_INVALID',
+      disposition: 'diagnostic',
+      stage: resolveGatewayClientStage(this.state),
     });
   }
 }

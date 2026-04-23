@@ -11,7 +11,7 @@ import type { GatewayOutboundMessage, GatewaySendPayload } from '../../ports/Gat
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
 import type { GatewayBusinessOutboundMessage, OutboundProtocolGate } from '../protocol/OutboundProtocolGate.ts';
 import { getMessageType } from '../telemetry/message-log-fields.ts';
-import { resolveGatewayClientPhase } from './error-facts.ts';
+import { resolveGatewayClientStage } from './error-facts.ts';
 
 /**
  * 统一发送出口。
@@ -58,8 +58,8 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_CONNECTED',
-        source: 'state_gate',
-        phase: resolveGatewayClientPhase(this.state),
+        disposition: 'diagnostic',
+        stage: resolveGatewayClientStage(this.state),
         retryable: true,
         message: 'gateway_not_connected',
         details: { state: this.state.getState(), messageType },
@@ -74,8 +74,8 @@ export class OutboundSender {
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_READY',
-        source: 'state_gate',
-        phase: resolveGatewayClientPhase(this.state),
+        disposition: 'diagnostic',
+        stage: resolveGatewayClientStage(this.state),
         retryable: true,
         message: 'Gateway connection is not ready. Cannot send business message.',
         details: { state: this.state.getState(), messageType },
@@ -99,8 +99,8 @@ export class OutboundSender {
       if (error instanceof GatewayClientError) {
         throw new GatewayClientError({
           code: error.code,
-          source: error.source,
-          phase: resolveGatewayClientPhase(this.state),
+          disposition: error.disposition,
+          stage: resolveGatewayClientStage(this.state),
           retryable: error.retryable,
           message: error.message,
           details: error.details,
