@@ -6,15 +6,21 @@ import type {
 } from '../domain/error-contract.ts';
 
 function resolveFailureClass(error: GatewayClientErrorShape): GatewayClientFailureClass {
-  switch (error.source) {
-    case 'handshake':
+  switch (error.code) {
+    case 'GATEWAY_AUTH_REJECTED':
+    case 'GATEWAY_HANDSHAKE_TIMEOUT':
+    case 'GATEWAY_HANDSHAKE_REJECTED':
+    case 'GATEWAY_HANDSHAKE_INVALID':
       return 'handshake_failure';
-    case 'transport':
+    case 'GATEWAY_TRANSPORT_ERROR':
       return 'transport_failure';
-    case 'inbound_protocol':
-    case 'outbound_protocol':
+    case 'GATEWAY_INBOUND_PROTOCOL_INVALID':
+    case 'GATEWAY_OUTBOUND_PROTOCOL_INVALID':
       return 'protocol_diagnostic';
-    case 'state_gate':
+    case 'GATEWAY_CONNECT_ABORTED':
+    case 'GATEWAY_CONNECT_PARAMETER_INVALID':
+    case 'GATEWAY_NOT_CONNECTED':
+    case 'GATEWAY_NOT_READY':
       return 'state_gate';
   }
 }
@@ -28,7 +34,8 @@ export const gatewayClientFailureTranslator: GatewayClientFailureTranslator = {
     return {
       failureClass: resolveFailureClass(error),
       code: error.code,
-      phase: error.phase,
+      disposition: error.disposition,
+      stage: error.stage,
       retryable: error.retryable,
     };
   },

@@ -91,7 +91,9 @@ test('handshake frame processor interprets register_ok and register_rejected wit
   });
 
   assert.equal(rejected.kind, 'rejected');
-  assert.equal(rejected.error.code, 'GATEWAY_REGISTER_REJECTED');
+  assert.equal(rejected.error.code, 'GATEWAY_HANDSHAKE_REJECTED');
+  assert.equal(rejected.error.disposition, 'startup_failure');
+  assert.equal(rejected.error.stage, 'handshake');
 });
 
 test('inbound frame classifier separates handshake control from business and invalid frames', async () => {
@@ -157,5 +159,7 @@ test('inbound frame router surfaces invalid business frames without transport si
   assert.equal(messages.length, 0);
   assert.equal(inbound.length, 0);
   assert.equal(errors.length, 1);
-  assert.equal(errors[0]!.code, 'GATEWAY_PROTOCOL_VIOLATION');
+  assert.equal(errors[0]!.code, 'GATEWAY_INBOUND_PROTOCOL_INVALID');
+  assert.equal(errors[0]!.disposition, 'diagnostic');
+  assert.equal(errors[0]!.stage, 'ready');
 });

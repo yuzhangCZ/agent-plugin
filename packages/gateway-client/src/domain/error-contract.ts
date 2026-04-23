@@ -1,27 +1,27 @@
 export type GatewayClientErrorCode =
   | 'GATEWAY_CONNECT_ABORTED'
-  | 'GATEWAY_CONNECT_TIMEOUT'
-  | 'GATEWAY_WEBSOCKET_ERROR'
-  | 'GATEWAY_CLOSED_BEFORE_OPEN'
-  | 'GATEWAY_REGISTER_REJECTED'
+  | 'GATEWAY_CONNECT_PARAMETER_INVALID'
+  | 'GATEWAY_AUTH_REJECTED'
+  | 'GATEWAY_HANDSHAKE_TIMEOUT'
+  | 'GATEWAY_HANDSHAKE_REJECTED'
+  | 'GATEWAY_HANDSHAKE_INVALID'
+  | 'GATEWAY_TRANSPORT_ERROR'
+  | 'GATEWAY_INBOUND_PROTOCOL_INVALID'
+  | 'GATEWAY_OUTBOUND_PROTOCOL_INVALID'
   | 'GATEWAY_NOT_CONNECTED'
   | 'GATEWAY_NOT_READY'
-  | 'GATEWAY_UNEXPECTED_CLOSE'
-  | 'GATEWAY_PROTOCOL_VIOLATION';
+;
 
-export type GatewayClientErrorSource =
-  | 'transport'
+export type GatewayConnectionDisposition =
+  | 'startup_failure'
+  | 'runtime_failure'
+  | 'diagnostic'
+  | 'cancelled';
+
+export type GatewayConnectionStage =
+  | 'pre_open'
   | 'handshake'
-  | 'inbound_protocol'
-  | 'outbound_protocol'
-  | 'state_gate';
-
-export type GatewayClientErrorPhase =
-  | 'before_open'
-  | 'before_ready'
-  | 'ready'
-  | 'reconnecting'
-  | 'stopping';
+  | 'ready';
 
 export type GatewayClientFailureClass =
   | 'handshake_failure'
@@ -30,15 +30,32 @@ export type GatewayClientFailureClass =
   | 'state_gate';
 
 /**
+ * gateway-client 错误的诊断上下文。
+ * @remarks 只承载附加观测信息，不承载核心决策语义。
+ */
+export interface GatewayClientErrorDetails {
+  readonly closeCode?: number;
+  readonly closeReason?: string;
+  readonly wasClean?: boolean;
+  readonly messageType?: string;
+  readonly gatewayMessageId?: string;
+  readonly action?: string;
+  readonly welinkSessionId?: string;
+  readonly toolSessionId?: string;
+  readonly messagePreview?: string;
+  readonly [key: string]: unknown;
+}
+
+/**
  * gateway-client 对外暴露的标准错误结构。
  */
 export interface GatewayClientErrorShape {
   readonly code: GatewayClientErrorCode;
-  readonly source: GatewayClientErrorSource;
-  readonly phase: GatewayClientErrorPhase;
+  readonly disposition: GatewayConnectionDisposition;
+  readonly stage: GatewayConnectionStage;
   readonly retryable: boolean;
   readonly message: string;
-  readonly details?: Record<string, unknown>;
+  readonly details?: GatewayClientErrorDetails;
   readonly cause?: unknown;
 }
 
@@ -48,7 +65,8 @@ export interface GatewayClientErrorShape {
 export interface GatewayClientFailureSignal {
   readonly failureClass: GatewayClientFailureClass;
   readonly code: GatewayClientErrorCode;
-  readonly phase: GatewayClientErrorPhase;
+  readonly disposition: GatewayConnectionDisposition;
+  readonly stage: GatewayConnectionStage;
   readonly retryable: boolean;
 }
 
