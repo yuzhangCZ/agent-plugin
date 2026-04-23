@@ -4,7 +4,7 @@
 **Date:** 2026-04-20  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
-**Related:** [三方 Agent Provider 对外接口文档 v2](../design/interfaces/third-party-agent-provider-v2.md), [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md), [三方 Agent Runtime 系统分层架构设计](./third-party-agent-runtime-architecture.md)
+**Related:** [bridge-runtime-sdk 对外集成文档](../design/interfaces/bridge-runtime-sdk-integration.md), [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md), [三方 Agent Runtime 系统分层架构设计](./third-party-agent-runtime-architecture.md)
 
 ## 1. 文档定位
 
