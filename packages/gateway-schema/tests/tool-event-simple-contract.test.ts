@@ -476,3 +476,210 @@ test('validateToolEvent rejects malformed simple events with shared violations',
     assertWireViolationShape(result.error, expected);
   }
 });
+
+test('validateToolEvent preserves empty-string payloads for compatible simple opencode events', () => {
+  const cases = [
+    {
+      name: 'message.part.delta keeps empty delta',
+      input: createGatewayWireMessagePartDeltaEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          messageID: 'msg-gateway-wire',
+          partID: 'part-gateway-wire',
+          field: 'text',
+          delta: '',
+        },
+      }),
+      expected: {
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          messageID: 'msg-gateway-wire',
+          partID: 'part-gateway-wire',
+          field: 'text',
+          delta: '',
+        },
+      },
+    },
+    {
+      name: 'message.part.delta trims whitespace-only delta to empty string',
+      input: createGatewayWireMessagePartDeltaEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          messageID: 'msg-gateway-wire',
+          partID: 'part-gateway-wire',
+          field: 'text',
+          delta: '\n\t ',
+        },
+      }),
+      expected: {
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          messageID: 'msg-gateway-wire',
+          partID: 'part-gateway-wire',
+          field: 'text',
+          delta: '',
+        },
+      },
+    },
+    {
+      name: 'question.asked keeps empty question text and labels',
+      input: createGatewayWireQuestionAskedEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'question-gateway-wire',
+          questions: [
+            {
+              question: '',
+              header: '',
+              options: [{ label: '' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg-gateway-wire',
+            callID: 'call-gateway-wire',
+          },
+        },
+      }),
+      expected: {
+        type: 'question.asked',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'question-gateway-wire',
+          questions: [
+            {
+              question: '',
+              header: '',
+              options: [{ label: '' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg-gateway-wire',
+            callID: 'call-gateway-wire',
+          },
+        },
+      },
+    },
+    {
+      name: 'question.asked trims whitespace-only text fields to empty strings',
+      input: createGatewayWireQuestionAskedEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'question-gateway-wire',
+          questions: [
+            {
+              question: ' \t ',
+              header: '\n ',
+              options: [{ label: '  ' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg-gateway-wire',
+            callID: 'call-gateway-wire',
+          },
+        },
+      }),
+      expected: {
+        type: 'question.asked',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'question-gateway-wire',
+          questions: [
+            {
+              question: '',
+              header: '',
+              options: [{ label: '' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg-gateway-wire',
+            callID: 'call-gateway-wire',
+          },
+        },
+      },
+    },
+    {
+      name: 'session.error keeps empty string payload',
+      input: createGatewayWireSessionErrorEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: '',
+        },
+      }),
+      expected: {
+        type: 'session.error',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: '',
+        },
+      },
+    },
+    {
+      name: 'session.error keeps empty nested message payload',
+      input: createGatewayWireSessionErrorEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: {
+            message: '',
+          },
+        },
+      }),
+      expected: {
+        type: 'session.error',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: '',
+        },
+      },
+    },
+    {
+      name: 'session.error trims whitespace-only nested message payload to empty string',
+      input: createGatewayWireSessionErrorEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: {
+            message: '\t ',
+          },
+        },
+      }),
+      expected: {
+        type: 'session.error',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          error: '',
+        },
+      },
+    },
+    {
+      name: 'permission.updated keeps empty response and title',
+      input: createGatewayWirePermissionUpdatedEvent({
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'perm-gateway-wire',
+          title: '',
+          response: '',
+        },
+      }),
+      expected: {
+        type: 'permission.updated',
+        properties: {
+          sessionID: 'tool-gateway-wire',
+          id: 'perm-gateway-wire',
+          title: '',
+          response: '',
+        },
+      },
+    },
+  ];
+
+  for (const { name, input, expected } of cases) {
+    const result = validateToolEvent(input);
+    assert.equal(result.ok, true, name);
+    if (!result.ok) {
+      continue;
+    }
+
+    assert.deepStrictEqual(result.value, expected);
+  }
+});

@@ -3,20 +3,24 @@ import {
   MESSAGE_PART_STATE_STATUSES,
 } from '../../../literals/tool-event.ts';
 import { jsonValueSchema } from './json.ts';
-import { optionalLooseTrimmedString, requiredTrimmedString } from '../../shared.ts';
+import {
+  optionalLooseTrimmedStringPreservingEmpty,
+  requiredLooseTrimmedStringPreservingEmpty,
+  requiredTrimmedString,
+} from '../../shared.ts';
 
 export const messagePartToolStateSchema = z
   .object({
     status: z.enum(MESSAGE_PART_STATE_STATUSES),
     output: jsonValueSchema.optional(),
-    error: optionalLooseTrimmedString,
-    title: optionalLooseTrimmedString,
+    error: optionalLooseTrimmedStringPreservingEmpty,
+    title: optionalLooseTrimmedStringPreservingEmpty,
   })
   .transform((state) => ({
     status: state.status,
     ...(state.output !== undefined ? { output: state.output } : {}),
-    ...(state.error ? { error: state.error } : {}),
-    ...(state.title ? { title: state.title } : {}),
+    ...(state.error !== undefined ? { error: state.error } : {}),
+    ...(state.title !== undefined ? { title: state.title } : {}),
   }));
 export type MessagePartToolStateV1 = z.output<typeof messagePartToolStateSchema>;
 
@@ -30,7 +34,7 @@ export const messagePartTextSchema = z
   .object({
     ...messagePartBaseSchema,
     type: z.literal('text'),
-    text: requiredTrimmedString,
+    text: requiredLooseTrimmedStringPreservingEmpty,
   })
   .transform((part) => ({
     id: part.id,
@@ -45,7 +49,7 @@ export const messagePartReasoningSchema = z
   .object({
     ...messagePartBaseSchema,
     type: z.literal('reasoning'),
-    text: requiredTrimmedString,
+    text: requiredLooseTrimmedStringPreservingEmpty,
   })
   .transform((part) => ({
     id: part.id,
@@ -87,7 +91,7 @@ export const messagePartStepFinishSchema = z
     type: z.literal('step-finish'),
     tokens: jsonValueSchema.optional(),
     cost: z.number().optional(),
-    reason: optionalLooseTrimmedString,
+    reason: optionalLooseTrimmedStringPreservingEmpty,
   })
   .transform((part) => ({
     id: part.id,
@@ -96,7 +100,7 @@ export const messagePartStepFinishSchema = z
     type: 'step-finish' as const,
     ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
     ...(part.cost !== undefined ? { cost: part.cost } : {}),
-    ...(part.reason ? { reason: part.reason } : {}),
+    ...(part.reason !== undefined ? { reason: part.reason } : {}),
   }));
 export type MessagePartStepFinishV1 = z.output<typeof messagePartStepFinishSchema>;
 
@@ -104,18 +108,18 @@ export const messagePartFileSchema = z
   .object({
     ...messagePartBaseSchema,
     type: z.literal('file'),
-    filename: optionalLooseTrimmedString,
-    url: optionalLooseTrimmedString,
-    mime: optionalLooseTrimmedString,
+    filename: optionalLooseTrimmedStringPreservingEmpty,
+    url: optionalLooseTrimmedStringPreservingEmpty,
+    mime: optionalLooseTrimmedStringPreservingEmpty,
   })
   .transform((part) => ({
     id: part.id,
     sessionID: part.sessionID,
     messageID: part.messageID,
     type: 'file' as const,
-    ...(part.filename ? { filename: part.filename } : {}),
-    ...(part.url ? { url: part.url } : {}),
-    ...(part.mime ? { mime: part.mime } : {}),
+    ...(part.filename !== undefined ? { filename: part.filename } : {}),
+    ...(part.url !== undefined ? { url: part.url } : {}),
+    ...(part.mime !== undefined ? { mime: part.mime } : {}),
   }));
 export type MessagePartFileV1 = z.output<typeof messagePartFileSchema>;
 
@@ -134,14 +138,14 @@ export const messagePartUpdatedEventSchema = z
     type: z.literal('message.part.updated'),
     properties: z.object({
       part: messagePartSchema,
-      delta: optionalLooseTrimmedString,
+      delta: optionalLooseTrimmedStringPreservingEmpty,
     }),
   })
   .transform((event) => ({
     type: 'message.part.updated' as const,
     properties: {
       part: event.properties.part,
-      ...(event.properties.delta ? { delta: event.properties.delta } : {}),
+      ...(event.properties.delta !== undefined ? { delta: event.properties.delta } : {}),
     },
   }));
 export type MessagePartUpdatedEventV1 = z.output<typeof messagePartUpdatedEventSchema>;

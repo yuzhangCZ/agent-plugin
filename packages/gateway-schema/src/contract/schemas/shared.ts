@@ -19,6 +19,24 @@ export const optionalLooseTrimmedString = z
   )
   .optional();
 
+export const requiredLooseTrimmedStringPreservingEmpty = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim() : undefined),
+  z.string(),
+);
+
+export const optionalLooseTrimmedStringPreservingEmpty = z
+  .preprocess(
+    (value) => {
+      if (typeof value !== 'string') {
+        return undefined;
+      }
+
+      return value.trim();
+    },
+    z.string().optional(),
+  )
+  .optional();
+
 export const optionalStrictTrimmedString = z
   .string()
   .optional()

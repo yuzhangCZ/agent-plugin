@@ -24,6 +24,10 @@ export function readTrimmedString(value: UnknownBoundaryInput): string | undefin
   return typeof value === 'string' ? value.trim() || undefined : undefined;
 }
 
+export function readLooseTrimmedStringPreservingEmpty(value: UnknownBoundaryInput): string | undefined {
+  return typeof value === 'string' ? value.trim() : undefined;
+}
+
 export function readNumber(value: UnknownBoundaryInput): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
