@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "strict": false,
+    "strictNullChecks": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": [
@@ -12,6 +13,6 @@
     ]
   },
   "include": [
-    "src/public-contract.ts"
+    "src/**/*.ts"
   ]
 }

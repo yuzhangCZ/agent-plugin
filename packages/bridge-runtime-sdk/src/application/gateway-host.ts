@@ -47,6 +47,7 @@ export type BridgeGatewayHostState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'
 export interface BridgeGatewayHostError {
   code: string;
   message: string;
+  retryable?: boolean;
   detail?: Record<string, unknown>;
 }
 

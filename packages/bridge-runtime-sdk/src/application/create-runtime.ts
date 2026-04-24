@@ -125,6 +125,10 @@ function isGatewayRecovering(state: BridgeGatewayHostState): boolean {
   return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
 }
 
+function isRuntimeReady(state: BridgeRuntimeStatusSnapshot['state']): state is 'ready' {
+  return state === 'ready';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -133,12 +137,16 @@ function buildInvalidInvokeToolError(code: string): string {
   return `gateway_invalid_invoke:${code}`;
 }
 
-function shouldReplyToInvalidInvoke(frame: GatewayInboundFrame): frame is Extract<GatewayInboundFrame, { kind: 'invalid'; messageType: 'invoke' }> {
+type InvalidInvokeGatewayInboundFrame = Extract<GatewayInboundFrame, { kind: 'invalid' }> & {
+  messageType: 'invoke';
+};
+
+function shouldReplyToInvalidInvoke(frame: GatewayInboundFrame): frame is InvalidInvokeGatewayInboundFrame {
   return frame.kind === 'invalid' && frame.messageType === 'invoke';
 }
 
 function handleInvalidInvokeInboundFrame(
-  frame: Extract<GatewayInboundFrame, { kind: 'invalid'; messageType: 'invoke' }>,
+  frame: InvalidInvokeGatewayInboundFrame,
   client: BridgeGatewayHostConnection,
   trace: RuntimeTraceCollector,
   sink: GatewayOutboundSink,
@@ -587,7 +595,8 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         } else {
           await sleep(waitMs);
         }
-        if (status.state === 'ready') {
+        const postWaitState = status.state;
+        if (isRuntimeReady(postWaitState)) {
           return {
             state: 'ready',
             latencyMs: Math.max(0, Date.now() - startedAt),
