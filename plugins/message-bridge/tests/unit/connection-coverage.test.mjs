@@ -517,7 +517,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
     assert.ok(errorLogs.some((entry) =>
       entry.message === 'gateway.error'
-      && entry.extra?.error === 'gateway_startup_transport_error'
+      && entry.extra?.error === 'gateway_websocket_error'
       && entry.extra?.errorDetail === 'socket error'
       && entry.extra?.errorType === 'Error'
       && entry.extra?.rawType === 'Error',
@@ -559,7 +559,7 @@ describe('DefaultGatewayConnection coverage', () => {
 
     assert.ok(errorLogs.some((entry) =>
       entry.message === 'gateway.error'
-      && entry.extra?.error === 'gateway_startup_transport_error'
+      && entry.extra?.error === 'gateway_websocket_error'
       && entry.extra?.errorDetail === 'socket error'
       && entry.extra?.errorType === 'error'
       && entry.extra?.rawType === 'Object'

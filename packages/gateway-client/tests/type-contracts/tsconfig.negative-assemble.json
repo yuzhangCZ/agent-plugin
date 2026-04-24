@@ -6,6 +6,7 @@
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
     "types": ["node"]
   },
   "include": ["./public-api-negative-assemble.ts"]

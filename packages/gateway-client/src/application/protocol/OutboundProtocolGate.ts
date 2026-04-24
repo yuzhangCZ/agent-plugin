@@ -73,15 +73,9 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
     violation: WireContractViolation,
   ): GatewayClientError {
     return new GatewayClientError({
-<<<<<<< HEAD
-      code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
-      disposition: 'diagnostic',
-      stage: 'ready',
-=======
       code: 'GATEWAY_PROTOCOL_VIOLATION',
       source: 'outbound_protocol',
       phase: 'ready',
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: false,
       message: violation.violation.message,
       details: {
@@ -94,15 +88,9 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
 
   private toUnsupportedMessageTypeError(message: unknown): GatewayClientError {
     return new GatewayClientError({
-<<<<<<< HEAD
-      code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
-      disposition: 'diagnostic',
-      stage: 'ready',
-=======
       code: 'GATEWAY_PROTOCOL_VIOLATION',
       source: 'outbound_protocol',
       phase: 'ready',
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
       retryable: false,
       message: `gateway_invalid_message_type:${getMessageType(message)}`,
       details: {

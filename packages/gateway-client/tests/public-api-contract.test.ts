@@ -6,11 +6,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-<<<<<<< HEAD
-import { mapGatewayClientAvailability } from '../src/index.ts';
-=======
 import { gatewayClientFailureTranslator, translateGatewayClientFailure } from '../src/index.ts';
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -91,26 +87,15 @@ test('public api negative type fixture rejects importing config assembly helper 
   );
 });
 
-<<<<<<< HEAD
-test('public api exports stable gateway availability mapper', () => {
-  const error = {
-    code: 'GATEWAY_NOT_READY',
-    disposition: 'diagnostic',
-    stage: 'handshake',
-=======
 test('public api exports stable neutral failure translator helper', () => {
   const error = {
     code: 'GATEWAY_NOT_READY',
     source: 'state_gate',
     phase: 'before_ready',
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     retryable: true,
     message: 'gateway_not_ready',
   } as const;
 
-<<<<<<< HEAD
-  assert.equal(mapGatewayClientAvailability(error), null);
-=======
   assert.deepEqual(gatewayClientFailureTranslator.translate(error), {
     failureClass: 'state_gate',
     code: 'GATEWAY_NOT_READY',
@@ -123,7 +108,6 @@ test('public api exports stable neutral failure translator helper', () => {
     phase: 'before_ready',
     retryable: true,
   });
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 });
 
 test('public api negative type fixture rejects legacy category-based error shape', async () => {
@@ -131,11 +115,7 @@ test('public api negative type fixture rejects legacy category-based error shape
   const tempFixture = path.join(tempDir, 'public-api-negative-error-shape.ts');
   writeFileSync(
     tempFixture,
-<<<<<<< HEAD
-    `import type { GatewayClientErrorShape } from ${JSON.stringify(path.resolve(packageRoot, 'src/index.ts'))};\n\nconst _error: GatewayClientErrorShape = {\n  code: 'GATEWAY_TRANSPORT_ERROR',\n  category: 'transport',\n  retryable: true,\n  message: 'legacy',\n};\n`,
-=======
     `import type { GatewayClientErrorShape } from ${JSON.stringify(path.resolve(packageRoot, 'src/index.ts'))};\n\nconst _error: GatewayClientErrorShape = {\n  code: 'GATEWAY_WEBSOCKET_ERROR',\n  category: 'transport',\n  retryable: true,\n  message: 'legacy',\n};\n`,
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
   );
 
   await assert.rejects(
@@ -165,63 +145,11 @@ test('public api negative type fixture rejects legacy category-based error shape
       const output = typeof error === 'object' && error
         ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
         : '';
-<<<<<<< HEAD
-      return output.includes('category') || output.includes('source') || output.includes('phase');
-=======
       return output.includes('category') || output.includes('source');
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     },
   );
 });
 
-<<<<<<< HEAD
-test('availability mapper is sufficient for upper-layer neutral consumption', () => {
-  function consumeAvailability(
-    availability: ReturnType<typeof mapGatewayClientAvailability>,
-  ): 'queue_user_action' | 'server_unavailable' | 'network_unavailable' {
-    switch (availability) {
-      case 'remote_unavailable':
-        return 'server_unavailable';
-      case 'transport_unavailable':
-        return 'network_unavailable';
-      case null:
-        return 'queue_user_action';
-    }
-  }
-
-  assert.equal(consumeAvailability(mapGatewayClientAvailability({
-    code: 'GATEWAY_HANDSHAKE_TIMEOUT',
-    disposition: 'startup_failure',
-    stage: 'handshake',
-    retryable: true,
-    message: 'gateway_handshake_timeout',
-  })), 'server_unavailable');
-  assert.equal(consumeAvailability(mapGatewayClientAvailability({
-    code: 'GATEWAY_HANDSHAKE_REJECTED',
-    disposition: 'startup_failure',
-    stage: 'handshake',
-    retryable: false,
-    message: 'gateway_register_rejected',
-  })), 'server_unavailable');
-  assert.equal(consumeAvailability(mapGatewayClientAvailability({
-    code: 'GATEWAY_TRANSPORT_ERROR',
-    disposition: 'runtime_failure',
-    stage: 'ready',
-    retryable: true,
-    message: 'gateway_websocket_error',
-  })), 'network_unavailable');
-  assert.equal(consumeAvailability(mapGatewayClientAvailability({
-    code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
-    disposition: 'diagnostic',
-    stage: 'ready',
-    retryable: false,
-    message: 'gateway_invalid_message_type:heartbeat',
-  })), 'queue_user_action');
-  assert.equal(consumeAvailability(mapGatewayClientAvailability({
-    code: 'GATEWAY_NOT_READY',
-    disposition: 'diagnostic',
-    stage: 'handshake',
-=======
 test('failure signal is sufficient for upper-layer neutral consumption', () => {
   function consumeFailureSignal(
     signal: ReturnType<typeof gatewayClientFailureTranslator.translate>,
@@ -270,7 +198,6 @@ test('failure signal is sufficient for upper-layer neutral consumption', () => {
     code: 'GATEWAY_NOT_READY',
     source: 'state_gate',
     phase: 'reconnecting',
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
     retryable: true,
     message: 'gateway_not_ready',
   })), 'queue_user_action');

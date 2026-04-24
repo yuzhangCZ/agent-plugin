@@ -38,24 +38,8 @@ import { skillProviderEventSchema } from '../../contract/schemas/tool-event/skil
 import type { Result } from '../../shared/result.ts';
 import type { WireContractViolation } from '../../contract/errors/wire-errors.ts';
 import type { JsonValue, PlainObject, UnknownBoundaryInput } from '../../shared/boundary-types.ts';
-import {
-  readArray,
-  readEnumValue,
-  readLooseTrimmedStringPreservingEmpty,
-  readNumber,
-  readPlainObject,
-  readString,
-  readTrimmedString,
-} from '../../shared/type-guards.ts';
-import {
-  fail,
-  invalidFieldType,
-  isRecord,
-  ok,
-  requireNonEmptyString,
-  requireStringPreservingEmpty,
-  unsupportedEventType,
-} from './shared.ts';
+import { readArray, readEnumValue, readNumber, readPlainObject, readString, readTrimmedString } from '../../shared/type-guards.ts';
+import { fail, invalidFieldType, isRecord, ok, requireNonEmptyString, unsupportedEventType } from './shared.ts';
 
 type MessageUpdatedSummaryDiff = NonNullable<NonNullable<MessageUpdatedEvent['properties']['info']['summary']>['diffs']>[number];
 
@@ -266,7 +250,7 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
   const model = readOptionalModel(info.value.model);
   const summary = readSummary(info.value.summary);
   const finish = readPlainObject(info.value.finish);
-  const finishReason = finish ? readLooseTrimmedStringPreservingEmpty(finish.reason) : undefined;
+  const finishReason = finish ? readTrimmedString(finish.reason) : undefined;
 
   return ok({
     type: eventType,
@@ -281,7 +265,7 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
         },
         ...(model ? { model } : {}),
         ...(summary ? { summary } : {}),
-        ...(finishReason !== undefined ? { finish: { reason: finishReason } } : {}),
+        ...(finishReason ? { finish: { reason: finishReason } } : {}),
       },
     },
   });
@@ -305,14 +289,14 @@ function readToolState(raw: UnknownBoundaryInput, eventType: OpencodeToolEventTy
   }
 
   const output = readJsonValue(state.output);
-  const error = readLooseTrimmedStringPreservingEmpty(state.error);
-  const title = readLooseTrimmedStringPreservingEmpty(state.title);
+  const error = readTrimmedString(state.error);
+  const title = readTrimmedString(state.title);
 
   return ok({
     status: status as MessagePartStateStatus,
     ...(output !== undefined ? { output } : {}),
-    ...(error !== undefined ? { error } : {}),
-    ...(title !== undefined ? { title } : {}),
+    ...(error ? { error } : {}),
+    ...(title ? { title } : {}),
   });
 }
 
@@ -343,19 +327,15 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
   }
 
   if (type === 'text' || type === 'reasoning') {
-    const text = requireStringPreservingEmpty(part.value.text, {
-      stage: 'event',
-      field: 'properties.part.text',
-      eventType,
-    });
+    const text = requireNonEmptyString(part.value.text, { stage: 'event', field: 'properties.part.text', eventType });
     if (!text.ok) return text;
     const rawDelta = properties.value.delta;
-    const delta = rawDelta === undefined ? undefined : readLooseTrimmedStringPreservingEmpty(rawDelta);
-    if (rawDelta !== undefined && delta === undefined) {
+    const delta = rawDelta === undefined ? undefined : readTrimmedString(rawDelta);
+    if (rawDelta !== undefined && !delta) {
       return invalidFieldType({
         stage: 'event',
         field: 'properties.delta',
-        expected: 'a string',
+        expected: 'a non-empty string',
         eventType,
       });
     }
@@ -370,7 +350,7 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
           type,
           text: text.value,
         },
-        ...(delta !== undefined ? { delta } : {}),
+        ...(delta ? { delta } : {}),
       },
     });
   }
@@ -414,7 +394,7 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
     case 'step-finish': {
       const tokens = readJsonValue(part.value.tokens);
       const cost = readNumber(part.value.cost);
-      const reason = readLooseTrimmedStringPreservingEmpty(part.value.reason);
+      const reason = readTrimmedString(part.value.reason);
       return ok({
         type: eventType,
         properties: {
@@ -425,15 +405,15 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
             type,
             ...(tokens !== undefined ? { tokens } : {}),
             ...(cost !== undefined ? { cost } : {}),
-            ...(reason !== undefined ? { reason } : {}),
+            ...(reason ? { reason } : {}),
           },
         },
       });
     }
     case 'file': {
-      const filename = readLooseTrimmedStringPreservingEmpty(part.value.filename);
-      const url = readLooseTrimmedStringPreservingEmpty(part.value.url);
-      const mime = readLooseTrimmedStringPreservingEmpty(part.value.mime);
+      const filename = readTrimmedString(part.value.filename);
+      const url = readTrimmedString(part.value.url);
+      const mime = readTrimmedString(part.value.mime);
       return ok({
         type: eventType,
         properties: {
@@ -442,9 +422,9 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
             sessionID: sessionID.value,
             messageID: messageID.value,
             type,
-            ...(filename !== undefined ? { filename } : {}),
-            ...(url !== undefined ? { url } : {}),
-            ...(mime !== undefined ? { mime } : {}),
+            ...(filename ? { filename } : {}),
+            ...(url ? { url } : {}),
+            ...(mime ? { mime } : {}),
           },
         },
       });

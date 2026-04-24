@@ -1,22 +1,17 @@
 import { z } from 'zod';
-import {
-  optionalLooseTrimmedString,
-  optionalLooseTrimmedStringPreservingEmpty,
-  requiredLooseTrimmedStringPreservingEmpty,
-  requiredTrimmedString,
-} from '../../shared.ts';
+import { optionalLooseTrimmedString, requiredTrimmedString } from '../../shared.ts';
 
 export const questionAskedOptionSchema = z
   .object({
-    label: optionalLooseTrimmedStringPreservingEmpty,
+    label: optionalLooseTrimmedString,
   })
-  .transform((option) => (option.label !== undefined ? { label: option.label } : undefined));
+  .transform((option) => (option.label ? { label: option.label } : undefined));
 export type QuestionAskedOptionV1 = NonNullable<z.output<typeof questionAskedOptionSchema>>;
 
 export const questionAskedItemSchema = z
   .object({
-    question: requiredLooseTrimmedStringPreservingEmpty,
-    header: optionalLooseTrimmedStringPreservingEmpty,
+    question: requiredTrimmedString,
+    header: optionalLooseTrimmedString,
     options: z
       .preprocess(
         (value) => (Array.isArray(value) ? value : undefined),
@@ -29,7 +24,7 @@ export const questionAskedItemSchema = z
   })
   .transform((item) => ({
     question: item.question,
-    ...(item.header !== undefined ? { header: item.header } : {}),
+    ...(item.header ? { header: item.header } : {}),
     ...(item.options ? { options: item.options } : {}),
   }));
 export type QuestionAskedItemV1 = z.output<typeof questionAskedItemSchema>;

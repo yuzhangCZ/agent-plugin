@@ -1,13 +1,19 @@
 export type {
+  BridgeGatewayHostConfig,
+  BridgeGatewayLogger,
+  BridgeGatewayProbeResult,
+  BridgeGatewayToolType,
+  BridgeRuntime,
+  BridgeRuntimeOptions,
+  BridgeRuntimeStatus,
+  BridgeRuntimeStatusSnapshot,
   EmitOutboundMessageInput,
-  MessageDoneFact,
-  MessageStartFact,
   OutboundFact,
   PermissionAskFact,
-  ProviderAbortSessionInput,
-  ProviderCloseSessionInput,
+  ProviderCommandError,
   ProviderCreateSessionInput,
   ProviderCreateSessionResult,
+  ProviderError,
   ProviderFact,
   ProviderHealthInput,
   ProviderHealthResult,
@@ -17,31 +23,16 @@ export type {
   ProviderRunMessageInput,
   ProviderRuntimeContext,
   ProviderTerminalResult,
-  QuestionAskFact,
-  RuntimeOutboundEmitter,
-  SessionErrorFact,
-  TextDeltaFact,
-  TextDoneFact,
-  ThinkingDeltaFact,
-  ThinkingDoneFact,
-  ThirdPartyAgentProvider,
-  ToolUpdateFact,
-} from './domain/provider.ts';
-export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
-export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
-export type {
-  BridgeGatewayHostConfig,
-  BridgeGatewayProbeResult,
-  BridgeGatewayToolType,
-} from './application/gateway-host.ts';
-export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
-export type {
   RuntimeDiagnostics,
+  RuntimeOutboundEmitter,
   RuntimeTraceFailure,
   RuntimeTraceFact,
   RuntimeTraceInteraction,
   RuntimeTraceProviderCall,
   RuntimeTraceTerminal,
-} from './application/runtime-trace.ts';
+  SessionErrorFact,
+  ThirdPartyAgentProvider,
+  ToolUpdateFact,
+} from './public-contract.ts';
 export { createBridgeRuntime } from './application/create-runtime.ts';
 export { resolvePackageVersion } from './packageVersion.ts';

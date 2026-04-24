@@ -1,11 +1,6 @@
 import { z } from 'zod';
 import { SESSION_STATUS_TYPES } from '../../../literals/tool-event.ts';
-import {
-  optionalLooseTrimmedString,
-  optionalLooseTrimmedStringPreservingEmpty,
-  requiredLooseTrimmedStringPreservingEmpty,
-  requiredTrimmedString,
-} from '../../shared.ts';
+import { optionalLooseTrimmedString, requiredTrimmedString } from '../../shared.ts';
 
 export const sessionStatusEventSchema = z
   .object({
@@ -48,10 +43,10 @@ export const sessionUpdatedEventSchema = z
     type: z.literal('session.updated'),
     properties: z.object({
       sessionID: optionalLooseTrimmedString,
-      title: optionalLooseTrimmedStringPreservingEmpty,
+      title: optionalLooseTrimmedString,
       info: z.object({
         id: requiredTrimmedString,
-        title: optionalLooseTrimmedStringPreservingEmpty,
+        title: optionalLooseTrimmedString,
       }),
     }),
   })
@@ -61,7 +56,7 @@ export const sessionUpdatedEventSchema = z
       sessionID: event.properties.sessionID ?? event.properties.info.id,
       info: {
         id: event.properties.info.id,
-        ...(event.properties.info.title !== undefined || event.properties.title !== undefined
+        ...(event.properties.info.title ?? event.properties.title
           ? { title: event.properties.info.title ?? event.properties.title }
           : {}),
       },
@@ -70,9 +65,9 @@ export const sessionUpdatedEventSchema = z
 export type SessionUpdatedEventV1 = z.output<typeof sessionUpdatedEventSchema>;
 
 export const sessionErrorInfoSchema = z.union([
-  requiredLooseTrimmedStringPreservingEmpty,
+  requiredTrimmedString,
   z.object({
-    message: requiredLooseTrimmedStringPreservingEmpty,
+    message: requiredTrimmedString,
   }),
 ]);
 
@@ -103,7 +98,7 @@ export const sessionErrorEventSchema = z
     type: 'session.error' as const,
     properties: {
       sessionID: event.properties.sessionID,
-      ...(event.properties.error !== undefined
+      ...(event.properties.error
         ? {
             error:
               typeof event.properties.error === 'string'

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DEFAULT_GATEWAY_URL,
   buildGatewayRegisterMessage,
+  resolveGatewayClientHostConfig,
 } from '../src/index.ts';
 import { buildGatewayHostRegisterMessage } from '../src/factory/createGatewayClientForHost.ts';
 
@@ -91,4 +93,35 @@ test('buildGatewayHostRegisterMessage omits unusable macAddress and falls back d
     toolType: 'opencode',
     toolVersion: '1.2.3',
   });
+});
+
+test('resolveGatewayClientHostConfig injects the default gateway url when missing', () => {
+  const config = resolveGatewayClientHostConfig({
+    auth: {
+      ak: 'ak',
+      sk: 'sk',
+    },
+    register: {
+      toolType: 'openx',
+      toolVersion: '1.2.3',
+    },
+  });
+
+  assert.equal(config.url, DEFAULT_GATEWAY_URL);
+});
+
+test('resolveGatewayClientHostConfig keeps explicit gateway url', () => {
+  const config = resolveGatewayClientHostConfig({
+    url: 'wss://gateway.example.com/ws/agent',
+    auth: {
+      ak: 'ak',
+      sk: 'sk',
+    },
+    register: {
+      toolType: 'openx',
+      toolVersion: '1.2.3',
+    },
+  });
+
+  assert.equal(config.url, 'wss://gateway.example.com/ws/agent');
 });

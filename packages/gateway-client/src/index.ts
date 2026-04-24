@@ -7,17 +7,15 @@ export * from './ports/GatewayClientMessages.ts';
 export type { GatewayLogger } from './ports/LoggerPort.ts';
 export * from './domain/error-contract.ts';
 export * from './errors/GatewayClientError.ts';
-<<<<<<< HEAD
-export * from './errors/GatewayClientAvailabilityMapper.ts';
-=======
 export * from './errors/GatewayClientFailureTranslator.ts';
->>>>>>> ec1bccb (refactor: stabilize gateway client failure facts)
 export { createAkSkAuthProvider } from './auth/AkSkAuthProvider.ts';
 export * from './factory/buildGatewayRegisterMessage.ts';
 export * from './factory/createGatewayClient.ts';
 export {
+  DEFAULT_GATEWAY_URL,
   createGatewayClientForHost,
   type GatewayClientHostConfig,
   type GatewayClientHostOptions,
   type GatewayClientHostToolType,
+  resolveGatewayClientHostConfig,
 } from './factory/createGatewayClientForHost.ts';

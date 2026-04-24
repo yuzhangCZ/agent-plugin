@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import { MESSAGE_ROLES } from '../../../literals/tool-event.ts';
-import {
-  optionalLooseTrimmedString,
-  optionalLooseTrimmedStringPreservingEmpty,
-  requiredTrimmedString,
-} from '../../shared.ts';
+import { optionalLooseTrimmedString, requiredTrimmedString } from '../../shared.ts';
 
 export const messageUpdatedModelSchema = z
   .object({
@@ -57,9 +53,9 @@ export type MessageUpdatedTimeV1 = z.output<typeof messageUpdatedTimeSchema>;
 
 export const messageUpdatedFinishSchema = z
   .object({
-    reason: optionalLooseTrimmedStringPreservingEmpty,
+    reason: optionalLooseTrimmedString,
   })
-  .transform((finish) => (finish.reason !== undefined ? { reason: finish.reason } : undefined));
+  .transform((finish) => (finish.reason ? { reason: finish.reason } : undefined));
 export type MessageUpdatedFinishV1 = NonNullable<z.output<typeof messageUpdatedFinishSchema>>;
 
 export const messageUpdatedInfoSchema = z
