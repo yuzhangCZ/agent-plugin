@@ -90,6 +90,91 @@ process.exit(99);
   return script;
 }
 
+async function createFakeQrCodeModule(dir) {
+  const modulePath = path.join(dir, "fake-qrcode-auth.mjs");
+  await writeFile(
+    modulePath,
+    `export const qrcodeAuth = {
+  async run(input) {
+      if (process.env.OPENCLAW_QRCODE_LOG) {
+        await import('node:fs/promises').then(({ writeFile }) =>
+          writeFile(process.env.OPENCLAW_QRCODE_LOG, JSON.stringify({
+            baseUrl: input.baseUrl,
+            channel: input.channel,
+            mac: input.mac,
+          }), 'utf8')
+        );
+      }
+      const scenario = process.env.OPENCLAW_QRCODE_SCENARIO || 'success';
+      input.onSnapshot({
+        type: 'qrcode_generated',
+        qrcode: 'qr-1',
+        display: {
+          qrcode: 'qr-1',
+          weUrl: 'https://we.example/qr-1',
+          pcUrl: 'https://pc.example/qr-1',
+        },
+        expiresAt: '2026-04-24T00:00:00.000Z',
+      });
+      if (scenario === 'failed') {
+        input.onSnapshot({
+          type: 'failed',
+          qrcode: 'qr-1',
+          reasonCode: 'auth_service_error',
+        });
+        return;
+      }
+      input.onSnapshot({
+        type: 'confirmed',
+        qrcode: 'qr-1',
+        credentials: {
+          ak: process.env.OPENCLAW_QRCODE_AK || 'openclaw-ak',
+          sk: process.env.OPENCLAW_QRCODE_SK || 'openclaw-sk',
+        },
+      });
+  },
+};
+`,
+    "utf8",
+  );
+  return modulePath;
+}
+
+async function createDefaultRuntimeFetchPreload(dir) {
+  const preloadPath = path.join(dir, "mock-qrcode-fetch.mjs");
+  await writeFile(
+    preloadPath,
+    `globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (url.endsWith('/qrcode')) {
+    return new Response(JSON.stringify({
+      code: '200',
+      data: {
+        accessToken: 'token-1',
+        qrcode: 'qr-1',
+        weUrl: 'https://we.example/qr-1',
+        pcUrl: 'https://pc.example/qr-1',
+        expireTime: '2026-04-24T00:00:00.000Z',
+      },
+    }));
+  }
+  return new Response(JSON.stringify({
+    code: '200',
+    data: {
+      qrcode: 'qr-1',
+      status: 'confirmed',
+      expired: 'false',
+      ak: 'default-ak',
+      sk: 'default-sk',
+    },
+  }));
+};
+`,
+    "utf8",
+  );
+  return preloadPath;
+}
+
 async function createWin32ShimHarness(dir, openclawPath, { includeBareOpenclaw = true } = {}) {
   const pathBinDir = path.join(dir, "path-bin");
   const targetDir = path.join(dir, "resolved-openclaw");
@@ -250,62 +335,92 @@ async function readLoggedCommands(logFile) {
     .map((line) => JSON.parse(line));
 }
 
-test("installer runs preflight, install, verify, configure, and restart with non-interactive args", async () => {
+function baseArgs() {
+  return ["--url", "wss://gateway.example.com/ws/agent", "--base-url", "https://auth.example.com"];
+}
+
+test("installer runs qrcode auth and configures channel with returned credentials", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
+    const qrcodeLog = path.join(dir, "qrcode.json");
+    await mkdir(home, { recursive: true });
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
+
     const result = runInstaller({
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [
-        "--dev",
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-        "--name",
-        "Primary bridge",
-      ],
+      extraArgs: [...baseArgs(), "--name", "Primary bridge"],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
+        OPENCLAW_QRCODE_LOG: qrcodeLog,
       },
     });
 
-    assert.equal(result.status, 0, result.stderr);
+    assert.strictEqual(result.status, 0, result.stderr);
     const commands = await readLoggedCommands(logFile);
-    assert.deepEqual(commands, [
+    assert.deepStrictEqual(commands, [
       ["--version"],
-      ["--dev", "plugins", "install", "@wecode/skill-openclaw-plugin"],
-      ["--dev", "plugins", "info", "skill-openclaw-plugin", "--json"],
+      ["plugins", "install", "@wecode/skill-openclaw-plugin"],
+      ["plugins", "info", "skill-openclaw-plugin", "--json"],
       [
-        "--dev",
         "channels",
         "add",
         "--channel",
         "message-bridge",
         "--url",
-        "ws://127.0.0.1:8081/ws/agent",
+        "wss://gateway.example.com/ws/agent",
         "--token",
-        "ak-test",
+        "openclaw-ak",
         "--password",
-        "sk-test",
+        "openclaw-sk",
         "--name",
         "Primary bridge",
       ],
-      ["--dev", "gateway", "restart"],
+      ["gateway", "restart"],
     ]);
+    const qrcodeInput = JSON.parse(await readFile(qrcodeLog, "utf8"));
+    assert.equal(qrcodeInput.baseUrl, "https://auth.example.com");
+    assert.equal(qrcodeInput.channel, "openclaw");
+    assert.ok(result.stdout.includes("二维码授权成功"));
+  });
+});
 
-    const npmrc = await readFile(path.join(home, ".npmrc"), "utf8");
-    assert.ok(npmrc.includes("@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"));
-    assert.ok(result.stdout.includes("[skill-openclaw-plugin] 正在检查 OpenClaw 环境"));
-    assert.ok(result.stdout.includes("正在通过 OpenClaw 安装 skill-openclaw-plugin 插件"));
-    assert.ok(result.stdout.includes("Downloading package..."));
-    assert.ok(result.stdout.includes("skill-openclaw-plugin 插件安装校验通过"));
-    assert.ok(result.stdout.includes("正在重启 OpenClaw gateway"));
+test("monorepo source integration loads default qrcodeAuth runtime when no override is provided", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    await mkdir(home, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const preload = await createDefaultRuntimeFetchPreload(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: baseArgs(),
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        NODE_OPTIONS: `--import ${preload}`,
+      },
+    });
+
+    assert.strictEqual(result.status, 0, result.stderr);
+    const commands = await readLoggedCommands(logFile);
+    assert.deepStrictEqual(commands[3].slice(0, 7), [
+      "channels",
+      "add",
+      "--channel",
+      "message-bridge",
+      "--url",
+      "wss://gateway.example.com/ws/agent",
+      "--token",
+    ]);
+    assert.ok(commands[3].includes("default-ak"));
+    assert.ok(commands[3].includes("default-sk"));
   });
 });
 
@@ -316,20 +431,15 @@ test("installer preserves existing scoped registry when no override is provided"
     await mkdir(home, { recursive: true });
     await writeFile(path.join(home, ".npmrc"), "@wecode:registry=https://old.registry/\n", "utf8");
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const result = runInstaller({
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-      ],
+      extraArgs: baseArgs(),
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
       },
     });
 
@@ -339,53 +449,102 @@ test("installer preserves existing scoped registry when no override is provided"
   });
 });
 
-test("installer falls back to interactive channels add when non-interactive args are incomplete", async () => {
-  await withTempDir(async (dir) => {
-    const home = path.join(dir, "home");
-    const logFile = path.join(dir, "openclaw.log");
-    const fakeOpenclaw = await createFakeOpenclaw(dir);
-    const result = runInstaller({
-      cwd: process.cwd(),
-      home,
-      openclawBin: fakeOpenclaw,
-      extraArgs: ["--url", "ws://127.0.0.1:8081/ws/agent"],
-      extraEnv: {
-        FAKE_OPENCLAW_LOG: logFile,
-      },
-    });
-
-    assert.equal(result.status, 0, result.stderr);
-    const commands = await readLoggedCommands(logFile);
-    assert.deepEqual(commands[3], ["channels", "add", "--channel", "message-bridge"]);
-  });
-});
-
 test("installer skips restart only when --no-restart is passed", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const result = runInstaller({
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-        "--no-restart",
-      ],
+      extraArgs: [...baseArgs(), "--no-restart"],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
       },
     });
 
     assert.equal(result.status, 0, result.stderr);
     const commands = await readLoggedCommands(logFile);
     assert.equal(commands.some((command) => command.join(" ") === "gateway restart"), false);
+  });
+});
+
+test("installer exits non-zero and skips channel configuration when qrcode auth fails", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    await mkdir(home, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: baseArgs(),
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
+        OPENCLAW_QRCODE_SCENARIO: "failed",
+      },
+    });
+
+    assert.notStrictEqual(result.status, 0);
+    assert.ok(result.stderr.includes("error_code=QRCODE_AUTH_FAILED"));
+    const commands = await readLoggedCommands(logFile);
+    assert.equal(commands.some((args) => args[0] === "channels" && args[1] === "add"), false);
+  });
+});
+
+test("installer fails fast when baseUrl is missing", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    await mkdir(home, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: ["--url", "wss://gateway.example.com/ws/agent"],
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+      },
+    });
+
+    assert.notStrictEqual(result.status, 0);
+    assert.ok(result.stderr.includes("error_code=INSTALLER_USAGE_ERROR"));
+    await assert.rejects(readFile(logFile, "utf8"));
+  });
+});
+
+test("installer fails when qrcode auth override does not export runtime", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    const invalidQrCodeModule = path.join(dir, "invalid-qrcode-auth.mjs");
+    await mkdir(home, { recursive: true });
+    await writeFile(invalidQrCodeModule, "export const notQrCodeAuth = {};\n", "utf8");
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: baseArgs(),
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: invalidQrCodeModule,
+      },
+    });
+
+    assert.notStrictEqual(result.status, 0);
+    assert.ok(result.stderr.includes("error_code=QRCODE_AUTH_FAILED"));
+    assert.ok(result.stderr.includes("qrcodeAuth.run"));
   });
 });
 
@@ -398,7 +557,7 @@ test("installer stops immediately when plugin install fails", async () => {
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [],
+      extraArgs: baseArgs(),
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_FAIL_STEP: "plugins-install",
@@ -428,6 +587,7 @@ test("installer on win32 preserves non-utf8 install output bytes without re-deco
     const tempDir = path.join(dir, "temp");
     await mkdir(tempDir, { recursive: true });
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const shimHarness = await createWin32ShimHarness(dir, fakeOpenclaw, {
       includeBareOpenclaw: false,
     });
@@ -435,19 +595,13 @@ test("installer on win32 preserves non-utf8 install output bytes without re-deco
     const result = runInstallerRaw({
       cwd: process.cwd(),
       home,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-      ],
+      extraArgs: baseArgs(),
       prependPath: shimHarness.prependPath,
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_INSTALL_OUTPUT_HEX: "b2e2cad40a",
         NODE_OPTIONS: shimHarness.nodeOptions,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
         TEMP: tempDir,
         TMP: tempDir,
       },
@@ -456,6 +610,33 @@ test("installer on win32 preserves non-utf8 install output bytes without re-deco
     assert.equal(result.status, 0, result.stderr?.toString("utf8"));
     assert.ok(Buffer.isBuffer(result.stdout));
     assert.notEqual(result.stdout.indexOf(Buffer.from("b2e2cad40a", "hex")), -1);
+  });
+});
+
+test("installer stops when plugin info command fails", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: baseArgs(),
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        FAKE_OPENCLAW_FAIL_STEP: "plugins-info",
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes("error_code=PLUGIN_INSTALL_VERIFICATION_FAILED"));
+    const commands = await readLoggedCommands(logFile);
+    assert.deepEqual(commands, [
+      ["--version"],
+      ["plugins", "install", "@wecode/skill-openclaw-plugin"],
+      ["plugins", "info", "skill-openclaw-plugin", "--json"],
+    ]);
   });
 });
 
@@ -468,7 +649,7 @@ test("installer stops when plugin verification fails", async () => {
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [],
+      extraArgs: baseArgs(),
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_PLUGIN_INFO: JSON.stringify({ id: "wrong", channelIds: [] }),
@@ -491,21 +672,16 @@ test("installer stops when channels add fails", async () => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const result = runInstaller({
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-      ],
+      extraArgs: baseArgs(),
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_FAIL_STEP: "channels-add",
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
       },
     });
 
@@ -521,21 +697,16 @@ test("installer stops when gateway restart fails", async () => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const result = runInstaller({
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-      ],
+      extraArgs: baseArgs(),
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         FAKE_OPENCLAW_FAIL_STEP: "gateway-restart",
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
       },
     });
 
@@ -553,24 +724,19 @@ test("installer on simulated win32 detects openclaw via where.exe and reuses ope
     const logFile = path.join(dir, "openclaw.log");
     await mkdir(tempDir, { recursive: true });
     const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
     const shimHarness = await createWin32ShimHarness(dir, fakeOpenclaw, {
       includeBareOpenclaw: false,
     });
     const result = runInstaller({
       cwd: process.cwd(),
       home,
-      extraArgs: [
-        "--url",
-        "ws://127.0.0.1:8081/ws/agent",
-        "--token",
-        "ak-test",
-        "--password",
-        "sk-test",
-      ],
+      extraArgs: baseArgs(),
       prependPath: shimHarness.prependPath,
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
         NODE_OPTIONS: shimHarness.nodeOptions,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
         TEMP: tempDir,
         TMP: tempDir,
       },
@@ -591,11 +757,11 @@ test("installer on simulated win32 detects openclaw via where.exe and reuses ope
         "--channel",
         "message-bridge",
         "--url",
-        "ws://127.0.0.1:8081/ws/agent",
+        "wss://gateway.example.com/ws/agent",
         "--token",
-        "ak-test",
+        "openclaw-ak",
         "--password",
-        "sk-test",
+        "openclaw-sk",
       ],
       ["gateway", "restart"],
     ]);

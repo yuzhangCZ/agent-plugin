@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -10,54 +10,161 @@ const scriptPath = resolve('scripts/setup-message-bridge.mjs');
 async function withTempDirs(fn) {
   const home = await mkdtemp(join(tmpdir(), 'mb-cli-home-'));
   const project = await mkdtemp(join(tmpdir(), 'mb-cli-project-'));
+  const qrcodeModule = await createFakeQrCodeModule(home);
   try {
-    await fn({ home, project });
+    await fn({ home, project, qrcodeModule });
   } finally {
     await rm(home, { recursive: true, force: true });
     await rm(project, { recursive: true, force: true });
   }
 }
 
-function runSetup({ cwd, home, input, scope = 'user' }) {
-  const spawnEnv = createDefaultUserEnv(home);
-
-  return spawnSync(process.execPath, [scriptPath, '--scope', scope], {
-    cwd,
-    env: spawnEnv,
-    input,
-    encoding: 'utf8',
-  });
+async function createFakeQrCodeModule(dir) {
+  const modulePath = join(dir, 'fake-qrcode-auth.mjs');
+  await writeFile(
+    modulePath,
+    `export const qrcodeAuth = {
+  async run(input) {
+      if (process.env.MB_QRCODE_LOG) {
+        await import('node:fs/promises').then(({ writeFile }) =>
+          writeFile(process.env.MB_QRCODE_LOG, JSON.stringify({
+            baseUrl: input.baseUrl,
+            channel: input.channel,
+            mac: input.mac,
+          }), 'utf8')
+        );
+      }
+      const scenario = process.env.MB_QRCODE_SCENARIO || 'success';
+      if (scenario === 'refresh') {
+        input.onSnapshot({
+          type: 'qrcode_generated',
+          qrcode: 'qr-1',
+          display: {
+            qrcode: 'qr-1',
+            weUrl: 'https://we.example/qr-1',
+            pcUrl: 'https://pc.example/qr-1',
+          },
+          expiresAt: '2026-04-24T00:00:00.000Z',
+        });
+        input.onSnapshot({ type: 'expired', qrcode: 'qr-1' });
+        input.onSnapshot({
+          type: 'qrcode_generated',
+          qrcode: 'qr-2',
+          display: {
+            qrcode: 'qr-2',
+            weUrl: 'https://we.example/qr-2',
+            pcUrl: 'https://pc.example/qr-2',
+          },
+          expiresAt: '2026-04-24T00:05:00.000Z',
+        });
+        input.onSnapshot({
+          type: 'confirmed',
+          qrcode: 'qr-2',
+          credentials: { ak: 'refresh-ak', sk: 'refresh-sk' },
+        });
+        return;
+      }
+      if (scenario === 'failed') {
+        input.onSnapshot({
+          type: 'qrcode_generated',
+          qrcode: 'qr-1',
+          display: {
+            qrcode: 'qr-1',
+            weUrl: 'https://we.example/qr-1',
+            pcUrl: 'https://pc.example/qr-1',
+          },
+          expiresAt: '2026-04-24T00:00:00.000Z',
+        });
+        input.onSnapshot({
+          type: 'failed',
+          qrcode: 'qr-1',
+          reasonCode: 'network_error',
+        });
+        return;
+      }
+      input.onSnapshot({
+        type: 'qrcode_generated',
+        qrcode: 'qr-1',
+        display: {
+          qrcode: 'qr-1',
+          weUrl: 'https://we.example/qr-1',
+          pcUrl: 'https://pc.example/qr-1',
+        },
+        expiresAt: '2026-04-24T00:00:00.000Z',
+      });
+      input.onSnapshot({ type: 'scanned', qrcode: 'qr-1' });
+      input.onSnapshot({
+        type: 'confirmed',
+        qrcode: 'qr-1',
+        credentials: {
+          ak: process.env.MB_QRCODE_AK || 'success-ak',
+          sk: process.env.MB_QRCODE_SK || 'success-sk',
+        },
+      });
+  },
+};
+`,
+    'utf8',
+  );
+  return modulePath;
 }
 
-function createDefaultUserEnv(home) {
+async function createDefaultRuntimeFetchPreload(dir) {
+  const preloadPath = join(dir, 'mock-qrcode-fetch.mjs');
+  await writeFile(
+    preloadPath,
+    `globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (url.endsWith('/qrcode')) {
+    return new Response(JSON.stringify({
+      code: '200',
+      data: {
+        accessToken: 'token-1',
+        qrcode: 'qr-1',
+        weUrl: 'https://we.example/qr-1',
+        pcUrl: 'https://pc.example/qr-1',
+        expireTime: '2026-04-24T00:00:00.000Z',
+      },
+    }));
+  }
+  return new Response(JSON.stringify({
+    code: '200',
+    data: {
+      qrcode: 'qr-1',
+      status: 'confirmed',
+      expired: 'false',
+      ak: 'default-ak',
+      sk: 'default-sk',
+    },
+  }));
+};
+`,
+    'utf8',
+  );
+  return preloadPath;
+}
+
+async function createWin32PlatformPreload(dir) {
+  const preloadPath = join(dir, 'mock-win32-platform.mjs');
+  await writeFile(preloadPath, `Object.defineProperty(process, 'platform', { value: 'win32' });\n`, 'utf8');
+  return preloadPath;
+}
+
+function createDefaultUserEnv(home, qrcodeModule, extraEnv = {}) {
   return {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     XDG_CONFIG_HOME: join(home, '.config'),
+    MB_SETUP_QRCODE_AUTH_MODULE: qrcodeModule,
+    ...extraEnv,
   };
 }
 
-function runSetupCommand({ cwd, home, input = '', args = [], extraEnv = {} }) {
+function runSetupCommand({ cwd, home, qrcodeModule, args = [], extraEnv = {} }) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
     cwd,
-    env: {
-      ...createDefaultUserEnv(home),
-      ...extraEnv,
-    },
-    input,
-    encoding: 'utf8',
-  });
-}
-
-function runSetupWithEnv({ cwd, env: extraEnv, input, scope = 'user' }) {
-  return spawnSync(process.execPath, [scriptPath, '--scope', scope], {
-    cwd,
-    env: {
-      ...process.env,
-      ...extraEnv,
-    },
-    input,
+    env: createDefaultUserEnv(home, qrcodeModule, extraEnv),
     encoding: 'utf8',
   });
 }
@@ -72,34 +179,133 @@ function extractNpmrcPathFromOutput(stdout) {
 }
 
 describe('setup cli', () => {
-  test('creates user-scope bridge and opencode config', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const result = runSetup({
+  test('writes opencode config after successful qrcode auth', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const logPath = join(home, 'qrcode-log.json');
+      const result = runSetupCommand({
         cwd: project,
         home,
-        input: 'ak-test\nsk-test\ny\n',
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
+          MB_QRCODE_LOG: logPath,
+        },
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
-      const npmrc = await readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8');
+      const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
+      const qrcodeInput = JSON.parse(await readFile(logPath, 'utf8'));
 
-      assert.ok(bridge.includes('"ak": "ak-test"'));
-      assert.ok(bridge.includes('"sk": "sk-test"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
+      assert.ok(bridge.includes('"sk": "success-sk"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
-      assert.ok(result.stdout.includes('- AK: ak-test'));
-      assert.ok(result.stdout.includes('- SK: sk-test'));
-      assert.ok(result.stdout.includes('下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。'));
-      assert.ok(!result.stdout.includes('npx -y --registry='));
+      assert.equal(qrcodeInput.baseUrl, 'https://auth.example.com');
+      assert.equal(qrcodeInput.channel, 'opencode');
+      assert.ok(result.stdout.includes('二维码授权成功'));
+    });
+  });
+
+  test('monorepo source integration loads default qrcodeAuth runtime when no override is provided', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const preload = await createDefaultRuntimeFetchPreload(home);
+      const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+        cwd: project,
+        env: {
+          ...process.env,
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, '.config'),
+          NODE_OPTIONS: `--import ${preload}`,
+        },
+        encoding: 'utf8',
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const bridge = await readFile(join(home, '.config', 'opencode', 'message-bridge.jsonc'), 'utf8');
+      assert.ok(bridge.includes('"ak": "default-ak"'));
+      assert.ok(bridge.includes('"sk": "default-sk"'));
+    });
+  });
+
+  test('prints refreshed qrcode when previous qrcode expires', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
+          MB_QRCODE_SCENARIO: 'refresh',
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      assert.ok(result.stdout.includes('二维码已过期'));
+      assert.ok(result.stdout.includes('qrcode: qr-2'));
+
+      const bridge = await readFile(join(home, '.config', 'opencode', 'message-bridge.jsonc'), 'utf8');
+      assert.ok(bridge.includes('"ak": "refresh-ak"'));
+      assert.ok(bridge.includes('"sk": "refresh-sk"'));
+    });
+  });
+
+  test('does not write config when qrcode auth fails', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
+          MB_QRCODE_SCENARIO: 'failed',
+        },
+      });
+
+      assert.notStrictEqual(result.status, 0);
+      assert.ok(result.stderr.includes('二维码授权失败'));
+
+      const configRoot = join(home, '.config', 'opencode');
+      await assert.rejects(readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8'));
+    });
+  });
+
+  test('fails fast when baseUrl is missing', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user'],
+      });
+
+      assert.notStrictEqual(result.status, 0);
+      assert.ok(result.stderr.includes('base URL'));
+    });
+  });
+
+  test('fails when qrcode auth override does not export runtime', async () => {
+    await withTempDirs(async ({ home, project }) => {
+      const invalidModule = join(home, 'invalid-qrcode-auth.mjs');
+      await writeFile(invalidModule, 'export const notQrCodeAuth = {};\n', 'utf8');
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule: invalidModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+      });
+
+      assert.notStrictEqual(result.status, 0);
+      assert.ok(result.stderr.includes('qrcodeAuth.run'));
     });
   });
 
   test('preserves existing gateway url and avoids duplicate plugin entry', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const configRoot = join(home, '.config', 'opencode');
       await mkdir(configRoot, { recursive: true });
       await writeFile(
@@ -113,26 +319,27 @@ describe('setup cli', () => {
         'utf8',
       );
 
-      const result = runSetup({
+      const result = runSetupCommand({
         cwd: project,
         home,
-        input: 'old-ak\nnew-sk\ny\n',
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
 
       assert.ok(bridge.includes('"url": "wss://gateway.example.com/ws/agent"'));
-      assert.ok(bridge.includes('"ak": "old-ak"'));
-      assert.ok(bridge.includes('"sk": "new-sk"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
+      assert.ok(bridge.includes('"sk": "success-sk"'));
       assert.strictEqual(opencode.match(/@wecode\/skill-opencode-plugin/g)?.length, 1);
     });
   });
 
   test('adds missing sk into existing auth object without breaking json', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const configRoot = join(home, '.config', 'opencode');
       await mkdir(configRoot, { recursive: true });
       await writeFile(
@@ -141,30 +348,36 @@ describe('setup cli', () => {
         'utf8',
       );
 
-      const result = runSetup({
+      const result = runSetupCommand({
         cwd: project,
         home,
-        input: 'only-ak\nadded-sk\ny\n',
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
+          MB_QRCODE_AK: 'updated-ak',
+          MB_QRCODE_SK: 'added-sk',
+        },
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
-      assert.ok(bridge.includes('"ak": "only-ak",'));
+      assert.ok(bridge.includes('"ak": "updated-ak",'));
       assert.ok(bridge.includes('"sk": "added-sk"'));
     });
   });
 
   test('fails fast on invalid existing bridge config', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const configRoot = join(home, '.config', 'opencode');
       await mkdir(configRoot, { recursive: true });
       await writeFile(join(configRoot, 'message-bridge.jsonc'), '{\n  "auth": {\n', 'utf8');
 
-      const result = runSetup({
+      const result = runSetupCommand({
         cwd: project,
         home,
-        input: 'ak-test\nsk-test\ny\n',
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
       });
 
       assert.notStrictEqual(result.status, 0);
@@ -172,138 +385,91 @@ describe('setup cli', () => {
     });
   });
 
-  test('writes project-scope files when scope is project', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const result = runSetup({
+  test('fails fast on invalid existing opencode config', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const configRoot = join(home, '.config', 'opencode');
+      await mkdir(configRoot, { recursive: true });
+      await writeFile(join(configRoot, 'opencode.jsonc'), '[\n', 'utf8');
+
+      const result = runSetupCommand({
         cwd: project,
         home,
-        scope: 'project',
-        input: 'ak-project\nsk-project\ny\n',
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.notStrictEqual(result.status, 0);
+      assert.ok(result.stderr.includes('无法安全解析现有 OpenCode 配置'));
+    });
+  });
+
+  test('writes project-scope files when scope is project', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      await mkdir(join(project, '.opencode'), { recursive: true });
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'project', '--base-url', 'https://auth.example.com'],
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const bridge = await readFile(join(project, '.opencode', 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(project, 'opencode.jsonc'), 'utf8');
       const npmrc = await readFile(join(project, '.npmrc'), 'utf8');
-
-      assert.ok(bridge.includes('"ak": "ak-project"'));
-      assert.ok(bridge.includes('"sk": "sk-project"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
+      assert.ok(bridge.includes('"sk": "success-sk"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
-    });
-  });
-
-  test('does not write files when user cancels confirmation', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const result = runSetup({
-        cwd: project,
-        home,
-        input: 'ak-cancel\nsk-cancel\nn\n',
-      });
-
-      assert.strictEqual(result.status, 0);
-      assert.ok(result.stdout.includes('已取消，未写入任何文件。'));
-
-      const configRoot = join(home, '.config', 'opencode');
-      assert.deepStrictEqual(
-        await Promise.all([
-          readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8').then(() => true).catch(() => false),
-          readFile(join(configRoot, 'opencode.jsonc'), 'utf8').then(() => true).catch(() => false),
-          readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8').then(() => true).catch(() => false),
-        ]),
-        [false, false, false],
-      );
-    });
-  });
-
-  test('supports stdin input without tty', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const result = runSetup({
-        cwd: project,
-        home,
-        input: "ak-stdin\nsk-stdin\ny\n",
-      });
-
-      assert.strictEqual(result.status, 0);
-
-      const configRoot = join(home, '.config', 'opencode');
-      const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
-      const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
-      const npmrc = await readFile(extractNpmrcPathFromOutput(result.stdout), 'utf8');
-
-      assert.ok(bridge.includes('"ak": "ak-stdin"'));
-      assert.ok(bridge.includes('"sk": "sk-stdin"'));
-      assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
-      assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
-      assert.ok(result.stdout.includes('请输入 AK（必填）'));
-      assert.ok(result.stdout.includes('请输入 SK（必填）'));
-      assert.ok(result.stdout.includes('确认写入以上配置 [Y/N]'));
-    });
-  });
-
-  test('requires non-empty ak and sk before confirmation', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const result = runSetup({
-        cwd: project,
-        home,
-        input: '\nak-required\n\nsk-required\ny\n',
-      });
-
-      assert.strictEqual(result.status, 0);
-      assert.ok(result.stderr.includes('AK 不能为空，请重新输入'));
-      assert.ok(result.stderr.includes('SK 不能为空，请重新输入'));
-
-      const configRoot = join(home, '.config', 'opencode');
-      const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
-      assert.ok(bridge.includes('"ak": "ak-required"'));
-      assert.ok(bridge.includes('"sk": "sk-required"'));
     });
   });
 
   test('uses windows-style global config path when platform is win32', async () => {
-    await withTempDirs(async ({ home, project }) => {
-      const appData = join(home, 'AppData', 'Roaming');
-      await mkdir(appData, { recursive: true });
-      const result = runSetupWithEnv({
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const tempDir = join(home, 'Temp');
+      await mkdir(tempDir, { recursive: true });
+      const platformPreload = await createWin32PlatformPreload(home);
+      const result = runSetupCommand({
         cwd: project,
-        env: {
-          HOME: home,
-          USERPROFILE: home,
-          APPDATA: appData,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
           XDG_CONFIG_HOME: '',
-          MB_SETUP_PLATFORM: 'win32',
+          NODE_OPTIONS: `--import ${platformPreload}`,
+          TEMP: tempDir,
+          TMP: tempDir,
         },
-        input: 'ak-win\nsk-win\ny\n',
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
       const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
 
-      assert.ok(bridge.includes('"ak": "ak-win"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
     });
   });
 
   test('prefers NPM_CONFIG_USERCONFIG for user-scope npmrc path', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const customNpmrc = join(home, 'custom', 'npmrc', '.npmrc');
-      const result = runSetupWithEnv({
+      const result = runSetupCommand({
         cwd: project,
-        env: {
-          HOME: home,
-          XDG_CONFIG_HOME: join(home, '.config'),
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
           NPM_CONFIG_USERCONFIG: customNpmrc,
         },
-        input: 'ak-custom\nsk-custom\ny\n',
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const resolvedNpmrcPath = extractNpmrcPathFromOutput(result.stdout);
       const npmrc = await readFile(customNpmrc, 'utf8');
@@ -316,97 +482,102 @@ describe('setup cli', () => {
     });
   });
 
-  test('supports install subcommand and --yes argument mode', async () => {
-    await withTempDirs(async ({ home, project }) => {
+  test('supports install subcommand and --yes compatibility flag', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const result = runSetupCommand({
         cwd: project,
         home,
-        args: ['install', '--yes', '--ak', 'ak-arg', '--sk', 'sk-arg'],
+        qrcodeModule,
+        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
 
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
       const opencode = await readFile(join(configRoot, 'opencode.jsonc'), 'utf8');
       const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
 
-      assert.ok(bridge.includes('"ak": "ak-arg"'));
-      assert.ok(bridge.includes('"sk": "sk-arg"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
+      assert.ok(bridge.includes('"sk": "success-sk"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
     });
   });
 
   test('keeps compatibility for no-subcommand invocation', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const result = runSetupCommand({
         cwd: project,
         home,
-        args: ['--yes', '--ak', 'ak-legacy', '--sk', 'sk-legacy'],
+        qrcodeModule,
+        args: ['--yes', '--base-url', 'https://auth.example.com'],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
-      assert.ok(bridge.includes('"ak": "ak-legacy"'));
-      assert.ok(bridge.includes('"sk": "sk-legacy"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
+      assert.ok(bridge.includes('"sk": "success-sk"'));
     });
   });
 
   test('supports registry override via --registry', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const result = runSetupCommand({
         cwd: project,
         home,
+        qrcodeModule,
         args: [
           'install',
           '--yes',
-          '--ak',
-          'ak-reg',
-          '--sk',
-          'sk-reg',
+          '--base-url',
+          'https://auth.example.com',
           '--registry',
           'https://registry.override.example/npm',
         ],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
       const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
       assert.ok(npmrc.includes('@wecode:registry=https://registry.override.example/npm/'));
     });
   });
 
   test('prints warning and keeps going when opencode command is not installed', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      await chmod(qrcodeModule, 0o644);
       const result = runSetupCommand({
         cwd: project,
         home,
-        args: ['install', '--yes', '--ak', 'ak-warn', '--sk', 'sk-warn'],
-        extraEnv: { PATH: '/dev/null' },
+        qrcodeModule,
+        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
+        extraEnv: {
+          PATH: '/dev/null',
+        },
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
       assert.ok(result.stdout.includes('OpenCode 环境检查提示：未检测到 opencode 命令，将继续写入配置。'));
       const configRoot = join(home, '.config', 'opencode');
       const bridge = await readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8');
-      assert.ok(bridge.includes('"ak": "ak-warn"'));
+      assert.ok(bridge.includes('"ak": "success-ak"'));
     });
   });
 
   test('uses existing scope registry as preview when --registry is not provided', async () => {
-    await withTempDirs(async ({ home, project }) => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
       await writeFile(join(home, '.npmrc'), '@wecode:registry=https://existing.registry.example.com/npm\n', 'utf8');
 
       const result = runSetupCommand({
         cwd: project,
         home,
-        args: ['install', '--yes', '--ak', 'ak-existing', '--sk', 'sk-existing'],
+        qrcodeModule,
+        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
       });
 
-      assert.strictEqual(result.status, 0);
+      assert.strictEqual(result.status, 0, result.stderr);
       assert.ok(result.stdout.includes('默认 npm scope registry: https://existing.registry.example.com/npm/'));
-      assert.ok(result.stdout.includes('- npm scope: @wecode:registry=https://existing.registry.example.com/npm/'));
 
       const npmrc = await readFile(join(home, '.npmrc'), 'utf8');
       assert.ok(npmrc.includes('@wecode:registry=https://existing.registry.example.com/npm'));

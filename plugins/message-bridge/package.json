@@ -39,7 +39,9 @@
     "verify:release": "pnpm run verify:core && pnpm run verify:env && pnpm run test:e2e:smoke && pnpm run verify:opencode-load",
     "verify:release:dry": "pnpm run verify:release"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@agent-plugin/skill-qrcode-auth": "workspace:*"
+  },
   "devDependencies": {
     "@agent-plugin/gateway-client": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
 import { stdin, stdout, stderr, argv, env, cwd, exit } from 'node:process';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces, platform } from 'node:os';
 import { mkdtemp, readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { platform } from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 const PLUGIN_NAME = '@wecode/skill-opencode-plugin';
 const NPM_SCOPE_REGISTRY_LINE = '@wecode:registry=';
 const DEFAULT_SCOPE_REGISTRY = 'https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/';
+const DEFAULT_CHANNEL = 'opencode';
 const HELP_TEXT = `Message Bridge 安装 CLI
 
 用法:
@@ -19,11 +19,10 @@ const HELP_TEXT = `Message Bridge 安装 CLI
   node ./scripts/setup-message-bridge.mjs [options]  # 兼容旧入口，等价于 install
 
 选项:
-  --ak <value>        指定 AK
-  --sk <value>        指定 SK
+  --base-url <url>    指定二维码授权服务 base URL
   --registry <url>    指定 @wecode scope registry
   --scope <value>     user | project，默认 user
-  --yes               跳过确认；缺少必填字段时直接失败
+  --yes               兼容保留，无额外确认步骤
   --help              显示帮助
 `;
 
@@ -75,11 +74,10 @@ async function writeFileAtomically(path, content) {
 }
 
 function resolveGlobalConfigDir() {
-  const currentPlatform = env.MB_SETUP_PLATFORM || platform;
   if (env.XDG_CONFIG_HOME) {
     return join(env.XDG_CONFIG_HOME, 'opencode');
   }
-  if (currentPlatform === 'win32') {
+  if (platform() === 'win32') {
     return join(resolveWindowsHomeDir(), '.config', 'opencode');
   }
   return join(homedir(), '.config', 'opencode');
@@ -100,8 +98,7 @@ function resolveUserNpmrcPath() {
     return env.NPM_CONFIG_USERCONFIG;
   }
 
-  const currentPlatform = env.MB_SETUP_PLATFORM || platform;
-  if (currentPlatform === 'win32') {
+  if (platform() === 'win32') {
     return join(resolveWindowsHomeDir(), '.npmrc');
   }
   return join(env.HOME || homedir(), '.npmrc');
@@ -157,11 +154,6 @@ async function buildNextNpmrcContent(path, desiredRegistry) {
   return upsertScopeRegistryLine(existing, DEFAULT_SCOPE_REGISTRY);
 }
 
-function readConfiguredCredential(content, key) {
-  const match = content.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`, 'm'));
-  return match?.[1] ?? '';
-}
-
 function upsertJsonObjectField(objectBody, key, escapedValue) {
   const existingFieldPattern = new RegExp(`("${key}"\\s*:\\s*")[^"]*(")`, 's');
   if (existingFieldPattern.test(objectBody)) {
@@ -203,7 +195,6 @@ function buildNextBridgeConfig(content, ak, sk) {
     }
 
     return content.replace(authBlockPattern, (_match, start, objectBody, end) => {
-      // 保持文本级改写，尽量只更新 auth 下的目标字段。
       let nextBody = upsertJsonObjectField(objectBody, 'ak', escapedAk);
       nextBody = upsertJsonObjectField(nextBody, 'sk', escapedSk);
       return `${start}${nextBody}${end}`;
@@ -244,79 +235,11 @@ function buildNextOpencodeConfig(content) {
   return content.replace(/\n\}\s*$/s, `,\n  "plugin": ["${PLUGIN_NAME}"]\n}\n`);
 }
 
-class PromptSession {
-  constructor() {
-    this.queue = [];
-    this.useBufferedInput = false;
-    this.readline = null;
-  }
-
-  async init() {
-    if (stdin.isTTY && stdout.isTTY) {
-      this.readline = createInterface({ input: stdin, output: stdout });
-      return;
-    }
-
-    this.useBufferedInput = true;
-
-    // 非 TTY/半 TTY 场景统一读取整段 stdin，便于 bat、测试和脚本管道调用。
-    const piped = await new Promise((resolve, reject) => {
-      let data = '';
-      stdin.setEncoding('utf8');
-      stdin.on('data', (chunk) => {
-        data += chunk;
-      });
-      stdin.on('end', () => resolve(data));
-      stdin.on('error', reject);
-    });
-    this.queue = piped.split(/\r?\n/);
-  }
-
-  async ask(promptLabel, currentValue = '') {
-    if (this.useBufferedInput) {
-      writeLine(currentValue ? `${promptLabel} [${currentValue}]` : promptLabel);
-      const value = this.queue.shift() ?? '';
-      return value.trim() ? value.trim() : currentValue;
-    }
-
-    const prompt = currentValue ? `${promptLabel} [${currentValue}]: ` : `${promptLabel}: `;
-    const value = await this.readline.question(prompt);
-    return value.trim() ? value.trim() : currentValue;
-  }
-
-  async confirmAction(promptLabel) {
-    if (this.useBufferedInput) {
-      writeLine(`${promptLabel} [Y/N]`);
-      const value = (this.queue.shift() ?? '').trim().toLowerCase();
-      return value === 'y' || value === 'yes';
-    }
-
-    const answer = await this.readline.question(`${promptLabel} [Y/N]: `);
-    const normalized = answer.trim().toLowerCase();
-    return normalized === 'y' || normalized === 'yes';
-  }
-
-  async close() {
-    await this.readline?.close();
-  }
-}
-
-async function promptRequiredField(prompts, fieldName, promptLabel, currentValue = '') {
-  while (true) {
-    const value = await prompts.ask(promptLabel, currentValue);
-    if (value) {
-      return value;
-    }
-    writeError(`${fieldName} 不能为空，请重新输入`);
-  }
-}
-
 function parseArgs(rawArgs) {
   const parsed = {
     command: 'install',
     scope: 'user',
-    ak: null,
-    sk: null,
+    baseUrl: null,
     registry: null,
     yes: false,
     help: false,
@@ -357,13 +280,8 @@ function parseArgs(rawArgs) {
       index += 1;
       continue;
     }
-    if (token === '--ak') {
-      parsed.ak = readOptionValue('--ak', index);
-      index += 1;
-      continue;
-    }
-    if (token === '--sk') {
-      parsed.sk = readOptionValue('--sk', index);
+    if (token === '--base-url') {
+      parsed.baseUrl = readOptionValue('--base-url', index);
       index += 1;
       continue;
     }
@@ -375,11 +293,8 @@ function parseArgs(rawArgs) {
     throw new Error(`不支持的参数: ${token}`);
   }
 
-  if (parsed.ak === '') {
-    parsed.ak = null;
-  }
-  if (parsed.sk === '') {
-    parsed.sk = null;
+  if (parsed.baseUrl === '') {
+    parsed.baseUrl = null;
   }
   if (parsed.registry === '') {
     parsed.registry = null;
@@ -394,7 +309,6 @@ function buildTargetPaths(scope) {
     : join(cwd(), '.opencode');
 
   return {
-    configDir,
     bridgeConfigCandidates: [
       join(configDir, 'message-bridge.jsonc'),
       join(configDir, 'message-bridge.json'),
@@ -415,23 +329,14 @@ async function resolveTargetFilePaths(scope) {
   };
 }
 
-function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, registryValue) {
+function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, registryValue, baseUrl) {
   writeLine('Message Bridge 配置向导');
   writeLine(`配置作用域: ${scope}`);
+  writeLine(`二维码授权服务: ${baseUrl}`);
   writeLine(`Message Bridge 配置文件: ${bridgeConfig}`);
   writeLine(`OpenCode 配置文件: ${opencodeConfig}`);
   writeLine(`npm scope 配置文件: ${npmrcPath}`);
   writeLine(`默认 npm scope registry: ${registryValue}`);
-  writeLine('');
-}
-
-function printChangePreview(ak, sk, registry) {
-  writeLine('');
-  writeLine('即将写入以下配置：');
-  writeLine(`- AK: ${ak}`);
-  writeLine(`- SK: ${sk}`);
-  writeLine(`- OpenCode plugin: ${PLUGIN_NAME}`);
-  writeLine(`- npm scope: ${NPM_SCOPE_REGISTRY_LINE}${registry}`);
   writeLine('');
 }
 
@@ -447,17 +352,100 @@ function checkOpencodeInstalled() {
   return result.status === 0;
 }
 
-async function resolveCredential(parsedValue, existingValue, prompts, fieldName, promptLabel, nonInteractive) {
-  if (parsedValue) {
-    return parsedValue;
+function resolveBaseUrl(cliBaseUrl) {
+  const resolved = String(cliBaseUrl ?? env.WECODE_AUTH_BASE_URL ?? '').trim();
+  if (!resolved) {
+    throw new Error('缺少二维码授权服务 base URL，请通过 --base-url 或 WECODE_AUTH_BASE_URL 提供。');
   }
-  if (nonInteractive) {
-    if (existingValue) {
-      return existingValue;
-    }
-    throw new Error(`--yes 模式下必须提供 ${fieldName} 或确保现有配置包含该字段`);
+  return resolved;
+}
+
+function resolveMacAddress() {
+  const entries = Object.values(networkInterfaces())
+    .flat()
+    .filter(Boolean);
+
+  const candidate = entries.find((item) => {
+    const mac = String(item.mac ?? '').trim();
+    return !item.internal && mac && mac !== '00:00:00:00:00:00';
+  });
+
+  return candidate?.mac ?? '';
+}
+
+async function loadQrCodeAuthRuntime() {
+  const override = env.MB_SETUP_QRCODE_AUTH_MODULE;
+  const module = override
+    ? await import(pathToFileURL(override).href)
+    : await import(new URL('../../../packages/skill-qrcode-auth/src/index.ts', import.meta.url).href);
+  if (typeof module.qrcodeAuth?.run !== 'function') {
+    throw new Error('二维码授权模块必须导出 qrcodeAuth.run(input)。');
   }
-  return promptRequiredField(prompts, fieldName, promptLabel, existingValue);
+  return module.qrcodeAuth;
+}
+
+function renderSnapshot(snapshot) {
+  switch (snapshot.type) {
+    case 'qrcode_generated':
+      writeLine('二维码已生成，请使用企业侧应用扫码授权。');
+      writeLine(`- qrcode: ${snapshot.qrcode}`);
+      writeLine(`- weUrl: ${snapshot.display.weUrl}`);
+      writeLine(`- pcUrl: ${snapshot.display.pcUrl}`);
+      writeLine(`- expiresAt: ${snapshot.expiresAt}`);
+      break;
+    case 'scanned':
+      writeLine(`二维码已扫码，等待确认：${snapshot.qrcode}`);
+      break;
+    case 'expired':
+      writeLine(`二维码已过期，正在准备刷新：${snapshot.qrcode}`);
+      break;
+    case 'cancelled':
+      writeLine(`二维码授权已取消：${snapshot.qrcode}`);
+      break;
+    case 'confirmed':
+      writeLine(`二维码授权成功：${snapshot.qrcode}`);
+      break;
+    case 'failed':
+      writeLine(`二维码授权失败：${snapshot.reasonCode}${snapshot.qrcode ? ` (${snapshot.qrcode})` : ''}`);
+      if (snapshot.serviceError?.message) {
+        writeLine(`- service message: ${snapshot.serviceError.message}`);
+      }
+      break;
+  }
+}
+
+async function runQrCodeAuth(baseUrl) {
+  const qrcodeAuth = await loadQrCodeAuthRuntime();
+  let terminalSnapshot = null;
+  let credentials = null;
+
+  await qrcodeAuth.run({
+    baseUrl,
+    channel: DEFAULT_CHANNEL,
+    mac: resolveMacAddress(),
+    onSnapshot(snapshot) {
+      renderSnapshot(snapshot);
+      if (snapshot.type === 'confirmed') {
+        credentials = snapshot.credentials;
+      }
+      if (snapshot.type === 'confirmed' || snapshot.type === 'cancelled' || snapshot.type === 'failed') {
+        terminalSnapshot = snapshot;
+      }
+    },
+  });
+
+  if (credentials) {
+    return credentials;
+  }
+
+  if (terminalSnapshot?.type === 'cancelled') {
+    throw new Error('二维码授权已取消，未写入任何配置。');
+  }
+  if (terminalSnapshot?.type === 'failed') {
+    throw new Error(`二维码授权失败：${terminalSnapshot.reasonCode}`);
+  }
+
+  throw new Error('二维码授权流程异常结束，未获取到 AK/SK。');
 }
 
 async function main() {
@@ -478,76 +466,43 @@ async function main() {
   }
 
   const scope = parsed.scope;
+  const baseUrl = resolveBaseUrl(parsed.baseUrl);
   const { bridgeConfig, opencodeConfig, npmrcPath } = await resolveTargetFilePaths(scope);
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
   const existingScopeRegistry = existingNpmrc ? readScopeRegistry(existingNpmrc) : null;
   const effectiveRegistry = normalizeRegistryUrl(parsed.registry ?? existingScopeRegistry ?? DEFAULT_SCOPE_REGISTRY);
-
   const existingBridge = await readOptionalTextFile(bridgeConfig);
-  const currentAk = existingBridge ? readConfiguredCredential(existingBridge, 'ak') : '';
-  const currentSk = existingBridge ? readConfiguredCredential(existingBridge, 'sk') : '';
 
-  const prompts = new PromptSession();
-  await prompts.init();
+  printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, effectiveRegistry, baseUrl);
+  writeLine('正在启动二维码授权流程...');
+  const credentials = await runQrCodeAuth(baseUrl);
+
+  const existingOpencode = await readOptionalTextFile(opencodeConfig);
+  const nextNpmrc = await buildNextNpmrcContent(npmrcPath, parsed.registry);
+  let nextBridge;
+  let nextOpencode;
 
   try {
-    printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, effectiveRegistry);
-
-    const ak = await resolveCredential(
-      parsed.ak,
-      currentAk,
-      prompts,
-      'AK',
-      '请输入 AK（必填）',
-      parsed.yes,
-    );
-    const sk = await resolveCredential(
-      parsed.sk,
-      currentSk,
-      prompts,
-      'SK',
-      '请输入 SK（必填）',
-      parsed.yes,
-    );
-
-    printChangePreview(ak, sk, effectiveRegistry);
-
-    const confirmed = parsed.yes ? true : await prompts.confirmAction('确认写入以上配置');
-    if (!confirmed) {
-      writeLine('已取消，未写入任何文件。');
-      return;
-    }
-
-    const existingOpencode = await readOptionalTextFile(opencodeConfig);
-    const nextNpmrc = await buildNextNpmrcContent(npmrcPath, parsed.registry);
-    let nextBridge;
-    let nextOpencode;
-
-    try {
-      nextBridge = buildNextBridgeConfig(existingBridge, ak, sk);
-    } catch {
-      throw new Error(`无法安全解析现有 bridge 配置：${bridgeConfig}`);
-    }
-
-    try {
-      nextOpencode = buildNextOpencodeConfig(existingOpencode);
-    } catch {
-      throw new Error(`无法安全解析现有 OpenCode 配置：${opencodeConfig}`);
-    }
-
-    // 先生成所有目标内容，再统一落盘，避免部分写入成功后中途失败。
-    await writeFileAtomically(bridgeConfig, nextBridge);
-    await writeFileAtomically(opencodeConfig, nextOpencode);
-    await writeFileAtomically(npmrcPath, nextNpmrc);
-
-    writeLine('配置已完成。');
-    writeLine(`1. Message Bridge 配置已写入 ${bridgeConfig}`);
-    writeLine(`2. OpenCode 配置已更新 ${opencodeConfig}`);
-    writeLine(`3. npm scope 配置已更新 ${npmrcPath}`);
-    writeLine('4. 下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。');
-  } finally {
-    await prompts.close();
+    nextBridge = buildNextBridgeConfig(existingBridge, credentials.ak, credentials.sk);
+  } catch {
+    throw new Error(`无法安全解析现有 bridge 配置：${bridgeConfig}`);
   }
+
+  try {
+    nextOpencode = buildNextOpencodeConfig(existingOpencode);
+  } catch {
+    throw new Error(`无法安全解析现有 OpenCode 配置：${opencodeConfig}`);
+  }
+
+  await writeFileAtomically(bridgeConfig, nextBridge);
+  await writeFileAtomically(opencodeConfig, nextOpencode);
+  await writeFileAtomically(npmrcPath, nextNpmrc);
+
+  writeLine('配置已完成。');
+  writeLine(`1. Message Bridge 配置已写入 ${bridgeConfig}`);
+  writeLine(`2. OpenCode 配置已更新 ${opencodeConfig}`);
+  writeLine(`3. npm scope 配置已更新 ${npmrcPath}`);
+  writeLine('4. 下次启动或重启 OpenCode 时会自动安装并加载 npm 插件。');
 }
 
 main().catch((error) => {

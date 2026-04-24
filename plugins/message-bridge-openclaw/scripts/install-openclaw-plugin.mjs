@@ -2,10 +2,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildOpenClawInvocation, resolveOpenClawCommandSpec } from "./openclaw-command-resolver.mjs";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
@@ -317,8 +317,7 @@ export function parseArgs(argv) {
     noRestart: false,
     registry: "",
     url: "",
-    token: "",
-    password: "",
+    baseUrl: "",
     name: "",
     openclawBin: "",
   };
@@ -340,12 +339,8 @@ export function parseArgs(argv) {
         parsed.url = argv[index + 1] ?? "";
         index += 1;
         break;
-      case "--token":
-        parsed.token = argv[index + 1] ?? "";
-        index += 1;
-        break;
-      case "--password":
-        parsed.password = argv[index + 1] ?? "";
+      case "--base-url":
+        parsed.baseUrl = argv[index + 1] ?? "";
         index += 1;
         break;
       case "--name":
@@ -374,6 +369,102 @@ function writeStdout(message) {
 
 function writeStderr(message) {
   process.stderr.write(`${message}\n`);
+}
+
+function resolveBaseUrl(cliBaseUrl, env = process.env) {
+  const resolved = String(cliBaseUrl ?? env.WECODE_AUTH_BASE_URL ?? "").trim();
+  if (!resolved) {
+    throw createInstallerError(
+      "INSTALLER_USAGE_ERROR",
+      "Missing qrcode auth base URL. Please pass --base-url or set WECODE_AUTH_BASE_URL.",
+    );
+  }
+  return resolved;
+}
+
+function resolveMacAddress() {
+  const entries = Object.values(networkInterfaces())
+    .flat()
+    .filter(Boolean);
+  const candidate = entries.find((item) => {
+    const mac = String(item.mac ?? "").trim();
+    return !item.internal && mac && mac !== "00:00:00:00:00:00";
+  });
+  return candidate?.mac ?? "";
+}
+
+async function loadQrCodeAuthRuntime(env = process.env) {
+  const override = env.OPENCLAW_INSTALL_QRCODE_AUTH_MODULE;
+  const module = override
+    ? await import(pathToFileURL(override).href)
+    : await import(new URL("../../../packages/skill-qrcode-auth/src/index.ts", import.meta.url).href);
+  if (typeof module.qrcodeAuth?.run !== "function") {
+    throw createInstallerError("QRCODE_AUTH_FAILED", "QRCode auth module must export qrcodeAuth.run(input).");
+  }
+  return module.qrcodeAuth;
+}
+
+function renderQrCodeSnapshot(snapshot) {
+  switch (snapshot.type) {
+    case "qrcode_generated":
+      writeStdout(formatStep("二维码已生成，请使用企业侧应用扫码授权"));
+      writeStdout(formatStep(`qrcode=${snapshot.qrcode}`));
+      writeStdout(formatStep(`weUrl=${snapshot.display.weUrl}`));
+      writeStdout(formatStep(`pcUrl=${snapshot.display.pcUrl}`));
+      writeStdout(formatStep(`expiresAt=${snapshot.expiresAt}`));
+      break;
+    case "scanned":
+      writeStdout(formatStep(`二维码已扫码，等待确认：${snapshot.qrcode}`));
+      break;
+    case "expired":
+      writeStdout(formatStep(`二维码已过期，正在尝试刷新：${snapshot.qrcode}`));
+      break;
+    case "cancelled":
+      writeStdout(formatStep(`二维码授权已取消：${snapshot.qrcode}`));
+      break;
+    case "confirmed":
+      writeStdout(formatStep(`二维码授权成功：${snapshot.qrcode}`));
+      break;
+    case "failed":
+      writeStdout(formatStep(`二维码授权失败：${snapshot.reasonCode}${snapshot.qrcode ? ` (${snapshot.qrcode})` : ""}`));
+      if (snapshot.serviceError?.message) {
+        writeStdout(formatStep(`服务返回：${snapshot.serviceError.message}`));
+      }
+      break;
+  }
+}
+
+async function runQrCodeAuth({ baseUrl, channel, env = process.env }) {
+  const qrcodeAuth = await loadQrCodeAuthRuntime(env);
+  let credentials = null;
+  let terminalSnapshot = null;
+
+  await qrcodeAuth.run({
+    baseUrl,
+    channel,
+    mac: resolveMacAddress(),
+    onSnapshot(snapshot) {
+      renderQrCodeSnapshot(snapshot);
+      if (snapshot.type === "confirmed") {
+        credentials = snapshot.credentials;
+      }
+      if (snapshot.type === "confirmed" || snapshot.type === "cancelled" || snapshot.type === "failed") {
+        terminalSnapshot = snapshot;
+      }
+    },
+  });
+
+  if (credentials) {
+    return credentials;
+  }
+
+  if (terminalSnapshot?.type === "cancelled") {
+    throw createInstallerError("QRCODE_AUTH_FAILED", "QRCode auth cancelled by user.");
+  }
+  if (terminalSnapshot?.type === "failed") {
+    throw createInstallerError("QRCODE_AUTH_FAILED", `QRCode auth failed: ${terminalSnapshot.reasonCode}`);
+  }
+  throw createInstallerError("QRCODE_AUTH_FAILED", "QRCode auth finished without credentials.");
 }
 
 function spawnForwarded(openclaw, args, failureCode, cwd = process.cwd()) {
@@ -461,6 +552,10 @@ export async function runInstaller({
   resolvePackageRoot(importMetaUrl);
   const requiredRange = INSTALL_SUPPORTED_HOST_RANGE;
   const npmrcPath = resolveUserNpmrcPath(env);
+  const authBaseUrl = resolveBaseUrl(args.baseUrl, env);
+  if (!String(args.url ?? "").trim()) {
+    throw createInstallerError("INSTALLER_USAGE_ERROR", "Missing Message Bridge gateway URL. Please pass --url.");
+  }
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
   const registry = resolveRegistryValue({
     cliRegistry: args.registry,
@@ -509,24 +604,28 @@ export async function runInstaller({
   }
   writeStdout(formatStep(`${PLUGIN_LABEL} 插件安装校验通过`));
 
+  writeStdout(formatStep("正在启动二维码授权流程"));
+  const credentials = await runQrCodeAuth({
+    baseUrl: authBaseUrl,
+    channel: "openclaw",
+    env,
+  });
+
   writeStdout(formatStep("正在配置 Message Bridge channel"));
-  const hasNonInteractiveArgs = Boolean(args.url && args.token && args.password);
-  const channelArgs = hasNonInteractiveArgs
-    ? [
-        ...openclawArgsPrefix,
-        "channels",
-        "add",
-        "--channel",
-        CHANNEL_ID,
-        "--url",
-        args.url,
-        "--token",
-        args.token,
-        "--password",
-        args.password,
-        ...(args.name ? ["--name", args.name] : []),
-      ]
-    : [...openclawArgsPrefix, "channels", "add", "--channel", CHANNEL_ID];
+  const channelArgs = [
+    ...openclawArgsPrefix,
+    "channels",
+    "add",
+    "--channel",
+    CHANNEL_ID,
+    "--url",
+    args.url,
+    "--token",
+    credentials.ak,
+    "--password",
+    credentials.sk,
+    ...(args.name ? ["--name", args.name] : []),
+  ];
   await spawnForwarded(openclaw, channelArgs, "CHANNEL_ADD_FAILED", cwd);
 
   if (!args.noRestart) {
