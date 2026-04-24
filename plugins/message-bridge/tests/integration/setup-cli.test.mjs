@@ -1,11 +1,14 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const scriptPath = resolve('scripts/setup-message-bridge.mjs');
+const shadowPackageRoot = resolve('node_modules/@wecode/skill-qrcode-auth');
+const shadowPackageParent = resolve('node_modules/@wecode');
 
 async function withTempDirs(fn) {
   const home = await mkdtemp(join(tmpdir(), 'mb-cli-home-'));
@@ -178,6 +181,81 @@ function extractNpmrcPathFromOutput(stdout) {
   return line.slice(line.indexOf(':') + 1).trim();
 }
 
+async function pathExists(targetPath) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function withShadowInstalledQrCodePackage(mode, fn) {
+  const backupPath = join(shadowPackageParent, `.skill-qrcode-auth-backup-${randomUUID()}`);
+  const hadOriginalPackage = await pathExists(shadowPackageRoot);
+
+  if (hadOriginalPackage) {
+    await rename(shadowPackageRoot, backupPath);
+  }
+
+  await mkdir(join(shadowPackageRoot, 'dist'), { recursive: true });
+  await writeFile(
+    join(shadowPackageRoot, 'package.json'),
+    JSON.stringify(
+      {
+        name: '@wecode/skill-qrcode-auth',
+        type: 'module',
+        exports: {
+          '.': {
+            default: './dist/index.js',
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  await writeFile(
+    join(shadowPackageRoot, 'dist', 'index.js'),
+    mode === 'valid'
+      ? `export const qrcodeAuth = {
+  async run(input) {
+    input.onSnapshot({
+      type: 'qrcode_generated',
+      qrcode: 'pkg-qr',
+      display: {
+        qrcode: 'pkg-qr',
+        weUrl: 'https://pkg.example/we',
+        pcUrl: 'https://pkg.example/pc',
+      },
+      expiresAt: '2026-04-24T00:00:00.000Z',
+    });
+    input.onSnapshot({
+      type: 'confirmed',
+      qrcode: 'pkg-qr',
+      credentials: {
+        ak: 'package-ak',
+        sk: 'package-sk',
+      },
+    });
+  },
+};
+`
+      : `export const broken = {};\n`,
+    'utf8',
+  );
+
+  try {
+    await fn();
+  } finally {
+    await rm(shadowPackageRoot, { recursive: true, force: true });
+    if (hadOriginalPackage) {
+      await rename(backupPath, shadowPackageRoot);
+    }
+  }
+}
+
 describe('setup cli', () => {
   test('writes opencode config after successful qrcode auth', async () => {
     await withTempDirs(async ({ home, project, qrcodeModule }) => {
@@ -229,6 +307,52 @@ describe('setup cli', () => {
       const bridge = await readFile(join(home, '.config', 'opencode', 'message-bridge.jsonc'), 'utf8');
       assert.ok(bridge.includes('"ak": "default-ak"'));
       assert.ok(bridge.includes('"sk": "default-sk"'));
+    });
+  });
+
+  test('prefers installed qrcode package before monorepo fallback', async () => {
+    await withShadowInstalledQrCodePackage('valid', async () => {
+      await withTempDirs(async ({ home, project }) => {
+        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+          cwd: project,
+          env: {
+            ...process.env,
+            HOME: home,
+            USERPROFILE: home,
+            XDG_CONFIG_HOME: join(home, '.config'),
+          },
+          encoding: 'utf8',
+        });
+
+        assert.strictEqual(result.status, 0, result.stderr);
+        const bridge = await readFile(join(home, '.config', 'opencode', 'message-bridge.jsonc'), 'utf8');
+        assert.ok(bridge.includes('"ak": "package-ak"'));
+        assert.ok(bridge.includes('"sk": "package-sk"'));
+      });
+    });
+  });
+
+  test('falls back to monorepo source when installed qrcode package export is invalid', async () => {
+    await withShadowInstalledQrCodePackage('broken', async () => {
+      await withTempDirs(async ({ home, project }) => {
+        const preload = await createDefaultRuntimeFetchPreload(home);
+        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+          cwd: project,
+          env: {
+            ...process.env,
+            HOME: home,
+            USERPROFILE: home,
+            XDG_CONFIG_HOME: join(home, '.config'),
+            NODE_OPTIONS: `--import ${preload}`,
+          },
+          encoding: 'utf8',
+        });
+
+        assert.strictEqual(result.status, 0, result.stderr);
+        const bridge = await readFile(join(home, '.config', 'opencode', 'message-bridge.jsonc'), 'utf8');
+        assert.ok(bridge.includes('"ak": "default-ak"'));
+        assert.ok(bridge.includes('"sk": "default-sk"'));
+      });
     });
   });
 

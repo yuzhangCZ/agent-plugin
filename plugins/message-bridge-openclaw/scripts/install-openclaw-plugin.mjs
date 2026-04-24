@@ -395,13 +395,35 @@ function resolveMacAddress() {
 
 async function loadQrCodeAuthRuntime(env = process.env) {
   const override = env.OPENCLAW_INSTALL_QRCODE_AUTH_MODULE;
-  const module = override
-    ? await import(pathToFileURL(override).href)
-    : await import(new URL("../../../packages/skill-qrcode-auth/src/index.ts", import.meta.url).href);
-  if (typeof module.qrcodeAuth?.run !== "function") {
-    throw createInstallerError("QRCODE_AUTH_FAILED", "QRCode auth module must export qrcodeAuth.run(input).");
+  if (override) {
+    const module = await import(pathToFileURL(override).href);
+    if (typeof module.qrcodeAuth?.run !== "function") {
+      throw createInstallerError("QRCODE_AUTH_FAILED", "QRCode auth module must export qrcodeAuth.run(input).");
+    }
+    return module.qrcodeAuth;
   }
-  return module.qrcodeAuth;
+
+  const sourceHref = new URL("../../../packages/skill-qrcode-auth/src/index.ts", import.meta.url).href;
+  const packageSpecifier = ["@wecode", "skill-qrcode-auth"].join("/");
+  const attempts = [
+    async () => import(packageSpecifier),
+    async () => import(sourceHref),
+  ];
+  const failures = [];
+
+  for (const load of attempts) {
+    try {
+      const module = await load();
+      if (typeof module.qrcodeAuth?.run === "function") {
+        return module.qrcodeAuth;
+      }
+      failures.push("QRCode auth module must export qrcodeAuth.run(input).");
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw createInstallerError("QRCODE_AUTH_FAILED", `Unable to load qrcode auth module: ${failures.join(" | ")}`);
 }
 
 function renderQrCodeSnapshot(snapshot) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -8,6 +9,8 @@ import test from "node:test";
 const scriptPath = path.resolve("scripts/install-openclaw-plugin.mjs");
 const packageManifest = JSON.parse(await readFile(path.resolve("package.json"), "utf8"));
 const defaultOpenclawVersion = packageManifest.peerDependencies.openclaw.replace(/^>=/, "");
+const shadowPackageRoot = path.resolve("node_modules/@wecode/skill-qrcode-auth");
+const shadowPackageParent = path.resolve("node_modules/@wecode");
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(tmpdir(), "openclaw-install-cli-"));
@@ -339,6 +342,81 @@ function baseArgs() {
   return ["--url", "wss://gateway.example.com/ws/agent", "--base-url", "https://auth.example.com"];
 }
 
+async function pathExists(targetPath) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function withShadowInstalledQrCodePackage(mode, fn) {
+  const backupPath = path.join(shadowPackageParent, `.skill-qrcode-auth-backup-${randomUUID()}`);
+  const hadOriginalPackage = await pathExists(shadowPackageRoot);
+
+  if (hadOriginalPackage) {
+    await rename(shadowPackageRoot, backupPath);
+  }
+
+  await mkdir(path.join(shadowPackageRoot, "dist"), { recursive: true });
+  await writeFile(
+    path.join(shadowPackageRoot, "package.json"),
+    JSON.stringify(
+      {
+        name: "@wecode/skill-qrcode-auth",
+        type: "module",
+        exports: {
+          ".": {
+            default: "./dist/index.js",
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  await writeFile(
+    path.join(shadowPackageRoot, "dist", "index.js"),
+    mode === "valid"
+      ? `export const qrcodeAuth = {
+  async run(input) {
+    input.onSnapshot({
+      type: 'qrcode_generated',
+      qrcode: 'pkg-qr',
+      display: {
+        qrcode: 'pkg-qr',
+        weUrl: 'https://pkg.example/we',
+        pcUrl: 'https://pkg.example/pc',
+      },
+      expiresAt: '2026-04-24T00:00:00.000Z',
+    });
+    input.onSnapshot({
+      type: 'confirmed',
+      qrcode: 'pkg-qr',
+      credentials: {
+        ak: 'package-ak',
+        sk: 'package-sk',
+      },
+    });
+  },
+};
+`
+      : `export const broken = {};\n`,
+    "utf8",
+  );
+
+  try {
+    await fn();
+  } finally {
+    await rm(shadowPackageRoot, { recursive: true, force: true });
+    if (hadOriginalPackage) {
+      await rename(backupPath, shadowPackageRoot);
+    }
+  }
+}
+
 test("installer runs qrcode auth and configures channel with returned credentials", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
@@ -421,6 +499,60 @@ test("monorepo source integration loads default qrcodeAuth runtime when no overr
     ]);
     assert.ok(commands[3].includes("default-ak"));
     assert.ok(commands[3].includes("default-sk"));
+  });
+});
+
+test("installer prefers installed qrcode package before monorepo fallback", async () => {
+  await withShadowInstalledQrCodePackage("valid", async () => {
+    await withTempDir(async (dir) => {
+      const home = path.join(dir, "home");
+      const logFile = path.join(dir, "openclaw.log");
+      await mkdir(home, { recursive: true });
+      const fakeOpenclaw = await createFakeOpenclaw(dir);
+
+      const result = runInstaller({
+        cwd: process.cwd(),
+        home,
+        openclawBin: fakeOpenclaw,
+        extraArgs: baseArgs(),
+        extraEnv: {
+          FAKE_OPENCLAW_LOG: logFile,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const commands = await readLoggedCommands(logFile);
+      assert.ok(commands[3].includes("package-ak"));
+      assert.ok(commands[3].includes("package-sk"));
+    });
+  });
+});
+
+test("installer falls back to monorepo source when installed qrcode package export is invalid", async () => {
+  await withShadowInstalledQrCodePackage("broken", async () => {
+    await withTempDir(async (dir) => {
+      const home = path.join(dir, "home");
+      const logFile = path.join(dir, "openclaw.log");
+      await mkdir(home, { recursive: true });
+      const fakeOpenclaw = await createFakeOpenclaw(dir);
+      const preload = await createDefaultRuntimeFetchPreload(dir);
+
+      const result = runInstaller({
+        cwd: process.cwd(),
+        home,
+        openclawBin: fakeOpenclaw,
+        extraArgs: baseArgs(),
+        extraEnv: {
+          FAKE_OPENCLAW_LOG: logFile,
+          NODE_OPTIONS: `--import ${preload}`,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const commands = await readLoggedCommands(logFile);
+      assert.ok(commands[3].includes("default-ak"));
+      assert.ok(commands[3].includes("default-sk"));
+    });
   });
 });
 

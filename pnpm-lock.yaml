@@ -41,6 +41,18 @@ importers:
         specifier: ^22.10.2
         version: 22.19.15
 
+  packages/skill-qrcode-auth:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.15
+      esbuild:
+        specifier: ^0.27.4
+        version: 0.27.4
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/test-support:
     dependencies:
       ws:
@@ -48,6 +60,10 @@ importers:
         version: 8.19.0
 
   plugins/message-bridge:
+    dependencies:
+      '@wecode/skill-qrcode-auth':
+        specifier: workspace:*
+        version: link:../../packages/skill-qrcode-auth
     devDependencies:
       '@agent-plugin/gateway-client':
         specifier: workspace:*
@@ -97,6 +113,9 @@ importers:
       '@agent-plugin/gateway-schema':
         specifier: workspace:*
         version: link:../../packages/gateway-schema
+      '@wecode/skill-qrcode-auth':
+        specifier: workspace:*
+        version: link:../../packages/skill-qrcode-auth
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

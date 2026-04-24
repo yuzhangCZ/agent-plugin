@@ -40,7 +40,7 @@
     "verify:release:dry": "pnpm run verify:release"
   },
   "dependencies": {
-    "@agent-plugin/skill-qrcode-auth": "workspace:*"
+    "@wecode/skill-qrcode-auth": "workspace:*"
   },
   "devDependencies": {
     "@agent-plugin/gateway-client": "workspace:*",

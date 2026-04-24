@@ -375,13 +375,35 @@ function resolveMacAddress() {
 
 async function loadQrCodeAuthRuntime() {
   const override = env.MB_SETUP_QRCODE_AUTH_MODULE;
-  const module = override
-    ? await import(pathToFileURL(override).href)
-    : await import(new URL('../../../packages/skill-qrcode-auth/src/index.ts', import.meta.url).href);
-  if (typeof module.qrcodeAuth?.run !== 'function') {
-    throw new Error('二维码授权模块必须导出 qrcodeAuth.run(input)。');
+  if (override) {
+    const module = await import(pathToFileURL(override).href);
+    if (typeof module.qrcodeAuth?.run !== 'function') {
+      throw new Error('二维码授权模块必须导出 qrcodeAuth.run(input)。');
+    }
+    return module.qrcodeAuth;
   }
-  return module.qrcodeAuth;
+
+  const sourceHref = new URL('../../../packages/skill-qrcode-auth/src/index.ts', import.meta.url).href;
+  const packageSpecifier = ['@wecode', 'skill-qrcode-auth'].join('/');
+  const attempts = [
+    async () => import(packageSpecifier),
+    async () => import(sourceHref),
+  ];
+  const failures = [];
+
+  for (const load of attempts) {
+    try {
+      const module = await load();
+      if (typeof module.qrcodeAuth?.run === 'function') {
+        return module.qrcodeAuth;
+      }
+      failures.push('二维码授权模块必须导出 qrcodeAuth.run(input)。');
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new Error(`无法加载二维码授权模块：${failures.join(' | ')}`);
 }
 
 function renderSnapshot(snapshot) {

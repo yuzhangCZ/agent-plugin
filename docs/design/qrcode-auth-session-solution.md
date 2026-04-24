@@ -39,7 +39,7 @@
 4. `run()` 返回 `Promise<void>`，只表示授权流程结束，不返回业务结果。
 5. `run()` resolve 前必须已经发出终态事件，resolve 后不再发送事件。
 6. `QrCodeAuthSnapshot` 是调用方可见授权事件模型，使用 `type` 作为唯一判别字段。
-7. 新增内部 package 命名为 `@agent-plugin/skill-qrcode-auth`，目录为 `packages/skill-qrcode-auth`。
+7. 新增内部 package 命名为 `@wecode/skill-qrcode-auth`，目录为 `packages/skill-qrcode-auth`。
 8. `baseUrl` 由宿主安装层解析后传入 `qrcodeAuth.run()`。
 9. `mac` 由 SDK / 宿主自动采集，采集失败传空字符串 `""`。
 10. `expired` 是当前二维码实例事件，不是整次授权会话终态。
@@ -97,7 +97,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 ### 3.3 使用示意
 
 ```ts
-import { qrcodeAuth } from "@agent-plugin/skill-qrcode-auth";
+import { qrcodeAuth } from "@wecode/skill-qrcode-auth";
 
 await qrcodeAuth.run({
   baseUrl: resolvedBaseUrl,
@@ -438,7 +438,7 @@ flowchart TD
     OpenClaw["OpenClaw installer host"]
   end
 
-  subgraph Auth["二维码授权包 @agent-plugin/skill-qrcode-auth"]
+  subgraph Auth["二维码授权包 @wecode/skill-qrcode-auth"]
     API["QrCodeAuth public facade"]
     CTRL["Application: QrCodeAuthSessionController"]
     PORT["Outbound Port: QrCodeAuthServicePort"]
@@ -598,7 +598,7 @@ sequenceDiagram
 
 | 项 | 值 |
 | --- | --- |
-| package name | `@agent-plugin/skill-qrcode-auth` |
+| package name | `@wecode/skill-qrcode-auth` |
 | package path | `packages/skill-qrcode-auth` |
 
 包内采用 Hexagonal Architecture 分层：
@@ -622,7 +622,7 @@ sequenceDiagram
 
 #### `QrCodeAuth`
 
-`QrCodeAuth` 是 `@agent-plugin/skill-qrcode-auth` 的 public facade，负责：
+`QrCodeAuth` 是 `@wecode/skill-qrcode-auth` 的 public facade，负责：
 
 - 校验 `baseUrl`、`channel`、`mac` 和 `onSnapshot`
 - 接收 `baseUrl`、`channel`、`mac`、`policy` 和 `onSnapshot`
@@ -840,7 +840,7 @@ adapter 单元测试覆盖远端协议转换：
 
 - 对安装脚本，只暴露 `qrcodeAuth.run()`
 - 对业务输出，只使用 `QrCodeAuthSnapshot` 事件流
-- 对内部实现，由 `@agent-plugin/skill-qrcode-auth` 保留自己的 controller / service port / adapter 分层
+- 对内部实现，由 `@wecode/skill-qrcode-auth` 保留自己的 controller / service port / adapter 分层
 - 对宿主动作，由 OpenCode / OpenClaw 安装脚本负责
 
 这样既能满足双端安装脚本复用诉求，又能避免把协议细节、状态机实现和宿主安装逻辑混在同一层。

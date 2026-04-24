@@ -21,6 +21,23 @@ export const releaseDescriptorSchema = Object.freeze([
 ]);
 
 export const releaseDescriptors = Object.freeze({
+  "skill-qrcode-auth": Object.freeze({
+    id: "skill-qrcode-auth",
+    packageRoot: "packages/skill-qrcode-auth",
+    versionSource: "package.json",
+    publishRoot: ".",
+    buildSteps: Object.freeze([["pnpm", "--dir", "packages/skill-qrcode-auth", "run", "build"]]),
+    verifyStep: Object.freeze(["pnpm", "--dir", "packages/skill-qrcode-auth", "run", "verify:core"]),
+    tagPrefix: "release/skill-qrcode-auth/v",
+    distTagSource: "version",
+    releaseReadinessChecks: Object.freeze([
+      Object.freeze({ type: "path-exists", relativePath: "." }),
+      Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
+      Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
+      Object.freeze({ type: "file-exists", relativePath: "package.json" }),
+      Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
+    ]),
+  }),
   "message-bridge": Object.freeze({
     id: "message-bridge",
     packageRoot: "plugins/message-bridge",
@@ -921,8 +938,8 @@ function formatReadiness(readiness) {
 export function formatHelp() {
   return `
 Usage:
-  pnpm release:local -- --target <message-bridge|message-bridge-openclaw|dual> [options]
-  pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|dual> [options]
+  pnpm release:local -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> [options]
+  pnpm release:plan -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> [options]
 
 Required version input:
   Single target:
@@ -963,12 +980,15 @@ Defaults:
   - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
   - missing packages fail fast unless an install flag is provided
   - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
-  - official release path requires --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
+  - gateway-dependent targets require --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
+  - skill-qrcode-auth publishes from packages/skill-qrcode-auth
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
   - dual releases are non-atomic
 
 Examples:
+  pnpm release:plan -- --target skill-qrcode-auth --bump patch
+  pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
   pnpm release:plan -- --target message-bridge --bump patch
   pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
@@ -1201,6 +1221,11 @@ function restoreManifestVersion(fs, manifestPath, version) {
 }
 
 function createReleaseBuildEnv(plan) {
+  const requiresGatewayUrl = plan.targets.some((target) => target.id !== "skill-qrcode-auth");
+  if (!requiresGatewayUrl) {
+    return {};
+  }
+
   const defaultGatewayUrl = validateDefaultGatewayUrl(plan.parsed?.defaultGatewayUrl);
   return {
     MB_DEFAULT_GATEWAY_URL: defaultGatewayUrl,
