@@ -23,7 +23,6 @@ import type { GatewayConnection } from "./connection/GatewayConnection.js";
 import { DefaultAkSkAuth } from "./connection/AkSkAuth.js";
 import { DefaultGatewayConnection } from "./connection/GatewayConnection.js";
 import { normalizeDownstreamMessage } from "./protocol/downstream.js";
-import { reconcileFinalText } from "./reconcileFinalText.js";
 import { resolveEffectiveReplyConfig, type StreamingSource } from "./resolveEffectiveReplyConfig.js";
 import {
   resolveStreamingExecutionPlan,
@@ -59,16 +58,8 @@ export interface OpenClawGatewayBridgeOptions {
   connectionFactory?: (account: MessageBridgeResolvedAccount, logger: BridgeLogger) => GatewayConnection;
 }
 
-type SubagentRuntime = PluginRuntime & {
+type SessionDeletionRuntime = PluginRuntime & {
   subagent: {
-    run(params: {
-      sessionKey: string;
-      message: string;
-      deliver: boolean;
-      idempotencyKey: string;
-    }): Promise<{ runId: string }>;
-    waitForRun(params: { runId: string; timeoutMs: number }): Promise<{ status: string; error?: string }>;
-    getSessionMessages(params: { sessionKey: string; limit: number }): Promise<{ messages: unknown[] }>;
     deleteSession(params: { sessionKey: string }): Promise<void>;
   };
 };
@@ -125,41 +116,6 @@ function getInvokeToolSessionId(message: InvokeMessage): string | undefined {
   return undefined;
 }
 
-function extractAssistantText(messages: unknown[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!isRecord(message) || message.role !== "assistant") {
-      continue;
-    }
-
-    if (typeof message.content === "string") {
-      return message.content;
-    }
-
-    if (Array.isArray(message.content)) {
-      const chunks = message.content
-        .map((part) => {
-          if (!isRecord(part)) {
-            return "";
-          }
-          if (part.type === "text" && typeof part.text === "string") {
-            return part.text;
-          }
-          if (typeof part.content === "string") {
-            return part.content;
-          }
-          return "";
-        })
-        .filter(Boolean);
-      if (chunks.length > 0) {
-        return chunks.join("");
-      }
-    }
-  }
-
-  return "";
-}
-
 interface AssistantStreamState {
   messageId: string;
   textPartId: string;
@@ -171,16 +127,14 @@ interface AssistantStreamState {
   stepStarted: boolean;
   stepFinished: boolean;
   textSeedUpdated: boolean;
-  textDisplayed: boolean;
   reasoningSeeded: boolean;
   messageCreatedAt: number;
   accumulatedText: string;
-  lastDisplayedText: string | null;
+  latestPartialText: string | null;
   accumulatedReasoning: string;
   reasoningStartedAt: number | null;
-  reasoningMetadata?: Record<string, unknown>;
-  chunkCount: number;
-  firstChunkAt: number | null;
+  partialCount: number;
+  firstPartialAt: number | null;
 }
 
 function createAssistantStreamState(sessionKey: string): AssistantStreamState {
@@ -196,16 +150,14 @@ function createAssistantStreamState(sessionKey: string): AssistantStreamState {
     stepStarted: false,
     stepFinished: false,
     textSeedUpdated: false,
-    textDisplayed: false,
     reasoningSeeded: false,
     messageCreatedAt: createdAt,
     accumulatedText: "",
-    lastDisplayedText: null,
+    latestPartialText: null,
     accumulatedReasoning: "",
     reasoningStartedAt: null,
-    reasoningMetadata: undefined,
-    chunkCount: 0,
-    firstChunkAt: null,
+    partialCount: 0,
+    firstPartialAt: null,
   };
 }
 
@@ -421,8 +373,8 @@ export class OpenClawGatewayBridge {
     });
   }
 
-  private getSubagentRuntime(): SubagentRuntime["subagent"] | null {
-    return (this.runtime as Partial<SubagentRuntime>).subagent ?? null;
+  private getSessionDeletionRuntime(): SessionDeletionRuntime["subagent"] | null {
+    return (this.runtime as Partial<SessionDeletionRuntime>).subagent ?? null;
   }
 
   async stop(): Promise<void> {
@@ -590,7 +542,6 @@ export class OpenClawGatewayBridge {
     const selectedModel = createSelectedModelState();
     const {
       effectiveConfig,
-      streamDefaultsInjected,
       malformedConfigPaths,
       streamingEnabled,
       streamingSource,
@@ -604,10 +555,9 @@ export class OpenClawGatewayBridge {
       hasRouteResolver,
       hasReplyRuntime,
     });
+    const canExecute = pathSelection.canExecute;
     const executionPath = pathSelection.executionPath;
     const streamMode = pathSelection.streamMode;
-    const effectiveStreamDefaultsInjected =
-      streamMode === "runtime_block_streaming" ? streamDefaultsInjected : false;
     if (malformedConfigPaths.length > 0) {
       this.options.logger.warn("bridge.chat.config_shape_corrected", {
         toolSessionId: record.toolSessionId,
@@ -643,7 +593,6 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
-      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       streamingEnabled,
       streamingSource,
       reason: pathSelection.reason,
@@ -660,7 +609,6 @@ export class OpenClawGatewayBridge {
       configuredTimeoutMs,
       executionPath,
       streamMode,
-      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       streamingEnabled,
       streamingSource,
       chatRequestId,
@@ -674,47 +622,16 @@ export class OpenClawGatewayBridge {
     while (true) {
       pendingFinalText = null;
       if (
-        executionPath !== "runtime_reply" ||
+        !canExecute ||
         !this.runtime.channel?.routing?.resolveAgentRoute ||
         !this.runtime.channel?.reply
       ) {
-        const fallbackResult = await this.handleChatWithSubagentFallback(
-          record,
-          message.payload.text,
-          startedAt,
-          selectedModel,
-          chatRequestId,
-          retryAttempt,
-          effectiveStreamDefaultsInjected,
-          streamingEnabled,
-          streamingSource,
-          context,
-        );
-        if (fallbackResult.ok) {
-          return true;
-        }
-        lastErrorMessage = fallbackResult.errorMessage;
-        lastErrorExtra = fallbackResult.extra;
-        if (retryAttempt === 0 && this.shouldRetryBeforeFirstChunkTimeout(lastErrorMessage, assistantStream)) {
-          retryAttempt = 1;
-          this.logChatStarted({
-            toolSessionId: record.toolSessionId,
-            welinkSessionId: record.welinkSessionId,
-            sessionKey: record.sessionKey,
-            chatText: message.payload.text,
-            textLength: message.payload.text.length,
-            startedAt,
-            configuredTimeoutMs,
-            executionPath,
-            streamMode,
-            streamDefaultsInjected: effectiveStreamDefaultsInjected,
-            streamingEnabled,
-            streamingSource,
-            chatRequestId,
-            retryAttempt,
-          });
-          continue;
-        }
+        lastErrorMessage = pathSelection.reason;
+        lastErrorExtra = {
+          canExecute,
+          hasRouteResolver,
+          hasReplyRuntime,
+        };
         break;
       }
 
@@ -775,7 +692,6 @@ export class OpenClawGatewayBridge {
           streamMode,
           chatRequestId,
           retryAttempt,
-          streamDefaultsInjected: effectiveStreamDefaultsInjected,
           streamingEnabled,
           streamingSource,
           provider: selection.provider,
@@ -817,50 +733,20 @@ export class OpenClawGatewayBridge {
         const payloadText = typeof payload.text === "string" ? payload.text : "";
 
         if (info.kind === "final") {
-          if (payloadText.length > 0) {
-            pendingFinalText = payloadText;
-          }
+          pendingFinalText = payloadText;
           return;
         }
 
-        if (info.kind !== "block" || payloadText.length === 0) {
+        if (info.kind !== "block") {
           return;
         }
-
-        if (!streamingEnabled) {
-          assistantStream.accumulatedText += payloadText;
-          return;
-        }
-
-        {
-          const now = Date.now();
-          assistantStream.chunkCount += 1;
-          if (assistantStream.firstChunkAt === null) {
-            assistantStream.firstChunkAt = now;
-            this.options.logger.info("bridge.chat.first_chunk", {
-              toolSessionId: record.toolSessionId,
-              sessionKey: record.sessionKey,
-              chatRequestId,
-              retryAttempt,
-              latencyMs: now - startedAt,
-              chunkLength: payloadText.length,
-              deltaText: payloadText,
-            });
-          } else {
-            this.options.logger.info("bridge.chat.chunk", {
-              toolSessionId: record.toolSessionId,
-              sessionKey: record.sessionKey,
-              chatRequestId,
-              retryAttempt,
-              chunkIndex: assistantStream.chunkCount,
-              chunkLength: payloadText.length,
-              sinceStartMs: now - startedAt,
-              sinceFirstChunkMs: now - assistantStream.firstChunkAt,
-              deltaText: payloadText,
-            });
-          }
-          this.sendAssistantStreamChunk(record.toolSessionId, assistantStream, payloadText, context);
-        }
+        logDebug(this.options.logger, "bridge.chat.block_ignored", {
+          toolSessionId: record.toolSessionId,
+          sessionKey: record.sessionKey,
+          chatRequestId,
+          retryAttempt,
+          blockTextLength: payloadText.length,
+        });
       };
 
       try {
@@ -879,12 +765,37 @@ export class OpenClawGatewayBridge {
               this.trackSessionRunId(record.sessionKey, runId);
             },
             onModelSelected: handleModelSelected,
+            onPartialReply: (text: unknown) => {
+              if (typeof text !== "string") {
+                return;
+              }
+              if (!streamingEnabled) {
+                return;
+              }
+              assistantStream.latestPartialText = text;
+              this.handleAssistantPartialReply({
+                toolSessionId: record.toolSessionId,
+                sessionKey: record.sessionKey,
+                chatRequestId,
+                retryAttempt,
+                startedAt,
+                state: assistantStream,
+                text,
+                context,
+              });
+            },
+            onReasoningStream: (text: unknown) => {
+              if (!streamingEnabled || typeof text !== "string") {
+                return;
+              }
+              this.handleAssistantReasoningStream(record.toolSessionId, assistantStream, text, context);
+            },
             timeoutOverrideSeconds: Math.ceil(configuredTimeoutMs / 1000),
           },
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (retryAttempt === 0 && this.shouldRetryBeforeFirstChunkTimeout(errorMessage, assistantStream)) {
+        if (retryAttempt === 0 && this.shouldRetryBeforeFirstPartialTimeout(errorMessage, assistantStream)) {
           retryAttempt = 1;
           this.logChatStarted({
             toolSessionId: record.toolSessionId,
@@ -896,7 +807,6 @@ export class OpenClawGatewayBridge {
             configuredTimeoutMs,
             executionPath,
             streamMode,
-            streamDefaultsInjected: effectiveStreamDefaultsInjected,
             streamingEnabled,
             streamingSource,
             chatRequestId,
@@ -912,9 +822,16 @@ export class OpenClawGatewayBridge {
         this.clearActiveToolSession(record.sessionKey);
         return true;
       }
-      const reconciliation = reconcileFinalText(assistantStream.accumulatedText, pendingFinalText);
-      assistantStream.accumulatedText = reconciliation.finalText;
-      const finalText = assistantStream.accumulatedText || "(empty response)";
+      const finalText = this.resolveAssistantFinalText(assistantStream, pendingFinalText);
+      if (finalText === null) {
+        lastErrorMessage = "assistant_response_missing_text";
+        lastErrorExtra = {
+          pendingFinalText,
+          latestPartialText: assistantStream.latestPartialText,
+        };
+        break;
+      }
+      const finalReconciled = pendingFinalText !== null && pendingFinalText !== (assistantStream.latestPartialText ?? "");
       this.sendAssistantFinalResponse(
         record.toolSessionId,
         assistantStream,
@@ -933,14 +850,14 @@ export class OpenClawGatewayBridge {
         selectedModel,
         executionPath: "runtime_reply",
         streamMode,
-        streamDefaultsInjected: effectiveStreamDefaultsInjected,
         streamingEnabled,
         streamingSource,
         chatRequestId,
         retryAttempt,
-        finalReconciled: reconciliation.finalReconciled,
+        finalReconciled,
         responseLength: finalText.length,
         finalText,
+        responseSource: this.resolveAssistantResponseSource(assistantStream, pendingFinalText, finalText),
       });
       this.sendToolEvent({
         type: "tool_event",
@@ -971,7 +888,6 @@ export class OpenClawGatewayBridge {
       selectedModel,
       executionPath,
       streamMode,
-      streamDefaultsInjected: effectiveStreamDefaultsInjected,
       streamingEnabled,
       streamingSource,
       chatRequestId,
@@ -994,117 +910,16 @@ export class OpenClawGatewayBridge {
     return false;
   }
 
-  private async handleChatWithSubagentFallback(
-    record: { toolSessionId: string; welinkSessionId?: string; sessionKey: string },
-    text: string,
-    startedAt: number,
-    selectedModel: SelectedModelState,
-    chatRequestId: string,
-    retryAttempt: RetryAttempt,
-    streamDefaultsInjected: boolean,
-    streamingEnabled: boolean,
-    streamingSource: StreamingSource,
-    context: UpstreamSendContext,
-  ): Promise<{ ok: true } | { ok: false; errorMessage: string; extra?: Record<string, unknown> }> {
-    const assistantStream = createAssistantStreamState(record.sessionKey);
-    const configuredTimeoutMs = this.options.account.runTimeoutMs;
-    const subagent = this.getSubagentRuntime();
-    if (!subagent) {
-      const errorMessage = "openclaw_runtime_missing_reply_executor";
-      return { ok: false, errorMessage };
-    }
-
-    try {
-      const run = await subagent.run({
-        sessionKey: record.sessionKey,
-        message: text,
-        deliver: false,
-        idempotencyKey: `chat:${record.toolSessionId}:${chatRequestId}`,
-      });
-
-      const wait = await subagent.waitForRun({
-        runId: run.runId,
-        timeoutMs: configuredTimeoutMs,
-      });
-
-      if (this.isSessionTerminated(record)) {
-        return { ok: true };
-      }
-
-      if (wait.status !== "ok") {
-        const errorMessage = wait.error || `subagent_${wait.status}`;
-        return {
-          ok: false,
-          errorMessage,
-          extra: {
-            waitStatus: wait.status,
-            waitError: wait.error ?? null,
-          },
-        };
-      }
-
-      const session = await subagent.getSessionMessages({
-        sessionKey: record.sessionKey,
-        limit: 50,
-      });
-      if (this.isSessionTerminated(record)) {
-        return { ok: true };
-      }
-      const assistantText = extractAssistantText(session.messages) || "(empty response)";
-      this.sendAssistantFinalResponse(record.toolSessionId, assistantStream, assistantText, context);
-      record.updatedAt = Date.now();
-      this.sendAssistantCompleted(record.toolSessionId, assistantStream, context);
-      this.sendSessionUpdated(record, context);
-      this.logChatCompleted({
-        toolSessionId: record.toolSessionId,
-        sessionKey: record.sessionKey,
-        configuredTimeoutMs,
-        startedAt,
-        assistantStream,
-        selectedModel,
-        executionPath: "subagent_fallback",
-        streamMode: "fallback_non_streaming",
-        streamDefaultsInjected,
-        streamingEnabled,
-        streamingSource,
-        chatRequestId,
-        retryAttempt,
-        finalReconciled: false,
-        responseLength: assistantText.length,
-        finalText: assistantText,
-        extra: {
-          waitStatus: wait.status,
-          waitError: wait.error ?? null,
-        },
-      });
-      this.sendToolEvent({
-        type: "tool_event",
-        toolSessionId: record.toolSessionId,
-        event: buildIdleEvent(record.toolSessionId),
-      }, context);
-      this.sendToolDone({
-        type: "tool_done",
-        toolSessionId: record.toolSessionId,
-        welinkSessionId: context.welinkSessionId,
-      }, context);
-      this.clearActiveToolSession(record.sessionKey);
-      return { ok: true };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return { ok: false, errorMessage };
-    }
-  }
-
-  private shouldRetryBeforeFirstChunkTimeout(errorMessage: string, assistantStream: AssistantStreamState): boolean {
+  private shouldRetryBeforeFirstPartialTimeout(errorMessage: string, assistantStream: AssistantStreamState): boolean {
     const lowered = errorMessage.toLowerCase();
     const isTimeout = lowered.includes("timed out") || lowered.includes("timeout");
-    return assistantStream.firstChunkAt === null && isTimeout;
+    return assistantStream.firstPartialAt === null && isTimeout;
   }
 
   private async deleteHostSession(record: { sessionKey: string }): Promise<void> {
-    const subagent = this.getSubagentRuntime();
-    if (subagent?.deleteSession) {
-      await subagent.deleteSession({
+    const sessionDeletionRuntime = this.getSessionDeletionRuntime();
+    if (sessionDeletionRuntime?.deleteSession) {
+      await sessionDeletionRuntime.deleteSession({
         sessionKey: record.sessionKey,
       });
       return;
@@ -1309,26 +1124,53 @@ export class OpenClawGatewayBridge {
     }
   }
 
-  private sendAssistantStreamChunk(
-    toolSessionId: string,
-    state: AssistantStreamState,
-    chunk: string,
-    context: UpstreamSendContext,
-  ): void {
-    state.accumulatedText += chunk;
-
-    if (state.accumulatedText === chunk) {
-      this.ensureAssistantMessageStarted(toolSessionId, state, context);
-      this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
-      this.sendAssistantTextPartUpdated(toolSessionId, state, chunk, context);
+  private handleAssistantPartialReply(params: {
+    toolSessionId: string;
+    sessionKey: string;
+    chatRequestId: string;
+    retryAttempt: RetryAttempt;
+    startedAt: number;
+    state: AssistantStreamState;
+    text: string;
+    context: UpstreamSendContext;
+  }): void {
+    const nextText = params.text;
+    if (nextText === params.state.accumulatedText) {
       return;
     }
 
-    this.sendToolEvent({
-      type: "tool_event",
-      toolSessionId,
-      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, chunk),
-    }, context);
+    const now = Date.now();
+    params.state.partialCount += 1;
+    if (params.state.firstPartialAt === null) {
+      params.state.firstPartialAt = now;
+      this.options.logger.info("bridge.chat.partial_streaming", {
+        toolSessionId: params.toolSessionId,
+        sessionKey: params.sessionKey,
+        chatRequestId: params.chatRequestId,
+        retryAttempt: params.retryAttempt,
+        latencyMs: now - params.startedAt,
+        partialLength: nextText.length,
+      });
+    }
+
+    this.ensureAssistantMessageStarted(params.toolSessionId, params.state, params.context);
+    this.sendAssistantTextSeedPartUpdated(params.toolSessionId, params.state, params.context);
+
+    if (params.state.accumulatedText.length === 0) {
+      this.sendAssistantTextPartUpdated(params.toolSessionId, params.state, nextText, params.context);
+      return;
+    }
+
+    if (nextText.startsWith(params.state.accumulatedText)) {
+      const suffix = nextText.slice(params.state.accumulatedText.length);
+      if (suffix.length > 0) {
+        this.sendAssistantTextPartDelta(params.toolSessionId, params.state, suffix, params.context);
+      }
+      params.state.accumulatedText = nextText;
+      return;
+    }
+
+    this.sendAssistantTextPartUpdated(params.toolSessionId, params.state, nextText, params.context);
   }
 
   private ensureAssistantMessageStarted(
@@ -1375,12 +1217,11 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): void {
     this.ensureAssistantMessageStarted(toolSessionId, state, context);
-    const finalText = state.accumulatedText || text;
-    if (state.textDisplayed && state.lastDisplayedText === finalText) {
+    this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
+    if (state.accumulatedText === text) {
       return;
     }
-    this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
-    this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
+    this.sendAssistantTextPartUpdated(toolSessionId, state, text, context);
   }
 
   private sendAssistantTextSeedPartUpdated(
@@ -1415,11 +1256,7 @@ export class OpenClawGatewayBridge {
     text: string,
     context: UpstreamSendContext,
   ): void {
-    this.sendToolEvent({
-      type: "tool_event",
-      toolSessionId,
-      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, ""),
-    }, context);
+    state.accumulatedText = text;
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
@@ -1433,8 +1270,56 @@ export class OpenClawGatewayBridge {
         },
       ),
     }, context);
-    state.textDisplayed = true;
-    state.lastDisplayedText = text;
+  }
+
+  private sendAssistantTextPartDelta(
+    toolSessionId: string,
+    state: AssistantStreamState,
+    delta: string,
+    context: UpstreamSendContext,
+  ): void {
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, delta),
+    }, context);
+    state.accumulatedText += delta;
+  }
+
+  private resolveAssistantFinalText(state: AssistantStreamState, pendingFinalText: string | null): string | null {
+    if (pendingFinalText !== null) {
+      if (pendingFinalText.length > 0) {
+        return pendingFinalText;
+      }
+
+      if (state.latestPartialText !== null && state.latestPartialText.length > 0) {
+        return state.latestPartialText;
+      }
+
+      return null;
+    }
+
+    if (state.latestPartialText !== null && state.latestPartialText.length > 0) {
+      return state.latestPartialText;
+    }
+
+    return null;
+  }
+
+  private resolveAssistantResponseSource(
+    state: AssistantStreamState,
+    pendingFinalText: string | null,
+    finalText: string,
+  ): "partial_streaming" | "final_only" | "final_missing" {
+    if (pendingFinalText === null) {
+      return "final_missing";
+    }
+
+    if (state.latestPartialText === null) {
+      return "final_only";
+    }
+
+    return "partial_streaming";
   }
 
   private sendAssistantCompleted(
@@ -1520,19 +1405,18 @@ export class OpenClawGatewayBridge {
     }, context);
   }
 
-  private emitReasoningEvent(
+  private handleAssistantReasoningStream(
     toolSessionId: string,
     state: AssistantStreamState,
-    phase: string,
-    deltaText: string,
-    metadata: Record<string, unknown> | undefined,
+    text: string,
     context: UpstreamSendContext,
   ): void {
+    if (text === state.accumulatedReasoning) {
+      return;
+    }
+
     this.ensureAssistantMessageStarted(toolSessionId, state, context);
     const now = Date.now();
-    if (metadata) {
-      state.reasoningMetadata = metadata;
-    }
 
     if (!state.reasoningSeeded) {
       state.reasoningSeeded = true;
@@ -1542,40 +1426,38 @@ export class OpenClawGatewayBridge {
         toolSessionId,
         event: buildReasoningPartUpdated(toolSessionId, state.messageId, state.reasoningPartId, "", {
           start: now,
-          metadata: state.reasoningMetadata,
         }),
       }, context);
     }
 
-    const shouldAppendDelta =
-      deltaText.length > 0 && (phase !== "finish" && phase !== "result" || state.accumulatedReasoning.length === 0);
-
-    if (shouldAppendDelta) {
-      state.accumulatedReasoning += deltaText;
+    if (text.startsWith(state.accumulatedReasoning)) {
+      const suffix = text.slice(state.accumulatedReasoning.length);
+      if (suffix.length === 0) {
+        return;
+      }
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId,
-        event: buildMessagePartDelta(toolSessionId, state.messageId, state.reasoningPartId, deltaText),
+        event: buildMessagePartDelta(toolSessionId, state.messageId, state.reasoningPartId, suffix),
       }, context);
+      state.accumulatedReasoning = text;
+      return;
     }
 
-    if (phase === "finish" || phase === "result") {
-      this.sendToolEvent({
-        type: "tool_event",
+    state.accumulatedReasoning = text;
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildReasoningPartUpdated(
         toolSessionId,
-        event: buildReasoningPartUpdated(
-          toolSessionId,
-          state.messageId,
-          state.reasoningPartId,
-          state.accumulatedReasoning,
-          {
-            start: state.reasoningStartedAt ?? now,
-            end: now,
-            metadata: state.reasoningMetadata,
-          },
-        ),
-      }, context);
-    }
+        state.messageId,
+        state.reasoningPartId,
+        text,
+        {
+          start: state.reasoningStartedAt ?? now,
+        },
+      ),
+    }, context);
   }
 
   private trackSessionRunId(sessionKey: string, runId: string): void {
@@ -1644,15 +1526,6 @@ export class OpenClawGatewayBridge {
     }
 
     const context = this.buildChatEventContext(activeSession.toolSessionId);
-    if (evt.stream === "reasoning") {
-      const phase = typeof evt.data.phase === "string" ? evt.data.phase : "delta";
-      const text = typeof evt.data.text === "string" ? evt.data.text : "";
-      const metadata =
-        isRecord(evt.data.metadata) ? evt.data.metadata : isRecord(evt.data.meta) ? evt.data.meta : undefined;
-      this.emitReasoningEvent(activeSession.toolSessionId, activeSession.assistantStream, phase, text, metadata, context);
-      return;
-    }
-
     if (evt.stream !== "tool") {
       return;
     }
@@ -1711,7 +1584,6 @@ export class OpenClawGatewayBridge {
     configuredTimeoutMs: number;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
-    streamDefaultsInjected: boolean;
     streamingEnabled: boolean;
     streamingSource: StreamingSource;
     chatRequestId: string;
@@ -1728,7 +1600,6 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
-      streamDefaultsInjected: params.streamDefaultsInjected,
       streamingEnabled: params.streamingEnabled,
       streamingSource: params.streamingSource,
       chatRequestId: params.chatRequestId,
@@ -1741,6 +1612,7 @@ export class OpenClawGatewayBridge {
     hasRouteResolver: boolean;
     hasReplyRuntime: boolean;
   }): {
+    canExecute: boolean;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
     reason: ChatExecutionPathReason;
@@ -1755,7 +1627,6 @@ export class OpenClawGatewayBridge {
     configuredTimeoutMs: number;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
-    streamDefaultsInjected: boolean;
     streamingEnabled: boolean;
     streamingSource: StreamingSource;
     reason: ChatExecutionPathReason;
@@ -1770,7 +1641,6 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
-      streamDefaultsInjected: params.streamDefaultsInjected,
       streamingEnabled: params.streamingEnabled,
       streamingSource: params.streamingSource,
       reason: params.reason,
@@ -1788,7 +1658,6 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
-    streamDefaultsInjected: boolean;
     streamingEnabled: boolean;
     streamingSource: StreamingSource;
     chatRequestId: string;
@@ -1796,12 +1665,14 @@ export class OpenClawGatewayBridge {
     finalReconciled: boolean;
     responseLength: number;
     finalText: string;
+    responseSource: "partial_streaming" | "final_only" | "final_missing";
     extra?: Record<string, unknown>;
   }): void {
     this.options.logger.info("bridge.chat.completed", {
       ...this.buildChatDiagnostics(params),
       responseLength: params.responseLength,
       finalText: params.finalText,
+      responseSource: params.responseSource,
       ...(params.extra ?? {}),
     });
   }
@@ -1815,7 +1686,6 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
-    streamDefaultsInjected: boolean;
     streamingEnabled: boolean;
     streamingSource: StreamingSource;
     chatRequestId: string;
@@ -1829,7 +1699,7 @@ export class OpenClawGatewayBridge {
     this.options.logger.warn("bridge.chat.failed", {
       ...this.buildChatDiagnostics(params),
       error: params.error,
-      failureStage: params.assistantStream.firstChunkAt === null ? "before_first_chunk" : "after_first_chunk",
+      failureStage: params.assistantStream.firstPartialAt === null ? "before_first_partial" : "after_first_partial",
       errorCategory: isTimeout ? "timeout" : "runtime_error",
       timedOut: isTimeout,
       ...(params.extra ?? {}),
@@ -1845,7 +1715,6 @@ export class OpenClawGatewayBridge {
     selectedModel: SelectedModelState;
     executionPath: ChatExecutionPath;
     streamMode: StreamMode;
-    streamDefaultsInjected: boolean;
     streamingEnabled: boolean;
     streamingSource: StreamingSource;
     chatRequestId: string;
@@ -1859,7 +1728,6 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
-      streamDefaultsInjected: params.streamDefaultsInjected,
       streamingEnabled: params.streamingEnabled,
       streamingSource: params.streamingSource,
       chatRequestId: params.chatRequestId,
@@ -1868,9 +1736,9 @@ export class OpenClawGatewayBridge {
       provider: params.selectedModel.provider,
       model: params.selectedModel.model,
       thinkLevel: params.selectedModel.thinkLevel,
-      chunkCount: params.assistantStream.chunkCount,
-      firstChunkLatencyMs:
-        params.assistantStream.firstChunkAt === null ? null : params.assistantStream.firstChunkAt - params.startedAt,
+      partialCount: params.assistantStream.partialCount,
+      firstPartialLatencyMs:
+        params.assistantStream.firstPartialAt === null ? null : params.assistantStream.firstPartialAt - params.startedAt,
       totalLatencyMs: Date.now() - params.startedAt,
     };
   }

@@ -259,9 +259,9 @@ Progressive text delivery is enabled by default. Optional controls:
 
 - `channels.message-bridge.streaming = false` to force non-streaming delivery mode
 - `channels.message-bridge.blockStreaming` is removed and no longer supported
-- `agents.defaults.blockStreamingChunk` / `agents.defaults.blockStreamingCoalesce` for chunking cadence overrides
+- `agents.defaults.blockStreamingDefault` / `blockStreamingBreak` / `blockStreamingChunk` / `blockStreamingCoalesce` remain OpenClaw runtime knobs when you need to tune runtime-side block buffering, but the plugin no longer injects defaults for them
 
-When no explicit block streaming profile is configured, the plugin injects a moderate default profile (`8-24` chars with `sentence` preference and `40ms` coalescing) so streaming stays visible without regressing into a single large block on OpenClaw 2026.3.24. Override `agents.defaults.blockStreamingChunk` and `agents.defaults.blockStreamingCoalesce` if you want a different cadence.
+When `channels.message-bridge.streaming` is enabled, the plugin prefers runtime `onPartialReply` callbacks for visible assistant text streaming and treats `deliver(kind=final)` as the terminal truth source. Buffered `deliver(kind=block)` payloads are not forwarded as user-visible text by the plugin. Chat execution depends on `runtime.channel.routing` and `runtime.channel.reply`; `close_session` still depends on `runtime.subagent.deleteSession` to delete the host-side session.
 
 ## Start OpenClaw dev gateway
 

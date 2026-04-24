@@ -346,7 +346,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 
 如果你没有显式配置 `runTimeoutMs`，插件会使用这个更保守的默认值；如果你已经在配置里写了该字段，则继续以你的显式值为准。
 
-当前未显式配置时，插件默认注入一个更稳的 block streaming profile。在 OpenClaw 2026.3.24 的本地验证里，`8-24` 比此前的极小块配置更稳定，能避免退化成整段一次性输出；如果你想继续调细，再按需覆盖：
+如果你需要调 OpenClaw 运行时自己的 block buffering 行为，仍然可以显式覆盖这些 runtime 配置：
 
 ```json
 {
@@ -367,32 +367,31 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 }
 ```
 
-说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。默认 `blockStreamingBreak` 仍保持 `text_end`，若你需要继续试验 `message_end`，请显式覆盖 `agents.defaults.blockStreamingBreak`。
+说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。插件不再为 `blockStreaming*` 注入默认值；若你需要 `text_end`、`message_end` 或 chunk/coalesce 节奏，请显式写在 `agents.defaults.*` 下。
 
 当前文本流式行为（v0.7）：
 
 - `runtime_reply` 主路径：
-  - `deliver(kind=block)` 会实时上送（首块 `message.part.updated`，后续 `message.part.delta`）。
-  - `deliver(kind=final)` 只做缓存，结束时统一收敛，不直接作为增量上送。
-- `subagent_fallback` 回退路径：
-  - 显式非流式（`deliver:false`），只在完成时回填最终文本。
+  - `replyOptions.onPartialReply(text)` 作为可见文本流的主来源。首条 partial 发 `message.part.updated`，后续前缀增长发 `message.part.delta`，非前缀修正发新的 `message.part.updated`。
+  - `replyOptions.onReasoningStream(text)` 只投影到 reasoning part，不会写入 assistant text part。
+  - `deliver(kind=final)` 只做完成时收敛；若 final 为空且已有非空 partial，插件保留已展示的 partial 文本；若 final 为空且没有任何可见文本，插件按失败处理并发送 `session.error` / `tool_error`。
+  - `deliver(kind=block)` 不再作为用户可见文本事件直接上送，仅保留运行时侧缓冲职责。
+
+当前实现不再提供 `subagent_fallback`。聊天执行依赖宿主同时提供 `runtime.channel.routing` 与 `runtime.channel.reply`；任一缺失时，插件直接按失败处理并发送 `session.error` / `tool_error`。另外，`close_session` 仍依赖宿主提供 `runtime.subagent.deleteSession` 用于删除宿主侧会话。
 
 新增观测字段（日志）：
 
 - `streamMode`
-  - `runtime_block_streaming`
-  - `fallback_non_streaming`
+  - `runtime_reply_streaming`
+  - `runtime_reply_non_streaming`
 - `streamingEnabled`
   - `true`: 插件启用流式主路径
   - `false`: 插件显式关闭流式，强制走非流式输出模式
 - `streamingSource`
   - `default_on` / `explicit_on` / `explicit_off`
-- `streamDefaultsInjected`
-  - `true`: 本次请求由插件注入默认流式 profile（仅缺失字段）
-  - `false`: 使用用户显式配置或流式被关闭
 - `finalReconciled`
-  - `true`：最终文本与流式累计文本不一致，完成时采用 final 覆盖
-  - `false`：最终文本与累计文本一致（或可直接前缀补齐）
+  - `true`：final 与最近一次 partial 不一致，完成时按最终收敛结果修正
+  - `false`：final 与最近一次 partial 一致，或本次没有发生 final/partial 不一致
 
 ## 8. 启动
 
