@@ -49,6 +49,22 @@ test('gatewayToolEventPayloadSchema dispatches by protocol without provider fall
   assert.equal(undefinedProtocol.success, false);
 });
 
+test('gatewayToolEventPayloadSchema preserves delegated opencode validation issues instead of collapsing them to custom root errors', () => {
+  const invalidOpencodeEvent = gatewaySchema.gatewayToolEventPayloadSchema.safeParse({
+    type: 'session.status',
+    properties: {},
+  });
+
+  assert.equal(invalidOpencodeEvent.success, false);
+  if (invalidOpencodeEvent.success) {
+    return;
+  }
+
+  assert.equal(invalidOpencodeEvent.error.issues[0]?.code, 'invalid_union');
+  assert.deepEqual(invalidOpencodeEvent.error.issues[0]?.path, ['value']);
+  assert.notEqual(invalidOpencodeEvent.error.issues[0]?.code, 'custom');
+});
+
 test('tool_event keeps toolSessionId on the envelope and strips nested payload copies', () => {
   const result = gatewaySchema.toolEventMessageSchema.safeParse({
     type: 'tool_event',

@@ -13,17 +13,17 @@ import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
-const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
+const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PACKAGE_VERSION__;
 const SOURCE_RUNTIME_API = globalThis.__MB_RUNTIME_API__;
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
 function restoreInjectedPluginVersion() {
   if (typeof ORIGINAL_PLUGIN_VERSION === 'undefined') {
-    delete globalThis.__MB_PLUGIN_VERSION__;
+    delete globalThis.__MB_PACKAGE_VERSION__;
     return;
   }
 
-  globalThis.__MB_PLUGIN_VERSION__ = ORIGINAL_PLUGIN_VERSION;
+  globalThis.__MB_PACKAGE_VERSION__ = ORIGINAL_PLUGIN_VERSION;
 }
 
 function createPluginClient(overrides = {}) {
@@ -256,7 +256,7 @@ describe('plugin contract', () => {
   });
 
   test('logs plugin version in runtime.start.requested', async () => {
-    globalThis.__MB_PLUGIN_VERSION__ = '1.2.0-test';
+    globalThis.__MB_PACKAGE_VERSION__ = '1.2.0-test';
 
     const logs = [];
     const client = createPluginClient({

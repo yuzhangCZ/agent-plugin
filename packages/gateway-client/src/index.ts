@@ -12,8 +12,10 @@ export { createAkSkAuthProvider } from './auth/AkSkAuthProvider.ts';
 export * from './factory/buildGatewayRegisterMessage.ts';
 export * from './factory/createGatewayClient.ts';
 export {
+  DEFAULT_GATEWAY_URL,
   createGatewayClientForHost,
   type GatewayClientHostConfig,
   type GatewayClientHostOptions,
   type GatewayClientHostToolType,
+  resolveGatewayClientHostConfig,
 } from './factory/createGatewayClientForHost.ts';

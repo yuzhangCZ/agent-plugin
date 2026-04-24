@@ -13,7 +13,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "pnpm run build:bridge && pnpm run build:openclaw",
+    "build": "pnpm run build:bridge-runtime-sdk && pnpm run build:bridge && pnpm run build:openclaw",
+    "build:bridge-runtime-sdk": "pnpm --dir packages/bridge-runtime-sdk run build",
     "build:bridge": "pnpm --dir plugins/message-bridge run build",
     "build:openclaw": "pnpm --dir plugins/message-bridge-openclaw run build",
     "build:openclaw:bundle": "pnpm --dir plugins/message-bridge-openclaw run build:bundle",
@@ -22,9 +23,10 @@
     "verify:release-local:e2e": "node ./scripts/verify-release-local-e2e.mjs",
     "verify:bridge:core": "pnpm --dir plugins/message-bridge run verify:core",
     "verify:openclaw:core": "pnpm --dir plugins/message-bridge-openclaw run verify:core",
-    "test": "pnpm run test:test-support && pnpm run test:gateway-schema && pnpm run test:bridge && pnpm run test:openclaw && pnpm run test:release-local",
+    "test": "pnpm run test:test-support && pnpm run test:gateway-schema && pnpm run test:bridge-runtime-sdk && pnpm run test:bridge && pnpm run test:openclaw && pnpm run test:release-local",
     "test:test-support": "pnpm --dir packages/test-support test",
     "test:gateway-schema": "pnpm --dir packages/gateway-schema test",
+    "test:bridge-runtime-sdk": "pnpm --dir packages/bridge-runtime-sdk test",
     "test:bridge": "pnpm --dir plugins/message-bridge test",
     "test:openclaw": "pnpm --dir plugins/message-bridge-openclaw test",
     "test:release-local": "node --test ./scripts/release-local.test.mjs",
