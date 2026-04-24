@@ -130,10 +130,13 @@ function createRepoState(repoRoot = "/repo") {
   const bridgeRoot = path.join(repoRoot, "plugins/message-bridge");
   const openclawRoot = path.join(repoRoot, "plugins/message-bridge-openclaw");
   const bundleRoot = path.join(openclawRoot, "bundle");
+  const runtimeRoot = path.join(repoRoot, "packages/bridge-runtime-sdk");
+  const runtimeDistRoot = path.join(runtimeRoot, "dist");
 
   return {
     bridgeRoot,
     bundleRoot,
+    runtimeRoot,
     manifests: {
       [path.join(bridgeRoot, "package.json")]: {
         name: "@wecode/skill-opencode-plugin",
@@ -146,6 +149,10 @@ function createRepoState(repoRoot = "/repo") {
       [path.join(bundleRoot, "package.json")]: {
         name: "@wecode/skill-openclaw-plugin",
         version: "0.2.0",
+      },
+      [path.join(runtimeRoot, "package.json")]: {
+        name: "@agent-plugin/bridge-runtime-sdk",
+        version: "0.0.0",
       },
     },
     paths: [
@@ -160,6 +167,11 @@ function createRepoState(repoRoot = "/repo") {
       path.join(bundleRoot, "package.json"),
       path.join(bundleRoot, "openclaw.plugin.json"),
       path.join(bundleRoot, "README.md"),
+      runtimeRoot,
+      path.join(runtimeRoot, "package.json"),
+      runtimeDistRoot,
+      path.join(runtimeDistRoot, "index.js"),
+      path.join(runtimeDistRoot, "index.d.ts"),
     ],
   };
 }
@@ -172,7 +184,7 @@ function missingDependencyResult(targetId, missingPackages) {
   };
 }
 
-test("descriptor schema is complete for both release targets", () => {
+test("descriptor schema is complete for all release targets", () => {
   for (const descriptor of Object.values(releaseDescriptors)) {
     for (const field of releaseDescriptorSchema) {
       assert.ok(field in descriptor, `missing field ${field}`);
@@ -751,6 +763,10 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
     },
     { repoRoot, fs, exec },
   );
+  fs.writeJson(path.join(state.runtimeRoot, "package.json"), {
+    name: "@agent-plugin/bridge-runtime-sdk",
+    version: "0.1.0",
+  });
 
   const readiness = evaluatePublishReadiness(plan.targets[0], { fs });
 
@@ -759,6 +775,123 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
   assert.equal(readiness.resolvedDistTag, "latest");
   assert.equal(readiness.resolvedPublishRoot, path.join("plugins", "message-bridge-openclaw", "bundle"));
   assert.ok(readiness.executedChecks.length >= 4);
+});
+
+test("createReleasePlan resolves bridge-runtime-sdk target metadata", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+  const plan = createReleasePlan(
+    {
+      target: "bridge-runtime-sdk",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: false,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+
+  assert.equal(plan.targets.length, 1);
+  assert.equal(plan.targets[0].id, "bridge-runtime-sdk");
+  assert.equal(plan.targets[0].targetVersion, "0.1.0");
+  assert.equal(plan.targets[0].publishRootRelative, path.join("packages", "bridge-runtime-sdk"));
+  assert.equal(plan.targets[0].tagName, "release/bridge-runtime-sdk/v0.1.0");
+});
+
+test("evaluatePublishReadiness returns the bridge-runtime-sdk publish readiness contract", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+  const plan = createReleasePlan(
+    {
+      target: "bridge-runtime-sdk",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: false,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+  fs.writeJson(path.join(state.runtimeRoot, "package.json"), {
+    name: "@agent-plugin/bridge-runtime-sdk",
+    version: "0.1.0",
+  });
+
+  const readiness = evaluatePublishReadiness(plan.targets[0], { fs });
+
+  assert.equal(readiness.releaseReady, true);
+  assert.equal(readiness.resolvedVersion, "0.1.0");
+  assert.equal(readiness.resolvedDistTag, "latest");
+  assert.equal(readiness.resolvedPublishRoot, path.join("packages", "bridge-runtime-sdk"));
+  assert.ok(readiness.executedChecks.some((entry) => entry.check.includes("dist/index.js")));
+  assert.ok(readiness.executedChecks.some((entry) => entry.check.includes("dist/index.d.ts")));
+});
+
+test("executeRelease runs bridge-runtime-sdk verify and publish flow", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "bridge-runtime-sdk",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
+  assert.ok(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm" &&
+        entry.args[0] === "publish" &&
+        entry.cwd === path.join(repoRoot, "packages", "bridge-runtime-sdk"),
+    ),
+  );
 });
 
 test("executeRelease skips publish and still stages git flow", () => {
@@ -1596,6 +1729,15 @@ test("release workflows validate and forward MB_DEFAULT_GATEWAY_URL", () => {
     assert.match(content, /Validate default gateway url/i);
     assert.match(content, /MB_DEFAULT_GATEWAY_URL is required/i);
   }
+});
+
+test("bridge runtime sdk release workflow publishes the prepared tarball artifact", () => {
+  const content = readFileSync(path.resolve(".github/workflows/release-bridge-runtime-sdk.yml"), "utf8");
+
+  assert.match(content, /Download prepared tarball/i);
+  assert.match(content, /uses:\s*actions\/download-artifact@v5/i);
+  assert.match(content, /name:\s*bridge-runtime-sdk-tgz/i);
+  assert.match(content, /npm publish \.tmp\/release-bridge-runtime-sdk\/\*\.tgz --tag/i);
 });
 
 test("isCliEntry normalizes argv paths before comparing ESM entry files", () => {

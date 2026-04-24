@@ -41,9 +41,20 @@ interface InternalBridgeGatewayHostConfig extends BridgeGatewayHostConfig {
   logger?: BridgeGatewayLogger;
 }
 
+<<<<<<< HEAD
 export type BridgeGatewayHostState = GatewayClientState;
 export type BridgeGatewayHostError = GatewayClientErrorShape;
 export type BridgeGatewaySendContext = GatewaySendContext;
+=======
+export type BridgeGatewayHostState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'READY';
+
+export interface BridgeGatewayHostError {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  detail?: Record<string, unknown>;
+}
+>>>>>>> d4fb321 (fix: tighten bridge runtime sdk release gates)
 
 export interface BridgeGatewayHostEvents {
   stateChange: (state: BridgeGatewayHostState) => void;

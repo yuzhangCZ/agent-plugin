@@ -197,11 +197,13 @@ function parseSimpleEvent<T>(
  * 复杂事件先做白名单投影，再用 Zod 做最终准入。
  * 这样可以保留当前兼容裁剪语义，同时把最终外部形状固定在 adapter schema。
  */
-function parseProjectedEvent<T>(
-  projected: T,
+function parseProjectedEvent<TInput, TOutput>(
+  projected: TInput,
   eventType: OpencodeToolEventType,
-  schema: { safeParse: (input: T) => { success: true; data: T } | { success: false; error: import('zod').ZodError } },
-): Result<T, WireContractViolation> {
+  schema: {
+    safeParse: (input: TInput) => { success: true; data: TOutput } | { success: false; error: import('zod').ZodError };
+  },
+): Result<TOutput, WireContractViolation> {
   const parsed = schema.safeParse(projected);
   return parsed.success
     ? ok(parsed.data)
