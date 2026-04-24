@@ -1,4 +1,5 @@
 import type { QrCodeAuthPolicy, QrCodeAuthSnapshot } from "../types.ts";
+import { buildSnapshotKey } from "./buildSnapshotKey.ts";
 import type {
   CreatedQrCodeSession,
   QrCodeAuthFailureResult,
@@ -140,7 +141,8 @@ export class QrCodeAuthSessionController {
   }
 
   private emitSnapshot(snapshot: QrCodeAuthSnapshot): void {
-    const key = JSON.stringify(snapshot);
+    // 这里做的是轮询态事件去重，不是基于对象序列化结果的通用相等判断。
+    const key = buildSnapshotKey(snapshot);
     if (this.emittedKeys.has(key)) {
       return;
     }

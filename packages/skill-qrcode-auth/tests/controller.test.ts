@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { QrCodeAuthSessionController } from "../src/internal/QrCodeAuthSessionController.ts";
+import { buildSnapshotKey } from "../src/internal/buildSnapshotKey.ts";
 import type {
   CreateQrCodeSessionResult,
   QrCodeAuthServicePort,
@@ -197,6 +198,58 @@ test("controller closes on cancelled and deduplicates repeated scanned snapshots
   ]);
 });
 
+test("snapshot key treats repeated expired snapshots for the same qrcode as duplicates", () => {
+  assert.equal(
+    buildSnapshotKey({ type: "expired", qrcode: "qr-1" }),
+    buildSnapshotKey({ type: "expired", qrcode: "qr-1" }),
+  );
+  assert.notEqual(
+    buildSnapshotKey({ type: "expired", qrcode: "qr-1" }),
+    buildSnapshotKey({ type: "expired", qrcode: "qr-2" }),
+  );
+});
+
+test("controller does not deduplicate same event type across different qrcodes", async () => {
+  const snapshots: QrCodeAuthSnapshot[] = [];
+  const controller = new QrCodeAuthSessionController({
+    service: createService({
+      createResults: [created("qr-1"), created("qr-2")],
+      queryResults: [
+        { kind: "scanned", qrcode: "qr-1" },
+        { kind: "expired", qrcode: "qr-1" },
+        { kind: "scanned", qrcode: "qr-2" },
+        { kind: "confirmed", qrcode: "qr-2", credentials: { ak: "ak-2", sk: "sk-2" } },
+      ],
+    }),
+    baseUrl: "https://auth.example.com",
+    channel: "openclaw",
+    mac: "",
+    policy: {
+      refreshOnExpired: true,
+      maxRefreshCount: 1,
+      pollIntervalMs: 1,
+    },
+    onSnapshot(snapshot) {
+      snapshots.push(snapshot);
+    },
+    wait: async () => {},
+  });
+
+  await controller.start();
+
+  assert.deepStrictEqual(
+    snapshots.map((item) => item.type === "qrcode_generated" ? `${item.type}:${item.qrcode}` : `${item.type}:${item.qrcode ?? "session"}`),
+    [
+      "qrcode_generated:qr-1",
+      "scanned:qr-1",
+      "expired:qr-1",
+      "qrcode_generated:qr-2",
+      "scanned:qr-2",
+      "confirmed:qr-2",
+    ],
+  );
+});
+
 test("controller emits service failures as terminal snapshots", async () => {
   const snapshots: QrCodeAuthSnapshot[] = [];
   const controller = new QrCodeAuthSessionController({
@@ -231,4 +284,43 @@ test("controller emits service failures as terminal snapshots", async () => {
     qrcode: "qr-1",
     reasonCode: "network_error",
   });
+});
+
+test("snapshot key deduplicates failed snapshots by qrcode and reasonCode", () => {
+  assert.equal(
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-1",
+      reasonCode: "auth_service_error",
+    }),
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-1",
+      reasonCode: "auth_service_error",
+    }),
+  );
+  assert.notEqual(
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-1",
+      reasonCode: "auth_service_error",
+    }),
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-1",
+      reasonCode: "network_error",
+    }),
+  );
+  assert.notEqual(
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-1",
+      reasonCode: "auth_service_error",
+    }),
+    buildSnapshotKey({
+      type: "failed",
+      qrcode: "qr-2",
+      reasonCode: "auth_service_error",
+    }),
+  );
 });

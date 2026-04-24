@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { qrcodeAuth, type QrCodeAuthSnapshot } from "../src/index.ts";
 import { createQrCodeAuthRuntime } from "../src/internal/createQrCodeAuthRuntime.ts";
+import type { QrCodeAuthServicePort } from "../src/internal/service-port.ts";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -121,6 +122,67 @@ test("facade uses partial policy overrides", async () => {
   });
 
   assert.deepStrictEqual(waits, [50]);
+});
+
+test("facade prefers injected service port over default http adapter", async () => {
+  const waits: number[] = [];
+  let createCalls = 0;
+  let queryCalls = 0;
+  const service: QrCodeAuthServicePort = {
+    async createSession() {
+      createCalls += 1;
+      return {
+        kind: "created",
+        session: {
+          ref: {
+            qrcode: "qr-service",
+            accessToken: "token-service",
+          },
+          display: {
+            qrcode: "qr-service",
+            weUrl: "https://we.example/qr-service",
+            pcUrl: "https://pc.example/qr-service",
+          },
+          expiresAt: "2026-04-24T00:00:00.000Z",
+        },
+      };
+    },
+    async querySession() {
+      queryCalls += 1;
+      return {
+        kind: "confirmed",
+        qrcode: "qr-service",
+        credentials: {
+          ak: "ak-service",
+          sk: "sk-service",
+        },
+      };
+    },
+  };
+  const auth = createQrCodeAuthRuntime({
+    service,
+    fetch: async () => {
+      throw new Error("fetch should not be used when service is injected");
+    },
+    wait: async (ms) => {
+      waits.push(ms);
+    },
+  });
+
+  const snapshots: QrCodeAuthSnapshot[] = [];
+  await auth.run({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+    onSnapshot(snapshot) {
+      snapshots.push(snapshot);
+    },
+  });
+
+  assert.equal(createCalls, 1);
+  assert.equal(queryCalls, 1);
+  assert.deepStrictEqual(waits, [2_000]);
+  assert.deepStrictEqual(snapshots.map((snapshot) => snapshot.type), ["qrcode_generated", "confirmed"]);
 });
 
 test("facade rejects non-boolean refreshOnExpired string input", async () => {

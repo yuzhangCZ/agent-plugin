@@ -634,6 +634,7 @@ sequenceDiagram
 它不负责轮询实现、刷新策略判断、服务端状态映射、HTTP 请求、宿主 preflight、插件安装或配置写入。
 
 包入口导出的 `qrcodeAuth` 是默认 `QrCodeAuth` runtime 实例。它可以作为模块级单例复用，但不得持有单次授权会话状态；每次 `run()` 必须创建新的 controller 和会话状态。工厂、HTTP adapter 与 service port 都属于内部装配细节，安装脚本不得 import 或调用。
+内部 runtime 工厂允许以 `QrCodeAuthServicePort` 形式替换默认远端实现；未显式注入时，工厂默认装配 HTTP service adapter。
 
 #### `QrCodeAuthSessionController`
 
@@ -643,7 +644,7 @@ sequenceDiagram
 - 调度轮询节奏
 - 根据稳定查询结果推进授权事件
 - 根据 `QrCodeAuthPolicy` 执行过期刷新
-- 对 `onSnapshot` 事件去重
+- 按事件类型、`qrcode` 与失败原因对轮询态 `onSnapshot` 事件去重
 - 终态收口
 
 它不负责 HTTP 协议细节、业务 `code` 原始解析、`accessToken` 管理、宿主 preflight、配置写入或终端渲染。

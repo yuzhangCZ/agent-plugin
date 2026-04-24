@@ -1,5 +1,6 @@
 import type { QrCodeAuth, QrCodeAuthPolicy, QrCodeAuthRunInput } from "../types.ts";
 import { HttpQrCodeAuthService, type FetchLike } from "./HttpQrCodeAuthService.ts";
+import type { QrCodeAuthServicePort } from "./service-port.ts";
 import { QrCodeAuthSessionController } from "./QrCodeAuthSessionController.ts";
 
 const DEFAULT_POLICY: Required<QrCodeAuthPolicy> = {
@@ -8,11 +9,18 @@ const DEFAULT_POLICY: Required<QrCodeAuthPolicy> = {
   pollIntervalMs: 2_000,
 };
 
+/**
+ * 创建二维码授权 runtime。
+ *
+ * @remarks
+ * `service` 是 application 层的远端能力注入点；未传入时默认装配 HTTP adapter。
+ */
 export function createQrCodeAuthRuntime(input: {
+  service?: QrCodeAuthServicePort;
   fetch?: FetchLike;
   wait?: (ms: number) => Promise<void>;
 } = {}): QrCodeAuth {
-  const service = new HttpQrCodeAuthService(input.fetch);
+  const service = input.service ?? new HttpQrCodeAuthService(input.fetch);
   const wait = input.wait ?? defaultWait;
 
   return {
