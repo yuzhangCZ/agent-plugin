@@ -47,6 +47,7 @@
 
 ```text
 ProviderFact
+  -> FactSequenceValidator / RuntimeStateAdvance
   -> FactToSkillEventProjector
   -> SkillProviderEvent
   -> SkillEventToGatewayMessageProjector
@@ -57,13 +58,16 @@ ProviderFact
 其中：
 
 - `ProviderFact` 是宿主适配层提供给 Runtime 的正式事实输入。
+- `ProviderFact` 在 Runtime 中是受生命周期约束的有序事实流，而不是无序事件集合。
 - `SkillProviderEvent` 是 `bridge-runtime-sdk` 的统一上行业务事件模型。
 - `GatewayUplinkBusinessMessage` 是 Runtime 发往 AI Gateway 的上行业务消息总称。
 
 补充链路：
 
+- `ProviderFact` 与 `SkillProviderEvent` 不是一一映射关系；`message.start`、`message.done` 等 lifecycle facts 默认只参与时序校验与状态推进，不默认进入 `SkillProviderEvent`。
 - `createSession()`、`health()` 等命令结果，不经 `SkillProviderEvent` 主链路，分别投影为 `session_created`、`status_response`。
-- request run 的终态收口结果，单独投影为 `tool_done` 或 `tool_error`。
+- request run 的终态收口结果，单独投影为 `tool_done` 或 `tool_error`，不属于 `tool_event` 主链路。
+- `session.error` 在架构层视为特殊 fact：可参与诊断与特定投影路径，但不等同于 request run terminal 真源。
 
 ### 3.2 下行 intake / dispatch 链路
 
@@ -290,6 +294,11 @@ request run 子域负责：
 - 终态到 `tool_done` / `tool_error` 的信号派生
 - `abort_execution` 之后的终态解释与上行收口
 
+在 lifecycle profile 上：
+
+- request run 以 `ProviderRun.result()` 作为 terminal 真源，`message.done` 不能替代 terminal 结论。
+- `abort_execution` 后允许有限尾部 facts，直到 `result()` 收口；尾部窗口由语义收口决定，而不是固定超时。
+
 ### 5.2 outbound
 
 outbound 子域负责：
@@ -298,6 +307,12 @@ outbound 子域负责：
 - 单会话单活跃 outbound message 约束
 - 批次级 `messageId` 一致性
 - `message.done` 后禁止续写
+
+在 lifecycle profile 上：
+
+- outbound 与 request run 共享 `ProviderFact` 类型集合与基础顺序约束，但不引入 run terminal 语义。
+- outbound 可用 `message.done` 作为自然收口条件，不要求 `ProviderRun.result()` 式 terminal。
+- `close_session` 成功后应进入 fail-closed，不再接受新的 session-scoped / run-scoped facts。
 
 ### 5.3 interaction
 
@@ -329,7 +344,102 @@ host integration
 - SDK 不重复维护协议层概念的字段表、validator 或字面量集合。
 - `status_query` / `invoke.*` 以及 `tool_event`、`tool_done`、`tool_error`、`session_created`、`status_response` 的 canonical 概念定义位于 [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md)。
 
-## 7. 架构术语与当前实现命名
+## 7. 与 OpenCode 在上行 AI Gateway 协议上的差异
+
+`bridge-runtime-sdk` 与 OpenCode 的协议差异，不发生在 Runtime 的下行入口，而发生在上行 `tool_event.event` payload family 的表达层。
+
+### 7.1 下行协议一致
+
+对 Runtime 而言，下行入口始终是统一的 `GatewayDownstreamBusinessRequest`：
+
+- `status_query` / `invoke.*` 不按 `opencode` / `skill` family 分叉。
+- Runtime 先把下行协议收敛为统一的 `RuntimeCommand`，再进入 UseCase、Coordinator 与 Provider SPI。
+- `GatewayDownstreamBusinessRequest` 是统一下行入口，不因为 OpenCode compatibility 需求产生第二套下行协议。
+
+### 7.2 上行差异只存在于 `tool_event.event`
+
+上行路径里，family 差异只允许存在于 `tool_event.event` payload：
+
+```text
+Downstream (no family split)
+AI Gateway
+  -> GatewayDownstreamBusinessRequest
+  -> RuntimeCommand
+  -> Provider SPI
+
+Uplink (family split only inside tool_event.event)
+ProviderFact
+  -> SkillProviderEvent
+  -> GatewayUplinkBusinessMessage
+       ├─ tool_event(event.family = skill | opencode)
+       ├─ tool_done
+       ├─ tool_error
+       ├─ session_created
+       └─ status_response
+```
+
+图中的边界约束如下：
+
+- family 差异仅影响 `tool_event.event`。
+- `tool_done`、`tool_error`、`session_created`、`status_response` 不按 OpenCode / skill 分叉。
+- `toolSessionId` 仍只属于 `tool_event` 外层 envelope，而不是 `tool_event.event` payload。
+- `family` 只属于 `tool_event.event`，不回写到 `GatewayUplinkBusinessMessage` 的其他 message 类型。
+
+### 7.3 差异隔离位置
+
+OpenCode compatibility family 与 skill family 的差异，只允许存在于 projector adapter / gateway payload adapter 边界：
+
+- family-specific 分支只允许存在于 `tool_event.event` 的投影与封装边界。
+- `RuntimeCore`、UseCase、Coordinator、registry 不直接感知 `opencode` / `skill` 差异。
+- `bridge-runtime-sdk` 负责先把 `ProviderFact` 收敛成统一 runtime 语义，再在 adapter 边界决定如何封装为 `GatewayToolEventPayload`。
+
+### 7.4 为什么存在两套上行 family
+
+- `OpencodeProviderEvent` 是 current-state compatibility family，用于承接 legacy OpenCode 可观察事件。
+- `SkillProviderEvent` 是 runtime 统一语义 family，用于承接收敛后的 SDK 语义。
+- 两者共存的目的不是维护两套 RuntimeCore，而是在不扩散兼容差异的前提下，同时支持 legacy OpenCode compatibility 与目标态统一 runtime 语义。
+
+### 7.5 全量事件覆盖列表
+
+当前 `tool_event.event` 的两个 family 覆盖如下。
+
+`opencode` family 全量事件：
+
+- `message.updated`
+- `message.part.updated`
+- `message.part.delta`
+- `message.part.removed`
+- `session.status`
+- `session.idle`
+- `session.updated`
+- `session.error`
+- `permission.updated`
+- `permission.asked`
+- `permission.replied`
+- `question.asked`
+
+`skill` family 全量事件：
+
+- `text.delta`
+- `text.done`
+- `thinking.delta`
+- `thinking.done`
+- `tool.update`
+- `question`
+- `permission.ask`
+- `permission.reply`
+- `step.start`
+- `step.done`
+- `session.status`
+- `session.error`
+
+限制说明：
+
+- 这里列的是 current-state payload family coverage，不是字段真源。
+- 两个 family 不是一一映射表，也不要求事件名称逐项对齐。
+- 这份列表不代表 Runtime 内部统一事件模型 coverage；字段、必填项与 fail-closed 规则仍以 [gateway-schema 事件契约](../design/interfaces/gateway-schema-event-contract.md) 为准。
+
+## 8. 架构术语与当前实现命名
 
 本文使用的是目标态架构术语：
 
@@ -341,7 +451,7 @@ host integration
 
 当前代码中的 `GatewayOutboundMessage`、`GatewaySendPayload`、`GatewayBusinessMessage` 可能与这些术语语义对应，但本轮不要求名称完全一致，也不允许当前实现命名反向约束目标态架构术语。
 
-## 8. 结论
+## 9. 结论
 
 `bridge-runtime-sdk` 的目标态边界很明确：
 
@@ -353,6 +463,6 @@ host integration
 - 它把内部业务事件投影成 `GatewayUplinkBusinessMessage`
 - 它把协议发送交给下游边界
 
-换言之，SDK 负责运行时语义与业务编排，而不是协议真源本身。
+换言之，SDK 负责运行时语义与业务编排，而不是协议真源本身。对 Runtime 而言，下行始终是统一协议入口；上行只有 `tool_event.event` 存在 family 差异，而这种差异必须被隔离在 core 之外。
 
 首版实施方案、迁移顺序与测试矩阵，另见独立文档：`docs/superpowers/plans/2026-04-20-bridge-runtime-sdk-implementation-plan.md`。
