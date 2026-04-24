@@ -1,8 +1,3 @@
-import type {
-  GatewayUplinkBusinessMessage,
-  SkillProviderEvent,
-} from '@agent-plugin/gateway-schema';
-
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
 
 export interface RuntimeTraceProviderCall {
@@ -56,10 +51,10 @@ export interface RuntimeDiagnostics {
   lastHeartbeatAt: number | null;
   providerCalls: RuntimeTraceProviderCall[];
   facts: RuntimeTraceFact[];
-  uplinks: Array<{ type: GatewayUplinkBusinessMessage['type']; toolSessionId?: string }>;
+  uplinks: Array<{ type: string; toolSessionId?: string }>;
   terminals: RuntimeTraceTerminal[];
   interactions: RuntimeTraceInteraction[];
-  derivedEvents: Array<{ type: SkillProviderEvent['type']; toolSessionId: string }>;
+  derivedEvents: Array<{ type: string; toolSessionId: string }>;
   failures: RuntimeTraceFailure[];
 }
 
@@ -94,7 +89,7 @@ export class RuntimeTraceCollector {
     });
   }
 
-  recordUplink(message: GatewayUplinkBusinessMessage): void {
+  recordUplink(message: { type: string; toolSessionId?: string }): void {
     this.diagnostics.uplinks.push({
       type: message.type,
       ...('toolSessionId' in message && message.toolSessionId ? { toolSessionId: message.toolSessionId } : {}),
@@ -112,7 +107,7 @@ export class RuntimeTraceCollector {
     this.diagnostics.interactions.push(interaction);
   }
 
-  recordDerivedEvent(toolSessionId: string, event: SkillProviderEvent): void {
+  recordDerivedEvent(toolSessionId: string, event: { type: string }): void {
     this.diagnostics.derivedEvents.push({
       toolSessionId,
       type: event.type,

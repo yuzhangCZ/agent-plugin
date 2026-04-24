@@ -1579,7 +1579,7 @@ test("main prints help output", async () => {
   assert.match(stdout.toString(), /--skip-verify/);
   assert.match(stdout.toString(), /--install-deps/);
   assert.match(stdout.toString(), /presence sanity check/i);
-  assert.match(stdout.toString(), /official release path requires --default-gateway-url/i);
+  assert.match(stdout.toString(), /targets that require a build-time default gateway url need --default-gateway-url/i);
   assert.match(stdout.toString(), /pnpm install --frozen-lockfile/);
   assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
@@ -1587,6 +1587,7 @@ test("main prints help output", async () => {
 
 test("release workflows validate and forward MB_DEFAULT_GATEWAY_URL", () => {
   for (const workflowPath of [
+    path.resolve(".github/workflows/release-bridge-runtime-sdk.yml"),
     path.resolve(".github/workflows/release-message-bridge.yml"),
     path.resolve(".github/workflows/release-message-bridge-openclaw.yml"),
   ]) {

@@ -17,6 +17,7 @@ export const releaseDescriptorSchema = Object.freeze([
   "verifyStep",
   "tagPrefix",
   "distTagSource",
+  "requiresDefaultGatewayUrl",
   "releaseReadinessChecks",
 ]);
 
@@ -30,6 +31,7 @@ export const releaseDescriptors = Object.freeze({
     verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge", "run", "verify:release"]),
     tagPrefix: "release/message-bridge/v",
     distTagSource: "version",
+    requiresDefaultGatewayUrl: true,
     releaseReadinessChecks: Object.freeze([
       Object.freeze({ type: "path-exists", relativePath: "." }),
       Object.freeze({ type: "file-exists", relativePath: "release/message-bridge.plugin.js" }),
@@ -45,12 +47,30 @@ export const releaseDescriptors = Object.freeze({
     verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "verify:release"]),
     tagPrefix: "release/message-bridge-openclaw/v",
     distTagSource: "version",
+    requiresDefaultGatewayUrl: true,
     releaseReadinessChecks: Object.freeze([
       Object.freeze({ type: "path-exists", relativePath: "." }),
       Object.freeze({ type: "file-exists", relativePath: "index.js" }),
       Object.freeze({ type: "file-exists", relativePath: "package.json" }),
       Object.freeze({ type: "file-exists", relativePath: "openclaw.plugin.json" }),
       Object.freeze({ type: "file-exists", relativePath: "README.md" }),
+      Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
+    ]),
+  }),
+  "bridge-runtime-sdk": Object.freeze({
+    id: "bridge-runtime-sdk",
+    packageRoot: "packages/bridge-runtime-sdk",
+    versionSource: "package.json",
+    publishRoot: ".",
+    buildSteps: Object.freeze([["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "build"]]),
+    verifyStep: Object.freeze(["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "verify:release"]),
+    tagPrefix: "release/bridge-runtime-sdk/v",
+    distTagSource: "version",
+    requiresDefaultGatewayUrl: true,
+    releaseReadinessChecks: Object.freeze([
+      Object.freeze({ type: "path-exists", relativePath: "." }),
+      Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
+      Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
       Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
     ]),
   }),
@@ -297,6 +317,11 @@ function validateDefaultGatewayUrl(value) {
   }
 
   return normalized;
+}
+
+function requiresDefaultGatewayUrl(planOrTargets) {
+  const targets = Array.isArray(planOrTargets) ? planOrTargets : planOrTargets.targets;
+  return targets.some((target) => target.requiresDefaultGatewayUrl);
 }
 
 function readOptionValue(argv, index, flag) {
@@ -863,7 +888,7 @@ function formatTargetPlan(target, options = {}) {
 
 export function formatReleasePlan(plan) {
   const skipVerify = Boolean(plan.parsed?.skipVerify);
-  const defaultGatewayUrl = normalizeOptionalString(plan.parsed?.defaultGatewayUrl);
+  const defaultGatewayUrl = requiresDefaultGatewayUrl(plan) ? normalizeOptionalString(plan.parsed?.defaultGatewayUrl) : null;
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
@@ -873,7 +898,7 @@ export function formatReleasePlan(plan) {
     `verify: ${skipVerify ? "no" : "yes"}`,
     `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
     `push remote: ${plan.actions.push ? "yes" : "no"}`,
-    `default gateway url: ${defaultGatewayUrl ?? "missing"}`,
+    `default gateway url: ${requiresDefaultGatewayUrl(plan) ? defaultGatewayUrl ?? "missing" : "not required"}`,
     "",
     "Targets:",
     ...plan.targets.map((target) => formatTargetPlan(target, { skipVerify })),
@@ -921,8 +946,8 @@ function formatReadiness(readiness) {
 export function formatHelp() {
   return `
 Usage:
-  pnpm release:local -- --target <message-bridge|message-bridge-openclaw|dual> [options]
-  pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|dual> [options]
+  pnpm release:local -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
+  pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
 
 Required version input:
   Single target:
@@ -963,16 +988,19 @@ Defaults:
   - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
   - missing packages fail fast unless an install flag is provided
   - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
-  - official release path requires --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
+  - targets that require a build-time default gateway url need --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
+  - bridge-runtime-sdk publishes from packages/bridge-runtime-sdk
   - dual releases are non-atomic
 
 Examples:
   pnpm release:plan -- --target message-bridge --bump patch
+  pnpm release:plan -- --target bridge-runtime-sdk --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta
+  pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --bump patch --push --default-gateway-url wss://gateway.example.com/ws/agent
@@ -1201,6 +1229,10 @@ function restoreManifestVersion(fs, manifestPath, version) {
 }
 
 function createReleaseBuildEnv(plan) {
+  if (!requiresDefaultGatewayUrl(plan)) {
+    return {};
+  }
+
   const defaultGatewayUrl = validateDefaultGatewayUrl(plan.parsed?.defaultGatewayUrl);
   return {
     MB_DEFAULT_GATEWAY_URL: defaultGatewayUrl,
