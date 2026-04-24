@@ -1,4 +1,4 @@
-export type {
+import type {
   EmitOutboundMessageInput,
   MessageDoneFact,
   MessageStartFact,
@@ -27,14 +27,46 @@ export type {
   ThirdPartyAgentProvider,
   ToolUpdateFact,
 } from './domain/provider.ts';
-export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
-export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
+import type { ProviderCommandError, ProviderError } from './domain/errors.ts';
+
+export type {
+  EmitOutboundMessageInput,
+  MessageDoneFact,
+  MessageStartFact,
+  OutboundFact,
+  PermissionAskFact,
+  ProviderAbortSessionInput,
+  ProviderCloseSessionInput,
+  ProviderCommandError,
+  ProviderCreateSessionInput,
+  ProviderCreateSessionResult,
+  ProviderError,
+  ProviderFact,
+  ProviderHealthInput,
+  ProviderHealthResult,
+  ProviderPermissionReplyInput,
+  ProviderQuestionReplyInput,
+  ProviderRun,
+  ProviderRunMessageInput,
+  ProviderRuntimeContext,
+  ProviderTerminalResult,
+  QuestionAskFact,
+  RuntimeOutboundEmitter,
+  SessionErrorFact,
+  TextDeltaFact,
+  TextDoneFact,
+  ThinkingDeltaFact,
+  ThinkingDoneFact,
+  ThirdPartyAgentProvider,
+  ToolUpdateFact,
+};
 export type {
   BridgeGatewayHostConfig,
   BridgeGatewayProbeResult,
   BridgeGatewayToolType,
 } from './application/gateway-host.ts';
 export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
+export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
 export type {
   RuntimeDiagnostics,
   RuntimeTraceFailure,
@@ -43,5 +75,6 @@ export type {
   RuntimeTraceProviderCall,
   RuntimeTraceTerminal,
 } from './application/runtime-trace.ts';
-export { createBridgeRuntime } from './application/create-runtime.ts';
-export { resolvePackageVersion } from './packageVersion.ts';
+
+export declare function resolvePackageVersion(): string;
+export declare function createBridgeRuntime(options: import('./application/create-runtime.ts').BridgeRuntimeOptions): Promise<import('./application/runtime.ts').BridgeRuntime>;

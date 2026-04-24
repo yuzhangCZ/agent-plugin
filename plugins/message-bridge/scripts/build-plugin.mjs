@@ -52,10 +52,10 @@ async function main() {
     define: injectedDefaultGatewayUrl
       ? {
           'globalThis.__MB_DEFAULT_GATEWAY_URL__': JSON.stringify(injectedDefaultGatewayUrl),
-          'globalThis.__MB_PLUGIN_VERSION__': JSON.stringify(pluginVersion),
+          'globalThis.__MB_PACKAGE_VERSION__': JSON.stringify(pluginVersion),
         }
       : {
-          'globalThis.__MB_PLUGIN_VERSION__': JSON.stringify(pluginVersion),
+          'globalThis.__MB_PACKAGE_VERSION__': JSON.stringify(pluginVersion),
         },
   });
 
