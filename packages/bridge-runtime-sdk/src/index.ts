@@ -44,3 +44,4 @@ export type {
   RuntimeTraceTerminal,
 } from './application/runtime-trace.ts';
 export { createBridgeRuntime } from './application/create-runtime.ts';
+export { resolvePackageVersion } from './packageVersion.ts';

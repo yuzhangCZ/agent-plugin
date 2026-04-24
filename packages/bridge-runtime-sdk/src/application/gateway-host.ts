@@ -1,29 +1,29 @@
 import {
   createGatewayClientForHost,
-  type GatewayClient,
-  type GatewayClientErrorShape,
   type GatewayClientHostConfig,
-  type GatewayClientState,
-  type GatewayLogger,
-  type GatewaySendContext,
+  resolveGatewayClientHostConfig,
 } from '@agent-plugin/gateway-client';
-import type {
-  GatewayDownstreamBusinessRequest,
-} from '@agent-plugin/gateway-schema';
 
-export type BridgeGatewayToolType = GatewayClientHostConfig['register']['toolType'];
+export type BridgeGatewayToolType = 'openx' | 'openclaw' | 'opencode';
 
 /**
  * Bridge runtime 使用的最小日志端口。
  */
-export type BridgeGatewayLogger = GatewayLogger;
+export interface BridgeGatewayLogger {
+  debug?: (message: string, meta?: Record<string, unknown>) => void;
+  info?: (message: string, meta?: Record<string, unknown>) => void;
+  warn?: (message: string, meta?: Record<string, unknown>) => void;
+  error?: (message: string, meta?: Record<string, unknown>) => void;
+  child?: (meta: Record<string, unknown>) => BridgeGatewayLogger;
+  getTraceId?: () => string;
+}
 
 /**
  * Gateway host bootstrap 所需的最小稳定输入。
  * @remarks 宿主只声明连接身份与工具版本；deviceName、os、macAddress 由 gateway-client 统一装配。
  */
 export interface BridgeGatewayHostConfig {
-  url: string;
+  url?: string;
   auth: {
     ak: string;
     sk: string;
@@ -35,22 +35,28 @@ export interface BridgeGatewayHostConfig {
 }
 
 interface InternalBridgeGatewayHostConfig extends BridgeGatewayHostConfig {
+  url: string;
   connectionKey: string;
   debug?: boolean;
   abortSignal?: AbortSignal;
   logger?: BridgeGatewayLogger;
 }
 
-export type BridgeGatewayHostState = GatewayClientState;
-export type BridgeGatewayHostError = GatewayClientErrorShape;
-export type BridgeGatewaySendContext = GatewaySendContext;
+export type BridgeGatewayHostState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'READY';
+
+export interface BridgeGatewayHostError {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  detail?: Record<string, unknown>;
+}
 
 export interface BridgeGatewayHostEvents {
   stateChange: (state: BridgeGatewayHostState) => void;
   inbound: (frame: unknown) => void;
   outbound: (message: unknown) => void;
   heartbeat: () => void;
-  message: (message: GatewayDownstreamBusinessRequest) => void;
+  message: (message: unknown) => void;
   error: (error: BridgeGatewayHostError) => void;
 }
 
@@ -60,12 +66,12 @@ export interface BridgeGatewayHostEvents {
  * gateway-client 的 createGatewayClientForHost 创建。
  */
 export interface BridgeGatewayHostConnection {
-  connect: GatewayClient['connect'];
-  disconnect: GatewayClient['disconnect'];
-  send: GatewayClient['send'];
-  isConnected: GatewayClient['isConnected'];
-  getState: GatewayClient['getState'];
-  getStatus: GatewayClient['getStatus'];
+  connect(): Promise<void>;
+  disconnect(): void;
+  send(message: unknown): void;
+  isConnected(): boolean;
+  getState(): BridgeGatewayHostState;
+  getStatus(): { isReady(): boolean };
   on<E extends keyof BridgeGatewayHostEvents>(event: E, listener: BridgeGatewayHostEvents[E]): this;
 }
 
@@ -89,30 +95,12 @@ export interface BridgeGatewayProbeResult {
   reason?: string;
 }
 
-function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && 'disposition' in error
-    && 'stage' in error
-    && 'retryable' in error
-    && 'message' in error;
-}
-
 function elapsedMs(startedAt: number, now: () => number): number {
   return Math.max(0, now() - startedAt);
 }
 
-function isRejectedProbeError(error: GatewayClientErrorShape): boolean {
-  switch (error.code) {
-    case 'GATEWAY_AUTH_REJECTED':
-    case 'GATEWAY_HANDSHAKE_TIMEOUT':
-    case 'GATEWAY_HANDSHAKE_REJECTED':
-    case 'GATEWAY_HANDSHAKE_INVALID':
-      return true;
-    default:
-      return false;
-  }
+function isRejectedProbeError(message: string): boolean {
+  return message !== 'gateway_websocket_error' && message !== 'gateway_not_connected';
 }
 
 function logInfo(logger: BridgeGatewayLogger | undefined, message: string, meta: Record<string, unknown>): void {
@@ -149,9 +137,11 @@ export function normalizeBridgeGatewayHostConfig(
     abortSignal?: AbortSignal;
   } = {},
 ): InternalBridgeGatewayHostConfig {
+  const resolvedGatewayHost = resolveGatewayClientHostConfig(gatewayHost as GatewayClientHostConfig);
+
   return {
-    ...gatewayHost,
-    connectionKey: buildBridgeGatewayConnectionKey(gatewayHost),
+    ...resolvedGatewayHost,
+    connectionKey: buildBridgeGatewayConnectionKey(resolvedGatewayHost),
     debug: options.debug,
     abortSignal: options.abortSignal,
     logger: options.logger,
@@ -255,16 +245,33 @@ export async function probeBridgeGatewayHost(
       }
     });
 
+    connection.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error.message ?? error);
+      const result = {
+        state: isRejectedProbeError(message) ? 'rejected' : 'connect_error',
+        latencyMs: elapsedMs(startedAt, now),
+        reason: message,
+      } satisfies BridgeGatewayProbeResult;
+      const log = result.state === 'rejected' ? logWarn : logError;
+      log(logger, result.state === 'rejected' ? 'probe.connect.rejected' : 'probe.connect.error', {
+        connectionKey: gatewayHost.connectionKey,
+        gatewayUrl: gatewayHost.url,
+        latencyMs: result.latencyMs,
+        reason: result.reason,
+      });
+      finish(result);
+    });
+
     connection.connect().catch((error) => {
       if (settled) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
-      const state = isGatewayClientErrorShape(error) && isRejectedProbeError(error)
-        ? 'rejected'
-        : 'connect_error';
       const result = {
-        state,
+        state: isRejectedProbeError(message) ? 'rejected' : 'connect_error',
         latencyMs: elapsedMs(startedAt, now),
         reason: message,
       } satisfies BridgeGatewayProbeResult;

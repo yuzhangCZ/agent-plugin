@@ -9,17 +9,25 @@ importers:
   .: {}
 
   packages/bridge-runtime-sdk:
-    dependencies:
+    devDependencies:
       '@agent-plugin/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
       '@agent-plugin/gateway-schema':
         specifier: workspace:*
         version: link:../gateway-schema
-    devDependencies:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15
+      dts-bundle-generator:
+        specifier: ^9.5.1
+        version: 9.5.1
+      esbuild:
+        specifier: ^0.27.4
+        version: 0.27.4
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/gateway-client:
     dependencies:
@@ -527,6 +535,11 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
+  dts-bundle-generator@9.5.1:
+    resolution: {integrity: sha512-DxpJOb2FNnEyOzMkG11sxO2dmxPjthoVWxfKqWYJ/bI/rT1rvTMktF5EKjAYrRZu6Z6t3NhOUZ0sZ5ZXevOfbA==}
+    engines: {node: '>=14.0.0'}
+    hasBin: true
+
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
@@ -1017,6 +1030,11 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  dts-bundle-generator@9.5.1:
+    dependencies:
+      typescript: 5.9.3
+      yargs: 17.7.2
 
   eastasianwidth@0.2.0: {}
 
