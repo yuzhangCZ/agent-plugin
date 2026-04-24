@@ -14,15 +14,15 @@
 
 1. 首块前超时：尚未收到首块文本即 timeout，用户感知为“无回复”。
 2. 首块延迟波动：能回复但首块延迟不稳定，体验抖动明显。
-3. 路径口径不一致：`runtime_reply` 与 `subagent_fallback` 的 timeout 与诊断口径未完全统一。
+3. 宿主能力缺失时失败口径需稳定：缺少 `runtime.channel.routing` 或 `runtime.channel.reply` 时必须直接失败，并保持诊断字段一致。
 
 ## 2. 范围与非范围
 
 ### 2.1 范围内
 
 1. 仅收敛首块超时/延迟稳定性问题。
-2. 统一两条执行路径的 timeout 与诊断口径。
-3. 固化上线门禁：成功率、超时占比、失败分型、路径一致性。
+2. 统一主路径成功/失败的 timeout 与诊断口径。
+3. 固化上线门禁：成功率、超时占比、失败分型、宿主能力缺失场景一致性。
 
 ### 2.2 范围外
 
@@ -38,20 +38,20 @@
 
 1. 以“请求（request）”为统计单位，不以会话去重。
 2. 重试请求必须单独标记，但纳入总样本。
-3. 统计时 `runtime_reply` / `subagent_fallback` 必须分路径出报表并给出总体汇总。
+3. 统计时必须区分“主路径执行失败”和“宿主能力缺失失败”，并给出总体汇总。
 
 核心指标：
 
 1. 首块成功率（First Chunk Success Rate）
 2. 首块延迟（First Chunk Latency，关注 P50/P95）
 3. 首块前 timeout 占比（Before-First-Chunk Timeout Ratio）
-4. 路径一致性（`runtime_reply` / `subagent_fallback` 诊断字段一致率）
+4. 失败诊断一致性（主路径执行失败 / 宿主能力缺失失败）
 
 指标公式（固定）：
 
 1. 首块成功率 = `收到首块文本的请求数 / 总请求数 * 100%`
 2. 首块前 timeout 占比 = `failureStage=before_first_chunk 且 errorCategory=timeout 的请求数 / 总请求数 * 100%`
-3. 路径一致率 = `满足统一诊断字段集合（executionPath/failureStage/errorCategory/firstChunkLatencyMs/retryAttempt）的请求数 / 总请求数 * 100%`
+3. 一致率 = `满足统一诊断字段集合（executionPath/failureStage/errorCategory/firstChunkLatencyMs/retryAttempt）的请求数 / 总请求数 * 100%`
 4. 总请求数固定定义为 `bridge.chat.started` 事件计数。
 
 P0 通过阈值：
@@ -59,7 +59,7 @@ P0 通过阈值：
 1. 首块成功率 >= 99%
 2. 首块前 timeout 占比 <= 1%
 3. 失败样本分型覆盖率 100%（必须能区分 `before_first_chunk` 与 `after_first_chunk`）
-4. 两路径关键诊断字段一致率 100%
+4. 关键诊断字段一致率 100%
 
 发布门禁窗口（固定）：
 
@@ -72,7 +72,7 @@ P0 通过阈值：
 1. 新会话首块成功率统计
 2. 首块前 timeout 分类
 3. 首块后失败分类
-4. `runtime_reply` / `subagent_fallback` 一致性验证
+4. 宿主能力缺失失败与主路径失败的一致性验证
 
 每个场景必须明确：
 

@@ -20,7 +20,7 @@
 本节只挂载执行任务与验收门禁，不重复专题正文。
 
 ### P0-FC-01 实现任务包
-- [x] 统一 `runtime_reply` 与 `subagent_fallback` 的 timeout 口径（同一 `runTimeoutMs`）。
+- [x] 统一 `runtime_reply` 主路径的 timeout 口径（同一 `runTimeoutMs`）。
 - [x] 固化失败阶段分型：`before_first_chunk` / `after_first_chunk`。
 - [x] 固化错误分类字段：至少包含 `timeout` / `runtime_error`。
 - [x] 增加最小重试边界：仅首块前 timeout 允许单次重试。
@@ -31,13 +31,13 @@
 - [x] 新会话首块成功率统计场景。
 - [x] 首块前 timeout 注入与分类验证。
 - [x] 首块后失败注入与分类验证。
-- [x] `runtime_reply` / `subagent_fallback` 诊断字段一致性验证。
+- [x] 主路径失败与宿主能力缺失失败的诊断字段一致性验证。
 
 ### P0-FC-03 验收门禁
 - [ ] 首块成功率达标（阈值以需求专题定义为准）。
 - [ ] 首块前 timeout 占比达标（阈值以需求专题定义为准）。
 - [ ] 失败样本阶段分型覆盖率 100%。
-- [ ] 两路径关键诊断字段一致率 100%。
+- [ ] 关键诊断字段一致率 100%。
 - [ ] 发布前在目标环境执行同模型、同网关配置的连续 30 个新会话样本门禁检查。
 
 ### P0-FC-04 上线阻塞条件
@@ -46,7 +46,7 @@
 1. 首块成功率未达标。
 2. 首块前 timeout 占比超阈值。
 3. 无法稳定区分 `before_first_chunk` 与 `after_first_chunk`。
-4. `runtime_reply` / `subagent_fallback` 输出口径不一致。
+4. 主路径成功/失败与宿主能力缺失失败的输出口径不一致。
 
 ## P0 阶段四 permission_reply 专题索引（2026-03-15）
 
@@ -455,7 +455,7 @@
 - **v0.7 已完成**：
   - `deliver(kind=final)` 只缓存并在结束时统一收敛，不直接作为增量上送
   - 引入确定性收敛函数 `reconcileFinalText(accumulated, incomingFinal)`，覆盖 `prefix/mismatch/final-only` 场景
-  - fallback 路径显式标记为非流式（`streamMode=fallback_non_streaming`）
+  - 主路径在 streaming 关闭时显式标记为非流式（`streamMode=runtime_reply_non_streaming`）
   - 统一补充 `streamMode` 与 `finalReconciled` 观测字段
 
 验收标准：

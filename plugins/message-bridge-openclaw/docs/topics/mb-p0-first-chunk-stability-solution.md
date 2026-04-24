@@ -18,8 +18,8 @@
 
 ### 2.1 timeout 口径统一
 
-1. `runtime_reply` 与 `subagent_fallback` 统一使用同一 `runTimeoutMs`。
-2. 两路径 timeout 判断语义一致，错误映射一致。
+1. `runtime_reply` 主路径统一使用同一 `runTimeoutMs`。
+2. 主路径 timeout 判断语义一致；宿主能力缺失时直接失败，不再进入回退执行。
 3. 不改 transport message 结构，仅统一执行口径与诊断口径。
 
 ### 2.2 失败分型统一

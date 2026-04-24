@@ -2,23 +2,10 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 export type StreamingSource = "default_on" | "explicit_on" | "explicit_off";
 
-export const DEFAULT_BLOCK_STREAMING_CHUNK = {
-  minChars: 8,
-  maxChars: 24,
-  breakPreference: "sentence",
-} as const;
-
-export const DEFAULT_BLOCK_STREAMING_COALESCE = {
-  minChars: 8,
-  maxChars: 24,
-  idleMs: 40,
-} as const;
-
 interface ResolveEffectiveReplyConfigResult {
   streamingEnabled: boolean;
   streamingSource: StreamingSource;
   effectiveConfig: OpenClawConfig;
-  streamDefaultsInjected: boolean;
   malformedConfigPaths: string[];
 }
 
@@ -67,61 +54,32 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     malformedConfigPaths.push("channels.message-bridge.streaming");
   }
 
+  const normalizedConfig = {
+    ...root,
+    agents,
+    channels: {
+      ...channels,
+      "message-bridge": messageBridge,
+    },
+  } as OpenClawConfig;
+
+  const effectiveConfig = malformedConfigPaths.some((path) => path !== "channels.message-bridge.streaming")
+    ? normalizedConfig
+    : config;
+
   if (!streamingEnabled) {
     return {
       streamingEnabled,
       streamingSource,
-      effectiveConfig: config,
-      streamDefaultsInjected: false,
+      effectiveConfig,
       malformedConfigPaths,
     };
   }
-
-  const injectBlockStreamingDefault = defaults["blockStreamingDefault"] === undefined;
-  const injectBlockStreamingBreak = defaults["blockStreamingBreak"] === undefined;
-  const injectBlockStreamingChunk = defaults["blockStreamingChunk"] === undefined;
-  const injectBlockStreamingCoalesce = defaults["blockStreamingCoalesce"] === undefined;
-  const streamDefaultsInjected =
-    injectBlockStreamingDefault ||
-    injectBlockStreamingBreak ||
-    injectBlockStreamingChunk ||
-    injectBlockStreamingCoalesce;
-
-  if (!streamDefaultsInjected) {
-    return {
-      streamingEnabled,
-      streamingSource,
-      effectiveConfig: config,
-      streamDefaultsInjected: false,
-      malformedConfigPaths,
-    };
-  }
-
-  const effectiveConfig = {
-    ...root,
-    agents: {
-      ...agents,
-      defaults: {
-        ...defaults,
-        ...(injectBlockStreamingDefault ? { blockStreamingDefault: "on" } : {}),
-        ...(injectBlockStreamingBreak ? { blockStreamingBreak: "text_end" } : {}),
-        ...(injectBlockStreamingChunk ? { blockStreamingChunk: { ...DEFAULT_BLOCK_STREAMING_CHUNK } } : {}),
-        ...(injectBlockStreamingCoalesce ? { blockStreamingCoalesce: { ...DEFAULT_BLOCK_STREAMING_COALESCE } } : {}),
-      },
-    },
-    channels: {
-      ...channels,
-      "message-bridge": {
-        ...messageBridge,
-      },
-    },
-  } as OpenClawConfig;
 
   return {
     streamingEnabled,
     streamingSource,
     effectiveConfig,
-    streamDefaultsInjected: true,
     malformedConfigPaths,
   };
 }

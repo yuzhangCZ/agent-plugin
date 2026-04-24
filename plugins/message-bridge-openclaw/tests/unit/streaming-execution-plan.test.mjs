@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveStreamingExecutionPlan } from "../../src/resolveStreamingExecutionPlan.ts";
 
-test("resolveStreamingExecutionPlan uses runtime block streaming when enabled and runtime reply is available", () => {
+test("resolveStreamingExecutionPlan uses runtime reply streaming when enabled and runtime reply is available", () => {
   const result = resolveStreamingExecutionPlan({
     streamingEnabled: true,
     hasRouteResolver: true,
@@ -10,8 +10,9 @@ test("resolveStreamingExecutionPlan uses runtime block streaming when enabled an
   });
 
   assert.deepEqual(result, {
+    canExecute: true,
     executionPath: "runtime_reply",
-    streamMode: "runtime_block_streaming",
+    streamMode: "runtime_reply_streaming",
     reason: "runtime_reply_available",
   });
 });
@@ -24,13 +25,14 @@ test("resolveStreamingExecutionPlan keeps runtime path but switches to non-strea
   });
 
   assert.deepEqual(result, {
+    canExecute: true,
     executionPath: "runtime_reply",
-    streamMode: "fallback_non_streaming",
+    streamMode: "runtime_reply_non_streaming",
     reason: "plugin_streaming_disabled_runtime_reply",
   });
 });
 
-test("resolveStreamingExecutionPlan falls back when runtime reply is unavailable", () => {
+test("resolveStreamingExecutionPlan marks plan as non-executable when runtime reply is unavailable", () => {
   assert.deepEqual(
     resolveStreamingExecutionPlan({
       streamingEnabled: true,
@@ -38,8 +40,9 @@ test("resolveStreamingExecutionPlan falls back when runtime reply is unavailable
       hasReplyRuntime: false,
     }),
     {
-      executionPath: "subagent_fallback",
-      streamMode: "fallback_non_streaming",
+      canExecute: false,
+      executionPath: "runtime_reply",
+      streamMode: "runtime_reply_streaming",
       reason: "missing_reply_runtime",
     },
   );
@@ -51,8 +54,9 @@ test("resolveStreamingExecutionPlan falls back when runtime reply is unavailable
       hasReplyRuntime: false,
     }),
     {
-      executionPath: "subagent_fallback",
-      streamMode: "fallback_non_streaming",
+      canExecute: false,
+      executionPath: "runtime_reply",
+      streamMode: "runtime_reply_streaming",
       reason: "missing_route_resolver",
     },
   );
