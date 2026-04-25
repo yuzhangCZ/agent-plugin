@@ -15,6 +15,7 @@ const CHANNEL_ID = "message-bridge";
 const NPM_SCOPE = "@wecode:registry=";
 const DEFAULT_SCOPE_REGISTRY = "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/";
 const INSTALL_SUPPORTED_HOST_RANGE = ">=2026.3.24 <2026.3.31";
+const DEFAULT_QRCODE_ENVIRONMENT = "prod";
 
 function createInstallerError(code, message) {
   const error = new Error(message);
@@ -317,9 +318,17 @@ export function parseArgs(argv) {
     noRestart: false,
     registry: "",
     url: "",
-    baseUrl: "",
+    environment: DEFAULT_QRCODE_ENVIRONMENT,
     name: "",
     openclawBin: "",
+  };
+
+  const readOptionValue = (option, currentIndex) => {
+    const value = argv[currentIndex + 1];
+    if (!value || value.startsWith("-")) {
+      throw createInstallerError("INSTALLER_USAGE_ERROR", `${option} requires a value.`);
+    }
+    return value;
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -332,23 +341,23 @@ export function parseArgs(argv) {
         parsed.noRestart = true;
         break;
       case "--registry":
-        parsed.registry = argv[index + 1] ?? "";
+        parsed.registry = readOptionValue("--registry", index);
         index += 1;
         break;
       case "--url":
-        parsed.url = argv[index + 1] ?? "";
+        parsed.url = readOptionValue("--url", index);
         index += 1;
         break;
-      case "--base-url":
-        parsed.baseUrl = argv[index + 1] ?? "";
+      case "--environment":
+        parsed.environment = readOptionValue("--environment", index);
         index += 1;
         break;
       case "--name":
-        parsed.name = argv[index + 1] ?? "";
+        parsed.name = readOptionValue("--name", index);
         index += 1;
         break;
       case "--openclaw-bin":
-        parsed.openclawBin = argv[index + 1] ?? "";
+        parsed.openclawBin = readOptionValue("--openclaw-bin", index);
         index += 1;
         break;
       default:
@@ -371,13 +380,10 @@ function writeStderr(message) {
   process.stderr.write(`${message}\n`);
 }
 
-function resolveBaseUrl(cliBaseUrl, env = process.env) {
-  const resolved = String(cliBaseUrl ?? env.WECODE_AUTH_BASE_URL ?? "").trim();
-  if (!resolved) {
-    throw createInstallerError(
-      "INSTALLER_USAGE_ERROR",
-      "Missing qrcode auth base URL. Please pass --base-url or set WECODE_AUTH_BASE_URL.",
-    );
+function resolveEnvironment(value) {
+  const resolved = String(value ?? "").trim() || DEFAULT_QRCODE_ENVIRONMENT;
+  if (resolved !== "uat" && resolved !== "prod") {
+    throw createInstallerError("INSTALLER_USAGE_ERROR", "Unsupported qrcode auth environment. Use --environment uat|prod.");
   }
   return resolved;
 }
@@ -456,13 +462,13 @@ function renderQrCodeSnapshot(snapshot) {
   }
 }
 
-async function runQrCodeAuth({ baseUrl, channel, env = process.env }) {
+async function runQrCodeAuth({ environment, channel, env = process.env }) {
   const qrcodeAuth = await loadQrCodeAuthRuntime(env);
   let credentials = null;
   let terminalSnapshot = null;
 
   await qrcodeAuth.run({
-    baseUrl,
+    environment,
     channel,
     mac: resolveMacAddress(),
     onSnapshot(snapshot) {
@@ -574,7 +580,7 @@ export async function runInstaller({
   resolvePackageRoot(importMetaUrl);
   const requiredRange = INSTALL_SUPPORTED_HOST_RANGE;
   const npmrcPath = resolveUserNpmrcPath(env);
-  const authBaseUrl = resolveBaseUrl(args.baseUrl, env);
+  const authEnvironment = resolveEnvironment(args.environment);
   if (!String(args.url ?? "").trim()) {
     throw createInstallerError("INSTALLER_USAGE_ERROR", "Missing Message Bridge gateway URL. Please pass --url.");
   }
@@ -628,7 +634,7 @@ export async function runInstaller({
 
   writeStdout(formatStep("正在启动二维码授权流程"));
   const credentials = await runQrCodeAuth({
-    baseUrl: authBaseUrl,
+    environment: authEnvironment,
     channel: "openclaw",
     env,
   });

@@ -102,7 +102,7 @@ async function createFakeQrCodeModule(dir) {
       if (process.env.OPENCLAW_QRCODE_LOG) {
         await import('node:fs/promises').then(({ writeFile }) =>
           writeFile(process.env.OPENCLAW_QRCODE_LOG, JSON.stringify({
-            baseUrl: input.baseUrl,
+            environment: input.environment ?? 'prod',
             channel: input.channel,
             mac: input.mac,
           }), 'utf8')
@@ -339,7 +339,7 @@ async function readLoggedCommands(logFile) {
 }
 
 function baseArgs() {
-  return ["--url", "wss://gateway.example.com/ws/agent", "--base-url", "https://auth.example.com"];
+  return ["--url", "wss://gateway.example.com/ws/agent"];
 }
 
 async function pathExists(targetPath) {
@@ -461,9 +461,36 @@ test("installer runs qrcode auth and configures channel with returned credential
       ["gateway", "restart"],
     ]);
     const qrcodeInput = JSON.parse(await readFile(qrcodeLog, "utf8"));
-    assert.equal(qrcodeInput.baseUrl, "https://auth.example.com");
+    assert.equal(qrcodeInput.environment, "prod");
     assert.equal(qrcodeInput.channel, "openclaw");
     assert.ok(result.stdout.includes("二维码授权成功"));
+  });
+});
+
+test("installer supports explicit uat environment", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    const qrcodeLog = path.join(dir, "qrcode.json");
+    await mkdir(home, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+    const fakeQrCodeModule = await createFakeQrCodeModule(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: [...baseArgs(), "--environment", "uat"],
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+        OPENCLAW_INSTALL_QRCODE_AUTH_MODULE: fakeQrCodeModule,
+        OPENCLAW_QRCODE_LOG: qrcodeLog,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const qrcodeInput = JSON.parse(await readFile(qrcodeLog, "utf8"));
+    assert.equal(qrcodeInput.environment, "uat");
   });
 });
 
@@ -631,7 +658,7 @@ test("installer exits non-zero and skips channel configuration when qrcode auth 
   });
 });
 
-test("installer fails fast when baseUrl is missing", async () => {
+test("installer fails fast when environment is invalid", async () => {
   await withTempDir(async (dir) => {
     const home = path.join(dir, "home");
     const logFile = path.join(dir, "openclaw.log");
@@ -642,7 +669,7 @@ test("installer fails fast when baseUrl is missing", async () => {
       cwd: process.cwd(),
       home,
       openclawBin: fakeOpenclaw,
-      extraArgs: ["--url", "wss://gateway.example.com/ws/agent"],
+      extraArgs: ["--url", "wss://gateway.example.com/ws/agent", "--environment", "staging"],
       extraEnv: {
         FAKE_OPENCLAW_LOG: logFile,
       },
@@ -650,6 +677,30 @@ test("installer fails fast when baseUrl is missing", async () => {
 
     assert.notStrictEqual(result.status, 0);
     assert.ok(result.stderr.includes("error_code=INSTALLER_USAGE_ERROR"));
+    await assert.rejects(readFile(logFile, "utf8"));
+  });
+});
+
+test("installer fails fast when environment value is missing", async () => {
+  await withTempDir(async (dir) => {
+    const home = path.join(dir, "home");
+    const logFile = path.join(dir, "openclaw.log");
+    await mkdir(home, { recursive: true });
+    const fakeOpenclaw = await createFakeOpenclaw(dir);
+
+    const result = runInstaller({
+      cwd: process.cwd(),
+      home,
+      openclawBin: fakeOpenclaw,
+      extraArgs: ["--url", "wss://gateway.example.com/ws/agent", "--environment"],
+      extraEnv: {
+        FAKE_OPENCLAW_LOG: logFile,
+      },
+    });
+
+    assert.notStrictEqual(result.status, 0);
+    assert.ok(result.stderr.includes("error_code=INSTALLER_USAGE_ERROR"));
+    assert.ok(result.stderr.includes("--environment requires a value."));
     await assert.rejects(readFile(logFile, "utf8"));
   });
 });

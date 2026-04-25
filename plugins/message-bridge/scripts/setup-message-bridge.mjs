@@ -12,6 +12,7 @@ const PLUGIN_NAME = '@wecode/skill-opencode-plugin';
 const NPM_SCOPE_REGISTRY_LINE = '@wecode:registry=';
 const DEFAULT_SCOPE_REGISTRY = 'https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/';
 const DEFAULT_CHANNEL = 'opencode';
+const DEFAULT_QRCODE_ENVIRONMENT = 'prod';
 const HELP_TEXT = `Message Bridge 安装 CLI
 
 用法:
@@ -19,7 +20,7 @@ const HELP_TEXT = `Message Bridge 安装 CLI
   node ./scripts/setup-message-bridge.mjs [options]  # 兼容旧入口，等价于 install
 
 选项:
-  --base-url <url>    指定二维码授权服务 base URL
+  --environment <env> 指定二维码授权环境 uat | prod，默认 prod
   --registry <url>    指定 @wecode scope registry
   --scope <value>     user | project，默认 user
   --yes               兼容保留，无额外确认步骤
@@ -239,7 +240,7 @@ function parseArgs(rawArgs) {
   const parsed = {
     command: 'install',
     scope: 'user',
-    baseUrl: null,
+    environment: DEFAULT_QRCODE_ENVIRONMENT,
     registry: null,
     yes: false,
     help: false,
@@ -280,8 +281,8 @@ function parseArgs(rawArgs) {
       index += 1;
       continue;
     }
-    if (token === '--base-url') {
-      parsed.baseUrl = readOptionValue('--base-url', index);
+    if (token === '--environment') {
+      parsed.environment = readOptionValue('--environment', index);
       index += 1;
       continue;
     }
@@ -293,8 +294,11 @@ function parseArgs(rawArgs) {
     throw new Error(`不支持的参数: ${token}`);
   }
 
-  if (parsed.baseUrl === '') {
-    parsed.baseUrl = null;
+  if (!parsed.environment) {
+    parsed.environment = DEFAULT_QRCODE_ENVIRONMENT;
+  }
+  if (parsed.environment !== 'uat' && parsed.environment !== 'prod') {
+    throw new Error('--environment 仅支持 uat 或 prod');
   }
   if (parsed.registry === '') {
     parsed.registry = null;
@@ -329,10 +333,10 @@ async function resolveTargetFilePaths(scope) {
   };
 }
 
-function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, registryValue, baseUrl) {
+function printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, registryValue, environment) {
   writeLine('Message Bridge 配置向导');
   writeLine(`配置作用域: ${scope}`);
-  writeLine(`二维码授权服务: ${baseUrl}`);
+  writeLine(`二维码授权环境: ${environment}`);
   writeLine(`Message Bridge 配置文件: ${bridgeConfig}`);
   writeLine(`OpenCode 配置文件: ${opencodeConfig}`);
   writeLine(`npm scope 配置文件: ${npmrcPath}`);
@@ -350,14 +354,6 @@ function checkOpencodeInstalled() {
     return false;
   }
   return result.status === 0;
-}
-
-function resolveBaseUrl(cliBaseUrl) {
-  const resolved = String(cliBaseUrl ?? env.WECODE_AUTH_BASE_URL ?? '').trim();
-  if (!resolved) {
-    throw new Error('缺少二维码授权服务 base URL，请通过 --base-url 或 WECODE_AUTH_BASE_URL 提供。');
-  }
-  return resolved;
 }
 
 function resolveMacAddress() {
@@ -436,13 +432,13 @@ function renderSnapshot(snapshot) {
   }
 }
 
-async function runQrCodeAuth(baseUrl) {
+async function runQrCodeAuth(environment) {
   const qrcodeAuth = await loadQrCodeAuthRuntime();
   let terminalSnapshot = null;
   let credentials = null;
 
   await qrcodeAuth.run({
-    baseUrl,
+    environment,
     channel: DEFAULT_CHANNEL,
     mac: resolveMacAddress(),
     onSnapshot(snapshot) {
@@ -488,16 +484,15 @@ async function main() {
   }
 
   const scope = parsed.scope;
-  const baseUrl = resolveBaseUrl(parsed.baseUrl);
   const { bridgeConfig, opencodeConfig, npmrcPath } = await resolveTargetFilePaths(scope);
   const existingNpmrc = await readOptionalTextFile(npmrcPath);
   const existingScopeRegistry = existingNpmrc ? readScopeRegistry(existingNpmrc) : null;
   const effectiveRegistry = normalizeRegistryUrl(parsed.registry ?? existingScopeRegistry ?? DEFAULT_SCOPE_REGISTRY);
   const existingBridge = await readOptionalTextFile(bridgeConfig);
 
-  printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, effectiveRegistry, baseUrl);
+  printSetupOverview(scope, bridgeConfig, opencodeConfig, npmrcPath, effectiveRegistry, parsed.environment);
   writeLine('正在启动二维码授权流程...');
-  const credentials = await runQrCodeAuth(baseUrl);
+  const credentials = await runQrCodeAuth(parsed.environment);
 
   const existingOpencode = await readOptionalTextFile(opencodeConfig);
   const nextNpmrc = await buildNextNpmrcContent(npmrcPath, parsed.registry);

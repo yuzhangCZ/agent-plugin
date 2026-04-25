@@ -2,7 +2,7 @@
 
 **Version:** 0.4  
 **Date:** 2026-04-24  
-**Status:** Draft  
+**Status:** Final  
 **Owner:** agent-plugin maintainers  
 **Related:** [二维码扫码授权需求说明](../superpowers/specs/2026-04-23-qrcode-auth-requirements.md), [三方 Agent Runtime 系统分层架构设计](../architecture/third-party-agent-runtime-architecture.md), [bridge-runtime-sdk 目标态架构设计](../architecture/bridge-runtime-sdk-architecture.md)
 
@@ -14,7 +14,7 @@
 
 - 安装脚本视角下的主接口
 - 调用方可见授权事件模型
-- `baseUrl` / `mac` 的输入来源边界
+- `environment` / `mac` 的输入来源边界
 - 二维码刷新、轮询和失败收口规则
 - 二维码授权包的内部职责边界
 - `opencode` / `openclaw` 双端安装脚本接入方式
@@ -29,7 +29,7 @@
 
 ## 2. 设计结论
 
-本期将二维码扫码授权收敛为安装期能力，并对安装脚本只暴露一个高层入口。
+当前方案将二维码扫码授权收敛为安装期能力，并对安装脚本只暴露一个高层入口。
 
 核心结论如下：
 
@@ -40,7 +40,7 @@
 5. `run()` resolve 前必须已经发出终态事件，resolve 后不再发送事件。
 6. `QrCodeAuthSnapshot` 是调用方可见授权事件模型，使用 `type` 作为唯一判别字段。
 7. 新增内部 package 命名为 `@wecode/skill-qrcode-auth`，目录为 `packages/skill-qrcode-auth`。
-8. `baseUrl` 由宿主安装层解析后传入 `qrcodeAuth.run()`。
+8. `environment` 由宿主安装层传入 `qrcodeAuth.run()`，未传时默认 `prod`。
 9. `mac` 由 SDK / 宿主自动采集，采集失败传空字符串 `""`。
 10. `expired` 是当前二维码实例事件，不是整次授权会话终态。
 11. 终态事件只包括 `confirmed`、`cancelled`、`failed`。
@@ -51,7 +51,7 @@
 
 ### 3.1 设计原则
 
-本期唯一确定的使用方是安装脚本：
+当前唯一确定的使用方是安装脚本：
 
 - [plugins/message-bridge/scripts/setup-message-bridge.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge/scripts/setup-message-bridge.mjs)
 - [plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs)
@@ -68,7 +68,7 @@
 ```ts
 export interface QrCodeAuth {
   run(input: {
-    baseUrl: string;
+    environment?: "uat" | "prod";
     channel: string;
     mac: string;
     policy?: QrCodeAuthPolicy;
@@ -81,7 +81,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `baseUrl` | `string` | Y | 无 | 二维码授权服务 base URL，由宿主安装层解析后传入 |
+| `environment` | `"uat" \| "prod"` | N | `prod` | 固定授权环境枚举；包内映射到对应二维码授权服务地址 |
 | `channel` | `string` | Y | 无 | 渠道来源 |
 | `mac` | `string` | Y | 无 | 宿主自动采集的 MAC；采集失败传 `""` |
 | `policy` | `QrCodeAuthPolicy` | N | 默认策略 | 轮询与过期刷新策略 |
@@ -100,7 +100,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 import { qrcodeAuth } from "@wecode/skill-qrcode-auth";
 
 await qrcodeAuth.run({
-  baseUrl: resolvedBaseUrl,
+  environment: "prod",
   channel: "openclaw",
   mac: resolvedMacAddress,
   policy: {
@@ -126,16 +126,17 @@ await qrcodeAuth.run({
 
 ## 4. 输入来源约束
 
-### 4.1 `baseUrl`
+### 4.1 `environment`
 
-`baseUrl` 是二维码授权服务 base URL，由宿主安装层解析后传入 `qrcodeAuth.run()`。
+`environment` 是二维码授权服务固定环境枚举，由宿主安装层传入 `qrcodeAuth.run()`；未传时默认 `prod`。
 
 约束如下：
 
-- 二维码授权包只使用调用方传入的 `baseUrl`。
-- 二维码授权包不判断 `prod` / `uat` 或其他环境来源。
-- `baseUrl` 是服务入口配置，不是用户交互输入。
-- 具体配置键和默认值不在本文展开。
+- 二维码授权包只接受 `"uat"` 与 `"prod"`。
+- 二维码授权包内部固定地址映射，不接受任意 URL 输入。
+- `prod` 固定映射到 `https://api.inner.welink.huawei.com`。
+- `uat` 固定映射到 `https://api.uat.welink.huawei.com`。
+- 当前安装脚本默认传 `prod`，也支持显式传入 `uat`。
 
 ### 4.2 `mac`
 
@@ -303,6 +304,8 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 ### 6.1 `QrCodeAuthPolicy`
 
 ```ts
+export type QrCodeAuthEnvironment = "uat" | "prod";
+
 export interface QrCodeAuthPolicy {
   refreshOnExpired?: boolean;
   maxRefreshCount?: number;
@@ -331,7 +334,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 校验规则如下：
 
 - `onSnapshot` 必须是函数。
-- `baseUrl` 必须是非空 `http` / `https` URL。
+- `environment` 未提供时使用 `prod`；若提供，必须是 `"uat"` 或 `"prod"`。
 - `channel` 必须是非空字符串。
 - `mac` 必须是字符串；采集失败时由调用方传 `""`。
 - `refreshOnExpired` 未提供时使用默认值；若提供，必须是 `boolean`。
@@ -481,9 +484,9 @@ sequenceDiagram
     participant Writer as config writer
 
     User->>Script: 执行 cli install
-    Script->>Host: preflight / install / resolve baseUrl / collect mac
-    Host-->>Script: baseUrl + channel + mac
-    Script->>API: run(baseUrl, channel, mac, policy, onSnapshot)
+    Script->>Host: preflight / install / resolve environment / collect mac
+    Host-->>Script: environment + channel + mac
+    Script->>API: run(environment, channel, mac, policy, onSnapshot)
     API->>Controller: start session
     Controller->>Port: createSession()
     Port->>Adapter: createSession()
@@ -624,8 +627,9 @@ sequenceDiagram
 
 `QrCodeAuth` 是 `@wecode/skill-qrcode-auth` 的 public facade，负责：
 
-- 校验 `baseUrl`、`channel`、`mac` 和 `onSnapshot`
-- 接收 `baseUrl`、`channel`、`mac`、`policy` 和 `onSnapshot`
+- 校验 `environment`、`channel`、`mac` 和 `onSnapshot`
+- 接收 `environment`、`channel`、`mac`、`policy` 和 `onSnapshot`
+- 将固定环境映射为内部使用的 `baseUrl`
 - 合并默认 `QrCodeAuthPolicy`
 - 创建并启动 `QrCodeAuthSessionController`
 - 转发 controller 产生的 `QrCodeAuthSnapshot`
@@ -683,7 +687,7 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 
 - host preflight
 - 插件安装
-- `baseUrl` 解析
+- `environment` 选择
 - mac 采集
 - 配置写入
 - 安装后的宿主重启或提示
@@ -694,35 +698,35 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 
 ### 10.1 OpenCode
 
-OpenCode 本期主接入点固定为：
+OpenCode 当前主接入点固定为：
 
 - [plugins/message-bridge/scripts/setup-message-bridge.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge/scripts/setup-message-bridge.mjs)
 
 接入原则：
 
 - 保留当前脚本作为用户入口。
-- 安装脚本负责 preflight、`baseUrl` 解析、mac 采集和配置写入。
+- 安装脚本负责 preflight、`environment` 选择、mac 采集和配置写入。
 - 把原先直接输入 `AK/SK` 的步骤替换为 `qrcodeAuth.run()`。
 - 在 `onSnapshot` 中输出二维码和状态提示。
 - 在收到 `confirmed` 后沿用现有配置写入逻辑。
 
 ### 10.2 OpenClaw
 
-OpenClaw 本期主接入点固定为：
+OpenClaw 当前主接入点固定为：
 
 - [plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs)
 
 接入原则：
 
 - 保留当前脚本里的 preflight、版本校验、registry 配置和安装主流程。
-- 安装脚本负责 `baseUrl` 解析、mac 采集和配置写入。
+- 安装脚本负责 `environment` 选择、mac 采集和配置写入。
 - 在宿主安装准备完成后调用 `qrcodeAuth.run()`。
 - 在收到 `confirmed` 后通过现有或新增的宿主配置写入逻辑写入 `ak/sk`。
 
 约束：
 
-- 本期不以 `src/onboarding.ts` 作为主接入点。
-- `src/onboarding.ts` 仅作为后续可选扩展方向，不属于本期主方案。
+- 当前不以 `src/onboarding.ts` 作为主接入点。
+- `src/onboarding.ts` 仅作为后续可选扩展方向，不属于当前主方案。
 - `MB_SETUP_QRCODE_AUTH_MODULE` / `OPENCLAW_INSTALL_QRCODE_AUTH_MODULE` 指向的 override 模块必须导出 `qrcodeAuth.run(input)`。
 
 ## 11. 错误处理与 fail-closed 规则
@@ -762,7 +766,7 @@ facade 单元测试覆盖：
 - 安装脚本只调用 `qrcodeAuth.run()` 即可完成授权。
 - `onSnapshot` 是唯一业务输出通道。
 - `run()` 只表示流程结束，不返回业务结果。
-- `baseUrl` 由调用方传入 `qrcodeAuth.run()`。
+- `environment` 默认 `prod`，显式 `uat` / `prod` 映射到固定授权地址。
 - `policy` 默认值合并。
 - facade 只负责输入校验、controller 创建启动、事件转发和终态后 resolve。
 
@@ -809,7 +813,7 @@ adapter 单元测试覆盖远端协议转换：
 
 ### 12.4 mock server 集成测试
 
-后续实现至少应使用 mock auth server 覆盖端到端 create/query 链路，并断言事件序列：
+实现验收至少应使用 mock auth server 覆盖端到端 create/query 链路，并断言事件序列：
 
 - 成功链路：`qrcode_generated -> scanned -> confirmed`，随后 `run()` resolve。
 - 自动刷新链路：`qrcode_generated(qr-1) -> expired(qr-1) -> qrcode_generated(qr-2)`，后续继续轮询。
@@ -823,7 +827,7 @@ adapter 单元测试覆盖远端协议转换：
 
 ### 12.5 架构边界验收
 
-后续实现应通过静态检查或代码审查确认：
+实现验收应通过静态检查或代码审查确认：
 
 - OpenCode / OpenClaw 安装脚本只 import / 调用 `qrcodeAuth` public facade。
 - 安装脚本不得 import `QrCodeAuthSessionController`、`QrCodeAuthServicePort` 或 HTTP adapter。

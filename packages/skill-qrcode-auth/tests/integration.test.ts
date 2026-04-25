@@ -36,7 +36,6 @@ test("integration run emits terminal snapshot before resolve", async () => {
   });
 
   await auth.run({
-    baseUrl: "https://auth.example.com",
     channel: "opencode",
     mac: "",
     onSnapshot(snapshot) {
@@ -95,7 +94,6 @@ test("public qrcodeAuth creates isolated session state for repeated runs", async
       const snapshots: QrCodeAuthSnapshot[] = [];
       runSnapshots.push(snapshots);
       await runtime.run({
-        baseUrl: "https://auth.example.com",
         channel: "opencode",
         mac: "",
         policy: {

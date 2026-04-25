@@ -17,17 +17,16 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 test("facade validates required input", async () => {
   await assert.rejects(
     qrcodeAuth.run({
-      baseUrl: "",
+      environment: "staging" as unknown as "prod",
       channel: "opencode",
       mac: "",
       onSnapshot() {},
     }),
-    /baseUrl/,
+    /environment/,
   );
 
   await assert.rejects(
     qrcodeAuth.run({
-      baseUrl: "https://auth.example.com",
       channel: "",
       mac: "",
       onSnapshot() {},
@@ -71,7 +70,6 @@ test("facade merges default policy and resolves after terminal snapshot", async 
   });
 
   await auth.run({
-    baseUrl: "https://auth.example.com/",
     channel: "openclaw",
     mac: "",
     onSnapshot(snapshot) {
@@ -112,7 +110,6 @@ test("facade uses partial policy overrides", async () => {
   });
 
   await auth.run({
-    baseUrl: "https://auth.example.com",
     channel: "opencode",
     mac: "",
     policy: {
@@ -171,7 +168,6 @@ test("facade prefers injected service port over default http adapter", async () 
 
   const snapshots: QrCodeAuthSnapshot[] = [];
   await auth.run({
-    baseUrl: "https://auth.example.com",
     channel: "opencode",
     mac: "",
     onSnapshot(snapshot) {
@@ -188,7 +184,6 @@ test("facade prefers injected service port over default http adapter", async () 
 test("facade rejects non-boolean refreshOnExpired string input", async () => {
   await assert.rejects(
     qrcodeAuth.run({
-      baseUrl: "https://auth.example.com",
       channel: "opencode",
       mac: "",
       policy: {
@@ -203,7 +198,6 @@ test("facade rejects non-boolean refreshOnExpired string input", async () => {
 test("facade rejects non-boolean refreshOnExpired numeric input", async () => {
   await assert.rejects(
     qrcodeAuth.run({
-      baseUrl: "https://auth.example.com",
       channel: "opencode",
       mac: "",
       policy: {
@@ -213,4 +207,87 @@ test("facade rejects non-boolean refreshOnExpired numeric input", async () => {
     }),
     /refreshOnExpired/,
   );
+});
+
+test("facade defaults environment to prod and resolves after terminal snapshot", async () => {
+  const requestedUrls: string[] = [];
+  const auth = createQrCodeAuthRuntime({
+    fetch: async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.endsWith("/qrcode")) {
+        return jsonResponse({
+          code: "200",
+          data: {
+            accessToken: "token-1",
+            qrcode: "qr-1",
+            weUrl: "https://we.example/qr-1",
+            pcUrl: "https://pc.example/qr-1",
+            expireTime: "2026-04-24T00:00:00.000Z",
+          },
+        });
+      }
+      return jsonResponse({
+        code: "200",
+        data: {
+          qrcode: "qr-1",
+          status: "confirmed",
+          expired: "false",
+          ak: "ak-1",
+          sk: "sk-1",
+        },
+      });
+    },
+    wait: async () => {},
+  });
+
+  await auth.run({
+    channel: "opencode",
+    mac: "",
+    onSnapshot() {},
+  });
+
+  assert.ok(requestedUrls.every((url) => url.startsWith("https://api.inner.welink.huawei.com/")));
+});
+
+test("facade resolves uat environment to fixed auth base url", async () => {
+  const requestedUrls: string[] = [];
+  const auth = createQrCodeAuthRuntime({
+    fetch: async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.endsWith("/qrcode")) {
+        return jsonResponse({
+          code: "200",
+          data: {
+            accessToken: "token-1",
+            qrcode: "qr-1",
+            weUrl: "https://we.example/qr-1",
+            pcUrl: "https://pc.example/qr-1",
+            expireTime: "2026-04-24T00:00:00.000Z",
+          },
+        });
+      }
+      return jsonResponse({
+        code: "200",
+        data: {
+          qrcode: "qr-1",
+          status: "confirmed",
+          expired: "false",
+          ak: "ak-1",
+          sk: "sk-1",
+        },
+      });
+    },
+    wait: async () => {},
+  });
+
+  await auth.run({
+    environment: "uat",
+    channel: "opencode",
+    mac: "",
+    onSnapshot() {},
+  });
+
+  assert.ok(requestedUrls.every((url) => url.startsWith("https://api.uat.welink.huawei.com/")));
 });

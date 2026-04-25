@@ -1,5 +1,6 @@
 import type { QrCodeAuth, QrCodeAuthPolicy, QrCodeAuthRunInput } from "../types.ts";
 import { HttpQrCodeAuthService, type FetchLike } from "./HttpQrCodeAuthService.ts";
+import { resolveAuthEnvironment } from "./resolveAuthEnvironment.ts";
 import type { QrCodeAuthServicePort } from "./service-port.ts";
 import { QrCodeAuthSessionController } from "./QrCodeAuthSessionController.ts";
 
@@ -26,9 +27,10 @@ export function createQrCodeAuthRuntime(input: {
   return {
     async run(runInput: QrCodeAuthRunInput): Promise<void> {
       validateRunInput(runInput);
+      const resolved = resolveAuthEnvironment(runInput.environment);
       const controller = new QrCodeAuthSessionController({
         service,
-        baseUrl: normalizeBaseUrl(runInput.baseUrl),
+        baseUrl: resolved.baseUrl,
         channel: runInput.channel.trim(),
         mac: runInput.mac,
         policy: mergePolicy(runInput.policy),
@@ -45,31 +47,12 @@ function validateRunInput(input: QrCodeAuthRunInput): void {
     throw new TypeError("QrCodeAuth.run() requires onSnapshot callback.");
   }
 
-  validateHttpUrl("baseUrl", input.baseUrl);
-
   if (!input.channel || !input.channel.trim()) {
     throw new TypeError("QrCodeAuth.run() requires non-empty channel.");
   }
 
   if (typeof input.mac !== "string") {
     throw new TypeError("QrCodeAuth.run() requires mac to be a string.");
-  }
-}
-
-function validateHttpUrl(field: string, value: string): void {
-  if (!value || !value.trim()) {
-    throw new TypeError(`QrCodeAuth.run() requires non-empty ${field}.`);
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new TypeError(`QrCodeAuth.run() requires valid ${field}.`);
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new TypeError(`QrCodeAuth.run() requires http/https ${field}.`);
   }
 }
 
@@ -113,11 +96,6 @@ function readNumericPolicy(
     throw new TypeError(`QrCodeAuth.run() requires ${field} to be a finite number.`);
   }
   return value;
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim();
-  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
 async function defaultWait(ms: number): Promise<void> {

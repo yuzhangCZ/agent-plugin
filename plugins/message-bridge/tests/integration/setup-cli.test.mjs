@@ -31,7 +31,7 @@ async function createFakeQrCodeModule(dir) {
       if (process.env.MB_QRCODE_LOG) {
         await import('node:fs/promises').then(({ writeFile }) =>
           writeFile(process.env.MB_QRCODE_LOG, JSON.stringify({
-            baseUrl: input.baseUrl,
+            environment: input.environment ?? 'prod',
             channel: input.channel,
             mac: input.mac,
           }), 'utf8')
@@ -164,6 +164,10 @@ function createDefaultUserEnv(home, qrcodeModule, extraEnv = {}) {
   };
 }
 
+function baseSetupArgs(scope = 'user') {
+  return ['--scope', scope];
+}
+
 function runSetupCommand({ cwd, home, qrcodeModule, args = [], extraEnv = {} }) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
     cwd,
@@ -264,7 +268,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           MB_QRCODE_LOG: logPath,
         },
@@ -282,16 +286,35 @@ describe('setup cli', () => {
       assert.ok(bridge.includes('"sk": "success-sk"'));
       assert.ok(opencode.includes('"plugin": ["@wecode/skill-opencode-plugin"]'));
       assert.ok(npmrc.includes('@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/'));
-      assert.equal(qrcodeInput.baseUrl, 'https://auth.example.com');
+      assert.equal(qrcodeInput.environment, 'prod');
       assert.equal(qrcodeInput.channel, 'opencode');
       assert.ok(result.stdout.includes('二维码授权成功'));
+    });
+  });
+
+  test('supports explicit uat environment', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const logPath = join(home, 'qrcode-log.json');
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: ['--scope', 'user', '--environment', 'uat'],
+        extraEnv: {
+          MB_QRCODE_LOG: logPath,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const qrcodeInput = JSON.parse(await readFile(logPath, 'utf8'));
+      assert.equal(qrcodeInput.environment, 'uat');
     });
   });
 
   test('monorepo source integration loads default qrcodeAuth runtime when no override is provided', async () => {
     await withTempDirs(async ({ home, project }) => {
       const preload = await createDefaultRuntimeFetchPreload(home);
-      const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+      const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user'], {
         cwd: project,
         env: {
           ...process.env,
@@ -313,7 +336,7 @@ describe('setup cli', () => {
   test('prefers installed qrcode package before monorepo fallback', async () => {
     await withShadowInstalledQrCodePackage('valid', async () => {
       await withTempDirs(async ({ home, project }) => {
-        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user'], {
           cwd: project,
           env: {
             ...process.env,
@@ -336,7 +359,7 @@ describe('setup cli', () => {
     await withShadowInstalledQrCodePackage('broken', async () => {
       await withTempDirs(async ({ home, project }) => {
         const preload = await createDefaultRuntimeFetchPreload(home);
-        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user', '--base-url', 'https://auth.example.com'], {
+        const result = spawnSync(process.execPath, [scriptPath, '--scope', 'user'], {
           cwd: project,
           env: {
             ...process.env,
@@ -362,7 +385,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           MB_QRCODE_SCENARIO: 'refresh',
         },
@@ -384,7 +407,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           MB_QRCODE_SCENARIO: 'failed',
         },
@@ -398,17 +421,17 @@ describe('setup cli', () => {
     });
   });
 
-  test('fails fast when baseUrl is missing', async () => {
+  test('fails fast when environment is invalid', async () => {
     await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const result = runSetupCommand({
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user'],
+        args: ['--scope', 'user', '--environment', 'staging'],
       });
 
       assert.notStrictEqual(result.status, 0);
-      assert.ok(result.stderr.includes('base URL'));
+      assert.ok(result.stderr.includes('--environment'));
     });
   });
 
@@ -420,7 +443,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule: invalidModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
       });
 
       assert.notStrictEqual(result.status, 0);
@@ -447,7 +470,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
       });
 
       assert.strictEqual(result.status, 0, result.stderr);
@@ -476,7 +499,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           MB_QRCODE_AK: 'updated-ak',
           MB_QRCODE_SK: 'added-sk',
@@ -501,7 +524,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
       });
 
       assert.notStrictEqual(result.status, 0);
@@ -519,7 +542,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
       });
 
       assert.notStrictEqual(result.status, 0);
@@ -534,7 +557,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'project', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs('project'),
       });
 
       assert.strictEqual(result.status, 0, result.stderr);
@@ -558,7 +581,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           XDG_CONFIG_HOME: '',
           NODE_OPTIONS: `--import ${platformPreload}`,
@@ -587,7 +610,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--scope', 'user', '--base-url', 'https://auth.example.com'],
+        args: baseSetupArgs(),
         extraEnv: {
           NPM_CONFIG_USERCONFIG: customNpmrc,
         },
@@ -612,7 +635,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
+        args: ['install', '--yes'],
       });
 
       assert.strictEqual(result.status, 0, result.stderr);
@@ -635,7 +658,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['--yes', '--base-url', 'https://auth.example.com'],
+        args: ['--yes'],
       });
 
       assert.strictEqual(result.status, 0, result.stderr);
@@ -655,8 +678,8 @@ describe('setup cli', () => {
         args: [
           'install',
           '--yes',
-          '--base-url',
-          'https://auth.example.com',
+          '--environment',
+          'uat',
           '--registry',
           'https://registry.override.example/npm',
         ],
@@ -675,7 +698,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
+        args: ['install', '--yes'],
         extraEnv: {
           PATH: '/dev/null',
         },
@@ -697,7 +720,7 @@ describe('setup cli', () => {
         cwd: project,
         home,
         qrcodeModule,
-        args: ['install', '--yes', '--base-url', 'https://auth.example.com'],
+        args: ['install', '--yes'],
       });
 
       assert.strictEqual(result.status, 0, result.stderr);

@@ -21,6 +21,11 @@ export interface QrCodeAuthServiceError {
 export type QrCodeAuthFailureReasonCode = "timeout" | "network_error" | "auth_service_error";
 
 /**
+ * 二维码授权固定环境枚举。
+ */
+export type QrCodeAuthEnvironment = "uat" | "prod";
+
+/**
  * 调用方可感知的二维码授权事件。
  */
 export type QrCodeAuthSnapshot =
@@ -70,7 +75,10 @@ export interface QrCodeAuthPolicy {
  * `run()` 的完整输入。
  */
 export interface QrCodeAuthRunInput {
-  baseUrl: string;
+  /**
+   * 授权环境；未传时默认 `prod`。
+   */
+  environment?: QrCodeAuthEnvironment;
   channel: string;
   mac: string;
   policy?: QrCodeAuthPolicy;
