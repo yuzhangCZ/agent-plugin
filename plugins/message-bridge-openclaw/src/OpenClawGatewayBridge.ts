@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
+import * as channelRuntime from "openclaw/plugin-sdk/channel-runtime";
 import { normalizeOutboundReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import {
   type OpenClawConfig,
@@ -188,6 +188,87 @@ interface SelectedModelState {
   thinkLevel: string | null;
 }
 
+type ReplyDeliverKind = "tool" | "block" | "final";
+type ReplyExecutorType = "runtime" | "buffered";
+
+interface ReplyRuntimeCapabilities {
+  resolveEnvelopeFormatOptions: (cfg: OpenClawConfig) => unknown;
+  formatAgentEnvelope: (params: Record<string, unknown>) => string;
+  finalizeInboundContext: (context: Record<string, unknown>) => Record<string, unknown>;
+  createReplyDispatcherWithTyping?: (params: Record<string, unknown>) => {
+    dispatcher: {
+      waitForIdle?: () => Promise<void>;
+    };
+    replyOptions?: Record<string, unknown>;
+    markDispatchIdle?: () => void;
+    markFullyComplete?: () => void;
+  };
+  dispatchReplyFromConfig?: (params: Record<string, unknown>) => Promise<unknown>;
+  dispatchReplyWithBufferedBlockDispatcher?: (params: Record<string, unknown>) => Promise<void>;
+  resolveHumanDelayConfig?: (cfg: OpenClawConfig, agentId: string) => unknown;
+}
+
+interface ReplyExecutorSelection {
+  executorType: ReplyExecutorType;
+  fallbackReason: string | null;
+}
+
+interface ReplyProjectionCallbacks {
+  onPartialReply: (text: unknown) => void;
+  onReasoningStream: (text: unknown) => void;
+  onDeliver: (rawPayload: unknown, info: { kind: ReplyDeliverKind }) => Promise<void>;
+  onAgentRunStart: (runId: string) => void;
+  onModelSelected: (selection: { provider: string; model: string; thinkLevel: string | undefined }) => void;
+}
+
+interface ReplyExecutionResult {
+  executionPath: ChatExecutionPath;
+  executorType: ReplyExecutorType;
+  fallbackReason: string | null;
+  dispatcherReturned: boolean;
+  deliverCount: number;
+  deliverKinds: Record<ReplyDeliverKind, number>;
+  firstDeliverKind: ReplyDeliverKind | null;
+  firstDeliverTextPreview: string | null;
+  lastDeliverKind: ReplyDeliverKind | null;
+  lastDeliverTextPreview: string | null;
+  pendingFinalText: string | null;
+  latestPartialText: string | null;
+  firstVisibleReplyAt: number | null;
+  hasVisibleBlockText: boolean;
+  blockTextCandidate: string | null;
+}
+
+interface ReplyOutcome {
+  kind: "assistant_success" | "structured_error" | "empty_response";
+  finalText: string | null;
+  responseSource: "partial_streaming" | "final_only" | "final_missing" | "block_fallback";
+  errorMessage: string | null;
+  shouldEmitAssistant: boolean;
+  shouldEmitStructuredError: boolean;
+}
+
+interface ReplyExecutorParams {
+  runtimeReply: ReplyRuntimeCapabilities;
+  effectiveConfig: OpenClawConfig;
+  ctxPayload: Record<string, unknown>;
+  dispatcherFactoryParams: Record<string, unknown>;
+  bufferedDispatcherOptions: Record<string, unknown>;
+  configuredTimeoutMs: number;
+  agentId: string;
+  callbacks: ReplyProjectionCallbacks;
+}
+
+interface ReplyExecutor {
+  readonly type: ReplyExecutorType;
+  execute(params: ReplyExecutorParams): Promise<void>;
+}
+
+interface ReplyPrefixContextShape {
+  responsePrefix: string;
+  responsePrefixContextProvider: () => unknown;
+}
+
 function createSelectedModelState(): SelectedModelState {
   return {
     provider: null,
@@ -230,6 +311,242 @@ function extractToolResultText(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function summarizePayloadText(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed.slice(0, 120);
+}
+
+function getReplyPrefixContext(cfg: OpenClawConfig, agentId: string): ReplyPrefixContextShape {
+  const createPrefixContext = Reflect.get(channelRuntime, "createReplyPrefixContext");
+  if (typeof createPrefixContext === "function") {
+    const result = createPrefixContext({ cfg, agentId });
+    if (isRecord(result)) {
+      const responsePrefix = typeof result.responsePrefix === "string" ? result.responsePrefix : "";
+      const responsePrefixContextProvider =
+        typeof result.responsePrefixContextProvider === "function"
+          ? result.responsePrefixContextProvider
+          : () => ({});
+      return {
+        responsePrefix,
+        responsePrefixContextProvider,
+      };
+    }
+  }
+
+  return {
+    responsePrefix: "",
+    responsePrefixContextProvider: () => ({}),
+  };
+}
+
+class RuntimeReplyExecutor implements ReplyExecutor {
+  readonly type = "runtime" as const;
+
+  async execute(params: ReplyExecutorParams): Promise<void> {
+    const factory = params.runtimeReply.createReplyDispatcherWithTyping;
+    const dispatch = params.runtimeReply.dispatchReplyFromConfig;
+    if (typeof factory !== "function" || typeof dispatch !== "function") {
+      throw new Error("runtime_reply_executor_unavailable");
+    }
+
+    const dispatcherResult = factory({
+      ...params.dispatcherFactoryParams,
+      ...(typeof params.runtimeReply.resolveHumanDelayConfig === "function"
+        ? { humanDelay: params.runtimeReply.resolveHumanDelayConfig(params.effectiveConfig, params.agentId) }
+        : {}),
+      onReplyStart: async () => undefined,
+      onIdle: async () => undefined,
+      onCleanup: async () => undefined,
+      deliver: params.callbacks.onDeliver,
+    });
+
+    const dispatcher = dispatcherResult?.dispatcher;
+    const replyOptions = isRecord(dispatcherResult?.replyOptions) ? dispatcherResult.replyOptions : {};
+    const markDispatchIdle =
+      typeof dispatcherResult?.markDispatchIdle === "function" ? dispatcherResult.markDispatchIdle : () => undefined;
+    const markFullyComplete =
+      typeof dispatcherResult?.markFullyComplete === "function" ? dispatcherResult.markFullyComplete : () => undefined;
+
+    await dispatch({
+      ctx: params.ctxPayload,
+      cfg: params.effectiveConfig,
+      dispatcher,
+      replyOptions: {
+        ...replyOptions,
+        onAgentRunStart: params.callbacks.onAgentRunStart,
+        onModelSelected: params.callbacks.onModelSelected,
+        onPartialReply: params.callbacks.onPartialReply,
+        onReasoningStream: params.callbacks.onReasoningStream,
+        timeoutOverrideSeconds: Math.ceil(params.configuredTimeoutMs / 1000),
+      },
+    });
+    await dispatcher?.waitForIdle?.();
+    markFullyComplete();
+    markDispatchIdle();
+  }
+}
+
+class BufferedReplyExecutor implements ReplyExecutor {
+  readonly type = "buffered" as const;
+
+  async execute(params: ReplyExecutorParams): Promise<void> {
+    const dispatch = params.runtimeReply.dispatchReplyWithBufferedBlockDispatcher;
+    if (typeof dispatch !== "function") {
+      throw new Error("buffered_reply_executor_unavailable");
+    }
+
+    await dispatch({
+      ctx: params.ctxPayload,
+      cfg: params.effectiveConfig,
+      dispatcherOptions: {
+        ...params.bufferedDispatcherOptions,
+        deliver: params.callbacks.onDeliver,
+        onError: (error: unknown) => {
+          throw error;
+        },
+      },
+      replyOptions: {
+        onAgentRunStart: params.callbacks.onAgentRunStart,
+        onModelSelected: params.callbacks.onModelSelected,
+        onPartialReply: params.callbacks.onPartialReply,
+        onReasoningStream: params.callbacks.onReasoningStream,
+        timeoutOverrideSeconds: Math.ceil(params.configuredTimeoutMs / 1000),
+      },
+    });
+  }
+}
+
+class GatewayReplyProjector {
+  private pendingFinalText: string | null = null;
+  private dispatcherReturned = false;
+  private deliverCount = 0;
+  private readonly deliverKinds: Record<ReplyDeliverKind, number> = {
+    tool: 0,
+    block: 0,
+    final: 0,
+  };
+  private firstDeliverKind: ReplyDeliverKind | null = null;
+  private firstDeliverTextPreview: string | null = null;
+  private lastDeliverKind: ReplyDeliverKind | null = null;
+  private lastDeliverTextPreview: string | null = null;
+  private firstVisibleReplyAt: number | null = null;
+  private hasVisibleBlockText = false;
+  private blockTextCandidate: string | null = null;
+
+  constructor(
+    private readonly options: {
+      streamingEnabled: boolean;
+      onPartialReply: (text: string) => void;
+      onReasoningStream: (text: string) => void;
+      onToolDeliver: (payloadText: string) => void;
+      onBlockObserved: (payloadText: string) => void;
+    },
+  ) {}
+
+  onPartialReply = (text: unknown): void => {
+    if (typeof text !== "string") {
+      return;
+    }
+    if (!this.options.streamingEnabled) {
+      return;
+    }
+    if (text.length > 0 && this.firstVisibleReplyAt === null) {
+      this.firstVisibleReplyAt = Date.now();
+    }
+    this.options.onPartialReply(text);
+  };
+
+  onReasoningStream = (text: unknown): void => {
+    if (!this.options.streamingEnabled || typeof text !== "string") {
+      return;
+    }
+    this.options.onReasoningStream(text);
+  };
+
+  onDeliver = async (rawPayload: unknown, info: { kind: ReplyDeliverKind }): Promise<void> => {
+    const payload =
+      isRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
+    const payloadText = typeof payload.text === "string" ? payload.text : "";
+    this.recordDeliver(info.kind, payloadText);
+
+    if (info.kind === "tool") {
+      this.options.onToolDeliver(payloadText);
+      return;
+    }
+
+    if (info.kind === "final") {
+      this.pendingFinalText = payloadText;
+      if (payloadText.length > 0 && this.firstVisibleReplyAt === null) {
+        this.firstVisibleReplyAt = Date.now();
+      }
+      return;
+    }
+
+    const trimmed = payloadText.trim();
+    if (trimmed.length > 0) {
+      this.hasVisibleBlockText = true;
+      this.blockTextCandidate = trimmed;
+      if (this.firstVisibleReplyAt === null) {
+        this.firstVisibleReplyAt = Date.now();
+      }
+    }
+    this.options.onBlockObserved(payloadText);
+  };
+
+  markDispatcherReturned(): void {
+    this.dispatcherReturned = true;
+  }
+
+  buildResult(params: {
+    executionPath: ChatExecutionPath;
+    executorType: ReplyExecutorType;
+    fallbackReason: string | null;
+    latestPartialText: string | null;
+  }): ReplyExecutionResult {
+    return {
+      executionPath: params.executionPath,
+      executorType: params.executorType,
+      fallbackReason: params.fallbackReason,
+      dispatcherReturned: this.dispatcherReturned,
+      deliverCount: this.deliverCount,
+      deliverKinds: { ...this.deliverKinds },
+      firstDeliverKind: this.firstDeliverKind,
+      firstDeliverTextPreview: this.firstDeliverTextPreview,
+      lastDeliverKind: this.lastDeliverKind,
+      lastDeliverTextPreview: this.lastDeliverTextPreview,
+      pendingFinalText: this.pendingFinalText,
+      latestPartialText: params.latestPartialText,
+      firstVisibleReplyAt: this.firstVisibleReplyAt,
+      hasVisibleBlockText: this.hasVisibleBlockText,
+      blockTextCandidate: this.blockTextCandidate,
+    };
+  }
+
+  snapshot(params: {
+    executionPath: ChatExecutionPath;
+    executorType: ReplyExecutorType;
+    fallbackReason: string | null;
+    latestPartialText: string | null;
+  }): ReplyExecutionResult {
+    return this.buildResult(params);
+  }
+
+  private recordDeliver(kind: ReplyDeliverKind, payloadText: string): void {
+    this.deliverCount += 1;
+    this.deliverKinds[kind] += 1;
+    const preview = summarizePayloadText(payloadText);
+    if (this.firstDeliverKind === null) {
+      this.firstDeliverKind = kind;
+      this.firstDeliverTextPreview = preview;
+    }
+    this.lastDeliverKind = kind;
+    this.lastDeliverTextPreview = preview;
+  }
 }
 
 export class OpenClawGatewayBridge {
@@ -617,10 +934,8 @@ export class OpenClawGatewayBridge {
     let retryAttempt: RetryAttempt = 0;
     let lastErrorMessage: string | null = null;
     let lastErrorExtra: Record<string, unknown> | undefined;
-    let pendingFinalText: string | null = null;
 
     while (true) {
-      pendingFinalText = null;
       if (
         !canExecute ||
         !this.runtime.channel?.routing?.resolveAgentRoute ||
@@ -635,50 +950,26 @@ export class OpenClawGatewayBridge {
         break;
       }
 
-      const route = this.runtime.channel.routing.resolveAgentRoute({
-        cfg: effectiveConfig,
-        channel: "message-bridge",
-        accountId: this.options.account.accountId,
-        peer: {
-          kind: "direct",
-          id: record.welinkSessionId || record.toolSessionId,
-        },
+      const replyRuntime = this.runtime.channel.reply as ReplyRuntimeCapabilities;
+      const route = this.buildChatRoute(effectiveConfig, record);
+      const ctxPayload = this.buildChatInboundContext({
+        effectiveConfig,
+        record,
+        routeAccountId: route.accountId,
+        runtimeReply: replyRuntime,
+        text: message.payload.text,
       });
-      const envelopeOptions = this.runtime.channel.reply.resolveEnvelopeFormatOptions(effectiveConfig);
-      const body = this.runtime.channel.reply.formatAgentEnvelope({
-        channel: "message-bridge",
-        from: `ai-gateway:${record.welinkSessionId || record.toolSessionId}`,
-        timestamp: new Date(),
-        previousTimestamp: undefined,
-        envelope: envelopeOptions,
-        body: message.payload.text,
-      });
-      const ctxPayload = this.runtime.channel.reply.finalizeInboundContext({
-        Body: body,
-        BodyForAgent: message.payload.text,
-        RawBody: message.payload.text,
-        CommandBody: message.payload.text,
-        From: `message-bridge:${record.welinkSessionId || record.toolSessionId}`,
-        To: `message-bridge:${record.toolSessionId}`,
-        SessionKey: record.sessionKey,
-        AccountId: route.accountId,
-        ChatType: "direct",
-        ConversationLabel: `ai-gateway:${record.welinkSessionId || record.toolSessionId}`,
-        SenderName: "ai-gateway",
-        SenderId: record.welinkSessionId || record.toolSessionId,
-        Provider: "message-bridge",
-        Surface: "message-bridge",
-        Timestamp: new Date().toISOString(),
-        OriginatingChannel: "message-bridge",
-        OriginatingTo: `message-bridge:${record.toolSessionId}`,
-        CommandAuthorized: false,
-      });
-      const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
+      const prefixContext = getReplyPrefixContext(effectiveConfig, route.agentId);
+      const { onModelSelected, ...bufferedDispatcherOptions } = channelRuntime.createReplyPrefixOptions({
         cfg: effectiveConfig,
         agentId: route.agentId,
         channel: "message-bridge",
         accountId: this.options.account.accountId,
       });
+      const dispatcherFactoryParams: Record<string, unknown> = {
+        responsePrefix: prefixContext.responsePrefix,
+        responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
+      };
       const handleModelSelected = (selection: { provider: string; model: string; thinkLevel: string | undefined }) => {
         selectedModel.provider = selection.provider;
         selectedModel.model = selection.model;
@@ -700,98 +991,78 @@ export class OpenClawGatewayBridge {
         });
         onModelSelected?.(selection);
       };
-      const deliver = async (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => {
-        if (this.isSessionTerminated(record)) {
-          return;
-        }
-        const payload =
-          isRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
-
-        if (info.kind === "tool") {
-          const activeSession = this.activeToolSessions.get(record.sessionKey);
-          const toolCallId = activeSession?.pendingToolResultTarget;
-          if (!toolCallId) {
-            return;
-          }
-
-          const toolState = activeSession.toolStates.get(toolCallId);
-          if (!toolState) {
-            return;
-          }
-
-          const output = typeof payload.text === "string" ? payload.text.trim() : "";
-          if (output.length === 0) {
-            return;
-          }
-
-          activeSession.pendingToolResultTarget = null;
-          toolState.output = output;
-          this.emitToolPartUpdate(record.toolSessionId, toolState, context);
-          return;
-        }
-
-        const payloadText = typeof payload.text === "string" ? payload.text : "";
-
-        if (info.kind === "final") {
-          pendingFinalText = payloadText;
-          return;
-        }
-
-        if (info.kind !== "block") {
-          return;
-        }
-        logDebug(this.options.logger, "bridge.chat.block_ignored", {
-          toolSessionId: record.toolSessionId,
-          sessionKey: record.sessionKey,
-          chatRequestId,
-          retryAttempt,
-          blockTextLength: payloadText.length,
-        });
-      };
+      const projector = new GatewayReplyProjector({
+        streamingEnabled,
+        onPartialReply: (text) => {
+          assistantStream.latestPartialText = text;
+          this.handleAssistantPartialReply({
+            toolSessionId: record.toolSessionId,
+            sessionKey: record.sessionKey,
+            chatRequestId,
+            retryAttempt,
+            startedAt,
+            state: assistantStream,
+            text,
+            context,
+          });
+        },
+        onReasoningStream: (text) => {
+          this.handleAssistantReasoningStream(record.toolSessionId, assistantStream, text, context);
+        },
+        onToolDeliver: (payloadText) => {
+          this.handleToolDeliver(record, payloadText, context);
+        },
+        onBlockObserved: (payloadText) => {
+          logDebug(this.options.logger, "bridge.chat.block_observed", {
+            toolSessionId: record.toolSessionId,
+            sessionKey: record.sessionKey,
+            chatRequestId,
+            retryAttempt,
+            blockTextLength: payloadText.length,
+          });
+        },
+      });
+      const executorSelection = this.selectReplyExecutor(replyRuntime);
+      const executor = this.createReplyExecutor(executorSelection);
+      let executionResult: ReplyExecutionResult | null = null;
 
       try {
-        await this.runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-          ctx: ctxPayload,
-          cfg: effectiveConfig,
-          dispatcherOptions: {
-            ...prefixOptions,
-            deliver,
-            onError: (error) => {
-              throw error;
-            },
-          },
-          replyOptions: {
+        await executor.execute({
+          runtimeReply: replyRuntime,
+          effectiveConfig,
+          ctxPayload,
+          dispatcherFactoryParams,
+          bufferedDispatcherOptions,
+          configuredTimeoutMs,
+          agentId: route.agentId,
+          callbacks: {
             onAgentRunStart: (runId) => {
               this.trackSessionRunId(record.sessionKey, runId);
             },
             onModelSelected: handleModelSelected,
-            onPartialReply: (text: unknown) => {
-              if (typeof text !== "string") {
-                return;
-              }
-              if (!streamingEnabled) {
-                return;
-              }
-              assistantStream.latestPartialText = text;
-              this.handleAssistantPartialReply({
-                toolSessionId: record.toolSessionId,
-                sessionKey: record.sessionKey,
-                chatRequestId,
-                retryAttempt,
-                startedAt,
-                state: assistantStream,
-                text,
-                context,
-              });
-            },
-            onReasoningStream: (text: unknown) => {
-              if (!streamingEnabled || typeof text !== "string") {
-                return;
-              }
-              this.handleAssistantReasoningStream(record.toolSessionId, assistantStream, text, context);
-            },
-            timeoutOverrideSeconds: Math.ceil(configuredTimeoutMs / 1000),
+            onPartialReply: projector.onPartialReply,
+            onReasoningStream: projector.onReasoningStream,
+            onDeliver: projector.onDeliver,
           },
+        });
+        projector.markDispatcherReturned();
+        executionResult = projector.buildResult({
+          executionPath: "runtime_reply",
+          executorType: executor.type,
+          fallbackReason: executorSelection.fallbackReason,
+          latestPartialText: assistantStream.latestPartialText,
+        });
+        this.logDispatcherReturned({
+          toolSessionId: record.toolSessionId,
+          sessionKey: record.sessionKey,
+          configuredTimeoutMs,
+          executionPath: "runtime_reply",
+          streamMode,
+          streamingEnabled,
+          streamingSource,
+          chatRequestId,
+          retryAttempt,
+          result: executionResult,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -815,27 +1086,42 @@ export class OpenClawGatewayBridge {
           continue;
         }
         lastErrorMessage = errorMessage;
-        lastErrorExtra = undefined;
+        const partialExecutionResult = executionResult ?? projector.snapshot({
+          executionPath: "runtime_reply",
+          executorType: executor.type,
+          fallbackReason: executorSelection.fallbackReason,
+          latestPartialText: assistantStream.latestPartialText,
+        });
+        lastErrorExtra = this.buildReplyExecutionExtra(partialExecutionResult);
         break;
       }
       if (this.isSessionTerminated(record)) {
         this.clearActiveToolSession(record.sessionKey);
         return true;
       }
-      const finalText = this.resolveAssistantFinalText(assistantStream, pendingFinalText);
-      if (finalText === null) {
-        lastErrorMessage = "assistant_response_missing_text";
-        lastErrorExtra = {
-          pendingFinalText,
-          latestPartialText: assistantStream.latestPartialText,
-        };
+      const replyExecution = executionResult ?? projector.buildResult({
+        executionPath: "runtime_reply",
+        executorType: executor.type,
+        fallbackReason: executorSelection.fallbackReason,
+        latestPartialText: assistantStream.latestPartialText,
+      });
+      const outcome = this.classifyReplyOutcome({
+        replyExecution,
+        assistantStream,
+        caughtErrorMessage: null,
+      });
+      if (!outcome.shouldEmitAssistant || outcome.finalText === null) {
+        lastErrorMessage = outcome.errorMessage ?? "assistant_response_missing_text";
+        lastErrorExtra = this.buildReplyExecutionExtra(replyExecution);
         break;
       }
-      const finalReconciled = pendingFinalText !== null && pendingFinalText !== (assistantStream.latestPartialText ?? "");
+      const finalReconciled =
+        replyExecution.pendingFinalText !== null
+        && replyExecution.pendingFinalText !== (assistantStream.latestPartialText ?? "");
       this.sendAssistantFinalResponse(
         record.toolSessionId,
         assistantStream,
-        finalText,
+        outcome.finalText,
         context,
       );
       record.updatedAt = Date.now();
@@ -855,9 +1141,10 @@ export class OpenClawGatewayBridge {
         chatRequestId,
         retryAttempt,
         finalReconciled,
-        responseLength: finalText.length,
-        finalText,
-        responseSource: this.resolveAssistantResponseSource(assistantStream, pendingFinalText, finalText),
+        responseLength: outcome.finalText.length,
+        finalText: outcome.finalText,
+        responseSource: outcome.responseSource,
+        extra: this.buildReplyExecutionExtra(replyExecution),
       });
       this.sendToolEvent({
         type: "tool_event",
@@ -914,6 +1201,164 @@ export class OpenClawGatewayBridge {
     const lowered = errorMessage.toLowerCase();
     const isTimeout = lowered.includes("timed out") || lowered.includes("timeout");
     return assistantStream.firstPartialAt === null && isTimeout;
+  }
+
+  private buildChatRoute(
+    effectiveConfig: OpenClawConfig,
+    record: { toolSessionId: string; welinkSessionId?: string },
+  ): { agentId: string; accountId: string } {
+    return this.runtime.channel!.routing!.resolveAgentRoute({
+      cfg: effectiveConfig,
+      channel: "message-bridge",
+      accountId: this.options.account.accountId,
+      peer: {
+        kind: "direct",
+        id: record.welinkSessionId || record.toolSessionId,
+      },
+    });
+  }
+
+  private buildChatInboundContext(params: {
+    effectiveConfig: OpenClawConfig;
+    record: { toolSessionId: string; welinkSessionId?: string; sessionKey: string };
+    routeAccountId: string;
+    runtimeReply: ReplyRuntimeCapabilities;
+    text: string;
+  }): Record<string, unknown> {
+    const envelopeOptions = params.runtimeReply.resolveEnvelopeFormatOptions(params.effectiveConfig);
+    const participantId = params.record.welinkSessionId || params.record.toolSessionId;
+    const body = params.runtimeReply.formatAgentEnvelope({
+      channel: "message-bridge",
+      from: `ai-gateway:${participantId}`,
+      timestamp: new Date(),
+      previousTimestamp: undefined,
+      envelope: envelopeOptions,
+      body: params.text,
+    });
+
+    return params.runtimeReply.finalizeInboundContext({
+      Body: body,
+      BodyForAgent: params.text,
+      RawBody: params.text,
+      CommandBody: params.text,
+      From: `message-bridge:${participantId}`,
+      To: `message-bridge:${params.record.toolSessionId}`,
+      SessionKey: params.record.sessionKey,
+      AccountId: params.routeAccountId,
+      ChatType: "direct",
+      ConversationLabel: `ai-gateway:${participantId}`,
+      SenderName: "ai-gateway",
+      SenderId: participantId,
+      Provider: "message-bridge",
+      Surface: "message-bridge",
+      Timestamp: new Date().toISOString(),
+      OriginatingChannel: "message-bridge",
+      OriginatingTo: `message-bridge:${params.record.toolSessionId}`,
+      CommandAuthorized: false,
+    });
+  }
+
+  private selectReplyExecutor(runtimeReply: ReplyRuntimeCapabilities): ReplyExecutorSelection {
+    if (
+      typeof runtimeReply.createReplyDispatcherWithTyping === "function"
+      && typeof runtimeReply.dispatchReplyFromConfig === "function"
+    ) {
+      return {
+        executorType: "runtime",
+        fallbackReason: null,
+      };
+    }
+
+    return {
+      executorType: "buffered",
+      fallbackReason: "runtime_reply_api_unavailable",
+    };
+  }
+
+  private createReplyExecutor(selection: ReplyExecutorSelection): ReplyExecutor {
+    if (selection.executorType === "runtime") {
+      return new RuntimeReplyExecutor();
+    }
+    return new BufferedReplyExecutor();
+  }
+
+  private handleToolDeliver(
+    record: { sessionKey: string; toolSessionId: string },
+    payloadText: string,
+    context: UpstreamSendContext,
+  ): void {
+    if (this.isSessionTerminated(record)) {
+      return;
+    }
+
+    const activeSession = this.activeToolSessions.get(record.sessionKey);
+    const toolCallId = activeSession?.pendingToolResultTarget;
+    if (!toolCallId) {
+      return;
+    }
+
+    const toolState = activeSession.toolStates.get(toolCallId);
+    if (!toolState) {
+      return;
+    }
+
+    const output = payloadText.trim();
+    if (output.length === 0) {
+      return;
+    }
+
+    activeSession.pendingToolResultTarget = null;
+    toolState.output = output;
+    this.emitToolPartUpdate(record.toolSessionId, toolState, context);
+  }
+
+  private buildReplyExecutionExtra(result: ReplyExecutionResult): Record<string, unknown> {
+    return {
+      executionPath: result.executionPath,
+      executorType: result.executorType,
+      fallbackReason: result.fallbackReason,
+      dispatcherReturned: result.dispatcherReturned,
+      deliverCount: result.deliverCount,
+      toolDeliverCount: result.deliverKinds.tool,
+      blockDeliverCount: result.deliverKinds.block,
+      finalDeliverCount: result.deliverKinds.final,
+      firstDeliverKind: result.firstDeliverKind,
+      firstDeliverTextPreview: result.firstDeliverTextPreview,
+      lastDeliverKind: result.lastDeliverKind,
+      lastDeliverTextPreview: result.lastDeliverTextPreview,
+      pendingFinalText: result.pendingFinalText,
+      latestPartialText: result.latestPartialText,
+      firstVisibleReplyAt: result.firstVisibleReplyAt,
+      hasVisibleBlockText: result.hasVisibleBlockText,
+      blockTextCandidate: result.blockTextCandidate,
+    };
+  }
+
+  private logDispatcherReturned(params: {
+    toolSessionId: string;
+    sessionKey: string;
+    configuredTimeoutMs: number;
+    executionPath: ChatExecutionPath;
+    streamMode: StreamMode;
+    streamingEnabled: boolean;
+    streamingSource: StreamingSource;
+    chatRequestId: string;
+    retryAttempt: RetryAttempt;
+    result: ReplyExecutionResult;
+  }): void {
+    this.options.logger.info("bridge.chat.dispatcher_returned", {
+      toolSessionId: params.toolSessionId,
+      sessionKey: params.sessionKey,
+      configuredTimeoutMs: params.configuredTimeoutMs,
+      runTimeoutMs: params.configuredTimeoutMs,
+      executionPath: params.executionPath,
+      streamMode: params.streamMode,
+      streamingEnabled: params.streamingEnabled,
+      streamingSource: params.streamingSource,
+      chatRequestId: params.chatRequestId,
+      retryAttempt: params.retryAttempt,
+      ...this.buildReplyExecutionExtra(params.result),
+    });
   }
 
   private async deleteHostSession(record: { sessionKey: string }): Promise<void> {
@@ -1286,40 +1731,65 @@ export class OpenClawGatewayBridge {
     state.accumulatedText += delta;
   }
 
-  private resolveAssistantFinalText(state: AssistantStreamState, pendingFinalText: string | null): string | null {
-    if (pendingFinalText !== null) {
-      if (pendingFinalText.length > 0) {
-        return pendingFinalText;
-      }
-
-      if (state.latestPartialText !== null && state.latestPartialText.length > 0) {
-        return state.latestPartialText;
-      }
-
-      return null;
+  private classifyReplyOutcome(params: {
+    replyExecution: ReplyExecutionResult;
+    assistantStream: AssistantStreamState;
+    caughtErrorMessage: string | null;
+  }): ReplyOutcome {
+    if (params.caughtErrorMessage !== null) {
+      return {
+        kind: "structured_error",
+        finalText: null,
+        responseSource: "final_missing",
+        errorMessage: params.caughtErrorMessage,
+        shouldEmitAssistant: false,
+        shouldEmitStructuredError: true,
+      };
     }
 
-    if (state.latestPartialText !== null && state.latestPartialText.length > 0) {
-      return state.latestPartialText;
+    const pendingFinalText = params.replyExecution.pendingFinalText;
+    if (pendingFinalText !== null && pendingFinalText.length > 0) {
+      return {
+        kind: "assistant_success",
+        finalText: pendingFinalText,
+        responseSource: params.assistantStream.latestPartialText === null ? "final_only" : "partial_streaming",
+        errorMessage: null,
+        shouldEmitAssistant: true,
+        shouldEmitStructuredError: false,
+      };
     }
 
-    return null;
-  }
-
-  private resolveAssistantResponseSource(
-    state: AssistantStreamState,
-    pendingFinalText: string | null,
-    finalText: string,
-  ): "partial_streaming" | "final_only" | "final_missing" {
-    if (pendingFinalText === null) {
-      return "final_missing";
+    const latestPartialText = params.assistantStream.latestPartialText;
+    if (latestPartialText !== null && latestPartialText.length > 0) {
+      return {
+        kind: "assistant_success",
+        finalText: latestPartialText,
+        responseSource: pendingFinalText === null ? "final_missing" : "partial_streaming",
+        errorMessage: null,
+        shouldEmitAssistant: true,
+        shouldEmitStructuredError: false,
+      };
     }
 
-    if (state.latestPartialText === null) {
-      return "final_only";
+    if (params.replyExecution.hasVisibleBlockText && params.replyExecution.blockTextCandidate !== null) {
+      return {
+        kind: "assistant_success",
+        finalText: params.replyExecution.blockTextCandidate,
+        responseSource: "block_fallback",
+        errorMessage: null,
+        shouldEmitAssistant: true,
+        shouldEmitStructuredError: false,
+      };
     }
 
-    return "partial_streaming";
+    return {
+      kind: "empty_response",
+      finalText: null,
+      responseSource: "final_missing",
+      errorMessage: "assistant_response_missing_text",
+      shouldEmitAssistant: false,
+      shouldEmitStructuredError: true,
+    };
   }
 
   private sendAssistantCompleted(
@@ -1665,7 +2135,7 @@ export class OpenClawGatewayBridge {
     finalReconciled: boolean;
     responseLength: number;
     finalText: string;
-    responseSource: "partial_streaming" | "final_only" | "final_missing";
+    responseSource: "partial_streaming" | "final_only" | "final_missing" | "block_fallback";
     extra?: Record<string, unknown>;
   }): void {
     this.options.logger.info("bridge.chat.completed", {

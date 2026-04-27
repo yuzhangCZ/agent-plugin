@@ -79,7 +79,14 @@ function createAccount() {
   };
 }
 
-function createRuntimeReplyRuntime(dispatchImpl) {
+function createRuntimeReplyRuntime(dispatchImpl, options = {}) {
+  const {
+    includeRuntimeDispatcher = true,
+    includeBufferedDispatcher = true,
+    waitForIdle,
+    assertRuntimeDispatcherArgs,
+  } = options;
+  let runtimeDeliver;
   return {
     channel: {
       routing: {
@@ -100,9 +107,37 @@ function createRuntimeReplyRuntime(dispatchImpl) {
         finalizeInboundContext(context) {
           return context;
         },
-        async dispatchReplyWithBufferedBlockDispatcher(args) {
-          await dispatchImpl(args);
-        },
+        ...(includeRuntimeDispatcher
+          ? {
+              createReplyDispatcherWithTyping(args) {
+                assertRuntimeDispatcherArgs?.(args);
+                runtimeDeliver = args.deliver;
+                return {
+                  dispatcher: {
+                    waitForIdle: waitForIdle ?? (async () => {}),
+                  },
+                  replyOptions: {},
+                  markDispatchIdle() {},
+                  markFullyComplete() {},
+                };
+              },
+              async dispatchReplyFromConfig(args) {
+                await dispatchImpl({
+                  ...args,
+                  dispatcherOptions: {
+                    deliver: runtimeDeliver,
+                  },
+                });
+              },
+            }
+          : {}),
+        ...(includeBufferedDispatcher
+          ? {
+              async dispatchReplyWithBufferedBlockDispatcher(args) {
+                await dispatchImpl(args);
+              },
+            }
+          : {}),
       },
     },
   };
@@ -403,9 +438,13 @@ test("partial and different final logs finalReconciled=true before completion", 
   assert.ok(completedLog);
   assert.equal(completedLog.meta?.finalReconciled, true);
   assert.equal(completedLog.meta?.responseSource, "partial_streaming");
+  assert.equal(completedLog.meta?.executorType, "runtime");
+  assert.equal(completedLog.meta?.dispatcherReturned, true);
+  assert.equal(completedLog.meta?.deliverCount, 1);
+  assert.equal(completedLog.meta?.finalDeliverCount, 1);
 });
 
-test("block payloads are ignored for assistant text and final-only path still completes", async () => {
+test("block payloads fall back to assistant text only when final and partial are absent", async () => {
   const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
     await dispatcherOptions.deliver({ text: "ignored block" }, { kind: "block" });
     await dispatcherOptions.deliver({ text: "visible final" }, { kind: "final" });
@@ -425,6 +464,59 @@ test("block payloads are ignored for assistant text and final-only path still co
   const toolEvents = getToolEvents(connection);
   assert.equal(findAssistantTextUpdateIndex(toolEvents, "ignored block"), -1);
   assert.notEqual(findAssistantTextUpdateIndex(toolEvents, "visible final"), -1);
+});
+
+test("block-only visible reply is emitted as assistant success", async () => {
+  const logger = createLogger();
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "visible block fallback" }, { kind: "block" });
+  });
+  const { bridge, connection, logger: bridgeLogger } = createBridge({ runtime, logger });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_block_only_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_block_only_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  assert.notEqual(findAssistantTextUpdateIndex(toolEvents, "visible block fallback"), -1);
+  assert.equal(
+    connection.sent.some(({ message }) => message.type === "tool_event" && message.event.type === "session.error"),
+    false,
+  );
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_error"), false);
+  const completedLog = bridgeLogger.records.info.findLast((entry) => entry.message === "bridge.chat.completed");
+  assert.ok(completedLog);
+  assert.equal(completedLog.meta?.responseSource, "block_fallback");
+  assert.equal(completedLog.meta?.blockTextCandidate, "visible block fallback");
+});
+
+test("multiple visible blocks use the last non-empty block as fallback text", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "first block" }, { kind: "block" });
+    await dispatcherOptions.deliver({ text: "   " }, { kind: "block" });
+    await dispatcherOptions.deliver({ text: "last block" }, { kind: "block" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_block_last_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_block_last_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  assert.equal(findAssistantTextUpdateIndex(toolEvents, "first block"), -1);
+  assert.notEqual(findAssistantTextUpdateIndex(toolEvents, "last block"), -1);
 });
 
 test("streaming disabled ignores partial and reasoning streams and only uses final text", async () => {
@@ -501,6 +593,40 @@ test("streaming disabled does not reuse hidden partial text when final is empty"
   assert.ok(messages.some((message) => message.type === "tool_event" && message.event.type === "session.error"));
   assert.ok(messages.some((message) => message.type === "tool_error" && message.error === "assistant_response_missing_text"));
   assert.equal(logger.records.info.some((entry) => entry.message === "bridge.chat.completed"), false);
+});
+
+test("streaming disabled still allows block-only fallback success", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "block fallback while streaming off" }, { kind: "block" });
+  });
+  const { bridge, connection, logger } = createBridge({
+    runtime,
+    config: {
+      channels: {
+        "message-bridge": {
+          streaming: false,
+        },
+      },
+    },
+    logger: createLogger(),
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_streaming_off_block_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_streaming_off_block_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  assert.notEqual(findAssistantTextUpdateIndex(toolEvents, "block fallback while streaming off"), -1);
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_error"), false);
+  const completedLog = logger.records.info.findLast((entry) => entry.message === "bridge.chat.completed");
+  assert.ok(completedLog);
+  assert.equal(completedLog.meta?.responseSource, "block_fallback");
 });
 
 test("runtime reply final-only reuses the same assistant text part identity", async () => {
@@ -624,6 +750,191 @@ test("empty final without partial fails instead of emitting an assistant reply",
     false,
   );
   assert.equal(logger.records.info.some((entry) => entry.message === "bridge.chat.completed"), false);
+  const failedLog = logger.records.warn.findLast((entry) => entry.message === "bridge.chat.failed");
+  assert.ok(failedLog);
+  assert.equal(failedLog.meta?.executorType, "runtime");
+  assert.equal(failedLog.meta?.dispatcherReturned, true);
+  assert.equal(failedLog.meta?.deliverCount, 1);
+  assert.equal(failedLog.meta?.finalDeliverCount, 1);
+  assert.equal(failedLog.meta?.firstDeliverKind, "final");
+  assert.equal(failedLog.meta?.firstDeliverTextPreview, null);
+});
+
+test("runtime executor is preferred when upper reply api is available", async () => {
+  const logger = createLogger();
+  const runtime = createRuntimeReplyRuntime(
+    async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "runtime path final" }, { kind: "final" });
+    },
+    {
+      assertRuntimeDispatcherArgs(args) {
+        assert.equal(typeof args.responsePrefix, "string");
+        assert.equal(typeof args.responsePrefixContextProvider, "function");
+        assert.equal(typeof args.deliver, "function");
+        assert.equal("onModelSelected" in args, false);
+        assert.equal("channel" in args, false);
+        assert.equal("accountId" in args, false);
+      },
+    },
+  );
+  const { bridge } = createBridge({ runtime, logger });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_runtime_executor_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_runtime_executor_1",
+      text: "hello",
+    },
+  });
+
+  const dispatcherLog = logger.records.info.findLast((entry) => entry.message === "bridge.chat.dispatcher_returned");
+  assert.ok(dispatcherLog);
+  assert.equal(dispatcherLog.meta?.executorType, "runtime");
+  assert.equal(dispatcherLog.meta?.fallbackReason, null);
+});
+
+test("buffered executor fallback preserves assistant final response semantics", async () => {
+  const logger = createLogger();
+  const runtime = createRuntimeReplyRuntime(
+    async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "buffered final" }, { kind: "final" });
+    },
+    {
+      includeRuntimeDispatcher: false,
+      includeBufferedDispatcher: true,
+    },
+  );
+  const { bridge, connection } = createBridge({ runtime, logger });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_buffered_executor_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_buffered_executor_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  assert.notEqual(findAssistantTextUpdateIndex(toolEvents, "buffered final"), -1);
+  const dispatcherLog = logger.records.info.findLast((entry) => entry.message === "bridge.chat.dispatcher_returned");
+  assert.ok(dispatcherLog);
+  assert.equal(dispatcherLog.meta?.executorType, "buffered");
+  assert.equal(dispatcherLog.meta?.fallbackReason, "runtime_reply_api_unavailable");
+});
+
+test("waitForIdle blocks completion and tool_done until dispatcher becomes idle", async () => {
+  let releaseIdle;
+  const waitForIdle = new Promise((resolve) => {
+    releaseIdle = resolve;
+  });
+  const runtime = createRuntimeReplyRuntime(
+    async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "idle gated final" }, { kind: "final" });
+    },
+    {
+      waitForIdle: async () => {
+        await waitForIdle;
+      },
+    },
+  );
+  const { bridge, connection } = createBridge({ runtime });
+
+  const pending = bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_wait_for_idle_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_wait_for_idle_1",
+      text: "hello",
+    },
+  });
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const earlyMessages = connection.sent.map(({ message }) => message);
+  assert.equal(
+    earlyMessages.some((message) => message.type === "tool_done"),
+    false,
+  );
+  assert.equal(
+    earlyMessages.some((message) => message.type === "tool_event" && message.event.properties?.info?.time?.completed),
+    false,
+  );
+
+  releaseIdle();
+  await pending;
+
+  const finalMessages = connection.sent.map(({ message }) => message);
+  assert.equal(finalMessages.some((message) => message.type === "tool_done"), true);
+  assert.equal(
+    finalMessages.some((message) => message.type === "tool_event" && message.event.properties?.info?.time?.completed),
+    true,
+  );
+});
+
+test("failed runtime execution keeps deliver diagnostics collected before throw", async () => {
+  const logger = createLogger();
+  const runtime = createRuntimeReplyRuntime(async ({ replyOptions, dispatcherOptions }) => {
+    replyOptions.onPartialReply("hello");
+    await dispatcherOptions.deliver({ text: "partial final candidate" }, { kind: "final" });
+    throw new Error("runtime_failed_after_deliver");
+  });
+  const { bridge } = createBridge({ runtime, logger });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_runtime_error_after_deliver",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_runtime_error_after_deliver",
+      text: "hello",
+    },
+  });
+
+  const failedLog = logger.records.warn.findLast((entry) => entry.message === "bridge.chat.failed");
+  assert.ok(failedLog);
+  assert.equal(failedLog.meta?.error, "runtime_failed_after_deliver");
+  assert.equal(failedLog.meta?.deliverCount, 1);
+  assert.equal(failedLog.meta?.finalDeliverCount, 1);
+  assert.equal(failedLog.meta?.firstDeliverKind, "final");
+  assert.equal(failedLog.meta?.pendingFinalText, "partial final candidate");
+  assert.equal(failedLog.meta?.latestPartialText, "hello");
+  assert.equal(failedLog.meta?.dispatcherReturned, false);
+});
+
+test("executor exception wins over block fallback and emits structured error", async () => {
+  const logger = createLogger();
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
+    await dispatcherOptions.deliver({ text: "visible block before failure" }, { kind: "block" });
+    throw new Error("runtime_failed_after_block");
+  });
+  const { bridge, connection } = createBridge({ runtime, logger });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_block_error_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_block_error_1",
+      text: "hello",
+    },
+  });
+
+  const messages = connection.sent.map(({ message }) => message);
+  assert.equal(
+    messages.some((message) => message.type === "tool_event" && message.event.properties?.info?.role === "assistant"),
+    false,
+  );
+  assert.ok(messages.some((message) => message.type === "tool_error" && message.error === "runtime_failed_after_block"));
+  const failedLog = logger.records.warn.findLast((entry) => entry.message === "bridge.chat.failed");
+  assert.ok(failedLog);
+  assert.equal(failedLog.meta?.blockTextCandidate, "visible block before failure");
+  assert.equal(failedLog.meta?.hasVisibleBlockText, true);
 });
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {
