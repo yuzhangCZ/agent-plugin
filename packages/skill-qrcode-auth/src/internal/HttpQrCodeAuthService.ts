@@ -95,7 +95,8 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
   }): Promise<QueryQrCodeSessionResult> {
     const response = await this.requestJson({
       url: new URL(
-        `/assistant-api/nologin/we-crew/im-register/qrcode-detail/${encodeURIComponent(input.ref.qrcode)}`,
+        // 服务端保证 qrcode 不含 URL 保留字符；这里按原值拼接路径，不做编码。
+        `/assistant-api/nologin/we-crew/im-register/qrcode-detail/${input.ref.qrcode}`,
         normalizeBaseUrl(input.baseUrl),
       ),
       init: {
@@ -140,23 +141,23 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
       };
     }
 
-    switch (readString(data?.status)) {
-      case "wait":
+    switch (readStatusCode(data?.status)) {
+      case 0:
         return {
           kind: "waiting",
           qrcode,
         };
-      case "scaned":
+      case 1:
         return {
           kind: "scanned",
           qrcode,
         };
-      case "cancel":
+      case 3:
         return {
           kind: "cancelled",
           qrcode,
         };
-      case "confirmed": {
+      case 2: {
         const ak = readString(data?.ak);
         const sk = readString(data?.sk);
         if (!ak || !sk) {
@@ -238,6 +239,13 @@ function readCode(body: AuthResponseBody): string {
 
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function readStatusCode(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
 }
 
 function readDisplayData(data: Record<string, unknown> | null | undefined): QrCodeDisplayData | null {

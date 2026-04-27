@@ -152,7 +152,7 @@ cancel: 3     // 取消
 | `data.qrcode` | `string` | Y | 二维码唯一标识 |
 | `data.weUrl` | `string` | Y | H5 扫码内容，例如 `h5://.../index.html?qrcode=xxx&channel=xx` |
 | `data.pcUrl` | `string` | Y | PC 端拉起 app 链接，例如 `xxxapp://...?qrcode=xxx&channel=xx` |
-| `data.status` | `string` | Y | 当前二维码状态 |
+| `data.status` | `number` | Y | 当前二维码状态，`0=wait`、`1=scaned`、`2=confirmed`、`3=cancel` |
 | `data.expireTime` | `string` | Y | 二维码过期时间 |
 | `data.mac` | `string` | Y | MAC 地址 |
 | `data.channel` | `string` | Y | `channel` 来源 |
@@ -195,7 +195,7 @@ cancel: 3     // 取消
 | `data.qrcode` | `string` | Y | 二维码唯一标识 |
 | `data.weUrl` | `string` | Y | H5 扫码内容 |
 | `data.pcUrl` | `string` | Y | PC 端拉起 app 链接 |
-| `data.status` | `string` | Y | 当前二维码状态 |
+| `data.status` | `number` | Y | 当前二维码状态，`0=wait`、`1=scaned`、`2=confirmed`、`3=cancel` |
 | `data.ak` | `string` | Y | 二维码状态为 `confirmed` 时返回 |
 | `data.sk` | `string` | Y | 二维码状态为 `confirmed` 时返回 |
 | `data.expireTime` | `string` | Y | 二维码过期时间 |

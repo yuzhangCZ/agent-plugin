@@ -25,7 +25,7 @@ test("integration run emits terminal snapshot before resolve", async () => {
         code: "200",
         data: {
           qrcode: "qr-1",
-          status: "confirmed",
+          status: 2,
           expired: "false",
           ak: "ak-1",
           sk: "sk-1",
@@ -78,7 +78,7 @@ test("public qrcodeAuth creates isolated session state for repeated runs", async
       code: "200",
       data: {
         qrcode,
-        status: "confirmed",
+        status: 2,
         expired: "false",
         ak: `${qrcode}-ak`,
         sk: `${qrcode}-sk`,

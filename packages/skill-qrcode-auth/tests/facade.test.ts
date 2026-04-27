@@ -57,7 +57,7 @@ test("facade merges default policy and resolves after terminal snapshot", async 
         code: "200",
         data: {
           qrcode: "qr-1",
-          status: "confirmed",
+          status: 2,
           expired: "false",
           ak: "ak-1",
           sk: "sk-1",
@@ -231,7 +231,7 @@ test("facade defaults environment to prod and resolves after terminal snapshot",
         code: "200",
         data: {
           qrcode: "qr-1",
-          status: "confirmed",
+          status: 2,
           expired: "false",
           ak: "ak-1",
           sk: "sk-1",
@@ -272,7 +272,7 @@ test("facade resolves uat environment to fixed auth base url", async () => {
         code: "200",
         data: {
           qrcode: "qr-1",
-          status: "confirmed",
+          status: 2,
           expired: "false",
           ak: "ak-1",
           sk: "sk-1",

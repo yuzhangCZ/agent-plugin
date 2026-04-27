@@ -73,7 +73,7 @@ test("http adapter maps expired query from successful response", async () => {
     code: "200",
     data: {
       qrcode: "qr-1",
-      status: "wait",
+      status: 0,
       expired: "true",
     },
   }));
@@ -97,7 +97,7 @@ test("http adapter accepts numeric success business code on query", async () => 
     code: 200,
     data: {
       qrcode: "qr-1",
-      status: "confirmed",
+      status: 2,
       expired: "false",
       ak: "ak-1",
       sk: "sk-1",
@@ -127,9 +127,125 @@ test("http adapter maps confirmed without credentials to auth_service_error", as
     code: "200",
     data: {
       qrcode: "qr-1",
-      status: "confirmed",
+      status: 2,
       ak: "ak-only",
       sk: "",
+      expired: "false",
+    },
+  }));
+
+  const result = await service.querySession({
+    baseUrl: "https://auth.example.com",
+    ref: {
+      qrcode: "qr-1",
+      accessToken: "token-1",
+    },
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    qrcode: "qr-1",
+    reasonCode: "auth_service_error",
+    serviceError: {
+      httpStatus: 200,
+      businessCode: "200",
+    },
+  });
+});
+
+test("http adapter uses raw qrcode in query path without encoding", async () => {
+  const requestedUrls: string[] = [];
+  const service = new HttpQrCodeAuthService(async (input) => {
+    requestedUrls.push(String(input));
+    return jsonResponse({
+      code: "200",
+      data: {
+        qrcode: "qr/a+b=%20",
+        status: 0,
+        expired: "false",
+      },
+    });
+  });
+
+  await service.querySession({
+    baseUrl: "https://auth.example.com",
+    ref: {
+      qrcode: "qr/a+b=%20",
+      accessToken: "token-1",
+    },
+  });
+
+  assert.equal(
+    requestedUrls[0],
+    "https://auth.example.com/assistant-api/nologin/we-crew/im-register/qrcode-detail/qr/a+b=%20",
+  );
+});
+
+test("http adapter maps string query status to auth_service_error", async () => {
+  const service = new HttpQrCodeAuthService(async () => jsonResponse({
+    code: "200",
+    data: {
+      qrcode: "qr-1",
+      status: "confirmed",
+      expired: "false",
+      ak: "ak-1",
+      sk: "sk-1",
+    },
+  }));
+
+  const result = await service.querySession({
+    baseUrl: "https://auth.example.com",
+    ref: {
+      qrcode: "qr-1",
+      accessToken: "token-1",
+    },
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    qrcode: "qr-1",
+    reasonCode: "auth_service_error",
+    serviceError: {
+      httpStatus: 200,
+      businessCode: "200",
+    },
+  });
+});
+
+test("http adapter maps missing query status to auth_service_error", async () => {
+  const service = new HttpQrCodeAuthService(async () => jsonResponse({
+    code: "200",
+    data: {
+      qrcode: "qr-1",
+      expired: "false",
+    },
+  }));
+
+  const result = await service.querySession({
+    baseUrl: "https://auth.example.com",
+    ref: {
+      qrcode: "qr-1",
+      accessToken: "token-1",
+    },
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    qrcode: "qr-1",
+    reasonCode: "auth_service_error",
+    serviceError: {
+      httpStatus: 200,
+      businessCode: "200",
+    },
+  });
+});
+
+test("http adapter maps unknown numeric query status to auth_service_error", async () => {
+  const service = new HttpQrCodeAuthService(async () => jsonResponse({
+    code: "200",
+    data: {
+      qrcode: "qr-1",
+      status: 99,
       expired: "false",
     },
   }));
