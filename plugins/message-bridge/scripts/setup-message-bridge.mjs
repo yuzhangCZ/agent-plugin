@@ -13,6 +13,7 @@ const NPM_SCOPE_REGISTRY_LINE = '@wecode:registry=';
 const DEFAULT_SCOPE_REGISTRY = 'https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/';
 const DEFAULT_CHANNEL = 'opencode';
 const DEFAULT_QRCODE_ENVIRONMENT = 'prod';
+const TERMINAL_QRCODE_PACKAGE = 'terminal-qrcode';
 const HELP_TEXT = `Message Bridge 安装 CLI
 
 用法:
@@ -402,10 +403,72 @@ async function loadQrCodeAuthRuntime() {
   throw new Error(`无法加载二维码授权模块：${failures.join(' | ')}`);
 }
 
-function renderSnapshot(snapshot) {
+function resolveTerminalQrCodeRenderer(module) {
+  const candidate = module?.default ?? module;
+  if (typeof candidate?.drawText !== 'function') {
+    return null;
+  }
+
+  return async (content) => new Promise((resolve, reject) => {
+    candidate.drawText(content, (error, qrcode) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(typeof qrcode === 'string' ? qrcode : '');
+    });
+  });
+}
+
+async function loadTerminalQrCodeRenderer() {
+  const override = env.MB_SETUP_TERMINAL_QRCODE_MODULE;
+  const attempts = override
+    ? [async () => import(pathToFileURL(override).href)]
+    : [async () => import(TERMINAL_QRCODE_PACKAGE)];
+  const failures = [];
+
+  for (const load of attempts) {
+    try {
+      const renderer = resolveTerminalQrCodeRenderer(await load());
+      if (renderer) {
+        return renderer;
+      }
+      failures.push('terminal-qrcode 模块必须导出 drawText(text, callback)。');
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (failures.length > 0) {
+    writeLine(`终端二维码渲染不可用，将回退为链接展示：${failures.join(' | ')}`);
+  }
+  return null;
+}
+
+async function renderTerminalQrCode(renderer, weUrl) {
+  if (!renderer) {
+    return false;
+  }
+
+  try {
+    const output = await renderer(weUrl);
+    if (!output.trim()) {
+      writeLine('终端二维码渲染结果为空，将回退为链接展示。');
+      return false;
+    }
+    writeLine(output);
+    return true;
+  } catch (error) {
+    writeLine(`终端二维码渲染失败，将回退为链接展示：${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function renderSnapshot(snapshot, terminalQrCodeRenderer) {
   switch (snapshot.type) {
     case 'qrcode_generated':
       writeLine('二维码已生成，请使用企业侧应用扫码授权。');
+      await renderTerminalQrCode(terminalQrCodeRenderer, snapshot.display.weUrl);
       writeLine(`- qrcode: ${snapshot.qrcode}`);
       writeLine(`- weUrl: ${snapshot.display.weUrl}`);
       writeLine(`- pcUrl: ${snapshot.display.pcUrl}`);
@@ -434,15 +497,17 @@ function renderSnapshot(snapshot) {
 
 async function runQrCodeAuth(environment) {
   const qrcodeAuth = await loadQrCodeAuthRuntime();
+  const terminalQrCodeRenderer = await loadTerminalQrCodeRenderer();
   let terminalSnapshot = null;
   let credentials = null;
+  let renderQueue = Promise.resolve();
 
   await qrcodeAuth.run({
     environment,
     channel: DEFAULT_CHANNEL,
     mac: resolveMacAddress(),
     onSnapshot(snapshot) {
-      renderSnapshot(snapshot);
+      renderQueue = renderQueue.then(() => renderSnapshot(snapshot, terminalQrCodeRenderer));
       if (snapshot.type === 'confirmed') {
         credentials = snapshot.credentials;
       }
@@ -451,6 +516,7 @@ async function runQrCodeAuth(environment) {
       }
     },
   });
+  await renderQueue;
 
   if (credentials) {
     return credentials;
@@ -460,7 +526,8 @@ async function runQrCodeAuth(environment) {
     throw new Error('二维码授权已取消，未写入任何配置。');
   }
   if (terminalSnapshot?.type === 'failed') {
-    throw new Error(`二维码授权失败：${terminalSnapshot.reasonCode}`);
+    const detail = terminalSnapshot.serviceError?.message ? ` (${terminalSnapshot.serviceError.message})` : '';
+    throw new Error(`二维码授权失败：${terminalSnapshot.reasonCode}${detail}`);
   }
 
   throw new Error('二维码授权流程异常结束，未获取到 AK/SK。');

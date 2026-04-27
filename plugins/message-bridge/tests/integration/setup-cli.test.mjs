@@ -112,6 +112,34 @@ async function createFakeQrCodeModule(dir) {
   return modulePath;
 }
 
+async function createFakeTerminalQrCodeModule(dir, mode = 'success') {
+  const modulePath = join(dir, `fake-terminal-qrcode-${mode}.mjs`);
+  await writeFile(
+    modulePath,
+    mode === 'success'
+      ? `export default {
+  drawText(value, callback) {
+    if (process.env.MB_TERMINAL_QRCODE_LOG) {
+      import('node:fs/promises').then(({ writeFile }) =>
+        writeFile(process.env.MB_TERMINAL_QRCODE_LOG, JSON.stringify({ value }), 'utf8')
+      ).then(() => callback(null, '[terminal-qrcode]\\n' + value)).catch(callback);
+      return;
+    }
+    callback(null, '[terminal-qrcode]\\n' + value);
+  },
+};
+`
+      : `export default {
+  drawText(_value, callback) {
+    callback(new Error('mock render failed'));
+  },
+};
+`,
+    'utf8',
+  );
+  return modulePath;
+}
+
 async function createDefaultRuntimeFetchPreload(dir) {
   const preloadPath = join(dir, 'mock-qrcode-fetch.mjs');
   await writeFile(
@@ -134,8 +162,8 @@ async function createDefaultRuntimeFetchPreload(dir) {
     code: '200',
     data: {
       qrcode: 'qr-1',
-      status: 'confirmed',
-      expired: 'false',
+      status: 2,
+      expired: false,
       ak: 'default-ak',
       sk: 'default-sk',
     },
@@ -292,6 +320,48 @@ describe('setup cli', () => {
     });
   });
 
+  test('renders terminal qrcode from weUrl when renderer is available', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const terminalQrCodeModule = await createFakeTerminalQrCodeModule(home, 'success');
+      const logPath = join(home, 'terminal-qrcode-log.json');
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: baseSetupArgs(),
+        extraEnv: {
+          MB_SETUP_TERMINAL_QRCODE_MODULE: terminalQrCodeModule,
+          MB_TERMINAL_QRCODE_LOG: logPath,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const renderInput = JSON.parse(await readFile(logPath, 'utf8'));
+      assert.equal(renderInput.value, 'https://we.example/qr-1');
+      assert.ok(result.stdout.includes('[terminal-qrcode]'));
+      assert.ok(result.stdout.includes('https://we.example/qr-1'));
+    });
+  });
+
+  test('falls back to weUrl text when terminal qrcode renderer fails', async () => {
+    await withTempDirs(async ({ home, project, qrcodeModule }) => {
+      const terminalQrCodeModule = await createFakeTerminalQrCodeModule(home, 'failed');
+      const result = runSetupCommand({
+        cwd: project,
+        home,
+        qrcodeModule,
+        args: baseSetupArgs(),
+        extraEnv: {
+          MB_SETUP_TERMINAL_QRCODE_MODULE: terminalQrCodeModule,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      assert.ok(result.stdout.includes('终端二维码渲染失败，将回退为链接展示'));
+      assert.ok(result.stdout.includes('- weUrl: https://we.example/qr-1'));
+    });
+  });
+
   test('supports explicit uat environment', async () => {
     await withTempDirs(async ({ home, project, qrcodeModule }) => {
       const logPath = join(home, 'qrcode-log.json');
@@ -415,6 +485,7 @@ describe('setup cli', () => {
 
       assert.notStrictEqual(result.status, 0);
       assert.ok(result.stderr.includes('二维码授权失败'));
+      assert.ok(result.stderr.includes('network_error'));
 
       const configRoot = join(home, '.config', 'opencode');
       await assert.rejects(readFile(join(configRoot, 'message-bridge.jsonc'), 'utf8'));

@@ -327,7 +327,9 @@ test("http adapter stringifies numeric business code in service error", async ()
 
 test("http adapter maps fetch failure to network_error", async () => {
   const service = new HttpQrCodeAuthService(async () => {
-    throw new Error("socket hang up");
+    const error = new Error("socket hang up");
+    Object.assign(error, { code: "ECONNRESET" });
+    throw error;
   });
 
   const result = await service.createSession({
@@ -339,5 +341,8 @@ test("http adapter maps fetch failure to network_error", async () => {
   assert.deepStrictEqual(result, {
     kind: "failed",
     reasonCode: "network_error",
+    serviceError: {
+      message: "ECONNRESET: socket hang up",
+    },
   });
 });

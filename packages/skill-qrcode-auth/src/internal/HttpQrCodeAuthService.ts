@@ -197,10 +197,12 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
     let response: Response;
     try {
       response = await this.fetchImpl(input.url, input.init);
-    } catch {
+    } catch (error) {
+      const serviceError = buildNetworkServiceError(error);
       return {
         kind: "failed",
         reasonCode: "network_error",
+        ...(serviceError ? { serviceError } : {}),
       };
     }
 
@@ -282,6 +284,30 @@ function buildServiceError(httpStatus: number, body: AuthResponseBody): QrCodeAu
     ...(typeof body.message === "string" ? { message: body.message } : {}),
     ...(typeof body.errorEn === "string" ? { errorEn: body.errorEn } : {}),
   };
+}
+
+function buildNetworkServiceError(error: unknown): QrCodeAuthServiceError | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const details: string[] = [];
+  if (error.name && error.name !== "Error") {
+    details.push(error.name);
+  }
+  if ("code" in error && typeof error.code === "string" && error.code.trim()) {
+    details.push(error.code.trim());
+  }
+  if (error.message.trim()) {
+    details.push(error.message.trim());
+  }
+
+  const message = details.join(": ").slice(0, 300);
+  if (!message) {
+    return null;
+  }
+
+  return { message };
 }
 
 function normalizeBusinessCode(value: unknown): string {
