@@ -109,12 +109,40 @@ function createRuntimeReplyRuntime(dispatchImpl) {
         finalizeInboundContext(context) {
           return context;
         },
-        async dispatchReplyWithBufferedBlockDispatcher(args) {
+        async dispatchReplyFromConfig(args) {
           await dispatchImpl(args);
         },
       },
     },
   };
+}
+
+function createRuntimeReplyDispatchHarness(dispatcher) {
+  return {
+    block(payload) {
+      return typeof dispatcher.sendBlockReply === "function"
+        ? dispatcher.sendBlockReply(payload)
+        : dispatcher.deliver(payload, { kind: "block" });
+    },
+    final(payload) {
+      return typeof dispatcher.sendFinalReply === "function"
+        ? dispatcher.sendFinalReply(payload)
+        : dispatcher.deliver(payload, { kind: "final" });
+    },
+    tool(payload) {
+      return typeof dispatcher.sendToolResult === "function"
+        ? dispatcher.sendToolResult(payload)
+        : dispatcher.deliver(payload, { kind: "tool" });
+    },
+  };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 function createRuntimeEventBus() {
@@ -481,10 +509,11 @@ test("subagent fallback emits session.idle with toolSessionId instead of interna
 });
 
 test("runtime reply chat emits assistant text events in protocol order", async () => {
-  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
-    await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: " world" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "hello world" }, { kind: "final" });
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.block({ text: "hello" });
+    await reply.block({ text: " world" });
+    await reply.final({ text: "hello world" });
   });
   const { bridge, connection } = createBridge({ runtime });
 
@@ -668,9 +697,10 @@ test("runtime reply chat emits assistant text events in protocol order", async (
 });
 
 test("single block stream emits seeded first text update and skips identical final replay", async () => {
-  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
-    await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "hello" }, { kind: "final" });
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.block({ text: "hello" });
+    await reply.final({ text: "hello" });
   });
   const { bridge, connection } = createBridge({ runtime });
 
@@ -702,9 +732,44 @@ test("single block stream emits seeded first text update and skips identical fin
   assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "hello");
 });
 
-test("runtime reply final-only emits final text without synthetic delta and marks status unhealthy", async () => {
-  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
-    await dispatcherOptions.deliver({ text: "hello only final" }, { kind: "final" });
+test("runtime reply final reconciliation extends streamed prefix without duplicating text", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.block({ text: "hello" });
+    await reply.final({ text: "hello world" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_reconcile_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_reconcile_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const helloIndex = findAssistantTextUpdateIndex(toolEvents, "hello");
+  const finalIndex = findAssistantTextUpdateIndex(toolEvents, "hello world", helloIndex + 1);
+
+  assert.notEqual(helloIndex, -1);
+  assert.notEqual(finalIndex, -1);
+  assertNoAdjacentAssistantTextDelta(toolEvents, finalIndex, "hello world");
+
+  const finalUpdates = toolEvents.filter((message) => {
+    return message.event.type === "message.part.updated"
+      && message.event.properties?.part?.type === "text"
+      && message.event.properties?.part?.text === "hello world";
+  });
+  assert.equal(finalUpdates.length, 1);
+});
+
+test("runtime reply final-only replays synthetic delta and still marks status unhealthy", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.final({ text: "hello only final" });
   });
   const statuses = [];
   const { bridge, connection } = createBridge({
@@ -736,9 +801,56 @@ test("runtime reply final-only emits final text without synthetic delta and mark
 
   assert.notEqual(finalAssistantTextUpdateIndex, -1);
   assertAssistantTextSeed(toolEvents, finalAssistantTextUpdateIndex);
-  assertNoAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final");
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final", "hello only final");
   assert.ok(statuses.some((status) => status.streamingPathReason === "runtime_reply_final_only"));
   assert.ok(statuses.some((status) => status.streamingPathHealthy === false));
+});
+
+test("runtime reply waits for dispatcher idle before emitting session.idle and tool_done", async () => {
+  const idleGate = createDeferred();
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    assert.deepEqual(dispatcher.getQueuedCounts(), { tool: 0, block: 0, final: 0 });
+    const pendingBlock = reply.block({ text: "hello" });
+    assert.equal(typeof pendingBlock, "boolean");
+    assert.deepEqual(dispatcher.getQueuedCounts(), { tool: 0, block: 1, final: 0 });
+    await idleGate.promise;
+    await pendingBlock;
+    await reply.final({ text: "hello" });
+    assert.deepEqual(dispatcher.getQueuedCounts(), { tool: 0, block: 1, final: 1 });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  const pending = bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_idle_gate_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_idle_gate_1",
+      text: "hello",
+    },
+  });
+
+  await Promise.resolve();
+  assert.equal(connection.sent.some(({ message }) => message.event?.type === "session.idle"), false);
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_done"), false);
+
+  idleGate.resolve();
+  await pending;
+
+  const eventTypes = connection.sent.map(({ message }) => {
+    return message.type === "tool_done" ? "tool_done" : message.event.type;
+  });
+  const finalTextIndex = eventTypes.findIndex((eventType, index) => {
+    return eventType === "message.part.updated"
+      && connection.sent[index].message.event.properties?.part?.text === "hello";
+  });
+  const idleIndex = eventTypes.lastIndexOf("session.idle");
+  const doneIndex = eventTypes.lastIndexOf("tool_done");
+
+  assert.ok(finalTextIndex >= 0);
+  assert.ok(idleIndex > finalTextIndex);
+  assert.ok(doneIndex > idleIndex);
 });
 
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {
@@ -908,8 +1020,9 @@ test("subagent fallback emits empty response without synthetic delta before fina
 });
 
 test("runtime reply final-only and fallback reuse the same assistant text part identity", async () => {
-  const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
-    await dispatcherOptions.deliver({ text: "identity final" }, { kind: "final" });
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.final({ text: "identity final" });
   });
   const { bridge, connection } = createBridge({ runtime });
 
@@ -933,7 +1046,8 @@ test("runtime reply final-only and fallback reuse the same assistant text part i
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {
   let bridgeRef;
-  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcherOptions }) => {
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
     bridgeRef.handleRuntimeAgentEvent({
       stream: "tool",
       sessionKey: ctx.SessionKey,
@@ -952,7 +1066,7 @@ test("runtime tool agent events project to message.part.updated tool states", as
         name: "search",
       },
     });
-    await dispatcherOptions.deliver({ text: "tool output" }, { kind: "tool" });
+    await reply.tool({ text: "tool output" });
     bridgeRef.handleRuntimeAgentEvent({
       stream: "tool",
       sessionKey: ctx.SessionKey,
@@ -963,7 +1077,7 @@ test("runtime tool agent events project to message.part.updated tool states", as
         isError: true,
       },
     });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "block" });
+    await reply.block({ text: "done" });
   });
   const created = createBridge({ runtime });
   bridgeRef = created.bridge;
@@ -1019,7 +1133,8 @@ test("runtime tool agent events project to message.part.updated tool states", as
 
 test("runtime tool result can project output and error directly from agent event payload", async () => {
   let bridgeRef;
-  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcherOptions }) => {
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
     bridgeRef.handleRuntimeAgentEvent({
       stream: "tool",
       sessionKey: ctx.SessionKey,
@@ -1041,8 +1156,8 @@ test("runtime tool result can project output and error directly from agent event
         error: "payload tool error",
       },
     });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "final" });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
   });
   const created = createBridge({ runtime });
   bridgeRef = created.bridge;
@@ -1084,7 +1199,8 @@ test("runtime tool result can project output and error directly from agent event
 
 test("tool payload blocks are consumed once and do not leak to a stale pending target", async () => {
   let bridgeRef;
-  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcherOptions }) => {
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
     bridgeRef.handleRuntimeAgentEvent({
       stream: "tool",
       sessionKey: ctx.SessionKey,
@@ -1094,10 +1210,10 @@ test("tool payload blocks are consumed once and do not leak to a stale pending t
         name: "search",
       },
     });
-    await dispatcherOptions.deliver({ text: "tool output once" }, { kind: "tool" });
-    await dispatcherOptions.deliver({ text: "tool output should not leak" }, { kind: "tool" });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "final" });
+    await reply.tool({ text: "tool output once" });
+    await reply.tool({ text: "tool output should not leak" });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
   });
   const created = createBridge({ runtime });
   bridgeRef = created.bridge;
@@ -1136,7 +1252,8 @@ test("tool payload blocks are consumed once and do not leak to a stale pending t
 
 test("runtime reasoning events project to reasoning part before assistant text", async () => {
   let bridgeRef;
-  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcherOptions }) => {
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
     bridgeRef.handleRuntimeAgentEvent({
       stream: "reasoning",
       sessionKey: ctx.SessionKey,
@@ -1159,8 +1276,8 @@ test("runtime reasoning events project to reasoning part before assistant text",
         },
       },
     });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "final" });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
   });
   const created = createBridge({ runtime });
   bridgeRef = created.bridge;
@@ -1194,9 +1311,61 @@ test("runtime reasoning events project to reasoning part before assistant text",
   assert.ok(reasoningDelta);
 });
 
+test("abort_session suppresses late runtime reply blocks and does not emit extra final text", async () => {
+  const releaseBlock = createDeferred();
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await releaseBlock.promise;
+    await reply.block({ text: "late block" });
+    await reply.final({ text: "late block final" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  const pendingChat = bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_abort_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_abort_1",
+      text: "hello",
+    },
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_abort_1",
+    action: "abort_session",
+    payload: {
+      toolSessionId: "ses_abort_1",
+    },
+  });
+
+  releaseBlock.resolve();
+  await pendingChat;
+
+  const finalTexts = connection.sent
+    .map(({ message }) => message)
+    .filter((message) => {
+      return message.type === "tool_event"
+        && message.event.type === "message.part.updated"
+        && message.event.properties?.part?.type === "text";
+    })
+    .map((message) => message.event.properties.part.text);
+
+  assert.deepEqual(finalTexts, ["hello"]);
+
+  const toolDoneMessages = connection.sent
+    .map(({ message }) => message)
+    .filter((message) => message.type === "tool_done");
+  assert.equal(toolDoneMessages.length, 1);
+  assert.equal(toolDoneMessages[0].toolSessionId, "ses_abort_1");
+  assert.equal(connection.sent.some(({ message }) => message.event?.type === "session.idle"), false);
+});
+
 test("start subscribes runtime agent events and stop unsubscribes them", async () => {
   const runtimeBus = createRuntimeEventBus();
-  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcherOptions }) => {
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
     runtimeBus.emit({
       stream: "reasoning",
       sessionKey: ctx.SessionKey,
@@ -1215,8 +1384,8 @@ test("start subscribes runtime agent events and stop unsubscribes them", async (
         output: "subscribed tool output",
       },
     });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "block" });
-    await dispatcherOptions.deliver({ text: "done" }, { kind: "final" });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
   });
   runtime.events = runtimeBus.runtimeEvents;
   const { bridge, connection } = createBridge({ runtime });

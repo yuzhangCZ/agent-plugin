@@ -110,8 +110,8 @@ sequenceDiagram
   MB->>ORR: resolveAgentRoute(...)
   MB->>ORR: formatAgentEnvelope(...)
   MB->>ORR: finalizeInboundContext(...)
-  MB->>ORR: dispatchReplyWithBufferedBlockDispatcher(...)
-  ORR-->>MB: block replies + tool events
+  MB->>ORR: dispatchReplyFromConfig(..., dispatcher)
+  ORR-->>MB: block/final/tool replies + tool events
 
   AG->>MB: invoke.close_session(toolSessionId)
   MB->>MB: normalizeDownstreamMessage()

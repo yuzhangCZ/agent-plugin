@@ -341,7 +341,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 
 当前阶段默认 `runTimeoutMs` 已提高到 `300000`，它当前同时作用于两条执行链：
 
-- `dispatchReplyWithBufferedBlockDispatcher(... replyOptions.timeoutOverrideSeconds)`
+- `dispatchReplyFromConfig(... replyOptions.timeoutOverrideSeconds)`
 - `subagent.waitForRun(... timeoutMs)`
 
 如果你没有显式配置 `runTimeoutMs`，插件会使用这个更保守的默认值；如果你已经在配置里写了该字段，则继续以你的显式值为准。

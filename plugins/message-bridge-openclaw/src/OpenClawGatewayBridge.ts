@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
-import { normalizeOutboundReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import {
   type OpenClawConfig,
   type PluginRuntime,
@@ -40,6 +39,7 @@ import {
   type ApprovalPort,
   type QuestionReplyPort,
 } from "./runtime/InteractionPorts.js";
+import { createMessageBridgeReplyDispatcher } from "./runtime/MessageBridgeReplyDispatcher.js";
 import { QuestionRegistry } from "./runtime/QuestionRegistry.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import {
@@ -256,6 +256,28 @@ interface SelectedModelState {
   thinkLevel: string | null;
 }
 
+interface RuntimeReplyApi {
+  resolveEnvelopeFormatOptions: (config: OpenClawConfig) => unknown;
+  formatAgentEnvelope: (params: Record<string, unknown>) => unknown;
+  finalizeInboundContext: (context: Record<string, unknown>) => Record<string, unknown>;
+  dispatchReplyFromConfig: (args: {
+    ctx: Record<string, unknown>;
+    cfg: OpenClawConfig;
+    dispatcher: {
+      onReplyStart: () => void;
+      deliver: (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => Promise<void>;
+      sendToolResult: (rawPayload: unknown) => boolean;
+      sendBlockReply: (rawPayload: unknown) => boolean;
+      sendFinalReply: (rawPayload: unknown) => boolean;
+      getQueuedCounts: () => Record<"tool" | "block" | "final", number>;
+      waitForIdle: () => Promise<void>;
+      markComplete: () => void;
+    };
+    dispatcherOptions: Record<string, unknown>;
+    replyOptions: Record<string, unknown>;
+  }) => Promise<void>;
+}
+
 function createSelectedModelState(): SelectedModelState {
   return {
     provider: null,
@@ -298,6 +320,63 @@ function extractToolResultText(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function readSyntheticChunkConfig(config: OpenClawConfig): { minChars: number; maxChars: number } {
+  if (!isRecord(config)) {
+    return { minChars: 8, maxChars: 24 };
+  }
+  const agents = isRecord(config.agents) ? config.agents : undefined;
+  const defaults = isRecord(agents?.defaults) ? agents.defaults : undefined;
+  const chunk = isRecord(defaults?.blockStreamingChunk) ? defaults.blockStreamingChunk : undefined;
+  const minChars =
+    typeof chunk?.minChars === "number" && Number.isFinite(chunk.minChars) && chunk.minChars > 0
+      ? Math.max(1, Math.floor(chunk.minChars))
+      : 8;
+  const maxChars =
+    typeof chunk?.maxChars === "number" && Number.isFinite(chunk.maxChars) && chunk.maxChars >= minChars
+      ? Math.floor(chunk.maxChars)
+      : Math.max(minChars, 24);
+  return { minChars, maxChars };
+}
+
+function splitTextIntoSyntheticChunks(text: string, config: OpenClawConfig): string[] {
+  const normalized = text.trim();
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const { minChars, maxChars } = readSyntheticChunkConfig(config);
+  const chunks: string[] = [];
+  let index = 0;
+
+  while (index < normalized.length) {
+    const remaining = normalized.length - index;
+    if (remaining <= maxChars) {
+      chunks.push(normalized.slice(index));
+      break;
+    }
+
+    const window = normalized.slice(index, index + maxChars);
+    let cut = -1;
+
+    for (let cursor = Math.min(window.length - 1, maxChars - 1); cursor >= minChars - 1; cursor -= 1) {
+      const char = window[cursor];
+      if ("\n\r。！？；;.!?，,、）)]】 ".includes(char)) {
+        cut = cursor + 1;
+        break;
+      }
+    }
+
+    if (cut === -1) {
+      cut = maxChars;
+    }
+
+    chunks.push(normalized.slice(index, index + cut));
+    index += cut;
+  }
+
+  return chunks.filter((chunk) => chunk.length > 0);
 }
 
 export class OpenClawGatewayBridge {
@@ -479,6 +558,20 @@ export class OpenClawGatewayBridge {
 
   private getSubagentRuntime(): SubagentRuntime["subagent"] | null {
     return (this.runtime as Partial<SubagentRuntime>).subagent ?? null;
+  }
+
+  private getRuntimeReplyApi(): RuntimeReplyApi | null {
+    const reply = this.runtime.channel?.reply as Partial<RuntimeReplyApi> | undefined;
+    if (
+      !reply ||
+      typeof reply.resolveEnvelopeFormatOptions !== "function" ||
+      typeof reply.formatAgentEnvelope !== "function" ||
+      typeof reply.finalizeInboundContext !== "function" ||
+      typeof reply.dispatchReplyFromConfig !== "function"
+    ) {
+      return null;
+    }
+    return reply as RuntimeReplyApi;
   }
 
   async stop(): Promise<void> {
@@ -665,7 +758,7 @@ export class OpenClawGatewayBridge {
     );
     this.refreshRuntimeCapabilities("chat");
     const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
-    const hasReplyRuntime = !!this.runtime.channel?.reply;
+    const hasReplyRuntime = this.getRuntimeReplyApi() !== null;
     const pathSelection = this.resolveChatExecutionPath({
       streamingEnabled,
       hasRouteResolver,
@@ -736,14 +829,13 @@ export class OpenClawGatewayBridge {
     let retryAttempt: RetryAttempt = 0;
     let lastErrorMessage: string | null = null;
     let lastErrorExtra: Record<string, unknown> | undefined;
-    let pendingFinalText: string | null = null;
 
     while (true) {
-      pendingFinalText = null;
+      const runtimeReply = this.getRuntimeReplyApi();
       if (
         executionPath !== "runtime_reply" ||
         !this.runtime.channel?.routing?.resolveAgentRoute ||
-        !this.runtime.channel?.reply
+        !runtimeReply
       ) {
         const fallbackResult = await this.handleChatWithSubagentFallback(
           record,
@@ -785,180 +877,25 @@ export class OpenClawGatewayBridge {
         break;
       }
 
-      const route = this.runtime.channel.routing.resolveAgentRoute({
-        cfg: effectiveConfig,
-        channel: "message-bridge",
-        accountId: this.options.account.accountId,
-        peer: {
-          kind: "direct",
-          id: record.welinkSessionId || record.toolSessionId,
-        },
-      });
-      const envelopeOptions = this.runtime.channel.reply.resolveEnvelopeFormatOptions(effectiveConfig);
-      const body = this.runtime.channel.reply.formatAgentEnvelope({
-        channel: "message-bridge",
-        from: `ai-gateway:${record.welinkSessionId || record.toolSessionId}`,
-        timestamp: new Date(),
-        previousTimestamp: undefined,
-        envelope: envelopeOptions,
-        body: message.payload.text,
-      });
-      const ctxPayload = this.runtime.channel.reply.finalizeInboundContext({
-        Body: body,
-        BodyForAgent: message.payload.text,
-        RawBody: message.payload.text,
-        CommandBody: message.payload.text,
-        From: `message-bridge:${record.welinkSessionId || record.toolSessionId}`,
-        To: `message-bridge:${record.toolSessionId}`,
-        SessionKey: record.sessionKey,
-        AccountId: route.accountId,
-        ChatType: "direct",
-        ConversationLabel: `ai-gateway:${record.welinkSessionId || record.toolSessionId}`,
-        SenderName: "ai-gateway",
-        SenderId: record.welinkSessionId || record.toolSessionId,
-        Provider: "message-bridge",
-        Surface: "message-bridge",
-        Timestamp: new Date().toISOString(),
-        OriginatingChannel: "message-bridge",
-        OriginatingTo: `message-bridge:${record.toolSessionId}`,
-        CommandAuthorized: false,
-      });
-      const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-        cfg: effectiveConfig,
-        agentId: route.agentId,
-        channel: "message-bridge",
-        accountId: this.options.account.accountId,
-      });
-      const handleModelSelected = (selection: { provider: string; model: string; thinkLevel: string | undefined }) => {
-        selectedModel.provider = selection.provider;
-        selectedModel.model = selection.model;
-        selectedModel.thinkLevel = selection.thinkLevel ?? null;
-        this.options.logger.info("bridge.chat.model_selected", {
-          toolSessionId: record.toolSessionId,
-          sessionKey: record.sessionKey,
+      try {
+        await this.handleChatWithRuntimeReply({
+          record,
+          runtimeReply,
+          effectiveConfig,
+          text: message.payload.text,
+          startedAt,
+          selectedModel,
           configuredTimeoutMs,
-          runTimeoutMs: configuredTimeoutMs,
-          executionPath: "runtime_reply",
-          streamMode,
+          assistantStream,
           chatRequestId,
           retryAttempt,
-          streamDefaultsInjected: effectiveStreamDefaultsInjected,
+          effectiveStreamDefaultsInjected,
           streamingEnabled,
           streamingSource,
-          provider: selection.provider,
-          model: selection.model,
-          thinkLevel: selection.thinkLevel ?? null,
+          streamMode,
+          context,
         });
-        onModelSelected?.(selection);
-      };
-      const deliver = async (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => {
-        if (this.isSessionTerminated(record)) {
-          return;
-        }
-        const payload =
-          isRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
-
-        if (info.kind === "tool") {
-          const activeSession = this.activeToolSessions.get(record.sessionKey);
-          const toolCallId = activeSession?.pendingToolResultTarget;
-          if (!toolCallId) {
-            return;
-          }
-
-          const toolState = activeSession.toolStates.get(toolCallId);
-          if (!toolState) {
-            return;
-          }
-
-          const output = typeof payload.text === "string" ? payload.text.trim() : "";
-          if (output.length === 0) {
-            return;
-          }
-
-          activeSession.pendingToolResultTarget = null;
-          toolState.output = output;
-          this.emitToolPartUpdate(record.toolSessionId, toolState, context);
-          return;
-        }
-
-        const payloadText = typeof payload.text === "string" ? payload.text : "";
-
-        if (info.kind === "final") {
-          if (payloadText.length > 0) {
-            pendingFinalText = payloadText;
-          }
-          if (streamingEnabled && assistantStream.chunkCount === 0 && payloadText.length > 0) {
-            assistantStream.finalOnly = true;
-            this.options.logger.warn("bridge.chat.runtime_reply_final_only", {
-              toolSessionId: record.toolSessionId,
-              sessionKey: record.sessionKey,
-              chatRequestId,
-              retryAttempt,
-              finalTextLength: payloadText.length,
-            });
-          }
-          return;
-        }
-
-        if (info.kind !== "block" || payloadText.length === 0) {
-          return;
-        }
-
-        if (!streamingEnabled) {
-          assistantStream.accumulatedText += payloadText;
-          return;
-        }
-
-        {
-          const now = Date.now();
-          assistantStream.chunkCount += 1;
-          if (assistantStream.firstChunkAt === null) {
-            assistantStream.firstChunkAt = now;
-            this.options.logger.info("bridge.chat.first_chunk", {
-              toolSessionId: record.toolSessionId,
-              sessionKey: record.sessionKey,
-              chatRequestId,
-              retryAttempt,
-              latencyMs: now - startedAt,
-              chunkLength: payloadText.length,
-              deltaText: payloadText,
-            });
-          } else {
-            this.options.logger.info("bridge.chat.chunk", {
-              toolSessionId: record.toolSessionId,
-              sessionKey: record.sessionKey,
-              chatRequestId,
-              retryAttempt,
-              chunkIndex: assistantStream.chunkCount,
-              chunkLength: payloadText.length,
-              sinceStartMs: now - startedAt,
-              sinceFirstChunkMs: now - assistantStream.firstChunkAt,
-              deltaText: payloadText,
-            });
-          }
-          this.sendAssistantStreamChunk(record.toolSessionId, assistantStream, payloadText, context);
-        }
-      };
-
-      try {
-        await this.runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-          ctx: ctxPayload,
-          cfg: effectiveConfig,
-          dispatcherOptions: {
-            ...prefixOptions,
-            deliver,
-            onError: (error) => {
-              throw error;
-            },
-          },
-          replyOptions: {
-            onAgentRunStart: (runId) => {
-              this.trackSessionRunId(record.sessionKey, runId);
-            },
-            onModelSelected: handleModelSelected,
-            timeoutOverrideSeconds: Math.ceil(configuredTimeoutMs / 1000),
-          },
-        });
+        return true;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (retryAttempt === 0 && this.shouldRetryBeforeFirstChunkTimeout(errorMessage, assistantStream)) {
@@ -985,61 +922,6 @@ export class OpenClawGatewayBridge {
         lastErrorExtra = undefined;
         break;
       }
-      if (this.isSessionTerminated(record)) {
-        this.clearActiveToolSession(record.sessionKey);
-        return true;
-      }
-      const reconciliation = reconcileFinalText(assistantStream.accumulatedText, pendingFinalText);
-      assistantStream.accumulatedText = reconciliation.finalText;
-      const finalText = assistantStream.accumulatedText || "(empty response)";
-      assistantStream.finalOnly = streamingEnabled
-        && executionPath === "runtime_reply"
-        && assistantStream.chunkCount === 0
-        && finalText.length > 0;
-      this.updateStreamingOutcomeStatus({
-        executionPath: "runtime_reply",
-        streamingEnabled,
-        observedRealChunk: assistantStream.chunkCount > 0,
-      });
-      this.sendAssistantFinalResponse(
-        record.toolSessionId,
-        assistantStream,
-        finalText,
-        context,
-      );
-      record.updatedAt = Date.now();
-      this.sendAssistantCompleted(record.toolSessionId, assistantStream, context);
-      this.sendSessionUpdated(record, context);
-      this.logChatCompleted({
-        toolSessionId: record.toolSessionId,
-        sessionKey: record.sessionKey,
-        configuredTimeoutMs,
-        startedAt,
-        assistantStream,
-        selectedModel,
-        executionPath: "runtime_reply",
-        streamMode,
-        streamDefaultsInjected: effectiveStreamDefaultsInjected,
-        streamingEnabled,
-        streamingSource,
-        chatRequestId,
-        retryAttempt,
-        finalReconciled: reconciliation.finalReconciled,
-        responseLength: finalText.length,
-        finalText,
-      });
-      this.sendToolEvent({
-        type: "tool_event",
-        toolSessionId: record.toolSessionId,
-        event: buildIdleEvent(record.toolSessionId),
-      }, context);
-      this.sendToolDone({
-        type: "tool_done",
-        toolSessionId: record.toolSessionId,
-        welinkSessionId: context.welinkSessionId,
-      }, context);
-      this.clearActiveToolSession(record.sessionKey);
-      return true;
     }
 
     if (this.isSessionTerminated(record)) {
@@ -1078,6 +960,277 @@ export class OpenClawGatewayBridge {
       error: finalErrorMessage,
     }, context);
     return false;
+  }
+
+  private async handleChatWithRuntimeReply(params: {
+    record: { toolSessionId: string; welinkSessionId?: string; sessionKey: string; updatedAt?: number };
+    runtimeReply: RuntimeReplyApi;
+    effectiveConfig: OpenClawConfig;
+    text: string;
+    startedAt: number;
+    selectedModel: SelectedModelState;
+    configuredTimeoutMs: number;
+    assistantStream: AssistantStreamState;
+    chatRequestId: string;
+    retryAttempt: RetryAttempt;
+    streamDefaultsInjected: boolean;
+    streamingEnabled: boolean;
+    streamingSource: StreamingSource;
+    streamMode: StreamMode;
+    context: UpstreamSendContext;
+  }): Promise<void> {
+    const route = this.runtime.channel?.routing?.resolveAgentRoute?.({
+      cfg: params.effectiveConfig,
+      channel: "message-bridge",
+      accountId: this.options.account.accountId,
+      peer: {
+        kind: "direct",
+        id: params.record.welinkSessionId || params.record.toolSessionId,
+      },
+    }) as { agentId?: string; accountId?: string } | undefined;
+
+    if (!route?.accountId || !route.agentId) {
+      throw new Error("runtime_reply_route_unavailable");
+    }
+
+    const envelopeOptions = params.runtimeReply.resolveEnvelopeFormatOptions(params.effectiveConfig);
+    const body = params.runtimeReply.formatAgentEnvelope({
+      channel: "message-bridge",
+      from: `ai-gateway:${params.record.welinkSessionId || params.record.toolSessionId}`,
+      timestamp: new Date(),
+      previousTimestamp: undefined,
+      envelope: envelopeOptions,
+      body: params.text,
+    });
+    const ctxPayload = params.runtimeReply.finalizeInboundContext({
+      Body: body,
+      BodyForAgent: params.text,
+      RawBody: params.text,
+      CommandBody: params.text,
+      From: `message-bridge:${params.record.welinkSessionId || params.record.toolSessionId}`,
+      To: `message-bridge:${params.record.toolSessionId}`,
+      SessionKey: params.record.sessionKey,
+      AccountId: route.accountId,
+      ChatType: "direct",
+      ConversationLabel: `ai-gateway:${params.record.welinkSessionId || params.record.toolSessionId}`,
+      SenderName: "ai-gateway",
+      SenderId: params.record.welinkSessionId || params.record.toolSessionId,
+      Provider: "message-bridge",
+      Surface: "message-bridge",
+      Timestamp: new Date().toISOString(),
+      OriginatingChannel: "message-bridge",
+      OriginatingTo: `message-bridge:${params.record.toolSessionId}`,
+      CommandAuthorized: false,
+    });
+
+    const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
+      cfg: params.effectiveConfig,
+      agentId: route.agentId,
+      channel: "message-bridge",
+      accountId: this.options.account.accountId,
+    });
+    const handleModelSelected = (selection: { provider: string; model: string; thinkLevel: string | undefined }) => {
+      params.selectedModel.provider = selection.provider;
+      params.selectedModel.model = selection.model;
+      params.selectedModel.thinkLevel = selection.thinkLevel ?? null;
+      this.options.logger.info("bridge.chat.model_selected", {
+        toolSessionId: params.record.toolSessionId,
+        sessionKey: params.record.sessionKey,
+        configuredTimeoutMs: params.configuredTimeoutMs,
+        runTimeoutMs: params.configuredTimeoutMs,
+        executionPath: "runtime_reply",
+        streamMode: params.streamMode,
+        chatRequestId: params.chatRequestId,
+        retryAttempt: params.retryAttempt,
+        streamDefaultsInjected: params.streamDefaultsInjected,
+        streamingEnabled: params.streamingEnabled,
+        streamingSource: params.streamingSource,
+        provider: selection.provider,
+        model: selection.model,
+        thinkLevel: selection.thinkLevel ?? null,
+      });
+      onModelSelected?.(selection);
+    };
+
+    const dispatcher = createMessageBridgeReplyDispatcher({
+      onBlock: async (payloadText) => {
+        if (this.isSessionTerminated(params.record)) {
+          return;
+        }
+        if (!params.streamingEnabled) {
+          params.assistantStream.accumulatedText += payloadText;
+          return;
+        }
+
+        const now = Date.now();
+        params.assistantStream.chunkCount += 1;
+        if (params.assistantStream.firstChunkAt === null) {
+          params.assistantStream.firstChunkAt = now;
+          this.options.logger.info("bridge.chat.first_chunk", {
+            toolSessionId: params.record.toolSessionId,
+            sessionKey: params.record.sessionKey,
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+            latencyMs: now - params.startedAt,
+            chunkLength: payloadText.length,
+            deltaText: payloadText,
+          });
+        } else {
+          this.options.logger.info("bridge.chat.chunk", {
+            toolSessionId: params.record.toolSessionId,
+            sessionKey: params.record.sessionKey,
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+            chunkIndex: params.assistantStream.chunkCount,
+            chunkLength: payloadText.length,
+            sinceStartMs: now - params.startedAt,
+            sinceFirstChunkMs: now - params.assistantStream.firstChunkAt,
+            deltaText: payloadText,
+          });
+        }
+        this.sendAssistantStreamChunk(
+          params.record.toolSessionId,
+          params.assistantStream,
+          payloadText,
+          params.context,
+        );
+      },
+      onFinal: async (payloadText) => {
+        if (this.isSessionTerminated(params.record)) {
+          return;
+        }
+        if (params.streamingEnabled && params.assistantStream.chunkCount === 0 && payloadText.length > 0) {
+          params.assistantStream.finalOnly = true;
+          this.options.logger.warn("bridge.chat.runtime_reply_final_only", {
+            toolSessionId: params.record.toolSessionId,
+            sessionKey: params.record.sessionKey,
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+            finalTextLength: payloadText.length,
+          });
+        }
+      },
+      onTool: async (output) => {
+        if (this.isSessionTerminated(params.record) || output.length === 0) {
+          return;
+        }
+
+        const activeSession = this.activeToolSessions.get(params.record.sessionKey);
+        const toolCallId = activeSession?.pendingToolResultTarget;
+        if (!activeSession || !toolCallId) {
+          return;
+        }
+
+        const toolState = activeSession.toolStates.get(toolCallId);
+        if (!toolState) {
+          return;
+        }
+
+        activeSession.pendingToolResultTarget = null;
+        toolState.output = output;
+        this.emitToolPartUpdate(params.record.toolSessionId, toolState, params.context);
+      },
+    });
+
+    await params.runtimeReply.dispatchReplyFromConfig({
+      ctx: ctxPayload,
+      cfg: params.effectiveConfig,
+      dispatcher,
+      dispatcherOptions: {
+        ...prefixOptions,
+        onError: (error: unknown) => {
+          throw error;
+        },
+      },
+      replyOptions: {
+        onAgentRunStart: (runId: string) => {
+          this.trackSessionRunId(params.record.sessionKey, runId);
+        },
+        onModelSelected: handleModelSelected,
+        timeoutOverrideSeconds: Math.ceil(params.configuredTimeoutMs / 1000),
+      },
+    });
+
+    dispatcher.markComplete();
+    await dispatcher.waitForIdle();
+
+    if (this.isSessionTerminated(params.record)) {
+      this.clearActiveToolSession(params.record.sessionKey);
+      return;
+    }
+
+    const reconciliation = reconcileFinalText(
+      params.assistantStream.accumulatedText,
+      dispatcher.getPendingFinalText(),
+    );
+    const observedRuntimeChunk = params.assistantStream.chunkCount > 0;
+    const finalText = reconciliation.finalText || "(empty response)";
+    const shouldReplaySyntheticStream =
+      params.streamingEnabled &&
+      !observedRuntimeChunk &&
+      finalText.length > 0;
+    if (shouldReplaySyntheticStream) {
+      params.assistantStream.accumulatedText = "";
+      this.replayFinalTextAsSyntheticStream({
+        toolSessionId: params.record.toolSessionId,
+        state: params.assistantStream,
+        finalText,
+        context: params.context,
+        effectiveConfig: params.effectiveConfig,
+        startedAt: params.startedAt,
+        chatRequestId: params.chatRequestId,
+        retryAttempt: params.retryAttempt,
+        sessionKey: params.record.sessionKey,
+      });
+    } else {
+      params.assistantStream.accumulatedText = finalText;
+    }
+    params.assistantStream.finalOnly = params.streamingEnabled
+      && !observedRuntimeChunk
+      && finalText.length > 0;
+    this.updateStreamingOutcomeStatus({
+      executionPath: "runtime_reply",
+      streamingEnabled: params.streamingEnabled,
+      observedRealChunk: observedRuntimeChunk,
+    });
+    this.sendAssistantFinalResponse(
+      params.record.toolSessionId,
+      params.assistantStream,
+      finalText,
+      params.context,
+    );
+    params.record.updatedAt = Date.now();
+    this.sendAssistantCompleted(params.record.toolSessionId, params.assistantStream, params.context);
+    this.sendSessionUpdated(params.record, params.context);
+    this.logChatCompleted({
+      toolSessionId: params.record.toolSessionId,
+      sessionKey: params.record.sessionKey,
+      configuredTimeoutMs: params.configuredTimeoutMs,
+      startedAt: params.startedAt,
+      assistantStream: params.assistantStream,
+      selectedModel: params.selectedModel,
+      executionPath: "runtime_reply",
+      streamMode: params.streamMode,
+      streamDefaultsInjected: params.streamDefaultsInjected,
+      streamingEnabled: params.streamingEnabled,
+      streamingSource: params.streamingSource,
+      chatRequestId: params.chatRequestId,
+      retryAttempt: params.retryAttempt,
+      finalReconciled: reconciliation.finalReconciled,
+      responseLength: finalText.length,
+      finalText,
+    });
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId: params.record.toolSessionId,
+      event: buildIdleEvent(params.record.toolSessionId),
+    }, params.context);
+    this.sendToolDone({
+      type: "tool_done",
+      toolSessionId: params.record.toolSessionId,
+      welinkSessionId: params.context.welinkSessionId,
+    }, params.context);
+    this.clearActiveToolSession(params.record.sessionKey);
   }
 
   private async handleChatWithSubagentFallback(
@@ -1652,6 +1805,64 @@ export class OpenClawGatewayBridge {
     state.lastDisplayedText = text;
   }
 
+  private replayFinalTextAsSyntheticStream(params: {
+    toolSessionId: string;
+    state: AssistantStreamState;
+    finalText: string;
+    context: UpstreamSendContext;
+    effectiveConfig: OpenClawConfig;
+    startedAt: number;
+    chatRequestId: string;
+    retryAttempt: RetryAttempt;
+    sessionKey: string;
+  }): void {
+    const chunks = splitTextIntoSyntheticChunks(params.finalText, params.effectiveConfig);
+    if (chunks.length === 0) {
+      return;
+    }
+
+    this.options.logger.warn("bridge.chat.synthetic_stream_from_final", {
+      toolSessionId: params.toolSessionId,
+      sessionKey: params.sessionKey,
+      chatRequestId: params.chatRequestId,
+      retryAttempt: params.retryAttempt,
+      chunkCount: chunks.length,
+      finalTextLength: params.finalText.length,
+    });
+
+    for (const chunk of chunks) {
+      const now = Date.now();
+      params.state.chunkCount += 1;
+      if (params.state.firstChunkAt === null) {
+        params.state.firstChunkAt = now;
+        this.options.logger.info("bridge.chat.first_chunk", {
+          toolSessionId: params.toolSessionId,
+          sessionKey: params.sessionKey,
+          chatRequestId: params.chatRequestId,
+          retryAttempt: params.retryAttempt,
+          latencyMs: now - params.startedAt,
+          chunkLength: chunk.length,
+          deltaText: chunk,
+          syntheticFromFinal: true,
+        });
+      } else {
+        this.options.logger.info("bridge.chat.chunk", {
+          toolSessionId: params.toolSessionId,
+          sessionKey: params.sessionKey,
+          chatRequestId: params.chatRequestId,
+          retryAttempt: params.retryAttempt,
+          chunkIndex: params.state.chunkCount,
+          chunkLength: chunk.length,
+          sinceStartMs: now - params.startedAt,
+          sinceFirstChunkMs: now - params.state.firstChunkAt,
+          deltaText: chunk,
+          syntheticFromFinal: true,
+        });
+      }
+      this.sendAssistantStreamChunk(params.toolSessionId, params.state, chunk, params.context);
+    }
+  }
+
   private sendAssistantCompleted(
     toolSessionId: string,
     state: AssistantStreamState,
@@ -1980,7 +2191,7 @@ export class OpenClawGatewayBridge {
 
   private refreshRuntimeCapabilities(source: "start" | "chat"): void {
     const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
-    const hasReplyRuntime = !!this.runtime.channel?.reply;
+    const hasReplyRuntime = this.getRuntimeReplyApi() !== null;
     const pathSelection = this.resolveChatExecutionPath({
       streamingEnabled: this.options.account.streaming !== false,
       hasRouteResolver,
