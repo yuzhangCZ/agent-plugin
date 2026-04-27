@@ -51,6 +51,31 @@ export interface TextPartOptions {
   time?: number;
 }
 
+export interface PermissionEventOptions {
+  title?: string;
+  messageId?: string;
+  metadata?: Record<string, unknown>;
+  status?: "pending" | "resolved" | "expired";
+  decision?: string;
+  sourceEvent?: string;
+  expiresAt?: number;
+  resolvedAt?: number;
+}
+
+export interface QuestionAskedEventOptions {
+  requestId: string;
+  questions: Array<{
+    question: string;
+    header?: string;
+    options?: Array<{
+      label: string;
+      description?: string;
+    }>;
+  }>;
+  toolCallId?: string;
+  messageId?: string;
+}
+
 export function createToolSessionId(): string {
   return `ses_${randomUUID()}`;
 }
@@ -201,6 +226,65 @@ export function buildStepStartPartUpdated(
         messageID: messageId,
         type: "step-start",
         ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+      },
+    },
+  };
+}
+
+export function buildPermissionAskedEvent(
+  toolSessionId: string,
+  permissionId: string,
+  options: PermissionEventOptions = {},
+): Record<string, unknown> {
+  return {
+    type: "permission.asked",
+    properties: {
+      id: permissionId,
+      sessionID: toolSessionId,
+      ...(options.messageId !== undefined ? { messageID: options.messageId } : {}),
+      type: "exec",
+      ...(options.title !== undefined ? { title: options.title } : {}),
+      ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+      ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
+      ...(options.sourceEvent !== undefined ? { sourceEvent: options.sourceEvent } : {}),
+      ...(options.status !== undefined ? { status: options.status } : {}),
+    },
+  };
+}
+
+export function buildPermissionUpdatedEvent(
+  toolSessionId: string,
+  permissionId: string,
+  options: PermissionEventOptions = {},
+): Record<string, unknown> {
+  return {
+    type: "permission.updated",
+    properties: {
+      id: permissionId,
+      sessionID: toolSessionId,
+      status: options.status ?? "resolved",
+      ...(options.decision !== undefined ? { decision: options.decision } : {}),
+      ...(options.resolvedAt !== undefined ? { resolvedAt: options.resolvedAt } : {}),
+      ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
+      ...(options.sourceEvent !== undefined ? { sourceEvent: options.sourceEvent } : {}),
+    },
+  };
+}
+
+export function buildQuestionAskedEvent(
+  toolSessionId: string,
+  options: QuestionAskedEventOptions,
+): Record<string, unknown> {
+  return {
+    type: "question.asked",
+    properties: {
+      id: options.requestId,
+      sessionID: toolSessionId,
+      questions: options.questions,
+      ...(options.messageId !== undefined ? { messageID: options.messageId } : {}),
+      tool: {
+        ...(options.messageId !== undefined ? { messageID: options.messageId } : {}),
+        ...(options.toolCallId !== undefined ? { callID: options.toolCallId } : {}),
       },
     },
   };

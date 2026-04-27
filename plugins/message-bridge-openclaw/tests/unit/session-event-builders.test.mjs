@@ -13,6 +13,9 @@ import {
   buildTextPartUpdated,
   buildToolPartUpdated,
   buildReasoningPartUpdated,
+  buildPermissionAskedEvent,
+  buildPermissionUpdatedEvent,
+  buildQuestionAskedEvent,
   createToolSessionId,
 } from "../../src/session/upstreamEvents.ts";
 
@@ -125,4 +128,49 @@ test("tool part events use toolSessionId instead of internal sessionKey", () => 
   assert.equal(event.properties.part.messageID, "msg_2");
   assert.equal(event.properties.part.id, "part_2");
   assert.equal(event.properties.part.type, "tool");
+});
+
+test("permission and question events use gateway-compatible payload shape", () => {
+  const permissionAsked = buildPermissionAskedEvent("ses_tool_perm", "perm_1", {
+    title: "Run command",
+    messageId: "msg_perm_1",
+    metadata: { command: "ls" },
+    sourceEvent: "exec.approval.requested",
+  });
+  const permissionUpdated = buildPermissionUpdatedEvent("ses_tool_perm", "perm_1", {
+    status: "resolved",
+    decision: "allow-once",
+    resolvedAt: 501,
+    sourceEvent: "exec.approval.resolved",
+  });
+  const questionAsked = buildQuestionAskedEvent("ses_tool_q", {
+    requestId: "question_1",
+    messageId: "msg_q_1",
+    toolCallId: "call_q_1",
+    questions: [
+      {
+        question: "Choose a framework",
+        header: "Framework",
+        options: [{ label: "Vite" }],
+      },
+    ],
+  });
+
+  assert.equal(permissionAsked.type, "permission.asked");
+  assert.equal(permissionAsked.properties.id, "perm_1");
+  assert.equal(permissionAsked.properties.sessionID, "ses_tool_perm");
+  assert.equal(permissionAsked.properties.title, "Run command");
+  assert.equal(permissionAsked.properties.metadata.command, "ls");
+
+  assert.equal(permissionUpdated.type, "permission.updated");
+  assert.equal(permissionUpdated.properties.id, "perm_1");
+  assert.equal(permissionUpdated.properties.status, "resolved");
+  assert.equal(permissionUpdated.properties.decision, "allow-once");
+  assert.equal(permissionUpdated.properties.resolvedAt, 501);
+
+  assert.equal(questionAsked.type, "question.asked");
+  assert.equal(questionAsked.properties.id, "question_1");
+  assert.equal(questionAsked.properties.sessionID, "ses_tool_q");
+  assert.equal(questionAsked.properties.tool.callID, "call_q_1");
+  assert.equal(questionAsked.properties.questions[0].header, "Framework");
 });

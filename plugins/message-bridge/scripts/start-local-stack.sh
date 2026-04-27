@@ -14,7 +14,7 @@ LOG_DIR="${ROOT_DIR}/logs/local-stack"
 PID_DIR="${LOG_DIR}/pids"
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
 
-DB_HOST="${DB_HOST:-localhost}"
+DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-3306}"
 DB_USER="${DB_USER:-opencode}"
 DB_PASSWORD="${DB_PASSWORD:-opencode}"
@@ -25,6 +25,46 @@ CLEANUP_OPENCODE="${CLEANUP_OPENCODE:-0}"
 MINIAPP_PORT="${MINIAPP_PORT:-3001}"
 SIMULATOR_PORT="${SIMULATOR_PORT:-5173}"
 START_TEST_SIMULATOR="${START_TEST_SIMULATOR:-0}"
+START_WAIT_SECONDS="${START_WAIT_SECONDS:-300}"
+
+prepend_path() {
+  local dir="$1"
+  if [[ -d "${dir}" && ":$PATH:" != *":${dir}:"* ]]; then
+    PATH="${dir}:${PATH}"
+  fi
+}
+
+setup_homebrew_toolchain() {
+  prepend_path "${HOME}/.local/bin"
+
+  local brew_bin
+  brew_bin="$(command -v brew || true)"
+  if [[ -z "${brew_bin}" ]]; then
+    return 0
+  fi
+
+  local brew_prefix
+  brew_prefix="$("${brew_bin}" --prefix 2>/dev/null || true)"
+  if [[ -n "${brew_prefix}" ]]; then
+    prepend_path "${brew_prefix}/bin"
+    prepend_path "${brew_prefix}/sbin"
+  fi
+
+  local mysql_client_prefix
+  mysql_client_prefix="$("${brew_bin}" --prefix mysql-client 2>/dev/null || true)"
+  if [[ -n "${mysql_client_prefix}" ]]; then
+    prepend_path "${mysql_client_prefix}/bin"
+  fi
+
+  local openjdk_prefix
+  openjdk_prefix="$("${brew_bin}" --prefix openjdk 2>/dev/null || true)"
+  if [[ -n "${openjdk_prefix}" ]]; then
+    prepend_path "${openjdk_prefix}/bin"
+    if [[ -z "${JAVA_HOME:-}" && -d "${openjdk_prefix}/libexec/openjdk.jdk/Contents/Home" ]]; then
+      export JAVA_HOME="${openjdk_prefix}/libexec/openjdk.jdk/Contents/Home"
+    fi
+  fi
+}
 
 require_cmd() {
   local cmd="$1"
@@ -33,6 +73,8 @@ require_cmd() {
     exit 1
   fi
 }
+
+setup_homebrew_toolchain
 
 require_cmd lsof
 require_cmd mysql
@@ -57,6 +99,12 @@ fi
 run_sql() {
   local sql="$1"
   printf "%s\n" "${sql}" | "${MYSQL_CMD[@]}"
+}
+
+run_sql_in_db() {
+  local db="$1"
+  local sql="$2"
+  printf "%s\n" "${sql}" | "${MYSQL_CMD[@]}" "${db}"
 }
 
 reset_local_databases() {
@@ -108,7 +156,7 @@ index_exists() {
 wait_for_port() {
   local port="$1"
   local name="$2"
-  local attempts=60
+  local attempts="${START_WAIT_SECONDS}"
   while (( attempts > 0 )); do
     if lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
       echo "[ok] ${name} is listening on :${port}"
@@ -234,6 +282,8 @@ start_bg() {
   local pid_file="$3"
   local log_file="$4"
   local cmd="$5"
+  local launch_label="agent-plugin.local-stack.${name}"
+  local wrapped_cmd="export PATH='${PATH}'; export JAVA_HOME='${JAVA_HOME:-}'; exec </dev/null >>'${log_file}' 2>&1; ${cmd}"
 
   if is_port_listening "${port}"; then
     cleanup_port_listeners "${port}" "${name}"
@@ -245,8 +295,16 @@ start_bg() {
   fi
 
   echo "[start] ${name}"
-  nohup bash -lc "${cmd}" >"${log_file}" 2>&1 &
-  local launcher_pid=$!
+  : > "${log_file}"
+  if command -v launchctl >/dev/null 2>&1; then
+    launchctl remove "${launch_label}" >/dev/null 2>&1 || true
+    launchctl submit -l "${launch_label}" -- /bin/bash -lc "${wrapped_cmd}"
+    launchctl kickstart -k "gui/$(id -u)/${launch_label}" >/dev/null 2>&1 || true
+  else
+    nohup bash -lc "${wrapped_cmd}" >/dev/null 2>&1 &
+  fi
+
+  local launcher_pid=""
   if ! wait_for_port "${port}" "${name}"; then
     echo "[error] ${name} failed to start. Recent log output:" >&2
     tail -n 40 "${log_file}" >&2 || true
@@ -257,12 +315,11 @@ start_bg() {
   listener_pid="$(pids_on_port "${port}" | head -n 1)"
   if [[ -n "${listener_pid}" ]]; then
     echo "${listener_pid}" >"${pid_file}"
-    if [[ "${listener_pid}" != "${launcher_pid}" ]]; then
+    if [[ -n "${launcher_pid}" && "${listener_pid}" != "${launcher_pid}" ]]; then
       echo "[pid] ${name} launcher pid=${launcher_pid}, listener pid=${listener_pid}"
     fi
   else
-    echo "${launcher_pid}" >"${pid_file}"
-    echo "[warn] ${name} listener pid not found, fallback to launcher pid=${launcher_pid}"
+    echo "[warn] ${name} listener pid not found after startup"
   fi
 }
 
@@ -293,14 +350,14 @@ if table_exists "${AI_DB}" "agent_connection"; then
 
   if ! column_exists "${AI_DB}" "agent_connection" "mac_address"; then
     echo "[db] Add agent_connection.mac_address"
-    run_sql "ALTER TABLE ${AI_DB}.agent_connection ADD COLUMN mac_address VARCHAR(64) AFTER device_name;"
+    run_sql_in_db "${AI_DB}" "ALTER TABLE agent_connection ADD COLUMN mac_address VARCHAR(64) AFTER device_name;"
   fi
 
   if ! index_exists "${AI_DB}" "agent_connection" "uk_ak_tooltype"; then
     echo "[db] Add unique index uk_ak_tooltype on agent_connection(ak_id, tool_type)"
-    run_sql "DELETE a FROM ${AI_DB}.agent_connection a INNER JOIN (SELECT ak_id, tool_type, MAX(id) AS keep_id FROM ${AI_DB}.agent_connection GROUP BY ak_id, tool_type) b ON a.ak_id = b.ak_id AND a.tool_type = b.tool_type AND a.id != b.keep_id;"
-    run_sql "UPDATE ${AI_DB}.agent_connection SET status = 'OFFLINE';"
-    run_sql "ALTER TABLE ${AI_DB}.agent_connection ADD UNIQUE INDEX uk_ak_tooltype (ak_id, tool_type);"
+    run_sql_in_db "${AI_DB}" "DELETE a FROM agent_connection a INNER JOIN (SELECT ak_id, tool_type, MAX(id) AS keep_id FROM agent_connection GROUP BY ak_id, tool_type) b ON a.ak_id = b.ak_id AND a.tool_type = b.tool_type AND a.id != b.keep_id;"
+    run_sql_in_db "${AI_DB}" "UPDATE agent_connection SET status = 'OFFLINE';"
+    run_sql_in_db "${AI_DB}" "ALTER TABLE agent_connection ADD UNIQUE INDEX uk_ak_tooltype (ak_id, tool_type);"
   fi
 fi
 if ! table_exists "${SKILL_DB}" "skill_definition"; then
@@ -317,39 +374,39 @@ if table_exists "${SKILL_DB}" "skill_session"; then
 
   if ! column_exists "${SKILL_DB}" "skill_session" "ak"; then
     echo "[db] Add skill_session.ak"
-    run_sql "ALTER TABLE ${SKILL_DB}.skill_session ADD COLUMN ak VARCHAR(64) NULL AFTER user_id;"
+    run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session ADD COLUMN ak VARCHAR(64) NULL AFTER user_id;"
     if column_exists "${SKILL_DB}" "skill_session" "agent_id"; then
-      run_sql "UPDATE ${SKILL_DB}.skill_session SET ak = CAST(agent_id AS CHAR) WHERE agent_id IS NOT NULL;"
+      run_sql_in_db "${SKILL_DB}" "UPDATE skill_session SET ak = CAST(agent_id AS CHAR) WHERE agent_id IS NOT NULL;"
     fi
   fi
 
   if column_exists "${SKILL_DB}" "skill_session" "agent_id"; then
     if index_exists "${SKILL_DB}" "skill_session" "idx_agent"; then
-      run_sql "ALTER TABLE ${SKILL_DB}.skill_session DROP INDEX idx_agent;"
+      run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session DROP INDEX idx_agent;"
     fi
     echo "[db] Drop legacy skill_session.agent_id"
-    run_sql "ALTER TABLE ${SKILL_DB}.skill_session DROP COLUMN agent_id;"
+    run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session DROP COLUMN agent_id;"
   fi
 
   if ! index_exists "${SKILL_DB}" "skill_session" "idx_ak"; then
-    run_sql "ALTER TABLE ${SKILL_DB}.skill_session ADD INDEX idx_ak (ak);"
+    run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session ADD INDEX idx_ak (ak);"
   fi
 
   if column_exists "${SKILL_DB}" "skill_session" "im_chat_id" && ! column_exists "${SKILL_DB}" "skill_session" "im_group_id"; then
     echo "[db] Rename skill_session.im_chat_id -> im_group_id"
-    run_sql "ALTER TABLE ${SKILL_DB}.skill_session CHANGE COLUMN im_chat_id im_group_id VARCHAR(128);"
+    run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session CHANGE COLUMN im_chat_id im_group_id VARCHAR(128);"
   fi
 
   if column_exists "${SKILL_DB}" "skill_session" "skill_definition_id"; then
     echo "[db] Drop legacy skill_session.skill_definition_id"
-    run_sql "ALTER TABLE ${SKILL_DB}.skill_session DROP COLUMN skill_definition_id;"
+    run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session DROP COLUMN skill_definition_id;"
   fi
 
   if column_exists "${SKILL_DB}" "skill_session" "user_id"; then
     user_id_type="$(column_data_type "${SKILL_DB}" "skill_session" "user_id")"
     if [[ "${user_id_type}" != "varchar" ]]; then
       echo "[db] Align skill_session.user_id type to VARCHAR(128)"
-      run_sql "ALTER TABLE ${SKILL_DB}.skill_session MODIFY COLUMN user_id VARCHAR(128) NOT NULL;"
+      run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session MODIFY COLUMN user_id VARCHAR(128) NOT NULL;"
     fi
   fi
 fi

@@ -32,7 +32,15 @@ import {
   type StreamMode,
 } from "./resolveStreamingExecutionPlan.js";
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
+import { ApprovalRegistry } from "./runtime/ApprovalRegistry.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
+import {
+  RuntimeApprovalPort,
+  RuntimeQuestionReplyPort,
+  type ApprovalPort,
+  type QuestionReplyPort,
+} from "./runtime/InteractionPorts.js";
+import { QuestionRegistry } from "./runtime/QuestionRegistry.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import {
   buildBusyEvent,
@@ -47,6 +55,9 @@ import {
   buildToolPartUpdated,
   buildReasoningPartUpdated,
   createToolSessionId,
+  buildPermissionAskedEvent,
+  buildPermissionUpdatedEvent,
+  buildQuestionAskedEvent,
 } from "./session/upstreamEvents.js";
 
 export interface OpenClawGatewayBridgeOptions {
@@ -181,6 +192,7 @@ interface AssistantStreamState {
   reasoningMetadata?: Record<string, unknown>;
   chunkCount: number;
   firstChunkAt: number | null;
+  finalOnly: boolean;
 }
 
 function createAssistantStreamState(sessionKey: string): AssistantStreamState {
@@ -206,6 +218,7 @@ function createAssistantStreamState(sessionKey: string): AssistantStreamState {
     reasoningMetadata: undefined,
     chunkCount: 0,
     firstChunkAt: null,
+    finalOnly: false,
   };
 }
 
@@ -225,6 +238,13 @@ interface ToolAgentEvent {
   runId?: string;
   sessionKey?: string;
   stream?: string;
+  data?: unknown;
+}
+
+interface RuntimeGatewayEvent {
+  event?: string;
+  type?: string;
+  payload?: unknown;
   data?: unknown;
 }
 
@@ -285,6 +305,10 @@ export class OpenClawGatewayBridge {
   private readonly connection: GatewayConnection;
   private readonly runtime: PluginRuntime;
   private readonly registerMetadata: RegisterMetadata;
+  private readonly approvalRegistry = new ApprovalRegistry();
+  private readonly questionRegistry = new QuestionRegistry();
+  private readonly approvalPort: ApprovalPort;
+  private readonly questionReplyPort: QuestionReplyPort;
   private readonly activeToolSessions = new Map<
     string,
     {
@@ -301,15 +325,39 @@ export class OpenClawGatewayBridge {
   private running = false;
   private status: MessageBridgeStatusSnapshot;
   private unsubscribeAgentEvents: (() => boolean) | null = null;
+  private unsubscribeGatewayEvents: (() => boolean) | null = null;
 
   private publishStatus(): void {
     updateRuntimeSnapshot(this.options.account.accountId, { ...this.status });
     this.options.setStatus({ ...this.status });
   }
 
+  private updateStreamingOutcomeStatus(outcome: {
+    executionPath: ChatExecutionPath;
+    streamingEnabled: boolean;
+    observedRealChunk: boolean;
+  }): void {
+    if (outcome.executionPath !== "runtime_reply") {
+      return;
+    }
+
+    if (!outcome.streamingEnabled) {
+      this.status.streamingPathHealthy = true;
+      this.status.streamingPathReason = "plugin_streaming_disabled_runtime_reply";
+      this.publishStatus();
+      return;
+    }
+
+    this.status.streamingPathHealthy = outcome.observedRealChunk;
+    this.status.streamingPathReason = outcome.observedRealChunk ? "runtime_reply_available" : "runtime_reply_final_only";
+    this.publishStatus();
+  }
+
   constructor(private readonly options: OpenClawGatewayBridgeOptions) {
     this.runtime = options.runtime;
     this.registerMetadata = options.registerMetadata ?? resolveRegisterMetadata(options.logger);
+    this.approvalPort = new RuntimeApprovalPort(this.runtime);
+    this.questionReplyPort = new RuntimeQuestionReplyPort(this.runtime);
     warnUnknownToolType(options.logger, this.registerMetadata.toolType, options.account.accountId);
     this.sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
     this.connection =
@@ -339,6 +387,10 @@ export class OpenClawGatewayBridge {
       running: false,
       connected: false,
       runtimePhase: "idle",
+      routeResolverAvailable: false,
+      replyRuntimeAvailable: false,
+      streamingPathHealthy: false,
+      streamingPathReason: "missing_route_resolver",
       lastStartAt: null,
       lastStopAt: null,
       lastError: null,
@@ -408,12 +460,16 @@ export class OpenClawGatewayBridge {
     this.status.running = true;
     this.status.runtimePhase = "connecting";
     this.status.lastStartAt = Date.now();
+    this.refreshRuntimeCapabilities("start");
     markRuntimePhase(this.options.account.accountId, "connecting");
     this.publishStatus();
     if (!this.unsubscribeAgentEvents && this.runtime.events?.onAgentEvent) {
       this.unsubscribeAgentEvents = this.runtime.events.onAgentEvent((evt: ToolAgentEvent) => {
         this.handleRuntimeAgentEvent(evt);
       });
+    }
+    if (!this.unsubscribeGatewayEvents) {
+      this.unsubscribeGatewayEvents = this.subscribeRuntimeGatewayEvents();
     }
     await this.connection.connect();
     this.options.logger.info("runtime.start.completed", {
@@ -441,8 +497,12 @@ export class OpenClawGatewayBridge {
     this.connection.disconnect();
     this.unsubscribeAgentEvents?.();
     this.unsubscribeAgentEvents = null;
+    this.unsubscribeGatewayEvents?.();
+    this.unsubscribeGatewayEvents = null;
     this.activeToolSessions.clear();
     this.activeRunToSessionKey.clear();
+    this.approvalRegistry.clearAll();
+    this.questionRegistry.clearAll();
     this.status.running = false;
     this.status.connected = false;
     this.status.runtimePhase = "idle";
@@ -567,9 +627,15 @@ export class OpenClawGatewayBridge {
         }
         return { success: false, reason: "abort_session_failed" };
       case "permission_reply":
+        if (await this.handlePermissionReply(message, context)) {
+          return { success: true };
+        }
+        return { success: false, reason: "permission_reply_failed" };
       case "question_reply":
-        this.sendUnsupported(message.action, message.payload.toolSessionId, message.welinkSessionId, context);
-        return { success: false, reason: `unsupported_action:${message.action}` };
+        if (await this.handleQuestionReply(message, context)) {
+          return { success: true };
+        }
+        return { success: false, reason: "question_reply_failed" };
     }
   }
 
@@ -597,6 +663,7 @@ export class OpenClawGatewayBridge {
     } = resolveEffectiveReplyConfig(
       this.options.config,
     );
+    this.refreshRuntimeCapabilities("chat");
     const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
     const hasReplyRuntime = !!this.runtime.channel?.reply;
     const pathSelection = this.resolveChatExecutionPath({
@@ -820,6 +887,16 @@ export class OpenClawGatewayBridge {
           if (payloadText.length > 0) {
             pendingFinalText = payloadText;
           }
+          if (streamingEnabled && assistantStream.chunkCount === 0 && payloadText.length > 0) {
+            assistantStream.finalOnly = true;
+            this.options.logger.warn("bridge.chat.runtime_reply_final_only", {
+              toolSessionId: record.toolSessionId,
+              sessionKey: record.sessionKey,
+              chatRequestId,
+              retryAttempt,
+              finalTextLength: payloadText.length,
+            });
+          }
           return;
         }
 
@@ -915,6 +992,15 @@ export class OpenClawGatewayBridge {
       const reconciliation = reconcileFinalText(assistantStream.accumulatedText, pendingFinalText);
       assistantStream.accumulatedText = reconciliation.finalText;
       const finalText = assistantStream.accumulatedText || "(empty response)";
+      assistantStream.finalOnly = streamingEnabled
+        && executionPath === "runtime_reply"
+        && assistantStream.chunkCount === 0
+        && finalText.length > 0;
+      this.updateStreamingOutcomeStatus({
+        executionPath: "runtime_reply",
+        streamingEnabled,
+        observedRealChunk: assistantStream.chunkCount > 0,
+      });
       this.sendAssistantFinalResponse(
         record.toolSessionId,
         assistantStream,
@@ -1167,6 +1253,8 @@ export class OpenClawGatewayBridge {
 
     this.markSessionTerminated(record);
     try {
+      this.approvalRegistry.clearSession(record.toolSessionId);
+      this.questionRegistry.clearSession(record.toolSessionId);
       await this.deleteHostSession(record);
       this.clearActiveToolSession(record.sessionKey);
       this.sessionRegistry.delete(message.payload.toolSessionId);
@@ -1202,6 +1290,8 @@ export class OpenClawGatewayBridge {
 
     this.markSessionTerminated(record);
     try {
+      this.approvalRegistry.clearSession(record.toolSessionId);
+      this.questionRegistry.clearSession(record.toolSessionId);
       this.clearActiveToolSession(record.sessionKey);
       this.sendToolDone({
         type: "tool_done",
@@ -1217,6 +1307,133 @@ export class OpenClawGatewayBridge {
         toolSessionId: message.payload.toolSessionId,
         welinkSessionId: message.welinkSessionId,
         error: errorMessage,
+      }, context);
+      return false;
+    }
+  }
+
+  private async handlePermissionReply(
+    message: Extract<InvokeMessage, { action: "permission_reply" }>,
+    context: UpstreamSendContext,
+  ): Promise<boolean> {
+    const record = this.approvalRegistry.get(message.payload.permissionId);
+    if (!record) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_not_found",
+      }, context);
+      return false;
+    }
+    if (record.toolSessionId !== message.payload.toolSessionId) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_session_mismatch",
+      }, context);
+      return false;
+    }
+    if (record.status === "resolved") {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_already_resolved",
+      }, context);
+      return false;
+    }
+    if (record.status === "expired") {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_expired",
+      }, context);
+      return false;
+    }
+
+    const decision =
+      message.payload.response === "once"
+        ? "allow-once"
+        : message.payload.response === "always"
+          ? "allow-always"
+          : "deny";
+
+    try {
+      await this.approvalPort.resolve({
+        permissionId: message.payload.permissionId,
+        decision,
+      });
+      return true;
+    } catch (error) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: `permission_resolve_failed:${error instanceof Error ? error.message : String(error)}`,
+      }, context);
+      return false;
+    }
+  }
+
+  private async handleQuestionReply(
+    message: Extract<InvokeMessage, { action: "question_reply" }>,
+    context: UpstreamSendContext,
+  ): Promise<boolean> {
+    const matches = this.questionRegistry.findBySession(message.payload.toolSessionId, message.payload.toolCallId);
+    if (matches.length === 0) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "question_not_found",
+      }, context);
+      return false;
+    }
+    if (!message.payload.toolCallId && matches.length > 1) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "question_reply_requires_unique_pending_question",
+      }, context);
+      return false;
+    }
+    const record = matches[0];
+    if (record.status === "resolved") {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "question_already_resolved",
+      }, context);
+      return false;
+    }
+    if (record.status === "expired") {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "question_expired",
+      }, context);
+      return false;
+    }
+
+    try {
+      await this.questionReplyPort.reply({
+        requestId: record.requestId,
+        answer: message.payload.answer,
+      });
+      this.questionRegistry.markResolved(record.requestId);
+      return true;
+    } catch (error) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: error instanceof Error ? error.message : String(error),
       }, context);
       return false;
     }
@@ -1316,19 +1533,12 @@ export class OpenClawGatewayBridge {
     context: UpstreamSendContext,
   ): void {
     state.accumulatedText += chunk;
-
-    if (state.accumulatedText === chunk) {
-      this.ensureAssistantMessageStarted(toolSessionId, state, context);
-      this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
-      this.sendAssistantTextPartUpdated(toolSessionId, state, chunk, context);
-      return;
-    }
-
-    this.sendToolEvent({
-      type: "tool_event",
-      toolSessionId,
-      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, chunk),
-    }, context);
+    state.finalOnly = false;
+    this.ensureAssistantMessageStarted(toolSessionId, state, context);
+    this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
+    this.sendAssistantTextPartUpdated(toolSessionId, state, state.accumulatedText, context, {
+      delta: chunk,
+    });
   }
 
   private ensureAssistantMessageStarted(
@@ -1414,12 +1624,17 @@ export class OpenClawGatewayBridge {
     state: AssistantStreamState,
     text: string,
     context: UpstreamSendContext,
+    options: {
+      delta?: string;
+    } = {},
   ): void {
-    this.sendToolEvent({
-      type: "tool_event",
-      toolSessionId,
-      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, ""),
-    }, context);
+    if (typeof options.delta === "string" && options.delta.length > 0) {
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, options.delta),
+      }, context);
+    }
     this.sendToolEvent({
       type: "tool_event",
       toolSessionId,
@@ -1621,6 +1836,172 @@ export class OpenClawGatewayBridge {
     this.terminatedSessionKeys.delete(record.sessionKey);
   }
 
+  private subscribeRuntimeGatewayEvents(): (() => boolean) | null {
+    const events = this.runtime.events as {
+      onGatewayEvent?: (listener: (evt: RuntimeGatewayEvent) => void) => () => boolean;
+      onSystemEvent?: (listener: (evt: RuntimeGatewayEvent) => void) => () => boolean;
+      onEvent?: (listener: (evt: RuntimeGatewayEvent) => void) => () => boolean;
+    } | undefined;
+
+    const subscribe = events?.onGatewayEvent ?? events?.onSystemEvent ?? events?.onEvent;
+    if (!subscribe) {
+      return null;
+    }
+
+    return subscribe((evt) => {
+      this.handleRuntimeGatewayEvent(evt);
+    });
+  }
+
+  private handleRuntimeGatewayEvent(evt: RuntimeGatewayEvent): void {
+    const eventName = typeof evt.event === "string" ? evt.event : typeof evt.type === "string" ? evt.type : "";
+    const payload = isRecord(evt.payload) ? evt.payload : isRecord(evt.data) ? evt.data : null;
+    if (!eventName || !payload) {
+      return;
+    }
+
+    if (eventName === "exec.approval.requested") {
+      const permissionId = asString(payload.id);
+      const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+      if (!permissionId || !toolSessionId) {
+        return;
+      }
+      const record = this.approvalRegistry.upsertPending({
+        toolSessionId,
+        permissionId,
+        title: asString(payload.title),
+        messageId: asString(payload.messageId),
+        metadata: isRecord(payload.metadata) ? payload.metadata : undefined,
+        expiresAt: typeof payload.expiresAt === "number" ? payload.expiresAt : undefined,
+      });
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildPermissionAskedEvent(toolSessionId, permissionId, {
+          title: record.title,
+          messageId: record.messageId,
+          metadata: record.metadata,
+          expiresAt: record.expiresAt,
+          status: record.status,
+          sourceEvent: eventName,
+        }),
+      }, {
+        toolSessionId,
+      });
+      return;
+    }
+
+    if (eventName === "exec.approval.resolved") {
+      const permissionId = asString(payload.id);
+      if (!permissionId) {
+        return;
+      }
+      const record = this.approvalRegistry.markResolved(permissionId);
+      if (!record) {
+        return;
+      }
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId: record.toolSessionId,
+        event: buildPermissionUpdatedEvent(record.toolSessionId, permissionId, {
+          status: record.status,
+          resolvedAt: record.resolvedAt,
+          decision: asString(payload.decision),
+          sourceEvent: eventName,
+        }),
+      }, {
+        toolSessionId: record.toolSessionId,
+      });
+      return;
+    }
+
+    if (eventName === "question.asked") {
+      const requestId = asString(payload.id);
+      const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+      if (!requestId || !toolSessionId) {
+        return;
+      }
+      const questionsRaw = Array.isArray(payload.questions) ? payload.questions : [];
+      const questions = questionsRaw
+        .filter(isRecord)
+        .map((question) => ({
+          question: asString(question.question) ?? "",
+          header: asString(question.header),
+          options: Array.isArray(question.options)
+            ? question.options
+                .filter(isRecord)
+                .map((option) => ({
+                  label: asString(option.label) ?? "",
+                  description: asString(option.description),
+                }))
+                .filter((option) => option.label.length > 0)
+            : undefined,
+        }))
+        .filter((question) => question.question.length > 0);
+      if (questions.length === 0) {
+        return;
+      }
+
+      const toolRaw = isRecord(payload.tool) ? payload.tool : undefined;
+      const record = this.questionRegistry.upsertPending({
+        requestId,
+        toolSessionId,
+        toolCallId: asString(toolRaw?.callID) ?? asString(payload.toolCallId),
+        questions,
+        messageId: asString(toolRaw?.messageID) ?? asString(payload.messageId),
+      });
+      this.sendToolEvent({
+        type: "tool_event",
+        toolSessionId,
+        event: buildQuestionAskedEvent(toolSessionId, {
+          requestId,
+          questions: record.questions,
+          toolCallId: record.toolCallId,
+          messageId: record.messageId,
+        }),
+      }, {
+        toolSessionId,
+      });
+    }
+  }
+
+  private extractToolSessionIdFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
+    const metadata = isRecord(payload.metadata) ? payload.metadata : undefined;
+    const tool = isRecord(payload.tool) ? payload.tool : undefined;
+    return (
+      asString(payload.toolSessionId) ??
+      asString(payload.sessionID) ??
+      asString(payload.sessionId) ??
+      asString(metadata?.toolSessionId) ??
+      asString(metadata?.sessionID) ??
+      asString(tool?.sessionID)
+    );
+  }
+
+  private refreshRuntimeCapabilities(source: "start" | "chat"): void {
+    const hasRouteResolver = !!this.runtime.channel?.routing?.resolveAgentRoute;
+    const hasReplyRuntime = !!this.runtime.channel?.reply;
+    const pathSelection = this.resolveChatExecutionPath({
+      streamingEnabled: this.options.account.streaming !== false,
+      hasRouteResolver,
+      hasReplyRuntime,
+    });
+    this.status.routeResolverAvailable = hasRouteResolver;
+    this.status.replyRuntimeAvailable = hasReplyRuntime;
+    this.status.streamingPathHealthy = pathSelection.executionPath === "runtime_reply";
+    this.status.streamingPathReason = pathSelection.reason;
+    this.publishStatus();
+    if (source === "start" && pathSelection.executionPath !== "runtime_reply") {
+      this.options.logger.warn("runtime.streaming_path.unhealthy", {
+        accountId: this.options.account.accountId,
+        reason: pathSelection.reason,
+        hasRouteResolver,
+        hasReplyRuntime,
+        streamingEnabled: this.options.account.streaming !== false,
+      });
+    }
+  }
+
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
     if (!isRecord(evt.data)) {
       return;
@@ -1728,6 +2109,8 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
+      hasRouteResolver: this.status.routeResolverAvailable,
+      hasReplyRuntime: this.status.replyRuntimeAvailable,
       streamDefaultsInjected: params.streamDefaultsInjected,
       streamingEnabled: params.streamingEnabled,
       streamingSource: params.streamingSource,
@@ -1770,6 +2153,8 @@ export class OpenClawGatewayBridge {
       runTimeoutMs: params.configuredTimeoutMs,
       executionPath: params.executionPath,
       streamMode: params.streamMode,
+      hasRouteResolver: this.status.routeResolverAvailable,
+      hasReplyRuntime: this.status.replyRuntimeAvailable,
       streamDefaultsInjected: params.streamDefaultsInjected,
       streamingEnabled: params.streamingEnabled,
       streamingSource: params.streamingSource,
@@ -1852,6 +2237,12 @@ export class OpenClawGatewayBridge {
     retryAttempt: RetryAttempt;
     finalReconciled: boolean;
   }): Record<string, unknown> {
+    const streamingObserved =
+      params.executionPath !== "runtime_reply"
+        ? "fallback_non_streaming"
+        : params.streamingEnabled && params.assistantStream.chunkCount > 0
+          ? "runtime_block_streaming"
+          : "runtime_final_only";
     return {
       toolSessionId: params.toolSessionId,
       sessionKey: params.sessionKey,
@@ -1869,6 +2260,8 @@ export class OpenClawGatewayBridge {
       model: params.selectedModel.model,
       thinkLevel: params.selectedModel.thinkLevel,
       chunkCount: params.assistantStream.chunkCount,
+      streamingObserved,
+      finalOnly: params.assistantStream.finalOnly,
       firstChunkLatencyMs:
         params.assistantStream.firstChunkAt === null ? null : params.assistantStream.firstChunkAt - params.startedAt,
       totalLatencyMs: Date.now() - params.startedAt,

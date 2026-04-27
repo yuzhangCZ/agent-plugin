@@ -118,29 +118,50 @@ function createRuntimeReplyRuntime(dispatchImpl) {
 }
 
 function createRuntimeEventBus() {
-  const listeners = new Set();
+  const agentListeners = new Set();
+  const gatewayListeners = new Set();
   return {
+    events: {
+      onAgentEvent(listener) {
+        agentListeners.add(listener);
+        return () => agentListeners.delete(listener);
+      },
+      onGatewayEvent(listener) {
+        gatewayListeners.add(listener);
+        return () => gatewayListeners.delete(listener);
+      },
+    },
     runtimeEvents: {
       onAgentEvent(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
+        agentListeners.add(listener);
+        return () => agentListeners.delete(listener);
       },
     },
     emit(event) {
-      for (const listener of listeners) {
+      for (const listener of agentListeners) {
+        listener(event);
+      }
+    },
+    emitAgent(event) {
+      for (const listener of agentListeners) {
+        listener(event);
+      }
+    },
+    emitGateway(event) {
+      for (const listener of gatewayListeners) {
         listener(event);
       }
     },
   };
 }
 
-function createBridge({ runtime, connection = new FakeGatewayConnection() } = {}) {
+function createBridge({ runtime, connection = new FakeGatewayConnection(), setStatus = () => {} } = {}) {
   const bridge = new OpenClawGatewayBridge({
     account: createAccount(),
     config: {},
     logger: createLogger(),
     runtime: runtime ?? createFallbackRuntime(),
-    setStatus() {},
+    setStatus,
     connectionFactory: () => connection,
   });
 
@@ -168,11 +189,28 @@ function assertAdjacentAssistantTextDelta(events, updatedIndex, expectedText, ex
   assert.equal(deltaEvent.properties?.partID, updatedEvent.properties?.part?.id);
 }
 
+function assertNoAdjacentAssistantTextDelta(events, updatedIndex, expectedText) {
+  const updatedEvent = events[updatedIndex]?.event;
+  assert.ok(updatedEvent);
+  assert.equal(updatedEvent.type, "message.part.updated");
+  assert.equal(updatedEvent.properties?.part?.type, "text");
+  assert.equal(updatedEvent.properties?.part?.text, expectedText);
+
+  const previousEvent = events[updatedIndex - 1]?.event;
+  assert.ok(previousEvent);
+  assert.notEqual(previousEvent.type, "message.part.delta");
+}
+
 function assertAssistantTextSeed(events, updatedIndex) {
   const updatedEvent = events[updatedIndex]?.event;
   assert.ok(updatedEvent);
 
-  const seedEvent = events[updatedIndex - 2]?.event;
+  const previousEvent = events[updatedIndex - 1]?.event;
+  const fallbackEvent = events[updatedIndex - 2]?.event;
+  const seedEvent =
+    previousEvent?.type === "message.part.updated" && previousEvent.properties?.part?.text === ""
+      ? previousEvent
+      : fallbackEvent;
   assert.ok(seedEvent);
   assert.equal(seedEvent.type, "message.part.updated");
   assert.equal(seedEvent.properties?.part?.type, "text");
@@ -199,6 +237,20 @@ function assertSameAssistantTextPart(events, firstIndex, secondIndex) {
   assert.equal(firstEvent.properties?.part?.id, secondEvent.properties?.part?.id);
 }
 
+function findAssistantTextSeedIndex(events, updatedIndex) {
+  for (let index = Math.max(0, updatedIndex - 3); index < updatedIndex; index += 1) {
+    const event = events[index]?.event;
+    if (
+      event?.type === "message.part.updated"
+      && event.properties?.part?.type === "text"
+      && event.properties?.part?.text === ""
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 test("create_session emits session.updated before session_created", async () => {
   const { bridge, connection } = createBridge();
 
@@ -218,6 +270,193 @@ test("create_session emits session.updated before session_created", async () => 
   assert.equal(connection.sent[0].message.event.properties.info.title, "Session Title");
   assert.equal(connection.sent[1].message.type, "session_created");
   assert.equal(connection.sent[1].message.toolSessionId, connection.sent[0].message.toolSessionId);
+});
+
+test("start publishes streaming capability snapshot when runtime reply is unavailable", async () => {
+  const statuses = [];
+  const { bridge } = createBridge({
+    runtime: createFallbackRuntime(),
+    setStatus(status) {
+      statuses.push(status);
+    },
+  });
+
+  await bridge.start();
+  await bridge.stop();
+
+  assert.ok(statuses.some((status) => status.streamingPathReason === "missing_route_resolver"));
+  assert.ok(statuses.some((status) => status.streamingPathHealthy === false));
+});
+
+test("approval requested gateway event is projected as permission.asked", async () => {
+  const bus = createRuntimeEventBus();
+  const runtime = {
+    events: bus.events,
+    gatewayClient: {
+      async request() {},
+    },
+  };
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.start();
+  bus.emitGateway({
+    event: "exec.approval.requested",
+    payload: {
+      id: "perm_1",
+      toolSessionId: "ses_tool_perm_1",
+      title: "Run command",
+      metadata: {
+        command: "ls",
+      },
+    },
+  });
+
+  const asked = connection.sent.find(({ message }) => {
+    return message.type === "tool_event" && message.event.type === "permission.asked";
+  });
+
+  assert.ok(asked);
+  assert.equal(asked.message.event.properties.id, "perm_1");
+  assert.equal(asked.message.event.properties.sessionID, "ses_tool_perm_1");
+});
+
+test("permission_reply resolves through exec.approval.resolve after requested event", async () => {
+  const requests = [];
+  const bus = createRuntimeEventBus();
+  const runtime = {
+    events: bus.events,
+    gatewayClient: {
+      async request(method, params) {
+        requests.push({ method, params });
+      },
+    },
+  };
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.start();
+  bus.emitGateway({
+    event: "exec.approval.requested",
+    payload: {
+      id: "perm_2",
+      toolSessionId: "ses_tool_perm_2",
+    },
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_perm_2",
+    action: "permission_reply",
+    payload: {
+      toolSessionId: "ses_tool_perm_2",
+      permissionId: "perm_2",
+      response: "always",
+    },
+  });
+
+  assert.deepEqual(requests, [
+    {
+      method: "exec.approval.resolve",
+      params: {
+        id: "perm_2",
+        decision: "allow-always",
+      },
+    },
+  ]);
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_error"), false);
+});
+
+test("question.asked event is projected and question_reply uses host adapter when available", async () => {
+  const replies = [];
+  const bus = createRuntimeEventBus();
+  const runtime = {
+    events: bus.events,
+    question: {
+      async reply(params) {
+        replies.push(params);
+      },
+    },
+  };
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.start();
+  bus.emitGateway({
+    event: "question.asked",
+    payload: {
+      id: "q_req_1",
+      toolSessionId: "ses_tool_q_1",
+      tool: {
+        callID: "call_q_1",
+      },
+      questions: [
+        {
+          question: "Choose a framework",
+          header: "Framework",
+          options: [{ label: "Vite" }],
+        },
+      ],
+    },
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_q_1",
+    action: "question_reply",
+    payload: {
+      toolSessionId: "ses_tool_q_1",
+      toolCallId: "call_q_1",
+      answer: "Vite",
+    },
+  });
+
+  const asked = connection.sent.find(({ message }) => {
+    return message.type === "tool_event" && message.event.type === "question.asked";
+  });
+
+  assert.ok(asked);
+  assert.deepEqual(replies, [
+    {
+      requestId: "q_req_1",
+      answer: "Vite",
+    },
+  ]);
+});
+
+test("question_reply returns stable host-unavailable error when no host adapter exists", async () => {
+  const bus = createRuntimeEventBus();
+  const runtime = {
+    events: bus.events,
+  };
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.start();
+  bus.emitGateway({
+    event: "question.asked",
+    payload: {
+      id: "q_req_2",
+      toolSessionId: "ses_tool_q_2",
+      questions: [
+        {
+          question: "Choose a framework",
+        },
+      ],
+    },
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_q_2",
+    action: "question_reply",
+    payload: {
+      toolSessionId: "ses_tool_q_2",
+      answer: "Vite",
+    },
+  });
+
+  const toolError = connection.sent.findLast?.(({ message }) => message.type === "tool_error")
+    ?? [...connection.sent].reverse().find(({ message }) => message.type === "tool_error");
+
+  assert.ok(toolError);
+  assert.equal(toolError.message.error, "question_reply_unavailable_in_host");
 });
 
 test("subagent fallback emits session.idle with toolSessionId instead of internal sessionKey", async () => {
@@ -339,7 +578,7 @@ test("runtime reply chat emits assistant text events in protocol order", async (
       role: undefined,
       partType: undefined,
       text: undefined,
-      delta: "",
+      delta: "hello",
     },
     {
       type: "tool_event",
@@ -356,14 +595,6 @@ test("runtime reply chat emits assistant text events in protocol order", async (
       partType: undefined,
       text: undefined,
       delta: " world",
-    },
-    {
-      type: "tool_event",
-      eventType: "message.part.delta",
-      role: undefined,
-      partType: undefined,
-      text: undefined,
-      delta: "",
     },
     {
       type: "tool_event",
@@ -419,13 +650,13 @@ test("runtime reply chat emits assistant text events in protocol order", async (
   assert.notEqual(firstAssistantTextUpdateIndex, -1);
   assert.notEqual(finalAssistantTextUpdateIndex, -1);
   assertAssistantTextSeed(toolEvents, firstAssistantTextUpdateIndex);
-  assertAdjacentAssistantTextDelta(toolEvents, firstAssistantTextUpdateIndex, "hello", "");
+  assertAdjacentAssistantTextDelta(toolEvents, firstAssistantTextUpdateIndex, "hello", "hello");
   const streamedDeltaEvent = toolEvents.find((message) => {
     return message.event.type === "message.part.delta" && message.event.properties?.delta === " world";
   });
   assert.ok(streamedDeltaEvent);
   assert.equal(streamedDeltaEvent.event.properties.field, "text");
-  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello world", "");
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello world", " world");
 
   const updatedPartEvents = connection.sent
     .map(({ message }) => message)
@@ -468,14 +699,20 @@ test("single block stream emits seeded first text update and skips identical fin
 
   assert.equal(assistantTextUpdateIndexes.length, 1);
   assertAssistantTextSeed(toolEvents, assistantTextUpdateIndexes[0]);
-  assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "");
+  assertAdjacentAssistantTextDelta(toolEvents, assistantTextUpdateIndexes[0], "hello", "hello");
 });
 
-test("runtime reply final-only emits seeded first text update before final text", async () => {
+test("runtime reply final-only emits final text without synthetic delta and marks status unhealthy", async () => {
   const runtime = createRuntimeReplyRuntime(async ({ dispatcherOptions }) => {
     await dispatcherOptions.deliver({ text: "hello only final" }, { kind: "final" });
   });
-  const { bridge, connection } = createBridge({ runtime });
+  const statuses = [];
+  const { bridge, connection } = createBridge({
+    runtime,
+    setStatus(status) {
+      statuses.push(status);
+    },
+  });
 
   await bridge.handleDownstreamMessage({
     type: "invoke",
@@ -499,7 +736,9 @@ test("runtime reply final-only emits seeded first text update before final text"
 
   assert.notEqual(finalAssistantTextUpdateIndex, -1);
   assertAssistantTextSeed(toolEvents, finalAssistantTextUpdateIndex);
-  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final", "");
+  assertNoAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final");
+  assert.ok(statuses.some((status) => status.streamingPathReason === "runtime_reply_final_only"));
+  assert.ok(statuses.some((status) => status.streamingPathHealthy === false));
 });
 
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {
@@ -581,13 +820,6 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
     },
     {
       type: "tool_event",
-      eventType: "message.part.delta",
-      role: undefined,
-      partType: undefined,
-      text: undefined,
-    },
-    {
-      type: "tool_event",
       eventType: "message.part.updated",
       role: undefined,
       partType: "text",
@@ -630,10 +862,10 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
   const fallbackUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "fallback answer");
   assert.notEqual(fallbackUpdateIndex, -1);
   assertAssistantTextSeed(toolEvents, fallbackUpdateIndex);
-  assertAdjacentAssistantTextDelta(toolEvents, fallbackUpdateIndex, "fallback answer", "");
+  assertNoAdjacentAssistantTextDelta(toolEvents, fallbackUpdateIndex, "fallback answer");
 });
 
-test("subagent fallback emits empty response delta immediately before final text update", async () => {
+test("subagent fallback emits empty response without synthetic delta before final text update", async () => {
   const runtime = createFallbackRuntime({
     subagent: {
       async run() {
@@ -672,7 +904,7 @@ test("subagent fallback emits empty response delta immediately before final text
 
   assert.notEqual(emptyUpdateIndex, -1);
   assertAssistantTextSeed(toolEvents, emptyUpdateIndex);
-  assertAdjacentAssistantTextDelta(toolEvents, emptyUpdateIndex, "(empty response)", "");
+  assertNoAdjacentAssistantTextDelta(toolEvents, emptyUpdateIndex, "(empty response)");
 });
 
 test("runtime reply final-only and fallback reuse the same assistant text part identity", async () => {
@@ -694,7 +926,9 @@ test("runtime reply final-only and fallback reuse the same assistant text part i
   const toolEvents = getToolEvents(connection);
   const identityUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "identity final");
   assert.notEqual(identityUpdateIndex, -1);
-  assertSameAssistantTextPart(toolEvents, identityUpdateIndex - 2, identityUpdateIndex);
+  const seedIndex = findAssistantTextSeedIndex(toolEvents, identityUpdateIndex);
+  assert.notEqual(seedIndex, -1);
+  assertSameAssistantTextPart(toolEvents, seedIndex, identityUpdateIndex);
 });
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {
