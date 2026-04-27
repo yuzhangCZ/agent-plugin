@@ -340,6 +340,25 @@ function readSyntheticChunkConfig(config: OpenClawConfig): { minChars: number; m
   return { minChars, maxChars };
 }
 
+function readSyntheticReplayDelayMs(config: OpenClawConfig): number {
+  if (!isRecord(config)) {
+    return 80;
+  }
+  const agents = isRecord(config.agents) ? config.agents : undefined;
+  const defaults = isRecord(agents?.defaults) ? agents.defaults : undefined;
+  const coalesce = isRecord(defaults?.blockStreamingCoalesce) ? defaults.blockStreamingCoalesce : undefined;
+  const idleMs = typeof coalesce?.idleMs === "number" && Number.isFinite(coalesce.idleMs)
+    ? Math.floor(coalesce.idleMs)
+    : 80;
+  return Math.min(250, Math.max(20, idleMs));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function splitTextIntoSyntheticChunks(text: string, config: OpenClawConfig): string[] {
   const normalized = text.trim();
   if (normalized.length === 0) {
@@ -1171,7 +1190,7 @@ export class OpenClawGatewayBridge {
       finalText.length > 0;
     if (shouldReplaySyntheticStream) {
       params.assistantStream.accumulatedText = "";
-      this.replayFinalTextAsSyntheticStream({
+      await this.replayFinalTextAsSyntheticStream({
         toolSessionId: params.record.toolSessionId,
         state: params.assistantStream,
         finalText,
@@ -1689,9 +1708,11 @@ export class OpenClawGatewayBridge {
     state.finalOnly = false;
     this.ensureAssistantMessageStarted(toolSessionId, state, context);
     this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
-    this.sendAssistantTextPartUpdated(toolSessionId, state, state.accumulatedText, context, {
-      delta: chunk,
-    });
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId,
+      event: buildMessagePartDelta(toolSessionId, state.messageId, state.textPartId, chunk),
+    }, context);
   }
 
   private ensureAssistantMessageStarted(
@@ -1742,7 +1763,9 @@ export class OpenClawGatewayBridge {
     if (state.textDisplayed && state.lastDisplayedText === finalText) {
       return;
     }
-    this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
+    if (state.chunkCount === 0) {
+      this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
+    }
     this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
   }
 
@@ -1805,7 +1828,7 @@ export class OpenClawGatewayBridge {
     state.lastDisplayedText = text;
   }
 
-  private replayFinalTextAsSyntheticStream(params: {
+  private async replayFinalTextAsSyntheticStream(params: {
     toolSessionId: string;
     state: AssistantStreamState;
     finalText: string;
@@ -1815,11 +1838,12 @@ export class OpenClawGatewayBridge {
     chatRequestId: string;
     retryAttempt: RetryAttempt;
     sessionKey: string;
-  }): void {
+  }): Promise<void> {
     const chunks = splitTextIntoSyntheticChunks(params.finalText, params.effectiveConfig);
     if (chunks.length === 0) {
       return;
     }
+    const replayDelayMs = chunks.length > 1 ? readSyntheticReplayDelayMs(params.effectiveConfig) : 0;
 
     this.options.logger.warn("bridge.chat.synthetic_stream_from_final", {
       toolSessionId: params.toolSessionId,
@@ -1828,9 +1852,15 @@ export class OpenClawGatewayBridge {
       retryAttempt: params.retryAttempt,
       chunkCount: chunks.length,
       finalTextLength: params.finalText.length,
+      replayDelayMs,
     });
 
-    for (const chunk of chunks) {
+    for (let index = 0; index < chunks.length; index += 1) {
+      if (this.terminatedSessionKeys.has(params.sessionKey)) {
+        return;
+      }
+
+      const chunk = chunks[index];
       const now = Date.now();
       params.state.chunkCount += 1;
       if (params.state.firstChunkAt === null) {
@@ -1860,6 +1890,9 @@ export class OpenClawGatewayBridge {
         });
       }
       this.sendAssistantStreamChunk(params.toolSessionId, params.state, chunk, params.context);
+      if (replayDelayMs > 0 && index < chunks.length - 1) {
+        await sleep(replayDelayMs);
+      }
     }
   }
 
