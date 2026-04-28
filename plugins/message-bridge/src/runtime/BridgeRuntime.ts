@@ -362,6 +362,7 @@ export class BridgeRuntime {
     this.logger.info('runtime.stop.requested');
     this.lifecycleCoordinator.stopSession();
     this.gatewayConnectionOverride = null;
+    this.toolDoneCompat.reset();
     this.started = false;
     resetMessageBridgeStatus();
     this.logger.info('runtime.stop.completed');
@@ -764,6 +765,7 @@ export class BridgeRuntime {
 
     if (invokeMessage.action === 'close_session' && toolSessionId) {
       this.groupSessionCache.delete(toolSessionId);
+      this.toolDoneCompat.clearSession(toolSessionId);
     }
 
     const decision = this.toolDoneCompat.handleInvokeCompleted({
@@ -928,6 +930,10 @@ export class BridgeRuntime {
     return this.groupSessionCache.has(payload.toolSessionId) ? 'session_cache' : null;
   }
 
+  /**
+   * 群聊拦截链路的 synthetic 成功回放。
+   * @remarks 群聊会话不进入 ToolDoneCompat，回放成功后直接发送一次 tool_done。
+   */
   private replyGroupChatIntercept(options: {
     connection: GatewayClient;
     invokeLogger: BridgeLogger;
@@ -960,12 +966,6 @@ export class BridgeRuntime {
     if (!toolDoneSent) {
       return { ok: false, stage: 'tool_done', messageId };
     }
-
-    this.toolDoneCompat.handleInvokeCompleted({
-      action: 'chat',
-      toolSessionId: options.toolSessionId,
-      logger: options.invokeLogger,
-    });
 
     return { ok: true, messageId };
   }

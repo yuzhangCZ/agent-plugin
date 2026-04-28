@@ -39,6 +39,19 @@ export function buildGroupChatSyntheticEvents(toolSessionId: string): {
         type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId,
         event: {
+          type: 'session.status',
+          properties: {
+            sessionID: toolSessionId,
+            status: {
+              type: 'busy',
+            },
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId,
+        event: {
           type: 'message.updated',
           properties: {
             info: {
@@ -54,11 +67,13 @@ export function buildGroupChatSyntheticEvents(toolSessionId: string): {
         type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId,
         event: {
-          type: 'session.status',
+          type: 'message.part.updated',
           properties: {
-            sessionID: toolSessionId,
-            status: {
-              type: 'busy',
+            part: {
+              id: stepStartPartId,
+              sessionID: toolSessionId,
+              messageID: messageId,
+              type: 'step-start',
             },
           },
         },
@@ -70,10 +85,11 @@ export function buildGroupChatSyntheticEvents(toolSessionId: string): {
           type: 'message.part.updated',
           properties: {
             part: {
-              id: stepStartPartId,
+              id: textPartId,
               sessionID: toolSessionId,
               messageID: messageId,
-              type: 'step-start',
+              type: 'text',
+              text: '',
             },
           },
         },
@@ -134,7 +150,7 @@ export function buildGroupChatSyntheticEvents(toolSessionId: string): {
               id: messageId,
               sessionID: toolSessionId,
               role: 'assistant',
-              time: { created: now, updated: now },
+              time: { created: now },
             },
           },
         },

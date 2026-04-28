@@ -1202,8 +1202,9 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(prompts.length, 0);
-    assert.strictEqual(sent.length, 9);
+    assert.strictEqual(sent.length, 10);
     assert.deepStrictEqual(sent.map((entry) => entry.message.type), [
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1215,10 +1216,11 @@ describe('runtime protocol strictness', () => {
       'tool_done',
     ]);
 
-    const [messageUpdatedStart, sessionBusy, stepStart, textDelta, textPart, stepFinish, messageUpdatedFinish, sessionIdle, toolDone] = sent;
-    assert.strictEqual(messageUpdatedStart.message.event.type, 'message.updated');
+    const [sessionBusy, messageUpdatedStart, stepStart, textPartStart, textDelta, textPart, stepFinish, messageUpdatedFinish, sessionIdle, toolDone] = sent;
     assert.strictEqual(sessionBusy.message.event.type, 'session.status');
+    assert.strictEqual(messageUpdatedStart.message.event.type, 'message.updated');
     assert.strictEqual(stepStart.message.event.type, 'message.part.updated');
+    assert.strictEqual(textPartStart.message.event.type, 'message.part.updated');
     assert.strictEqual(textDelta.message.event.type, 'message.part.delta');
     assert.strictEqual(textPart.message.event.type, 'message.part.updated');
     assert.strictEqual(stepFinish.message.event.type, 'message.part.updated');
@@ -1231,12 +1233,14 @@ describe('runtime protocol strictness', () => {
     const busyStatus = sessionBusy.message.event.properties;
     const idleStatus = sessionIdle.message.event.properties;
     const stepStartPart = stepStart.message.event.properties.part;
+    const textStartPart = textPartStart.message.event.properties.part;
     const textDeltaProps = textDelta.message.event.properties;
     const textReplyPart = textPart.message.event.properties.part;
     const stepFinishPart = stepFinish.message.event.properties.part;
     assert.strictEqual(startInfo.id, finishInfo.id);
     assert.strictEqual(startInfo.sessionID, 'tool-group-1');
     assert.strictEqual(startInfo.role, 'assistant');
+    assert.deepStrictEqual(startInfo.time, finishInfo.time);
     assert.strictEqual('finish' in finishInfo, false);
     assert.match(startInfo.id, /^msg_/);
     assert.strictEqual(startInfo.id.includes('tool-group-1'), false);
@@ -1251,9 +1255,16 @@ describe('runtime protocol strictness', () => {
     assert.notStrictEqual(stepStartPart.id, startInfo.id);
     assert.match(stepStartPart.id, /^prt_/);
 
+    assert.strictEqual(textStartPart.sessionID, 'tool-group-1');
+    assert.strictEqual(textStartPart.messageID, startInfo.id);
+    assert.strictEqual(textStartPart.type, 'text');
+    assert.strictEqual(textStartPart.text, '');
+    assert.notStrictEqual(textStartPart.id, startInfo.id);
+    assert.match(textStartPart.id, /^prt_/);
+
     assert.strictEqual(textDeltaProps.sessionID, 'tool-group-1');
     assert.strictEqual(textDeltaProps.messageID, startInfo.id);
-    assert.strictEqual(textDeltaProps.partID, textReplyPart.id);
+    assert.strictEqual(textDeltaProps.partID, textStartPart.id);
     assert.strictEqual(textDeltaProps.field, 'text');
     assert.strictEqual(textDeltaProps.delta, '本机器人不处理群聊消息，请勿在群内@提问');
 
@@ -1261,6 +1272,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(textReplyPart.messageID, startInfo.id);
     assert.strictEqual(textReplyPart.type, 'text');
     assert.strictEqual(textReplyPart.text, '本机器人不处理群聊消息，请勿在群内@提问');
+    assert.strictEqual(textReplyPart.id, textStartPart.id);
     assert.notStrictEqual(textReplyPart.id, startInfo.id);
     assert.match(textReplyPart.id, /^prt_/);
 
@@ -1270,11 +1282,11 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(stepFinishPart.reason, 'stop');
     assert.notStrictEqual(stepFinishPart.id, startInfo.id);
     assert.match(stepFinishPart.id, /^prt_/);
-    assert.notStrictEqual(stepStartPart.id, textReplyPart.id);
+    assert.notStrictEqual(stepStartPart.id, textStartPart.id);
     assert.notStrictEqual(stepStartPart.id, stepFinishPart.id);
-    assert.notStrictEqual(textReplyPart.id, stepFinishPart.id);
+    assert.notStrictEqual(textStartPart.id, stepFinishPart.id);
     assert.strictEqual(stepStartPart.id.includes(startInfo.id), false);
-    assert.strictEqual(textReplyPart.id.includes(startInfo.id), false);
+    assert.strictEqual(textStartPart.id.includes(startInfo.id), false);
     assert.strictEqual(stepFinishPart.id.includes(startInfo.id), false);
     assert.strictEqual(toolDone.message.toolSessionId, 'tool-group-1');
     assert.strictEqual(toolDone.message.welinkSessionId, 'wl-group-1');
@@ -1283,6 +1295,31 @@ describe('runtime protocol strictness', () => {
       const validation = validateGatewayUplinkBusinessMessage(entry.message);
       assert.strictEqual(validation.ok, true);
     }
+  });
+
+  test('group chat intercept sends synthetic events immediately without delay', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-delay-1',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-delay-1',
+        text: 'hello',
+        imGroupId: 'group-delay-1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 10);
   });
 
   test('group chat intercept generates a fresh synthetic message id for each intercepted chat', async () => {
@@ -1318,25 +1355,25 @@ describe('runtime protocol strictness', () => {
       },
     });
 
-    const firstMessageId = sent[0].message.event.properties.info.id;
-    const secondMessageId = sent[9].message.event.properties.info.id;
+    const firstMessageId = sent[1].message.event.properties.info.id;
+    const secondMessageId = sent[11].message.event.properties.info.id;
     const firstStepStartPartId = sent[2].message.event.properties.part.id;
-    const secondStepStartPartId = sent[11].message.event.properties.part.id;
-    const firstTextDeltaPartId = sent[3].message.event.properties.partID;
-    const secondTextDeltaPartId = sent[12].message.event.properties.partID;
+    const secondStepStartPartId = sent[12].message.event.properties.part.id;
+    const firstTextDeltaPartId = sent[4].message.event.properties.partID;
+    const secondTextDeltaPartId = sent[14].message.event.properties.partID;
     assert.notStrictEqual(firstMessageId, secondMessageId);
     assert.match(firstMessageId, /^msg_/);
     assert.match(secondMessageId, /^msg_/);
     assert.strictEqual(firstMessageId.includes('tool-group-repeat-1'), false);
     assert.strictEqual(secondMessageId.includes('tool-group-repeat-1'), false);
     assert.strictEqual(sent[2].message.event.properties.part.messageID, firstMessageId);
-    assert.strictEqual(sent[11].message.event.properties.part.messageID, secondMessageId);
+    assert.strictEqual(sent[12].message.event.properties.part.messageID, secondMessageId);
     assert.notStrictEqual(firstStepStartPartId, secondStepStartPartId);
     assert.match(firstStepStartPartId, /^prt_/);
     assert.match(secondStepStartPartId, /^prt_/);
     assert.strictEqual(firstStepStartPartId.includes(firstMessageId), false);
     assert.strictEqual(secondStepStartPartId.includes(secondMessageId), false);
-    assert.strictEqual(sent[4].message.event.properties.part.id, firstTextDeltaPartId);
+    assert.strictEqual(sent[3].message.event.properties.part.id, firstTextDeltaPartId);
     assert.strictEqual(sent[13].message.event.properties.part.id, secondTextDeltaPartId);
   });
 
@@ -1387,6 +1424,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(prompts.length, 0);
     assert.strictEqual(sent[0].message.type, 'session_created');
     assert.deepStrictEqual(sent.slice(1).map((entry) => entry.message.type), [
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1489,6 +1527,7 @@ describe('runtime protocol strictness', () => {
       'tool_event',
       'tool_event',
       'tool_event',
+      'tool_event',
       'tool_done',
     ]);
   });
@@ -1576,7 +1615,7 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
-    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 9);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 10);
     assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
     assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
   });
@@ -1955,7 +1994,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].context.opencodePartId, 'part-1');
   });
 
-  test('forwards session.idle as tool_event and emits fallback tool_done', async () => {
+  test('forwards bare session.idle as tool_event without emitting fallback tool_done', async () => {
     const runtime = new BridgeRuntime({ client: {} });
     const sent = [];
 
@@ -1972,11 +2011,9 @@ describe('runtime protocol strictness', () => {
       },
     });
 
-    assert.strictEqual((sent).length, 2);
+    assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].message.type, 'tool_event');
     assert.strictEqual(sent[0].message.toolSessionId, 'tool-idle-1');
-    assert.strictEqual(sent[1].message.type, 'tool_done');
-    assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-1');
   });
 
   test('session.created primes child mapping outside the allowlist and rewrites later child events to parent envelope', async () => {
@@ -2249,6 +2286,109 @@ describe('runtime protocol strictness', () => {
       },
     }]);
     assert.strictEqual((sent).length, 0);
+  });
+
+  test('close_session clears compat state so later session.idle is treated as not started', async () => {
+    const appLogs = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            appLogs.push(options.body);
+            return true;
+          },
+        },
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+          delete: async () => ({}),
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'close-compat-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-close-compat-1', text: 'hello' },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'close-compat-1',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-close-compat-1' },
+    });
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-close-compat-1',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
+    assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
+    assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
+    assert.ok(appLogs.find((entry) => entry.message === 'compat.tool_done.skipped_not_started'));
+    assert.strictEqual(appLogs.find((entry) => entry.message === 'compat.tool_done.skipped_duplicate'), undefined);
+  });
+
+  test('stop resets compat state so later session.idle is treated as not started', async () => {
+    const appLogs = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            appLogs.push(options.body);
+            return true;
+          },
+        },
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'stop-compat-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-stop-compat-1', text: 'hello' },
+    });
+
+    runtime.stop();
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-stop-compat-1',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
+    assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
+    assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
+    assert.ok(appLogs.find((entry) => entry.message === 'compat.tool_done.skipped_not_started'));
+    assert.strictEqual(appLogs.find((entry) => entry.message === 'compat.tool_done.skipped_duplicate'), undefined);
   });
 
   test('uses effectiveDirectory only in create_session while keeping workspacePath for config lookup', async () => {

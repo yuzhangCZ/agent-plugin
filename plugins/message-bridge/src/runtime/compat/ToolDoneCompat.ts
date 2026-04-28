@@ -18,14 +18,28 @@ export interface ToolDoneDecision {
 }
 
 export class ToolDoneCompat {
+  private readonly startedPromptSessions = new Set<string>();
   private readonly pendingPromptSessions = new Set<string>();
   private readonly completedSessionsAwaitingIdleDrop = new Set<string>();
+
+  clearSession(toolSessionId: string): void {
+    this.startedPromptSessions.delete(toolSessionId);
+    this.pendingPromptSessions.delete(toolSessionId);
+    this.completedSessionsAwaitingIdleDrop.delete(toolSessionId);
+  }
+
+  reset(): void {
+    this.startedPromptSessions.clear();
+    this.pendingPromptSessions.clear();
+    this.completedSessionsAwaitingIdleDrop.clear();
+  }
 
   handleInvokeStarted(input: InvokeLifecycleInput): void {
     if (input.action !== 'chat' || !input.toolSessionId) {
       return;
     }
 
+    this.startedPromptSessions.add(input.toolSessionId);
     this.pendingPromptSessions.add(input.toolSessionId);
   }
 
@@ -34,7 +48,7 @@ export class ToolDoneCompat {
       return;
     }
 
-    this.pendingPromptSessions.delete(input.toolSessionId);
+    this.clearSession(input.toolSessionId);
   }
 
   handleInvokeCompleted(input: InvokeLifecycleInput & { logger: BridgeLogger }): ToolDoneDecision {
@@ -66,6 +80,14 @@ export class ToolDoneCompat {
 
   handleSessionIdle(input: SessionIdleInput): ToolDoneDecision {
     const { toolSessionId, logger } = input;
+    if (!this.startedPromptSessions.has(toolSessionId)) {
+      logger.debug('compat.tool_done.skipped_not_started', {
+        toolSessionId,
+        source: 'session_idle',
+      });
+      return { emit: false };
+    }
+
     if (this.pendingPromptSessions.has(toolSessionId)) {
       logger.debug('compat.tool_done.deferred_pending', {
         toolSessionId,
@@ -76,6 +98,7 @@ export class ToolDoneCompat {
 
     if (this.completedSessionsAwaitingIdleDrop.has(toolSessionId)) {
       this.completedSessionsAwaitingIdleDrop.delete(toolSessionId);
+      this.startedPromptSessions.delete(toolSessionId);
       logger.debug('compat.tool_done.skipped_duplicate', {
         toolSessionId,
         source: 'session_idle',
@@ -83,6 +106,7 @@ export class ToolDoneCompat {
       return { emit: false };
     }
 
+    this.startedPromptSessions.delete(toolSessionId);
     logger.info('compat.tool_done.fallback_from_idle', {
       toolSessionId,
       source: 'session_idle',
