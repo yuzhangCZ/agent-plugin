@@ -143,9 +143,9 @@ export function getMissingRequiredConfigPaths(
   const section = cfg ? stripLegacyAccounts(readChannelSection(cfg)) : undefined;
   const gatewaySection = cfg ? getSectionField(section, "gateway") : undefined;
   const authSection = cfg ? getSectionField(section, "auth") : undefined;
-  const gatewayUrl = cfg ? trimOrUndefined(gatewaySection?.url) : trimOrUndefined(account.gateway.url);
-  const authAk = cfg ? trimOrUndefined(authSection?.ak) : trimOrUndefined(account.auth.ak);
-  const authSk = cfg ? trimOrUndefined(authSection?.sk) : trimOrUndefined(account.auth.sk);
+  const gatewayUrl = trimOrUndefined(gatewaySection?.url) ?? trimOrUndefined(account.gateway.url);
+  const authAk = trimOrUndefined(authSection?.ak) ?? trimOrUndefined(account.auth.ak);
+  const authSk = trimOrUndefined(authSection?.sk) ?? trimOrUndefined(account.auth.sk);
   const missing: string[] = [];
   if (!gatewayUrl) {
     missing.push(`channels.${CHANNEL_ID}.gateway.url`);

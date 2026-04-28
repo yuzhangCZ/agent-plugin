@@ -1,0 +1,49 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { OpenClawHostAdapter } from "../../src/adapters/OpenClawHostAdapter.ts";
+import { InstallCliError } from "../../src/domain/errors.ts";
+import type { ProcessRunner } from "../../src/domain/ports.ts";
+
+function createProcessRunner(version: string): ProcessRunner {
+  return {
+    async exec(command, args) {
+      if (command === "openclaw" && args[0] === "--version") {
+        return {
+          stdout: version,
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+      };
+    },
+    async spawn() {
+      return { exitCode: 0 };
+    },
+    async spawnDetached() {
+      return;
+    },
+  };
+}
+
+test("OpenClawHostAdapter preflight accepts versions newer than the minimum runtime", async () => {
+  const adapter = new OpenClawHostAdapter(createProcessRunner("2026.4.12"));
+
+  const result = await adapter.preflight();
+
+  assert.match(result.detail, /2026\.4\.12/);
+});
+
+test("OpenClawHostAdapter preflight rejects versions older than the minimum runtime", async () => {
+  const adapter = new OpenClawHostAdapter(createProcessRunner("2026.3.23"));
+
+  await assert.rejects(
+    async () => {
+      await adapter.preflight();
+    },
+    (error) => error instanceof InstallCliError && error.code === "OPENCLAW_VERSION_UNSUPPORTED",
+  );
+});

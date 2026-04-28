@@ -6,7 +6,7 @@ const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
 const PLUGIN_ID = "skill-openclaw-plugin";
 const CHANNEL_ID = "message-bridge";
 const DEFAULT_GATEWAY_URL = "ws://localhost:8081/ws/agent";
-const SUPPORTED_RANGE = ">=2026.3.24 <2026.3.31";
+const MIN_SUPPORTED_VERSION = "2026.3.24";
 
 function parseVersion(text: string) {
   const match = text.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -26,10 +26,9 @@ function assertVersionRange(versionText: string) {
   if (!parsed) {
     throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `无法识别 OpenClaw 版本：${versionText}`);
   }
-  const lower = parseVersion("2026.3.24");
-  const upper = parseVersion("2026.3.31");
-  if (!lower || !upper || compareVersion(parsed, lower) < 0 || compareVersion(parsed, upper) >= 0) {
-    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `当前 OpenClaw 版本 ${versionText} 不满足 ${SUPPORTED_RANGE}`);
+  const lower = parseVersion(MIN_SUPPORTED_VERSION);
+  if (!lower || compareVersion(parsed, lower) < 0) {
+    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `当前 OpenClaw 版本 ${versionText} 不满足 >=${MIN_SUPPORTED_VERSION}`);
   }
 }
 

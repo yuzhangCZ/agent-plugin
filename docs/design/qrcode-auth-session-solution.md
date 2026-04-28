@@ -19,7 +19,7 @@
 - `environment` / `mac` 的输入来源边界
 - 二维码刷新、轮询和失败收口规则
 - 二维码授权包的内部职责边界
-- 统一 CLI 与兼容 wrapper 的二维码接入方式
+- 统一 CLI 作为唯一安装入口时的二维码接入方式
 
 本文不负责定义：
 
@@ -53,10 +53,7 @@
 
 ### 3.1 设计原则
 
-当前主使用方是 `skill-plugin-cli` 的二维码认证阶段；现有宿主脚本仅作为兼容 wrapper 间接进入统一 CLI：
-
-- [plugins/message-bridge/scripts/setup-message-bridge.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge/scripts/setup-message-bridge.mjs)
-- [plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs)
+当前主使用方是 `skill-plugin-cli` 的二维码认证阶段；用户侧唯一安装入口固定为统一 CLI。
 
 主接口必须满足：
 
@@ -68,7 +65,7 @@
 补充约束如下：
 
 - 本文中的“调用方”默认指统一 `skill-plugin-cli` 编排层。
-- OpenCode / OpenClaw 现有脚本不是长期主编排层，只是兼容入口。
+- OpenCode / OpenClaw 插件包不是二维码编排入口，只承载插件本体与宿主安装元数据。
 
 ### 3.2 主接口示意
 
@@ -656,7 +653,7 @@ sequenceDiagram
 
 它不负责轮询实现、刷新策略判断、服务端状态映射、HTTP 请求、宿主 preflight、插件安装或配置写入。
 
-包入口导出的 `qrcodeAuth` 是默认 `QrCodeAuth` runtime 实例。它可以作为模块级单例复用，但不得持有单次授权会话状态；每次 `run()` 必须创建新的 controller 和会话状态。工厂、HTTP adapter 与 service port 都属于内部装配细节，统一 CLI 编排层和兼容 wrapper 都不得 import 或调用。
+包入口导出的 `qrcodeAuth` 是默认 `QrCodeAuth` runtime 实例。它可以作为模块级单例复用，但不得持有单次授权会话状态；每次 `run()` 必须创建新的 controller 和会话状态。工厂、HTTP adapter 与 service port 都属于内部装配细节，统一 CLI 编排层与插件包分发层都不得 import 或调用。
 内部 runtime 工厂允许以 `QrCodeAuthServicePort` 形式替换默认远端实现；未显式注入时，工厂默认装配 HTTP service adapter。
 
 #### `QrCodeAuthSessionController`
@@ -726,29 +723,18 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 - 二维码授权成功后，统一 CLI 在阶段 8 继续执行宿主配置接入。
 - 二维码授权包只负责返回标准化事件，不负责宿主配置写入、宿主重启或结果确认。
 
-### 10.2 OpenCode 兼容入口
+### 10.2 统一 CLI 主入口
 
-OpenCode 当前主接入点固定为：
+用户侧主接入点固定为：
 
-- [plugins/message-bridge/scripts/setup-message-bridge.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge/scripts/setup-message-bridge.mjs)
-
-接入原则：
-
-- 保留当前脚本作为兼容入口。
-- 兼容脚本负责参数映射并进入统一 CLI，不再直接编排完整二维码认证流程。
-- OpenCode 的二维码展示、状态提示和终态收口由统一 CLI 负责。
-- OpenCode 的宿主配置接入与结果确认语义以上位方案为准。
-
-### 10.3 OpenClaw 兼容入口
-
-OpenClaw 当前主接入点固定为：
-
-- [plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs)
+- `npx @wecode/skill-plugin-cli install --host opencode ...`
+- `npx @wecode/skill-plugin-cli install --host openclaw ...`
 
 接入原则：
 
-- 保留当前脚本作为兼容入口。
-- 兼容脚本负责参数映射并进入统一 CLI，不再直接编排完整二维码认证流程。
+- 统一 CLI 是二维码认证阶段的唯一主编排层。
+- OpenCode / OpenClaw 的二维码展示、状态提示和终态收口由统一 CLI 负责。
+- 插件包只负责插件本体与宿主安装元数据，不再提供兼容 wrapper。
 - OpenClaw 的宿主前置校验、插件安装、`openclaw gateway restart` 和 probe 确认以上位方案为准。
 - 二维码授权包只提供阶段 7 所需的认证事件与结果。
 
@@ -756,7 +742,7 @@ OpenClaw 当前主接入点固定为：
 
 - 当前不以 `src/onboarding.ts` 作为主接入点。
 - `src/onboarding.ts` 仅作为后续可选扩展方向，不属于当前主方案。
-- `MB_SETUP_QRCODE_AUTH_MODULE` / `OPENCLAW_INSTALL_QRCODE_AUTH_MODULE` 指向的 override 模块必须导出 `qrcodeAuth.run(input)`。
+- `SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE` 指向的 override 模块必须导出 `qrcodeAuth.run(input)`。
 
 ## 11. 错误处理与 fail-closed 规则
 
@@ -859,13 +845,13 @@ adapter 单元测试覆盖远端协议转换：
 实现验收应通过静态检查或代码审查确认：
 
 - 统一 CLI 编排层只 import / 调用 `qrcodeAuth` public facade。
-- 兼容 wrapper 不得 import `QrCodeAuthSessionController`、`QrCodeAuthServicePort` 或 HTTP adapter。
+- 插件分发包与统一 CLI 以外的边界层不得 import `QrCodeAuthSessionController`、`QrCodeAuthServicePort` 或 HTTP adapter。
 - `QrCodeAuthSessionController` 不得 import HTTP adapter、fetch、HTTP client、headers 或远端响应 DTO。
 - HTTP adapter 不得依赖 OpenCode / OpenClaw host 安装逻辑。
 - OpenCode 与 OpenClaw 不复制二维码状态机、刷新策略或服务端状态映射逻辑。
 - `accessToken` 只存在于 adapter / session context，不进入 snapshot、controller 对外事件或 host 配置写入。
 - host 相关测试覆盖 `mac` 自动采集；采集失败时以空字符串继续。
-- OpenClaw 以 `install-openclaw-plugin.mjs` 为主入口，不与 onboarding 混用。
+- OpenClaw 以统一 CLI 安装入口为主入口，不与 onboarding 混用。
 
 ## 13. 结论
 

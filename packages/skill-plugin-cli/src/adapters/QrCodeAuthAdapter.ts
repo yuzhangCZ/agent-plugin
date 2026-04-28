@@ -20,9 +20,7 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
   }
 
   private async loadRuntime() {
-    const override = this.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE
-      || this.env.MB_SETUP_QRCODE_AUTH_MODULE
-      || this.env.OPENCLAW_INSTALL_QRCODE_AUTH_MODULE;
+    const override = this.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE;
     if (override?.trim()) {
       return await loadRuntimeFromOverride(override.trim());
     }

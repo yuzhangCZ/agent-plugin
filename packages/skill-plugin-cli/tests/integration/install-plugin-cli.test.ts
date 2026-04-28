@@ -214,3 +214,117 @@ exit 0`,
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("direct use case completes opencode install and writes explicit gateway url", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-success-"));
+  const originalEnv = { ...process.env };
+  const stdout: string[] = [];
+  const originalStdout = process.stdout.write.bind(process.stdout);
+  try {
+    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const configDir = join(dir, ".config", "opencode");
+    const logPath = join(dir, "opencode.log");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "opencode.json"),
+      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
+      "utf8",
+    );
+    await createFakeCommand(
+      dir,
+      "opencode",
+      `echo "$@" >> ${JSON.stringify(logPath)}
+if [ "$1" = "--version" ]; then
+  printf '1.0.0'
+  exit 0
+fi
+if [ "$1" = "plugin" ]; then
+  exit 0
+fi
+exit 0`,
+    );
+
+    process.env.PATH = `${dir}:${originalEnv.PATH || ""}`;
+    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+    process.env.XDG_CONFIG_HOME = join(dir, ".config");
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    const parsed = parseInstallArgv(["install", "--host", "opencode", "--url", "wss://gateway.example.com/ws/agent"]);
+    assert.ok(!("help" in parsed));
+    const result = await createInstallCliUseCase().execute(parsed);
+    assert.equal(result.status, "success");
+    const bridgeConfig = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(configDir, "message-bridge.json"), "utf8"));
+    const opencodeConfig = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(configDir, "opencode.json"), "utf8"));
+    const output = stdout.join("");
+    assert.match(output, /开始：插件安装/);
+    assert.match(output, /正在执行宿主安装命令，以下输出来自宿主原生命令。/);
+    assert.match(output, /宿主安装命令执行结束。/);
+    assert.match(bridgeConfig, /wss:\/\/gateway\.example\.com\/ws\/agent/);
+    assert.match(bridgeConfig, /"ak": "ak-1"/);
+    assert.match(bridgeConfig, /"sk": "sk-1"/);
+    assert.match(opencodeConfig, /@wecode\/skill-opencode-plugin/);
+  } finally {
+    process.stdout.write = originalStdout;
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("direct use case omits opencode gateway url write when user does not pass url", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-no-url-"));
+  const originalEnv = { ...process.env };
+  try {
+    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const configDir = join(dir, ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "opencode.json"),
+      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(configDir, "message-bridge.json"),
+      JSON.stringify({
+        gateway: {
+          url: "wss://existing.example.com/ws/agent",
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await createFakeCommand(
+      dir,
+      "opencode",
+      `if [ "$1" = "--version" ]; then
+  printf '1.0.0'
+  exit 0
+fi
+if [ "$1" = "plugin" ]; then
+  exit 0
+fi
+exit 0`,
+    );
+
+    process.env.PATH = `${dir}:${originalEnv.PATH || ""}`;
+    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+    process.env.XDG_CONFIG_HOME = join(dir, ".config");
+
+    const parsed = parseInstallArgv(["install", "--host", "opencode"]);
+    assert.ok(!("help" in parsed));
+    const result = await createInstallCliUseCase().execute(parsed);
+    assert.equal(result.status, "success");
+    const bridgeConfig = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(configDir, "message-bridge.json"), "utf8"));
+    assert.match(bridgeConfig, /wss:\/\/existing\.example\.com\/ws\/agent/);
+    assert.doesNotMatch(bridgeConfig, /localhost:8081/);
+  } finally {
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

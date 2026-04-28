@@ -42,34 +42,15 @@ message contract.
 
 当前仓库已验证的安装方式包括本地扩展安装与私有 npm 分发：
 
+- 统一安装入口（推荐）：`npx @wecode/skill-plugin-cli install --host openclaw`
 - bundle 安装（推荐交付）：执行 `pnpm run install:bundle:dev`，自动把 `bundle/` 安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
 - 手动复制 bundle：复制 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md`
-- 私有 npm 分发：通过 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
+- 私有 npm 分发：由统一 CLI 调用 OpenClaw 的 npm 安装流安装 `@wecode/skill-openclaw-plugin`
 
-### OpenClaw 版本兼容矩阵
-
-以下结论基于同一份 `bundle/` 产物对不同 OpenClaw 版本执行 `openclaw --dev plugins install <bundle-dir>` 的实测结果：
-
-| OpenClaw 版本 | 安装结果 | 说明 |
-| --- | --- | --- |
-| `2026.3.24` | 可安装 | 会提示 `install.mjs` 命中危险代码模式，但不会阻断安装 |
-| `2026.3.28` | 可安装 | 行为与 `2026.3.24` 一致，仍为 warning |
-| `2026.3.31` | 阻断安装 | 开始对插件安装包执行 fail-closed 安全扫描 |
-| `2026.4.12` | 阻断安装 | 与 `2026.3.31` 一致 |
-| `2026.4.14` | 阻断安装 | npm `latest`（验证日期：2026-04-14） |
-
-已确认的版本边界：
-
-- `2026.3.31-beta.1` 起，OpenClaw 发布说明已明确插件安装期危险代码扫描会默认 fail-closed
-- `2026.3.31` 是当前已实测的首个稳定版阻断版本
-- `2026.3.28` 及更早的已测稳定版仍然只告警、不阻断
-
-当前阻断原因不是运行时协议不兼容，而是插件发布产物内包含 `install.mjs`，其中使用了 `child_process`。从 `2026.3.31` 起，OpenClaw 安装阶段会将这类命中视为危险代码并拒绝安装。
-
-版本约束现已拆分为两类：
+版本约束：
 
 - 运行时宿主版本：`>=2026.3.24`
-- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
+- 统一 CLI 安装入口与 bundle 安装共享同一份纯插件分发包，不再发布 installer/bin
 
 首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起统一 CLI：
 
@@ -83,9 +64,9 @@ npx --yes \
   --url ws://127.0.0.1:8081/ws/agent
 ```
 
-安装过一次之后，也可以直接通过 `npx @wecode/skill-plugin-cli install --host openclaw` 使用。该命令会：
+统一 CLI 会：
 
-- 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
+- 检查 `openclaw` 是否已安装且版本满足最低运行时要求 `>=2026.3.24`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
 - 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
@@ -94,8 +75,6 @@ npx --yes \
 - 先执行 `openclaw channels status --channel message-bridge --probe --json`
 - 再执行 `openclaw gateway restart`；若 restart 失败仅输出 warning，不改变成功终态
 - 优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
-
-兼容 wrapper 仍保留 `node ./scripts/install-openclaw-plugin.mjs`，但只负责最小参数映射。`--dev`、`--openclaw-bin`、`--no-restart` 已废弃且会直接报错。
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
@@ -321,7 +300,7 @@ Behavior:
 
 - `npx --registry ...` ensures the unified CLI itself can be downloaded from the private registry on first use
 - the CLI writes the resolved `@wecode:registry=...` into the user `.npmrc`
-- checks `openclaw --version` against the supported install window
+- checks `openclaw --version` against the minimum runtime requirement `>=2026.3.24`
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
 - runs qrcode auth before host channel wiring
@@ -330,8 +309,6 @@ Behavior:
 - restarts the OpenClaw gateway, but restart failure is downgraded to warning
 
 If the private registry requires auth, make sure your npm auth environment is already available before running the command.
-
-Legacy wrapper note: `node ./scripts/install-openclaw-plugin.mjs` remains as a compatibility wrapper. Deprecated high-risk args such as `--dev`, `--openclaw-bin`, and `--no-restart` now fail fast.
 
 ## Runtime Version Conflicts
 

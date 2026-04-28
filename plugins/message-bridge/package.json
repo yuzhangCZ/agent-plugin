@@ -3,7 +3,6 @@
   "version": "1.2.0",
   "description": "Message Bridge Plugin — unified message interface supporting OpenCode and future AI tools",
   "main": "release/message-bridge.plugin.js",
-  "bin": "./scripts/setup-message-bridge.mjs",
   "exports": {
     ".": {
       "default": "./release/message-bridge.plugin.js"
@@ -39,10 +38,7 @@
     "verify:release": "pnpm run verify:core && pnpm run verify:env && pnpm run test:e2e:smoke && pnpm run verify:opencode-load",
     "verify:release:dry": "pnpm run verify:release"
   },
-  "dependencies": {
-    "@wecode/skill-plugin-cli": "workspace:*",
-    "@wecode/skill-qrcode-auth": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@agent-plugin/gateway-client": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",

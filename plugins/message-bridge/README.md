@@ -203,11 +203,6 @@ bridge 到 gateway 的上行消息当前包括：
 
 - `npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-plugin-cli install --host opencode`
 
-仓库内开发入口（兼容保留）：
-
-- `node ./scripts/setup-message-bridge.mjs install`
-- `node ./scripts/setup-message-bridge.mjs`（无子命令时默认等价 `install`）
-
 自包含启动示例（幂等写入 `.npmrc`，通过运行时 `OPENCODE_CONFIG_CONTENT` 注入 plugin 配置，再启动 `opencode serve`）：
 
 - `node ./scripts/minimal-start-opencode.mjs`
@@ -219,7 +214,6 @@ CLI 当前会：
 - 在 OpenCode `plugin` 配置中启用 `@wecode/skill-opencode-plugin`
 - 为 `@wecode` 写入 `.npmrc` scope 条目，默认值为 `https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`
 - 预检 `opencode --version`；若宿主可用则继续安装、校验、二维码认证和配置接入
-- 兼容 wrapper 只保留最小参数映射：`--environment`、`--registry`、`--url` 直接透传；`--yes`、`--scope` 仅输出 warning 后忽略
 
 CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 

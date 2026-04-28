@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "main": "bundle/index.js",
-  "bin": "./scripts/install-openclaw-plugin.mjs",
   "exports": {
     ".": {
       "default": "./bundle/index.js"
@@ -43,8 +42,6 @@
   "dependencies": {
     "@agent-plugin/bridge-runtime-sdk": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",
-    "@wecode/skill-plugin-cli": "workspace:*",
-    "@wecode/skill-qrcode-auth": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {

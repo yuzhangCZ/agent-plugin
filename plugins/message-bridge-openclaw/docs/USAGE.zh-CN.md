@@ -22,8 +22,7 @@
 OpenClaw 安装兼容窗口：
 
 - 运行时宿主版本：`>=2026.3.24`
-- npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
-- `2026.3.31` 起，OpenClaw 插件安装期危险代码扫描默认 fail-closed，当前带 `install.mjs` 的 npm helper 包会被阻断
+- 统一 CLI 与 bundle 安装共享同一份纯插件分发包，不再发布 installer/bin
 
 运行时依赖约束：
 
@@ -34,8 +33,7 @@ OpenClaw 安装兼容窗口：
 ## 1. 当前支持的安装方式
 
 - 正式私有 npm 安装
-  - 首次安装推荐通过 `npx` 直接拉起 `@wecode/skill-plugin-cli install --host openclaw`
-  - 安装过一次后也可以继续通过 `npx @wecode/skill-plugin-cli install --host openclaw` 运行
+  - 对外唯一入口固定为 `npx @wecode/skill-plugin-cli install --host openclaw`
   - 自动校验 `openclaw` 是否已安装且版本满足最低要求
   - 自动幂等配置 `@wecode` 二方仓源到用户级 `.npmrc`
   - 自动执行 `openclaw plugins install`
@@ -54,7 +52,7 @@ OpenClaw 安装兼容窗口：
 
 推荐顺序：
 
-1. 正式安装：`npx --registry ... @wecode/skill-openclaw-plugin ...`
+1. 正式安装：`npx --registry ... @wecode/skill-plugin-cli install --host openclaw ...`
 2. 本地部署或交付验证：bundle 安装
 3. 手动交付或排障：手动复制 bundle
 
@@ -126,13 +124,12 @@ npx --yes \
 - `npx --registry ...` 负责让首次执行时能从私仓下载统一 CLI 自身
 - helper 会优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
 - helper 会先通过 `which openclaw` / `where.exe openclaw` 检测宿主命令是否存在
-- 命令会先检查 `openclaw --version`，并验证版本位于 npm helper 支持窗口 `>=2026.3.24 <2026.3.31`
+- 命令会先检查 `openclaw --version`，并验证版本满足最低运行时要求 `>=2026.3.24`
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令会在插件安装校验后进入二维码授权，只有 `confirmed` 才会继续宿主接入
 - 命令会先执行 `openclaw channels status --channel message-bridge --probe --json`
 - 命令默认执行 `openclaw gateway restart`，restart 失败只降级为 warning
 - 如果私仓需要认证，执行前要保证 npm 认证环境已可用
-- 兼容 wrapper `node ./scripts/install-openclaw-plugin.mjs` 仍可用，但 `--dev`、`--openclaw-bin`、`--no-restart` 已废弃且会直接报错
 
 ## 4. 手动复制 bundle
 
