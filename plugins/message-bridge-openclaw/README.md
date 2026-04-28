@@ -71,30 +71,31 @@ message contract.
 - 运行时宿主版本：`>=2026.3.24`
 - npm helper 安装支持窗口：`>=2026.3.24 <2026.3.31`
 
-首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起 helper：
+首次私有 npm 安装推荐通过 `npx` 显式指定二方仓源来拉起统一 CLI：
 
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  @wecode/skill-openclaw-plugin \
+  @wecode/skill-plugin-cli \
+  install \
+  --host openclaw \
   --registry https://your-private-registry.example.com/ \
-  --url ws://127.0.0.1:8081/ws/agent \
-  --token <ak> \
-  --password <sk> \
-  --dev
+  --url ws://127.0.0.1:8081/ws/agent
 ```
 
-安装过一次之后，也可以直接通过 `npx @wecode/skill-openclaw-plugin` 使用。该命令会：
+安装过一次之后，也可以直接通过 `npx @wecode/skill-plugin-cli install --host openclaw` 使用。该命令会：
 
 - 检查 `openclaw` 是否已安装且版本满足 npm helper 安装支持窗口 `>=2026.3.24 <2026.3.31`
 - 幂等配置用户级 `.npmrc` 中的 `@wecode:registry=...`
 - 调用 `openclaw plugins install @wecode/skill-openclaw-plugin`
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
+- 执行二维码授权，只有 `confirmed` 后才进入宿主接入
 - 调用 `openclaw channels add --channel message-bridge ...`
-- 默认执行 `openclaw gateway restart`
+- 先执行 `openclaw channels status --channel message-bridge --probe --json`
+- 再执行 `openclaw gateway restart`；若 restart 失败仅输出 warning，不改变成功终态
 - 优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
 
-如果 Windows 环境里自动回退后仍然失败，建议显式传入 `--openclaw-bin` 或设置 `OPENCLAW_BIN`。
+兼容 wrapper 仍保留 `node ./scripts/install-openclaw-plugin.mjs`，但只负责最小参数映射。`--dev`、`--openclaw-bin`、`--no-restart` 已废弃且会直接报错。
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。
 
@@ -165,7 +166,7 @@ Successful build should produce a ready-to-install bundle directory at `bundle/`
 
 ## Install into OpenClaw dev environment
 
-This guide uses the OpenClaw `--dev` environment.
+This guide uses the OpenClaw `--dev` environment for bundle-based local validation.
 
 The current dev plugin location is:
 
@@ -309,26 +310,28 @@ For first-time private registry installation, prefer an explicit `npx` bootstrap
 ```bash
 npx --yes \
   --registry https://your-private-registry.example.com/ \
-  @wecode/skill-openclaw-plugin \
-  --url ws://127.0.0.1:8081/ws/agent \
-  --token <ak> \
-  --password <sk> \
-  --dev
+  @wecode/skill-plugin-cli \
+  install \
+  --host openclaw \
+  --registry https://your-private-registry.example.com/ \
+  --url ws://127.0.0.1:8081/ws/agent
 ```
 
 Behavior:
 
-- `npx --registry ...` ensures the helper itself can be downloaded from the private registry on first use
-- the helper always writes `@wecode:registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`, aligned with `message-bridge`
-- checks `openclaw --version` against the package `peerDependencies.openclaw`
+- `npx --registry ...` ensures the unified CLI itself can be downloaded from the private registry on first use
+- the CLI writes the resolved `@wecode:registry=...` into the user `.npmrc`
+- checks `openclaw --version` against the supported install window
 - streams `openclaw plugins install` output directly to the terminal
 - verifies install result with `openclaw plugins info skill-openclaw-plugin --json`
+- runs qrcode auth before host channel wiring
 - runs `openclaw channels add --channel message-bridge ...`
-- restarts the OpenClaw gateway by default
+- probes channel availability before restart
+- restarts the OpenClaw gateway, but restart failure is downgraded to warning
 
 If the private registry requires auth, make sure your npm auth environment is already available before running the command.
 
-Pass `--no-restart` only when you explicitly need to defer gateway restart.
+Legacy wrapper note: `node ./scripts/install-openclaw-plugin.mjs` remains as a compatibility wrapper. Deprecated high-risk args such as `--dev`, `--openclaw-bin`, and `--no-restart` now fail fast.
 
 ## Runtime Version Conflicts
 

@@ -1,0 +1,40 @@
+{
+  "name": "@wecode/skill-plugin-cli",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "skill-plugin-cli": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "build:dev": "node ./scripts/build-package.mjs --mode=dev && tsc --emitDeclarationOnly --project ./tsconfig.json && node ./scripts/rewrite-dts-imports.mjs",
+    "typecheck": "tsc --noEmit --project ./tsconfig.json",
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
+    "pack:check": "pnpm run build && pnpm pack --pack-destination .tmp/pack-check && node ./scripts/check-pack.mjs",
+    "verify:dist-tracking": "node ./scripts/check-dist-tracking.mjs",
+    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check && pnpm run verify:dist-tracking"
+  },
+  "dependencies": {
+    "@wecode/skill-qrcode-auth": "workspace:*",
+    "qrcode-terminal": "^0.12.0",
+    "supports-hyperlinks": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.27.4",
+    "typescript": "^5.9.3"
+  }
+}
