@@ -101,10 +101,10 @@ export class TerminalCliPresenter implements Presenter {
     writeLine(`[skill-plugin-cli][warning] ${message}`);
   }
 
-  success(summary: string, warnings: string[] = []) {
+  success(summary: string, nextSteps: string[] = []) {
     writeLine(`[skill-plugin-cli] 安装成功：${summary}`);
-    for (const warning of warnings) {
-      this.warning(warning);
+    for (const nextStep of nextSteps) {
+      writeLine(`[skill-plugin-cli] ${nextStep}`);
     }
   }
 

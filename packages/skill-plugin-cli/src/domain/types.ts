@@ -26,6 +26,7 @@ export interface InstallContext {
 export interface InstallResult {
   status: InstallResultStatus;
   message: string;
+  nextSteps: string[];
   warningMessages: string[];
 }
 
@@ -40,7 +41,7 @@ export interface HostConfigureResult {
 
 export interface HostAvailabilityResult {
   detail: string;
-  warning?: string;
+  nextSteps: string[];
 }
 
 export interface QrCodeAuthOutcome {

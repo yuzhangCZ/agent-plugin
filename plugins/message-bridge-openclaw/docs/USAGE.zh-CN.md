@@ -38,7 +38,7 @@ OpenClaw 安装兼容窗口：
   - 自动幂等配置 `@wecode` 二方仓源到用户级 `.npmrc`
   - 自动执行 `openclaw plugins install`
   - 自动执行 `openclaw channels add`
-  - 默认自动执行 `openclaw gateway restart`
+  - 成功后提示用户手动执行 `openclaw gateway restart`
 - bundle 安装（推荐交付）
   - 执行 `pnpm run install:bundle:dev`
   - 自动生成完整的 `bundle/` 安装目录
@@ -128,7 +128,7 @@ npx --yes \
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令会在插件安装校验后进入二维码授权，只有 `confirmed` 才会继续宿主接入
 - 命令会先执行 `openclaw channels status --channel message-bridge --probe --json`
-- 命令默认执行 `openclaw gateway restart`，restart 失败只降级为 warning
+- 命令不会自动执行 `openclaw gateway restart`，成功后会提示用户手动执行
 - 如果私仓需要认证，执行前要保证 npm 认证环境已可用
 
 ## 4. 手动复制 bundle

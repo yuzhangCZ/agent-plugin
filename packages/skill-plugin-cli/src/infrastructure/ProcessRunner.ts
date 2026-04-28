@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
+import process from "node:process";
 import { InstallCliError } from "../domain/errors.ts";
 import type { ProcessRunner } from "../domain/ports.ts";
+
+const SHOULD_USE_SHELL = process.platform === "win32";
 
 export class NodeProcessRunner implements ProcessRunner {
   async exec(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -9,7 +12,7 @@ export class NodeProcessRunner implements ProcessRunner {
         cwd: options.cwd,
         env: { ...process.env, ...(options.env ?? {}) },
         stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
+        shell: SHOULD_USE_SHELL,
       });
 
       let stdout = "";
@@ -35,7 +38,7 @@ export class NodeProcessRunner implements ProcessRunner {
         cwd: options.cwd,
         env: { ...process.env, ...(options.env ?? {}) },
         stdio: options.stdio ?? "inherit",
-        shell: false,
+        shell: SHOULD_USE_SHELL,
       });
 
       child.on("error", (error: Error) => reject(new InstallCliError("PROCESS_SPAWN_FAILED", error.message)));

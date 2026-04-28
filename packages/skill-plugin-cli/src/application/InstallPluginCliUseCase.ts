@@ -102,11 +102,12 @@ export class InstallPluginCliUseCase {
       if (SUCCESS_DETAIL_STAGES.has(INSTALL_STAGES[9])) {
         this.presenter.stageSucceeded(INSTALL_STAGES[9], "流程已收口");
       }
-      this.presenter.success(`${preflight.hostLabel} 安装完成`, availability.warning ? [availability.warning] : []);
+      this.presenter.success(`${preflight.hostLabel} 安装完成`, availability.nextSteps);
       return {
         status: "success",
         message: `${preflight.hostLabel} 安装完成`,
-        warningMessages: availability.warning ? [availability.warning] : [],
+        nextSteps: availability.nextSteps,
+        warningMessages: [],
       };
     } catch (error) {
       const installError = toInstallCliError(error);
@@ -116,6 +117,7 @@ export class InstallPluginCliUseCase {
         return {
           status: "cancelled",
           message: installError.message,
+          nextSteps: [],
           warningMessages: [],
         };
       }
@@ -123,6 +125,7 @@ export class InstallPluginCliUseCase {
       return {
         status: "failed",
         message: installError.message,
+        nextSteps: [],
         warningMessages: [],
       };
     }

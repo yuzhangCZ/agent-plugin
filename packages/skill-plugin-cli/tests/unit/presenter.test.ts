@@ -99,3 +99,30 @@ test("TerminalCliPresenter falls back to weUrl text when qrcode rendering fails"
   assert.match(content, /pcUrl（可复制打开）: https:\/\/pc\.example\/qr-1/);
   assert.doesNotMatch(content, /\u001B\]8;;/);
 });
+
+test("TerminalCliPresenter prints success next steps in order", () => {
+  const presenter = new TerminalCliPresenter();
+  const stdout: string[] = [];
+  const originalStdout = process.stdout.write.bind(process.stdout);
+
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    presenter.success("OpenCode 安装完成", [
+      "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
+      "可执行命令：opencode",
+    ]);
+  } finally {
+    process.stdout.write = originalStdout;
+  }
+
+  assert.equal(
+    stdout.join(""),
+    "[skill-plugin-cli] 安装成功：OpenCode 安装完成\n"
+      + "[skill-plugin-cli] 下一步：请手动重启 OpenCode 以确认插件与配置生效。\n"
+      + "[skill-plugin-cli] 可执行命令：opencode\n",
+  );
+});

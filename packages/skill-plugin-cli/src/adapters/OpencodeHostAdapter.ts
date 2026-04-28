@@ -113,20 +113,12 @@ export class OpencodeHostAdapter implements HostAdapter {
     if (status.exitCode !== 0) {
       throw new InstallCliError("HOST_AVAILABILITY_FAILED", "OpenCode 进程探测失败。");
     }
-
-    const runningFlag = this.env.SKILL_PLUGIN_CLI_OPENCODE_RUNNING;
-    if (runningFlag === "1") {
-      return {
-        detail: "检测到 OpenCode 已运行，本次不接管重启。",
-        warning: "请手动重启 OpenCode 确认插件生效。",
-      };
-    }
-
-    const startCommand = (this.env.SKILL_PLUGIN_CLI_OPENCODE_START_COMMAND || "opencode").trim();
-    const startArgs = (this.env.SKILL_PLUGIN_CLI_OPENCODE_START_ARGS || "").split(/\s+/u).filter(Boolean);
-    await this.processRunner.spawnDetached(startCommand, startArgs);
     return {
-      detail: "已尝试主动拉起 OpenCode。",
+      detail: "已完成 OpenCode 可执行性确认。",
+      nextSteps: [
+        "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
+        "可执行命令：opencode",
+      ],
     };
   }
 }

@@ -47,3 +47,15 @@ test("OpenClawHostAdapter preflight rejects versions older than the minimum runt
     (error) => error instanceof InstallCliError && error.code === "OPENCLAW_VERSION_UNSUPPORTED",
   );
 });
+
+test("OpenClawHostAdapter confirmAvailability returns manual gateway restart next steps after probe", async () => {
+  const adapter = new OpenClawHostAdapter(createProcessRunner("2026.4.12"));
+
+  const result = await adapter.confirmAvailability();
+
+  assert.equal(result.detail, "探活通过，channel 已可用。");
+  assert.deepEqual(result.nextSteps, [
+    "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
+    "可执行命令：openclaw gateway restart",
+  ]);
+});

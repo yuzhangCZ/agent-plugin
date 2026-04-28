@@ -105,3 +105,22 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("OpencodeHostAdapter confirmAvailability returns manual restart next steps", async () => {
+  const adapter = new OpencodeHostAdapter(noopProcessRunner, {});
+
+  const result = await adapter.confirmAvailability({
+    command: "install",
+    host: "opencode",
+    environment: "prod",
+    registry: "https://npm.example.com",
+    mac: "",
+    channel: "openx",
+  });
+
+  assert.equal(result.detail, "已完成 OpenCode 可执行性确认。");
+  assert.deepEqual(result.nextSteps, [
+    "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
+    "可执行命令：opencode",
+  ]);
+});

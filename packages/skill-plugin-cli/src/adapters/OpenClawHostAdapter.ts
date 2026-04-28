@@ -124,16 +124,12 @@ export class OpenClawHostAdapter implements HostAdapter {
     if (probe.exitCode !== 0) {
       throw new InstallCliError("HOST_AVAILABILITY_FAILED", (probe.stderr || probe.stdout).trim());
     }
-
-    const restart = await this.processRunner.exec("openclaw", ["gateway", "restart"]);
-    if (restart.exitCode !== 0) {
-      return {
-        detail: "探活通过，gateway restart 已降级为 warning。",
-        warning: (restart.stderr || restart.stdout || "openclaw gateway restart 执行失败。").trim(),
-      };
-    }
     return {
-      detail: "探活通过，gateway restart 已执行。",
+      detail: "探活通过，channel 已可用。",
+      nextSteps: [
+        "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
+        "可执行命令：openclaw gateway restart",
+      ],
     };
   }
 }

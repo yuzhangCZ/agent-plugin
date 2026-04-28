@@ -50,7 +50,7 @@ export interface Presenter {
   info(message: string): void;
   qrSnapshot(snapshot: QrCodeAuthSnapshot): void;
   warning(message: string): void;
-  success(summary: string, warnings?: string[]): void;
+  success(summary: string, nextSteps?: string[]): void;
   failure(summary: string): void;
   cancelled(summary: string): void;
 }

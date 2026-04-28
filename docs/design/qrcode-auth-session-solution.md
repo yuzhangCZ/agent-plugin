@@ -735,7 +735,7 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 - 统一 CLI 是二维码认证阶段的唯一主编排层。
 - OpenCode / OpenClaw 的二维码展示、状态提示和终态收口由统一 CLI 负责。
 - 插件包只负责插件本体与宿主安装元数据，不再提供兼容 wrapper。
-- OpenClaw 的宿主前置校验、插件安装、`openclaw gateway restart` 和 probe 确认以上位方案为准。
+- OpenClaw 的宿主前置校验、插件安装、probe 确认以及手动执行 `openclaw gateway restart` 的提示以上位方案为准。
 - 二维码授权包只提供阶段 7 所需的认证事件与结果。
 
 约束：
