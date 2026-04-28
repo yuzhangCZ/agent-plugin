@@ -51,6 +51,30 @@ describe('gateway business message adapter', () => {
     });
   });
 
+  test('preserves normalized chat imGroupId from typed facade message', () => {
+    const result = adaptGatewayBusinessMessage({
+      type: 'invoke',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-chat-group-1',
+        text: 'hello',
+        imGroupId: 'group-1',
+      },
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value, {
+      type: 'invoke',
+      action: 'chat',
+      welinkSessionId: undefined,
+      payload: {
+        toolSessionId: 'tool-chat-group-1',
+        text: 'hello',
+        imGroupId: 'group-1',
+      },
+    });
+  });
+
   test('preserves required welinkSessionId for typed facade create_session message', () => {
     const result = adaptGatewayBusinessMessage({
       type: 'invoke',

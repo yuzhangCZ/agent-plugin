@@ -247,6 +247,55 @@ test('normalizeDownstream rejects non-string chat assistantId', () => {
   });
 });
 
+test('normalizeDownstream preserves non-empty chat imGroupId and trims surrounding whitespace', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      welinkSessionId: 'wl-chat-group',
+      payload: {
+        toolSessionId: 'tool-chat-group',
+        text: 'hello',
+        imGroupId: ' group-001 ',
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    welinkSessionId: 'wl-chat-group',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-chat-group',
+      text: 'hello',
+      imGroupId: 'group-001',
+    },
+  });
+});
+
+test('normalizeDownstream drops blank chat imGroupId', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      welinkSessionId: 'wl-chat-group-blank',
+      payload: {
+        toolSessionId: 'tool-chat-group-blank',
+        text: 'hello',
+        imGroupId: '   ',
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    welinkSessionId: 'wl-chat-group-blank',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-chat-group-blank',
+      text: 'hello',
+    },
+  });
+});
+
 test('normalizeDownstream accepts question_reply without welinkSessionId through the public API', () => {
   const result = normalizeDownstream({
     type: 'invoke',

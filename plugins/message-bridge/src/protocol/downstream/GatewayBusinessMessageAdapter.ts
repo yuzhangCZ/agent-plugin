@@ -32,6 +32,7 @@ function adaptInvokeMessage(
           toolSessionId: message.payload.toolSessionId,
           text: message.payload.text,
           ...(message.payload.assistantId ? { assistantId: message.payload.assistantId } : {}),
+          ...(message.payload.imGroupId ? { imGroupId: message.payload.imGroupId } : {}),
         },
       });
     case 'create_session':

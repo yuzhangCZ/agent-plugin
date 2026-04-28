@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { ResolveCreateSessionDirectoryUseCase } from '../../src/usecase/ResolveCreateSessionDirectoryUseCase.ts';
 import { CreateSessionUseCase } from '../../src/usecase/CreateSessionUseCase.ts';
 import { ChatUseCase } from '../../src/usecase/ChatUseCase.ts';
+import { isImGroupTitle } from '../../src/session/isImGroupTitle.ts';
 
 function createLoggerRecorder() {
   const calls = [];
@@ -345,6 +346,30 @@ describe('assiant use cases', () => {
       },
     ]);
     assert.strictEqual(Object.hasOwn(calls[0], 'permission'), false);
+  });
+
+  test('im-group title helper stays aligned with create_session permission gate', () => {
+    const createSessionUseCase = new CreateSessionUseCase(
+      {
+        execute: async () => ({
+          directory: '/mapped/group',
+          source: 'mapping',
+        }),
+      },
+      {
+        createSession: async () => ({
+          success: true,
+          data: {
+            sessionId: 'created-group-2',
+          },
+        }),
+      },
+    );
+
+    assert.strictEqual(isImGroupTitle('im-group-abc'), true);
+    assert.strictEqual(isImGroupTitle('tenant session'), false);
+    assert.ok(createSessionUseCase.resolvePermission({ payload: { title: 'im-group-abc' } }));
+    assert.strictEqual(createSessionUseCase.resolvePermission({ payload: { title: 'tenant session' } }), undefined);
   });
 
   test('chat use case forwards assistantId as agent without directory', async () => {

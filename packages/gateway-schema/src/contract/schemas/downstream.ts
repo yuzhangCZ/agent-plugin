@@ -25,11 +25,13 @@ export const chatPayloadSchema = z
     toolSessionId: requiredTrimmedString,
     text: requiredTrimmedString,
     assistantId: optionalStrictTrimmedString,
+    imGroupId: optionalStrictTrimmedString,
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
     text: payload.text,
     ...(payload.assistantId ? { assistantId: payload.assistantId } : {}),
+    ...(payload.imGroupId ? { imGroupId: payload.imGroupId } : {}),
   }));
 export type ChatPayload = z.output<typeof chatPayloadSchema>;
 

@@ -7,6 +7,7 @@ import {
   assertInvalidInvokeToolErrorContract,
   createInvalidInvokeInboundFrame,
 } from '@agent-plugin/test-support/assertions';
+import { validateGatewayUplinkBusinessMessage } from '@agent-plugin/gateway-schema';
 
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import {
@@ -1168,6 +1169,387 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].type, 'tool_done');
     assert.strictEqual(sent[0].toolSessionId, 'tool-100');
     assert.strictEqual(sent[0].welinkSessionId, '100');
+  });
+
+  test('intercepts group chat by payload imGroupId and replays synthetic assistant events', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-1',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-1',
+        text: 'hello',
+        imGroupId: 'group-1',
+      },
+    });
+
+    assert.strictEqual(prompts.length, 0);
+    assert.strictEqual(sent.length, 6);
+    assert.deepStrictEqual(sent.map((entry) => entry.message.type), [
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_done',
+    ]);
+
+    const [messageUpdatedStart, stepStart, textPart, stepFinish, messageUpdatedFinish, toolDone] = sent;
+    assert.strictEqual(messageUpdatedStart.message.event.type, 'message.updated');
+    assert.strictEqual(stepStart.message.event.type, 'message.part.updated');
+    assert.strictEqual(textPart.message.event.type, 'message.part.updated');
+    assert.strictEqual(stepFinish.message.event.type, 'message.part.updated');
+    assert.strictEqual(messageUpdatedFinish.message.event.type, 'message.updated');
+    assert.strictEqual(toolDone.message.type, 'tool_done');
+
+    const startInfo = messageUpdatedStart.message.event.properties.info;
+    const finishInfo = messageUpdatedFinish.message.event.properties.info;
+    const stepStartPart = stepStart.message.event.properties.part;
+    const textReplyPart = textPart.message.event.properties.part;
+    const stepFinishPart = stepFinish.message.event.properties.part;
+    assert.strictEqual(startInfo.id, finishInfo.id);
+    assert.strictEqual(startInfo.sessionID, 'tool-group-1');
+    assert.strictEqual(startInfo.role, 'assistant');
+    assert.deepStrictEqual(finishInfo.finish, { reason: 'stop' });
+    assert.match(startInfo.id, /^msg_/);
+    assert.strictEqual(startInfo.id.includes('tool-group-1'), false);
+
+    assert.strictEqual(stepStartPart.sessionID, 'tool-group-1');
+    assert.strictEqual(stepStartPart.messageID, startInfo.id);
+    assert.strictEqual(stepStartPart.type, 'step-start');
+    assert.notStrictEqual(stepStartPart.id, startInfo.id);
+    assert.match(stepStartPart.id, /^prt_/);
+
+    assert.strictEqual(textReplyPart.sessionID, 'tool-group-1');
+    assert.strictEqual(textReplyPart.messageID, startInfo.id);
+    assert.strictEqual(textReplyPart.type, 'text');
+    assert.strictEqual(textReplyPart.text, '本机器人不处理群聊消息，请勿在群内@提问');
+    assert.notStrictEqual(textReplyPart.id, startInfo.id);
+    assert.match(textReplyPart.id, /^prt_/);
+
+    assert.strictEqual(stepFinishPart.sessionID, 'tool-group-1');
+    assert.strictEqual(stepFinishPart.messageID, startInfo.id);
+    assert.strictEqual(stepFinishPart.type, 'step-finish');
+    assert.strictEqual(stepFinishPart.reason, 'stop');
+    assert.notStrictEqual(stepFinishPart.id, startInfo.id);
+    assert.match(stepFinishPart.id, /^prt_/);
+    assert.notStrictEqual(stepStartPart.id, textReplyPart.id);
+    assert.notStrictEqual(stepStartPart.id, stepFinishPart.id);
+    assert.notStrictEqual(textReplyPart.id, stepFinishPart.id);
+    assert.strictEqual(stepStartPart.id.includes(startInfo.id), false);
+    assert.strictEqual(textReplyPart.id.includes(startInfo.id), false);
+    assert.strictEqual(stepFinishPart.id.includes(startInfo.id), false);
+    assert.strictEqual(toolDone.message.toolSessionId, 'tool-group-1');
+    assert.strictEqual(toolDone.message.welinkSessionId, 'wl-group-1');
+
+    for (const entry of sent) {
+      const validation = validateGatewayUplinkBusinessMessage(entry.message);
+      assert.strictEqual(validation.ok, true);
+    }
+  });
+
+  test('group chat intercept generates a fresh synthetic message id for each intercepted chat', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-repeat-1',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-repeat-1',
+        text: 'hello',
+        imGroupId: 'group-repeat-1',
+      },
+    });
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-repeat-2',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-repeat-1',
+        text: 'hello again',
+        imGroupId: 'group-repeat-1',
+      },
+    });
+
+    const firstMessageId = sent[0].message.event.properties.info.id;
+    const secondMessageId = sent[6].message.event.properties.info.id;
+    const firstStepStartPartId = sent[1].message.event.properties.part.id;
+    const secondStepStartPartId = sent[7].message.event.properties.part.id;
+    assert.notStrictEqual(firstMessageId, secondMessageId);
+    assert.match(firstMessageId, /^msg_/);
+    assert.match(secondMessageId, /^msg_/);
+    assert.strictEqual(firstMessageId.includes('tool-group-repeat-1'), false);
+    assert.strictEqual(secondMessageId.includes('tool-group-repeat-1'), false);
+    assert.strictEqual(sent[1].message.event.properties.part.messageID, firstMessageId);
+    assert.strictEqual(sent[7].message.event.properties.part.messageID, secondMessageId);
+    assert.notStrictEqual(firstStepStartPartId, secondStepStartPartId);
+    assert.match(firstStepStartPartId, /^prt_/);
+    assert.match(secondStepStartPartId, /^prt_/);
+    assert.strictEqual(firstStepStartPartId.includes(firstMessageId), false);
+    assert.strictEqual(secondStepStartPartId.includes(secondMessageId), false);
+  });
+
+  test('intercepts chat by session cache after im-group create_session success', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'tool-group-cache-1',
+            },
+          }),
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+          delete: async () => ({ data: { id: 'tool-group-cache-1' } }),
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-create-group-cache',
+      action: 'create_session',
+      payload: {
+        title: 'im-group-xyz',
+      },
+    });
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-chat-group-cache',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-cache-1',
+        text: 'hello',
+      },
+    });
+
+    assert.strictEqual(prompts.length, 0);
+    assert.strictEqual(sent[0].message.type, 'session_created');
+    assert.deepStrictEqual(sent.slice(1).map((entry) => entry.message.type), [
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_done',
+    ]);
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-close-group-cache',
+      action: 'close_session',
+      payload: {
+        toolSessionId: 'tool-group-cache-1',
+      },
+    });
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-chat-after-close',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-cache-1',
+        text: 'hello again',
+      },
+    });
+
+    assert.strictEqual(prompts.length, 1);
+    assert.deepStrictEqual(prompts[0], {
+      path: { id: 'tool-group-cache-1' },
+      query: { directory: '/session/default-directory' },
+      body: {
+        parts: [{ type: 'text', text: 'hello again' }],
+      },
+    });
+  });
+
+  test('im-group create_session still seeds session cache when session_created cannot be forwarded', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'tool-group-cache-send-fail-1',
+            },
+          }),
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const original = runtime.validateGatewayUplinkBusinessMessageOrLog.bind(runtime);
+    runtime.validateGatewayUplinkBusinessMessageOrLog = (message, logContext, logger) => {
+      if (message.type === 'session_created') {
+        return null;
+      }
+      return original(message, logContext, logger);
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-create-group-cache-send-fail',
+      action: 'create_session',
+      payload: {
+        title: 'im-group-cache-send-fail',
+      },
+    });
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-chat-group-cache-send-fail',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-cache-send-fail-1',
+        text: 'hello',
+      },
+    });
+
+    assert.strictEqual(prompts.length, 0);
+    assert.strictEqual(sent.some((entry) => entry.message.type === 'session_created'), false);
+    assert.deepStrictEqual(sent.map((entry) => entry.message.type), [
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_event',
+      'tool_done',
+    ]);
+  });
+
+  test('group chat intercept does not log replied success when synthetic send fails', async () => {
+    const logs = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: {
+          log: async (options) => {
+            logs.push(options);
+            return true;
+          },
+        },
+      }),
+    });
+
+    runtime.gatewayConnection = {
+      send: (message, context) => {
+        if (message.type === 'tool_event' && message.event.type === 'message.part.updated') {
+          throw new Error('send should not be called after validation failure');
+        }
+      },
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const original = runtime.validateGatewayUplinkBusinessMessageOrLog.bind(runtime);
+    let messagePartAttempted = false;
+    runtime.validateGatewayUplinkBusinessMessageOrLog = (message, logContext, logger) => {
+      if (message.type === 'tool_event' && message.event.type === 'message.part.updated') {
+        messagePartAttempted = true;
+        return null;
+      }
+      return original(message, logContext, logger);
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-fail-1',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-fail-1',
+        text: 'hello',
+        imGroupId: 'group-fail-1',
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.strictEqual(messagePartAttempted, true);
+    assert.strictEqual(logs.some((entry) => entry?.body?.message === 'runtime.invoke.chat_group_replied'), false);
+    const failedLog = logs.find((entry) => entry?.body?.message === 'runtime.invoke.chat_group_reply_failed');
+    assert.ok(failedLog);
+    assert.strictEqual(failedLog.body.extra.failedStage, 'tool_event');
+  });
+
+  test('group chat intercept suppresses duplicate tool_done when session.idle follows', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-idle-1',
+      action: 'chat',
+      payload: {
+        toolSessionId: 'tool-group-idle-1',
+        text: 'hello',
+        imGroupId: 'group-idle-1',
+      },
+    });
+
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-group-idle-1',
+      },
+    });
+
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 6);
+    assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
+    assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
   });
 
   test('accepts question_reply invoke shape and routes answer via question API', async () => {

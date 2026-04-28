@@ -66,6 +66,7 @@ import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
+import { isImGroupTitle } from '../session/isImGroupTitle.js';
 import {
   DefaultGatewayLifecycleCoordinator,
   type GatewayLifecycleCoordinator,
@@ -114,6 +115,11 @@ interface DownstreamLogFields {
   toolSessionId?: string;
 }
 
+type GroupChatSource = 'payload' | 'session_cache';
+type GroupChatInterceptResult =
+  | { ok: true; messageId: string }
+  | { ok: false; stage: 'tool_event' | 'tool_done'; messageId: string };
+
 function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
   return typeof error === 'object'
     && error !== null
@@ -124,6 +130,16 @@ function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorS
     && 'message' in error;
 }
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
+const GROUP_CHAT_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
+const GROUP_CHAT_FINISH_REASON = 'stop';
+
+function createSyntheticOpencodeMessageId(): string {
+  return `msg_${randomUUID().replaceAll('-', '')}`;
+}
+
+function createSyntheticOpencodePartId(): string {
+  return `prt_${randomUUID().replaceAll('-', '')}`;
+}
 
 export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
@@ -149,6 +165,7 @@ export class BridgeRuntime {
   private readonly toolErrorClassifier = new ToolErrorClassifier();
   private readonly invalidInvokeToolErrorResponder: InvalidInvokeToolErrorResponder;
   private readonly subagentSessionMapper = new SubagentSessionMapper(() => this.sdkClient);
+  private readonly groupSessionCache = new Map<string, true>();
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
   private readonly lifecycleCoordinator: GatewayLifecycleCoordinator;
   private readonly sessionSender: GatewaySessionSenderPort;
@@ -609,6 +626,47 @@ export class BridgeRuntime {
 
     invokeLogger.info('runtime.invoke.received');
 
+    if (invokeMessage.action === 'chat') {
+      const groupSource = this.resolveGroupChatSource(invokeMessage.payload);
+      if (groupSource) {
+        invokeLogger.info('runtime.invoke.chat_group_intercepted', {
+          toolSessionId,
+          welinkSessionId,
+          imGroupId: invokeMessage.payload.imGroupId,
+          groupSource,
+        });
+        const interceptResult = this.replyGroupChatIntercept({
+          connection,
+          invokeLogger,
+          traceId,
+          gatewayMessageId: downstreamFields.gatewayMessageId,
+          toolSessionId: invokeMessage.payload.toolSessionId,
+          welinkSessionId,
+        });
+        if (interceptResult.ok) {
+          invokeLogger.info('runtime.invoke.chat_group_replied', {
+            toolSessionId,
+            welinkSessionId,
+            imGroupId: invokeMessage.payload.imGroupId,
+            groupSource,
+            syntheticMessageId: interceptResult.messageId,
+            latencyMs: Date.now() - startedAt,
+          });
+        } else {
+          invokeLogger.warn('runtime.invoke.chat_group_reply_failed', {
+            toolSessionId,
+            welinkSessionId,
+            imGroupId: invokeMessage.payload.imGroupId,
+            groupSource,
+            syntheticMessageId: interceptResult.messageId,
+            failedStage: interceptResult.stage,
+            latencyMs: Date.now() - startedAt,
+          });
+        }
+        return;
+      }
+    }
+
     if (invokeMessage.action === 'create_session') {
       const normalizedWelinkSessionId = asTrimmedString(invokeMessage.welinkSessionId) ?? invokeMessage.welinkSessionId;
       const result = await this.actionRouter.route(
@@ -658,6 +716,9 @@ export class BridgeRuntime {
         toolSessionId,
         action: invokeMessage.action,
       };
+      if (isImGroupTitle(invokeMessage.payload.title)) {
+        this.groupSessionCache.set(toolSessionId, true);
+      }
       const validatedSessionCreated = this.validateGatewayUplinkBusinessMessageOrLog(
         sessionCreated,
         sessionCreatedLogContext,
@@ -709,6 +770,10 @@ export class BridgeRuntime {
       toolSessionId,
       latencyMs: Date.now() - startedAt,
     });
+
+    if (invokeMessage.action === 'close_session' && toolSessionId) {
+      this.groupSessionCache.delete(toolSessionId);
+    }
 
     const decision = this.toolDoneCompat.handleInvokeCompleted({
       action: invokeMessage.action,
@@ -864,6 +929,142 @@ export class BridgeRuntime {
     return extra && extra.kind === TOOL_EVENT_TYPE.SESSION_STATUS ? extra.status : null;
   }
 
+  private resolveGroupChatSource(payload: { toolSessionId: string; imGroupId?: string }): GroupChatSource | null {
+    if (payload.imGroupId) {
+      return 'payload';
+    }
+
+    return this.groupSessionCache.has(payload.toolSessionId) ? 'session_cache' : null;
+  }
+
+  private replyGroupChatIntercept(options: {
+    connection: GatewayClient;
+    invokeLogger: BridgeLogger;
+    traceId: string;
+    gatewayMessageId?: string;
+    toolSessionId: string;
+    welinkSessionId?: string;
+  }): GroupChatInterceptResult {
+    const messageId = createSyntheticOpencodeMessageId();
+    const now = Date.now();
+    // synthetic 事件不是 SDK 原样透传，但 reason 值和 part id 形状要尽量贴近真实 OpenCode 事件，
+    // 避免下游 translator / 持久化 / 去重逻辑与真实流量产生行为漂移。
+    const stepStartPartId = createSyntheticOpencodePartId();
+    const textPartId = createSyntheticOpencodePartId();
+    const stepFinishPartId = createSyntheticOpencodePartId();
+    const events: Array<Extract<GatewaySendPayload, { type: 'tool_event' }>> = [
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: options.toolSessionId,
+        event: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: messageId,
+              sessionID: options.toolSessionId,
+              role: 'assistant',
+              time: { created: now },
+            },
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: options.toolSessionId,
+        event: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: stepStartPartId,
+              sessionID: options.toolSessionId,
+              messageID: messageId,
+              type: 'step-start',
+            },
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: options.toolSessionId,
+        event: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: textPartId,
+              sessionID: options.toolSessionId,
+              messageID: messageId,
+              type: 'text',
+              text: GROUP_CHAT_REPLY_TEXT,
+            },
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: options.toolSessionId,
+        event: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: stepFinishPartId,
+              sessionID: options.toolSessionId,
+              messageID: messageId,
+              type: 'step-finish',
+              reason: GROUP_CHAT_FINISH_REASON,
+            },
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: options.toolSessionId,
+        event: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: messageId,
+              sessionID: options.toolSessionId,
+              role: 'assistant',
+              time: { created: now, updated: now },
+              finish: { reason: GROUP_CHAT_FINISH_REASON },
+            },
+          },
+        },
+      },
+    ];
+
+    for (const eventMessage of events) {
+      if (!this.sendToolEventMessage(eventMessage, {
+        connection: options.connection,
+        logger: options.invokeLogger,
+        traceId: options.traceId,
+        gatewayMessageId: options.gatewayMessageId,
+        toolSessionId: options.toolSessionId,
+      })) {
+        return { ok: false, stage: 'tool_event', messageId };
+      }
+    }
+
+    const toolDoneSent = this.sendToolDone(options.toolSessionId, options.welinkSessionId, 'invoke_complete', {
+      connection: options.connection,
+      logger: options.invokeLogger,
+      traceId: options.traceId,
+      gatewayMessageId: options.gatewayMessageId,
+      action: 'chat',
+    });
+    if (!toolDoneSent) {
+      return { ok: false, stage: 'tool_done', messageId };
+    }
+
+    this.toolDoneCompat.handleInvokeCompleted({
+      action: 'chat',
+      toolSessionId: options.toolSessionId,
+      logger: options.invokeLogger,
+    });
+
+    return { ok: true, messageId };
+  }
+
   private extractDownstreamLogFields(raw: unknown): DownstreamLogFields {
     const message = asRecord(raw);
     if (!message) {
@@ -1000,11 +1201,11 @@ export class BridgeRuntime {
       gatewayMessageId?: string;
       action?: string;
     },
-  ): void {
+  ): boolean {
     const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
     if (!connection) {
       this.logger.warn('runtime.tool_done.skipped_no_connection', { toolSessionId, welinkSessionId, source });
-      return;
+      return false;
     }
 
     const logger = logOptions?.logger ?? this.logger;
@@ -1035,9 +1236,34 @@ export class BridgeRuntime {
       logger,
     );
     if (!validatedToolDone) {
-      return;
+      return false;
     }
-    this.sessionSender.sendIfActive(connection, validatedToolDone, toolDoneLogContext);
+    return this.sessionSender.sendIfActive(connection, validatedToolDone, toolDoneLogContext);
+  }
+
+  private sendToolEventMessage(
+    message: Extract<GatewaySendPayload, { type: 'tool_event' }>,
+    logOptions: {
+      connection: GatewayClient;
+      logger: BridgeLogger;
+      traceId: string;
+      gatewayMessageId?: string;
+      toolSessionId: string;
+    },
+  ): boolean {
+    const logContext: GatewaySendLogContext = {
+      traceId: logOptions.traceId,
+      runtimeTraceId: this.logger.getTraceId(),
+      gatewayMessageId: logOptions.gatewayMessageId,
+      toolSessionId: logOptions.toolSessionId,
+      eventType: message.event.type,
+    };
+    const validatedMessage = this.validateGatewayUplinkBusinessMessageOrLog(message, logContext, logOptions.logger);
+    if (!validatedMessage) {
+      return false;
+    }
+
+    return this.sessionSender.sendIfActive(logOptions.connection, validatedMessage, logContext);
   }
 
   private validateGatewayUplinkBusinessMessageOrLog(

@@ -18,6 +18,7 @@ export interface ChatPayload {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  imGroupId?: string;
 }
 
 export interface CreateSessionPayload {
