@@ -756,7 +756,7 @@ test("runtime reply final reconciliation extends streamed prefix without duplica
   assert.equal(suffixDeltaEvent, undefined);
 });
 
-test("runtime reply final-only replays synthetic delta and still marks status unhealthy", async () => {
+test("runtime reply final-only emits final text without synthetic delta and still marks status unhealthy", async () => {
   const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
     const reply = createRuntimeReplyDispatchHarness(dispatcher);
     await reply.final({ text: "hello only final" });
@@ -790,64 +790,10 @@ test("runtime reply final-only replays synthetic delta and still marks status un
   );
 
   assert.notEqual(finalAssistantTextUpdateIndex, -1);
-  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final", "hello only final");
+  assertNoAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello only final");
+  assert.equal(toolEvents.some((message) => message.event.type === "message.part.delta"), false);
   assert.ok(statuses.some((status) => status.streamingPathReason === "runtime_reply_final_only"));
   assert.ok(statuses.some((status) => status.streamingPathHealthy === false));
-});
-
-test("runtime reply final-only replays synthetic delta with visible pacing", async () => {
-  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
-    const reply = createRuntimeReplyDispatchHarness(dispatcher);
-    await reply.final({ text: "abcdefghijkl" });
-  });
-  const { bridge, connection } = createBridge({
-    runtime,
-    config: {
-      agents: {
-        defaults: {
-          blockStreamingChunk: {
-            minChars: 4,
-            maxChars: 4,
-          },
-          blockStreamingCoalesce: {
-            idleMs: 20,
-          },
-        },
-      },
-    },
-  });
-
-  const pending = bridge.handleDownstreamMessage({
-    type: "invoke",
-    welinkSessionId: "wl_final_only_paced_1",
-    action: "chat",
-    payload: {
-      toolSessionId: "ses_final_only_paced_1",
-      text: "hello",
-    },
-  });
-
-  await new Promise((resolve) => setTimeout(resolve, 5));
-
-  const midEvents = getToolEvents(connection);
-  const midDeltaCount = midEvents.filter((message) => {
-    return message.event.type === "message.part.delta";
-  }).length;
-  const midFinalIndex = findAssistantTextUpdateIndex(midEvents, "abcdefghijkl");
-
-  assert.ok(midDeltaCount >= 1);
-  assert.equal(midFinalIndex, -1);
-
-  await pending;
-
-  const finalEvents = getToolEvents(connection);
-  const finalDeltaCount = finalEvents.filter((message) => {
-    return message.event.type === "message.part.delta";
-  }).length;
-  const finalTextIndex = findAssistantTextUpdateIndex(finalEvents, "abcdefghijkl");
-
-  assert.equal(finalDeltaCount, 3);
-  assert.notEqual(finalTextIndex, -1);
 });
 
 test("runtime reply waits for dispatcher idle before emitting session.idle and tool_done", async () => {
@@ -895,6 +841,41 @@ test("runtime reply waits for dispatcher idle before emitting session.idle and t
   assert.ok(finalTextIndex >= 0);
   assert.ok(idleIndex > finalTextIndex);
   assert.ok(doneIndex > idleIndex);
+});
+
+test("runtime reply preserves late async block replies before final completion", async () => {
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    void (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      reply.block({ text: "hello" });
+    })();
+    await reply.final({ text: "hello" });
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_late_block_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_late_block_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(connection);
+  const assistantMessageUpdatedIndex = toolEvents.findIndex((message) => {
+    return message.event.type === "message.updated" && message.event.properties?.info?.role === "assistant";
+  });
+  const finalAssistantTextUpdateIndex = findAssistantTextUpdateIndex(
+    toolEvents,
+    "hello",
+    assistantMessageUpdatedIndex,
+  );
+
+  assert.notEqual(finalAssistantTextUpdateIndex, -1);
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello", "hello");
 });
 
 test("subagent fallback emits final assistant text before idle and tool_done", async () => {
@@ -972,13 +953,6 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
       eventType: "message.part.updated",
       role: undefined,
       partType: "text",
-      text: "",
-    },
-    {
-      type: "tool_event",
-      eventType: "message.part.updated",
-      role: undefined,
-      partType: "text",
       text: "fallback answer",
     },
     {
@@ -1017,7 +991,6 @@ test("subagent fallback emits final assistant text before idle and tool_done", a
   const toolEvents = getToolEvents(connection);
   const fallbackUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "fallback answer");
   assert.notEqual(fallbackUpdateIndex, -1);
-  assertAssistantTextSeed(toolEvents, fallbackUpdateIndex);
   assertNoAdjacentAssistantTextDelta(toolEvents, fallbackUpdateIndex, "fallback answer");
 });
 
@@ -1059,7 +1032,6 @@ test("subagent fallback emits empty response without synthetic delta before fina
   const emptyUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "(empty response)");
 
   assert.notEqual(emptyUpdateIndex, -1);
-  assertAssistantTextSeed(toolEvents, emptyUpdateIndex);
   assertNoAdjacentAssistantTextDelta(toolEvents, emptyUpdateIndex, "(empty response)");
 });
 
@@ -1083,11 +1055,16 @@ test("runtime reply final-only and fallback reuse the same assistant text part i
   const toolEvents = getToolEvents(connection);
   const identityUpdateIndex = findAssistantTextUpdateIndex(toolEvents, "identity final");
   assert.notEqual(identityUpdateIndex, -1);
-  const deltaEvent = toolEvents[identityUpdateIndex - 1]?.event;
-  assert.ok(deltaEvent);
-  assert.equal(deltaEvent.type, "message.part.delta");
-  assert.equal(deltaEvent.properties?.messageID, toolEvents[identityUpdateIndex].event.properties?.part?.messageID);
-  assert.equal(deltaEvent.properties?.partID, toolEvents[identityUpdateIndex].event.properties?.part?.id);
+  const textUpdates = toolEvents.filter((message) => {
+    return message.event.type === "message.part.updated"
+      && message.event.properties?.part?.type === "text";
+  });
+  const assistantTextUpdates = textUpdates.filter((message) => {
+    return message.event.properties?.part?.messageID
+      === toolEvents[identityUpdateIndex].event.properties?.part?.messageID;
+  });
+  assert.equal(assistantTextUpdates.length, 1);
+  assert.equal(toolEvents.some((message) => message.event.type === "message.part.delta"), false);
 });
 
 test("runtime tool agent events project to message.part.updated tool states", async () => {
@@ -1241,6 +1218,47 @@ test("runtime tool result can project output and error directly from agent event
       },
     ],
   );
+});
+
+test("runtime assistant agent events project to assistant text delta before final reply", async () => {
+  let bridgeRef;
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    bridgeRef.handleRuntimeAgentEvent({
+      stream: "assistant",
+      sessionKey: ctx.SessionKey,
+      data: {
+        text: "hello",
+        delta: "hello",
+      },
+    });
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.final({ text: "hello" });
+  });
+  const created = createBridge({ runtime });
+  bridgeRef = created.bridge;
+
+  await created.bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_assistant_evt_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_assistant_evt_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = getToolEvents(created.connection);
+  const assistantMessageUpdatedIndex = toolEvents.findIndex((message) => {
+    return message.event.type === "message.updated" && message.event.properties?.info?.role === "assistant";
+  });
+  const finalAssistantTextUpdateIndex = findAssistantTextUpdateIndex(
+    toolEvents,
+    "hello",
+    assistantMessageUpdatedIndex,
+  );
+
+  assert.notEqual(finalAssistantTextUpdateIndex, -1);
+  assertAdjacentAssistantTextDelta(toolEvents, finalAssistantTextUpdateIndex, "hello", "hello");
 });
 
 test("tool payload blocks are consumed once and do not leak to a stale pending target", async () => {

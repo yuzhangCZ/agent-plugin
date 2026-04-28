@@ -42,11 +42,11 @@ export function createMessageBridgeReplyDispatcher(
   let sendChain = Promise.resolve();
   let replyStarted = false;
   let completeCalled = false;
+  let fullyClosed = false;
   let pendingFinalText: string | null = null;
-  let pending = 1;
 
   const startOnce = () => {
-    if (replyStarted || completeCalled) {
+    if (replyStarted || fullyClosed) {
       return;
     }
     replyStarted = true;
@@ -58,15 +58,8 @@ export function createMessageBridgeReplyDispatcher(
     return typeof payload.text === "string" ? payload.text : "";
   };
 
-  const finalizePending = () => {
-    pending -= 1;
-    if (pending === 1 && completeCalled) {
-      pending -= 1;
-    }
-  };
-
   const enqueue = (kind: ReplyPayloadKind, rawPayload: unknown): boolean => {
-    if (completeCalled) {
+    if (fullyClosed) {
       return false;
     }
 
@@ -76,7 +69,6 @@ export function createMessageBridgeReplyDispatcher(
     }
 
     queuedCounts[kind] += 1;
-    pending += 1;
     startOnce();
     sendChain = sendChain
       .then(async () => {
@@ -92,9 +84,7 @@ export function createMessageBridgeReplyDispatcher(
         await params.onBlock(payloadText);
       })
       .catch(() => {})
-      .finally(() => {
-        finalizePending();
-      });
+      .finally(() => {});
 
     return true;
   };
@@ -108,11 +98,6 @@ export function createMessageBridgeReplyDispatcher(
       return;
     }
     completeCalled = true;
-    Promise.resolve().then(() => {
-      if (pending === 1 && completeCalled) {
-        pending -= 1;
-      }
-    });
   };
 
   return {
@@ -136,14 +121,27 @@ export function createMessageBridgeReplyDispatcher(
     sendBlockReply,
     sendFinalReply,
     sendToolReply,
-    waitForIdle() {
-      return sendChain;
+    async waitForIdle() {
+      while (true) {
+        const observedChain = sendChain;
+        await observedChain;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        if (observedChain === sendChain) {
+          if (completeCalled) {
+            fullyClosed = true;
+          }
+          return;
+        }
+      }
     },
     getQueuedCounts() {
       return { ...queuedCounts };
     },
     markComplete,
     markFullyComplete() {
+      fullyClosed = true;
       markComplete();
     },
     getPendingFinalText() {

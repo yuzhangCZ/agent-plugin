@@ -322,82 +322,6 @@ function extractToolResultText(value: unknown): string | undefined {
   return undefined;
 }
 
-function readSyntheticChunkConfig(config: OpenClawConfig): { minChars: number; maxChars: number } {
-  if (!isRecord(config)) {
-    return { minChars: 8, maxChars: 24 };
-  }
-  const agents = isRecord(config.agents) ? config.agents : undefined;
-  const defaults = isRecord(agents?.defaults) ? agents.defaults : undefined;
-  const chunk = isRecord(defaults?.blockStreamingChunk) ? defaults.blockStreamingChunk : undefined;
-  const minChars =
-    typeof chunk?.minChars === "number" && Number.isFinite(chunk.minChars) && chunk.minChars > 0
-      ? Math.max(1, Math.floor(chunk.minChars))
-      : 8;
-  const maxChars =
-    typeof chunk?.maxChars === "number" && Number.isFinite(chunk.maxChars) && chunk.maxChars >= minChars
-      ? Math.floor(chunk.maxChars)
-      : Math.max(minChars, 24);
-  return { minChars, maxChars };
-}
-
-function readSyntheticReplayDelayMs(config: OpenClawConfig): number {
-  if (!isRecord(config)) {
-    return 80;
-  }
-  const agents = isRecord(config.agents) ? config.agents : undefined;
-  const defaults = isRecord(agents?.defaults) ? agents.defaults : undefined;
-  const coalesce = isRecord(defaults?.blockStreamingCoalesce) ? defaults.blockStreamingCoalesce : undefined;
-  const idleMs = typeof coalesce?.idleMs === "number" && Number.isFinite(coalesce.idleMs)
-    ? Math.floor(coalesce.idleMs)
-    : 80;
-  return Math.min(250, Math.max(20, idleMs));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-function splitTextIntoSyntheticChunks(text: string, config: OpenClawConfig): string[] {
-  const normalized = text.trim();
-  if (normalized.length === 0) {
-    return [];
-  }
-
-  const { minChars, maxChars } = readSyntheticChunkConfig(config);
-  const chunks: string[] = [];
-  let index = 0;
-
-  while (index < normalized.length) {
-    const remaining = normalized.length - index;
-    if (remaining <= maxChars) {
-      chunks.push(normalized.slice(index));
-      break;
-    }
-
-    const window = normalized.slice(index, index + maxChars);
-    let cut = -1;
-
-    for (let cursor = Math.min(window.length - 1, maxChars - 1); cursor >= minChars - 1; cursor -= 1) {
-      const char = window[cursor];
-      if ("\n\r。！？；;.!?，,、）)]】 ".includes(char)) {
-        cut = cursor + 1;
-        break;
-      }
-    }
-
-    if (cut === -1) {
-      cut = maxChars;
-    }
-
-    chunks.push(normalized.slice(index, index + cut));
-    index += cut;
-  }
-
-  return chunks.filter((chunk) => chunk.length > 0);
-}
-
 export class OpenClawGatewayBridge {
   private readonly sessionRegistry: SessionRegistry;
   private readonly connection: GatewayConnection;
@@ -1184,26 +1108,7 @@ export class OpenClawGatewayBridge {
     );
     const observedRuntimeChunk = params.assistantStream.chunkCount > 0;
     const finalText = reconciliation.finalText || "(empty response)";
-    const shouldReplaySyntheticStream =
-      params.streamingEnabled &&
-      !observedRuntimeChunk &&
-      finalText.length > 0;
-    if (shouldReplaySyntheticStream) {
-      params.assistantStream.accumulatedText = "";
-      await this.replayFinalTextAsSyntheticStream({
-        toolSessionId: params.record.toolSessionId,
-        state: params.assistantStream,
-        finalText,
-        context: params.context,
-        effectiveConfig: params.effectiveConfig,
-        startedAt: params.startedAt,
-        chatRequestId: params.chatRequestId,
-        retryAttempt: params.retryAttempt,
-        sessionKey: params.record.sessionKey,
-      });
-    } else {
-      params.assistantStream.accumulatedText = finalText;
-    }
+    params.assistantStream.accumulatedText = finalText;
     params.assistantStream.finalOnly = params.streamingEnabled
       && !observedRuntimeChunk
       && finalText.length > 0;
@@ -1763,9 +1668,6 @@ export class OpenClawGatewayBridge {
     if (state.textDisplayed && state.lastDisplayedText === finalText) {
       return;
     }
-    if (state.chunkCount === 0) {
-      this.sendAssistantTextSeedPartUpdated(toolSessionId, state, context);
-    }
     this.sendAssistantTextPartUpdated(toolSessionId, state, finalText, context);
   }
 
@@ -1826,74 +1728,6 @@ export class OpenClawGatewayBridge {
     }, context);
     state.textDisplayed = true;
     state.lastDisplayedText = text;
-  }
-
-  private async replayFinalTextAsSyntheticStream(params: {
-    toolSessionId: string;
-    state: AssistantStreamState;
-    finalText: string;
-    context: UpstreamSendContext;
-    effectiveConfig: OpenClawConfig;
-    startedAt: number;
-    chatRequestId: string;
-    retryAttempt: RetryAttempt;
-    sessionKey: string;
-  }): Promise<void> {
-    const chunks = splitTextIntoSyntheticChunks(params.finalText, params.effectiveConfig);
-    if (chunks.length === 0) {
-      return;
-    }
-    const replayDelayMs = chunks.length > 1 ? readSyntheticReplayDelayMs(params.effectiveConfig) : 0;
-
-    this.options.logger.warn("bridge.chat.synthetic_stream_from_final", {
-      toolSessionId: params.toolSessionId,
-      sessionKey: params.sessionKey,
-      chatRequestId: params.chatRequestId,
-      retryAttempt: params.retryAttempt,
-      chunkCount: chunks.length,
-      finalTextLength: params.finalText.length,
-      replayDelayMs,
-    });
-
-    for (let index = 0; index < chunks.length; index += 1) {
-      if (this.terminatedSessionKeys.has(params.sessionKey)) {
-        return;
-      }
-
-      const chunk = chunks[index];
-      const now = Date.now();
-      params.state.chunkCount += 1;
-      if (params.state.firstChunkAt === null) {
-        params.state.firstChunkAt = now;
-        this.options.logger.info("bridge.chat.first_chunk", {
-          toolSessionId: params.toolSessionId,
-          sessionKey: params.sessionKey,
-          chatRequestId: params.chatRequestId,
-          retryAttempt: params.retryAttempt,
-          latencyMs: now - params.startedAt,
-          chunkLength: chunk.length,
-          deltaText: chunk,
-          syntheticFromFinal: true,
-        });
-      } else {
-        this.options.logger.info("bridge.chat.chunk", {
-          toolSessionId: params.toolSessionId,
-          sessionKey: params.sessionKey,
-          chatRequestId: params.chatRequestId,
-          retryAttempt: params.retryAttempt,
-          chunkIndex: params.state.chunkCount,
-          chunkLength: chunk.length,
-          sinceStartMs: now - params.startedAt,
-          sinceFirstChunkMs: now - params.state.firstChunkAt,
-          deltaText: chunk,
-          syntheticFromFinal: true,
-        });
-      }
-      this.sendAssistantStreamChunk(params.toolSessionId, params.state, chunk, params.context);
-      if (replayDelayMs > 0 && index < chunks.length - 1) {
-        await sleep(replayDelayMs);
-      }
-    }
   }
 
   private sendAssistantCompleted(
@@ -2269,6 +2103,11 @@ export class OpenClawGatewayBridge {
     }
 
     const context = this.buildChatEventContext(activeSession.toolSessionId);
+    if (evt.stream === "assistant") {
+      this.emitAssistantRuntimeDelta(activeSession.assistantStream, activeSession.toolSessionId, evt.data, context);
+      return;
+    }
+
     if (evt.stream === "reasoning") {
       const phase = typeof evt.data.phase === "string" ? evt.data.phase : "delta";
       const text = typeof evt.data.text === "string" ? evt.data.text : "";
@@ -2324,6 +2163,62 @@ export class OpenClawGatewayBridge {
       activeSession.pendingToolResultTarget = toolCallId;
       this.emitToolPartUpdate(activeSession.toolSessionId, toolState, context);
     }
+  }
+
+  private emitAssistantRuntimeDelta(
+    state: AssistantStreamState,
+    toolSessionId: string,
+    data: Record<string, unknown>,
+    context: UpstreamSendContext,
+  ): void {
+    const fullText = typeof data.text === "string" ? data.text : "";
+    let deltaText = typeof data.delta === "string" ? data.delta : "";
+
+    if (fullText.startsWith(state.accumulatedText)) {
+      const suffix = fullText.slice(state.accumulatedText.length);
+      if (suffix.length > 0) {
+        deltaText = suffix;
+      } else if (deltaText.length === 0 || state.accumulatedText.endsWith(deltaText)) {
+        return;
+      }
+    } else if (deltaText.length === 0) {
+      return;
+    }
+
+    if (deltaText.length === 0) {
+      return;
+    }
+
+    if (this.options.account.streaming === false) {
+      state.accumulatedText = fullText || `${state.accumulatedText}${deltaText}`;
+      return;
+    }
+
+    const now = Date.now();
+    state.chunkCount += 1;
+    if (state.firstChunkAt === null) {
+      state.firstChunkAt = now;
+      this.options.logger.info("bridge.chat.first_chunk", {
+        toolSessionId,
+        sessionKey: state.sessionKey,
+        latencyMs: 0,
+        chunkLength: deltaText.length,
+        deltaText,
+        source: "assistant_agent_event",
+      });
+    } else {
+      this.options.logger.info("bridge.chat.chunk", {
+        toolSessionId,
+        sessionKey: state.sessionKey,
+        chunkIndex: state.chunkCount,
+        chunkLength: deltaText.length,
+        sinceFirstChunkMs: now - state.firstChunkAt,
+        deltaText,
+        source: "assistant_agent_event",
+      });
+    }
+
+    this.sendAssistantStreamChunk(toolSessionId, state, deltaText, context);
   }
 
   private logChatStarted(params: {
