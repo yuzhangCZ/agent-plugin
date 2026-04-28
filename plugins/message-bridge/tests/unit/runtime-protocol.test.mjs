@@ -1202,8 +1202,10 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(prompts.length, 0);
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 8);
     assert.deepStrictEqual(sent.map((entry) => entry.message.type), [
+      'tool_event',
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1212,16 +1214,20 @@ describe('runtime protocol strictness', () => {
       'tool_done',
     ]);
 
-    const [messageUpdatedStart, stepStart, textPart, stepFinish, messageUpdatedFinish, toolDone] = sent;
+    const [messageUpdatedStart, sessionBusy, stepStart, textPart, stepFinish, messageUpdatedFinish, sessionIdle, toolDone] = sent;
     assert.strictEqual(messageUpdatedStart.message.event.type, 'message.updated');
+    assert.strictEqual(sessionBusy.message.event.type, 'session.status');
     assert.strictEqual(stepStart.message.event.type, 'message.part.updated');
     assert.strictEqual(textPart.message.event.type, 'message.part.updated');
     assert.strictEqual(stepFinish.message.event.type, 'message.part.updated');
     assert.strictEqual(messageUpdatedFinish.message.event.type, 'message.updated');
+    assert.strictEqual(sessionIdle.message.event.type, 'session.status');
     assert.strictEqual(toolDone.message.type, 'tool_done');
 
     const startInfo = messageUpdatedStart.message.event.properties.info;
     const finishInfo = messageUpdatedFinish.message.event.properties.info;
+    const busyStatus = sessionBusy.message.event.properties;
+    const idleStatus = sessionIdle.message.event.properties;
     const stepStartPart = stepStart.message.event.properties.part;
     const textReplyPart = textPart.message.event.properties.part;
     const stepFinishPart = stepFinish.message.event.properties.part;
@@ -1231,6 +1237,10 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual('finish' in finishInfo, false);
     assert.match(startInfo.id, /^msg_/);
     assert.strictEqual(startInfo.id.includes('tool-group-1'), false);
+    assert.strictEqual(busyStatus.sessionID, 'tool-group-1');
+    assert.strictEqual(busyStatus.status.type, 'busy');
+    assert.strictEqual(idleStatus.sessionID, 'tool-group-1');
+    assert.strictEqual(idleStatus.status.type, 'idle');
 
     assert.strictEqual(stepStartPart.sessionID, 'tool-group-1');
     assert.strictEqual(stepStartPart.messageID, startInfo.id);
@@ -1300,16 +1310,16 @@ describe('runtime protocol strictness', () => {
     });
 
     const firstMessageId = sent[0].message.event.properties.info.id;
-    const secondMessageId = sent[6].message.event.properties.info.id;
-    const firstStepStartPartId = sent[1].message.event.properties.part.id;
-    const secondStepStartPartId = sent[7].message.event.properties.part.id;
+    const secondMessageId = sent[8].message.event.properties.info.id;
+    const firstStepStartPartId = sent[2].message.event.properties.part.id;
+    const secondStepStartPartId = sent[10].message.event.properties.part.id;
     assert.notStrictEqual(firstMessageId, secondMessageId);
     assert.match(firstMessageId, /^msg_/);
     assert.match(secondMessageId, /^msg_/);
     assert.strictEqual(firstMessageId.includes('tool-group-repeat-1'), false);
     assert.strictEqual(secondMessageId.includes('tool-group-repeat-1'), false);
-    assert.strictEqual(sent[1].message.event.properties.part.messageID, firstMessageId);
-    assert.strictEqual(sent[7].message.event.properties.part.messageID, secondMessageId);
+    assert.strictEqual(sent[2].message.event.properties.part.messageID, firstMessageId);
+    assert.strictEqual(sent[10].message.event.properties.part.messageID, secondMessageId);
     assert.notStrictEqual(firstStepStartPartId, secondStepStartPartId);
     assert.match(firstStepStartPartId, /^prt_/);
     assert.match(secondStepStartPartId, /^prt_/);
@@ -1364,6 +1374,8 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(prompts.length, 0);
     assert.strictEqual(sent[0].message.type, 'session_created');
     assert.deepStrictEqual(sent.slice(1).map((entry) => entry.message.type), [
+      'tool_event',
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1460,6 +1472,8 @@ describe('runtime protocol strictness', () => {
       'tool_event',
       'tool_event',
       'tool_event',
+      'tool_event',
+      'tool_event',
       'tool_done',
     ]);
   });
@@ -1547,7 +1561,7 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
-    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 6);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 8);
     assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
     assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
   });

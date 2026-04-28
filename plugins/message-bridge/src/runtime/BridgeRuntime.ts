@@ -76,6 +76,7 @@ import {
   DefaultGatewaySessionSender,
   type GatewaySessionSenderPort,
 } from './GatewaySessionSender.js';
+import { buildGroupChatSyntheticEvents } from './GroupChatSyntheticEvents.js';
 import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
@@ -130,16 +131,6 @@ function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorS
     && 'message' in error;
 }
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
-const GROUP_CHAT_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
-const GROUP_CHAT_FINISH_REASON = 'stop';
-
-function createSyntheticOpencodeMessageId(): string {
-  return `msg_${randomUUID().replaceAll('-', '')}`;
-}
-
-function createSyntheticOpencodePartId(): string {
-  return `prt_${randomUUID().replaceAll('-', '')}`;
-}
 
 export class BridgeRuntime {
   private readonly actionRouter = new DefaultActionRouter();
@@ -945,92 +936,7 @@ export class BridgeRuntime {
     toolSessionId: string;
     welinkSessionId?: string;
   }): GroupChatInterceptResult {
-    const messageId = createSyntheticOpencodeMessageId();
-    const now = Date.now();
-    // synthetic 事件不是 SDK 原样透传，但 reason 值和 part id 形状要尽量贴近真实 OpenCode 事件，
-    // 避免下游 translator / 持久化 / 去重逻辑与真实流量产生行为漂移。
-    const stepStartPartId = createSyntheticOpencodePartId();
-    const textPartId = createSyntheticOpencodePartId();
-    const stepFinishPartId = createSyntheticOpencodePartId();
-    const events: Array<Extract<GatewaySendPayload, { type: 'tool_event' }>> = [
-      {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId: options.toolSessionId,
-        event: {
-          type: 'message.updated',
-          properties: {
-            info: {
-              id: messageId,
-              sessionID: options.toolSessionId,
-              role: 'assistant',
-              time: { created: now },
-            },
-          },
-        },
-      },
-      {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId: options.toolSessionId,
-        event: {
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: stepStartPartId,
-              sessionID: options.toolSessionId,
-              messageID: messageId,
-              type: 'step-start',
-            },
-          },
-        },
-      },
-      {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId: options.toolSessionId,
-        event: {
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: textPartId,
-              sessionID: options.toolSessionId,
-              messageID: messageId,
-              type: 'text',
-              text: GROUP_CHAT_REPLY_TEXT,
-            },
-          },
-        },
-      },
-      {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId: options.toolSessionId,
-        event: {
-          type: 'message.part.updated',
-          properties: {
-            part: {
-              id: stepFinishPartId,
-              sessionID: options.toolSessionId,
-              messageID: messageId,
-              type: 'step-finish',
-              reason: GROUP_CHAT_FINISH_REASON,
-            },
-          },
-        },
-      },
-      {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId: options.toolSessionId,
-        event: {
-          type: 'message.updated',
-          properties: {
-            info: {
-              id: messageId,
-              sessionID: options.toolSessionId,
-              role: 'assistant',
-              time: { created: now, updated: now },
-            },
-          },
-        },
-      },
-    ];
+    const { events, messageId } = buildGroupChatSyntheticEvents(options.toolSessionId);
 
     for (const eventMessage of events) {
       if (!this.sendToolEventMessage(eventMessage, {
