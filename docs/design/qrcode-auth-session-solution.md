@@ -1,23 +1,25 @@
 # 二维码扫码授权方案设计
 
-**Version:** 0.4  
-**Date:** 2026-04-24  
-**Status:** Final  
+**Version:** 0.5  
+**Date:** 2026-04-27  
+**Status:** Draft  
 **Owner:** agent-plugin maintainers  
 **Related:** [二维码扫码授权需求说明](../superpowers/specs/2026-04-23-qrcode-auth-requirements.md), [三方 Agent Runtime 系统分层架构设计](../architecture/third-party-agent-runtime-architecture.md), [bridge-runtime-sdk 目标态架构设计](../architecture/bridge-runtime-sdk-architecture.md)
 
 ## 1. 文档定位
 
-本文基于 [二维码扫码授权需求说明](../superpowers/specs/2026-04-23-qrcode-auth-requirements.md)，定义安装脚本场景下的二维码扫码授权方案。
+本文基于 [二维码扫码授权需求说明](../superpowers/specs/2026-04-23-qrcode-auth-requirements.md)，定义统一安装 CLI 在二维码认证阶段调用的二维码扫码授权子方案。
+
+本文是 [`skill-plugin-cli` 统一安装 CLI 方案](./skill-plugin-cli-solution.md) 的专题子文档。完整安装流程、宿主命令、阶段顺序与完成语义以上位方案为准；本文只定义阶段 7 所需的二维码授权 contract、事件模型和包内边界。
 
 本文负责定义：
 
-- 安装脚本视角下的主接口
+- `skill-plugin-cli` 二维码认证阶段视角下的主接口
 - 调用方可见授权事件模型
 - `environment` / `mac` 的输入来源边界
 - 二维码刷新、轮询和失败收口规则
 - 二维码授权包的内部职责边界
-- `opencode` / `openclaw` 双端安装脚本接入方式
+- 统一 CLI 与兼容 wrapper 的二维码接入方式
 
 本文不负责定义：
 
@@ -29,12 +31,12 @@
 
 ## 2. 设计结论
 
-当前方案将二维码扫码授权收敛为安装期能力，并对安装脚本只暴露一个高层入口。
+当前方案将二维码扫码授权收敛为统一安装 CLI 内部复用的安装期能力，并对上层编排者只暴露一个高层入口。
 
 核心结论如下：
 
 1. 高层入口命名为 `QrCodeAuth`。
-2. 安装脚本只调用 `qrcodeAuth.run()`。
+2. `skill-plugin-cli` 的二维码认证阶段只调用 `qrcodeAuth.run()`。
 3. `onSnapshot` 是唯一业务输出通道，且为必填。
 4. `run()` 返回 `Promise<void>`，只表示授权流程结束，不返回业务结果。
 5. `run()` resolve 前必须已经发出终态事件，resolve 后不再发送事件。
@@ -45,13 +47,13 @@
 10. `expired` 是当前二维码实例事件，不是整次授权会话终态。
 11. 终态事件只包括 `confirmed`、`cancelled`、`failed`。
 12. 二维码授权包不负责宿主 preflight、插件安装或配置写入。
-13. 包入口提供默认 runtime 实例 `qrcodeAuth`；安装脚本不调用工厂或内部装配能力。
+13. 包入口提供默认 runtime 实例 `qrcodeAuth`；上层编排者不调用工厂或内部装配能力。
 
 ## 3. 对使用方的主接口
 
 ### 3.1 设计原则
 
-当前唯一确定的使用方是安装脚本：
+当前主使用方是 `skill-plugin-cli` 的二维码认证阶段；现有宿主脚本仅作为兼容 wrapper 间接进入统一 CLI：
 
 - [plugins/message-bridge/scripts/setup-message-bridge.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge/scripts/setup-message-bridge.mjs)
 - [plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs](/Users/zy/Code/agent-plugin/.worktrees/2026-04-23-qrcode-auth-requirements/plugins/message-bridge-openclaw/scripts/install-openclaw-plugin.mjs)
@@ -62,6 +64,11 @@
 - 调用方只通过 `onSnapshot` 接收业务事件
 - 调用方不需要理解内部 controller、service port 或 session context
 - 调用方通过包入口导出的默认 runtime 实例 `qrcodeAuth` 调用 `run()`
+
+补充约束如下：
+
+- 本文中的“调用方”默认指统一 `skill-plugin-cli` 编排层。
+- OpenCode / OpenClaw 现有脚本不是长期主编排层，只是兼容入口。
 
 ### 3.2 主接口示意
 
@@ -82,7 +89,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `environment` | `"uat" \| "prod"` | N | `prod` | 固定授权环境枚举；包内映射到对应二维码授权服务地址 |
-| `channel` | `string` | Y | 无 | 渠道来源 |
+| `channel` | `string` | Y | 无 | 宿主桥接通道标识 |
 | `mac` | `string` | Y | 无 | 宿主自动采集的 MAC；采集失败传 `""` |
 | `policy` | `QrCodeAuthPolicy` | N | 默认策略 | 轮询与过期刷新策略 |
 | `onSnapshot` | `(snapshot: QrCodeAuthSnapshot) => void` | Y | 无 | 唯一业务输出通道 |
@@ -101,7 +108,7 @@ import { qrcodeAuth } from "@wecode/skill-qrcode-auth";
 
 await qrcodeAuth.run({
   environment: "prod",
-  channel: "openclaw",
+  channel: "openx",
   mac: resolvedMacAddress,
   policy: {
     refreshOnExpired: true,
@@ -136,7 +143,7 @@ await qrcodeAuth.run({
 - 二维码授权包内部固定地址映射，不接受任意 URL 输入。
 - `prod` 固定映射到 `https://api.inner.welink.huawei.com`。
 - `uat` 固定映射到 `https://api.uat.welink.huawei.com`。
-- 当前安装脚本默认传 `prod`，也支持显式传入 `uat`。
+- 当前统一 CLI 默认传 `prod`，也支持显式传入 `uat`。
 
 ### 4.2 `mac`
 
@@ -150,6 +157,17 @@ await qrcodeAuth.run({
 - 用户不需要在安装过程中手动输入 MAC。
 
 虽然服务端创建二维码接口将 `mac` 标为可选字段，但安装期授权流程仍优先携带该字段，用于统一双端行为。
+
+### 4.3 `channel`
+
+`channel` 由统一 `skill-plugin-cli` 内部固定传入，首版固定为 `openx`。
+
+约束如下：
+
+- `channel` 不由用户输入。
+- `channel` 不提供按宿主差异覆盖。
+- `channel` 不接受运行时重写。
+- 统一 CLI 与二维码授权包之间以 `openx` 作为首版稳定通道标识。
 
 ## 5. 业务事件模型
 
@@ -174,8 +192,9 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 说明：
 
 - `weUrl` 与 `pcUrl` 来自服务端展示数据。
-- 二维码授权包不决定展示偏好。
-- 安装脚本或 UI 层自行选择展示 `weUrl`、`pcUrl`，或将其中一个 URL 渲染为终端二维码。
+- 二维码授权包不决定具体终端渲染库、超链接实现或 UI 文案。
+- 对统一 `skill-plugin-cli` 调用场景，`weUrl` 是主扫码入口，`pcUrl` 仅作辅助展示信息。
+- 调用方不得以仅展示 `pcUrl` 替代 `weUrl`。
 
 ### 5.2 `QrCodeAuthSnapshot`
 
@@ -608,14 +627,14 @@ sequenceDiagram
 
 | 层 | 组件 | 对外可见性 | 职责 |
 | --- | --- | --- | --- |
-| Public Facade | `qrcodeAuth: QrCodeAuth` | public | 安装脚本唯一调用入口 |
+| Public Facade | `qrcodeAuth: QrCodeAuth` | public | 统一 CLI 二维码阶段唯一调用入口 |
 | Application Layer | `QrCodeAuthSessionController` | internal | 授权流程状态机 |
 | Outbound Port | `QrCodeAuthServicePort` | internal | 应用层需要的远端授权能力 |
 | Adapter Layer | HTTP service adapter | internal | HTTP 与服务端协议转换 |
 
 依赖方向固定为：
 
-- 安装脚本只依赖 `qrcodeAuth` 默认 runtime 实例。
+- 统一 CLI 编排层只依赖 `qrcodeAuth` 默认 runtime 实例。
 - `qrcodeAuth` 依赖 application controller。
 - application controller 只依赖 `QrCodeAuthServicePort`。
 - HTTP service adapter 实现 `QrCodeAuthServicePort` 并访问远端服务。
@@ -637,7 +656,7 @@ sequenceDiagram
 
 它不负责轮询实现、刷新策略判断、服务端状态映射、HTTP 请求、宿主 preflight、插件安装或配置写入。
 
-包入口导出的 `qrcodeAuth` 是默认 `QrCodeAuth` runtime 实例。它可以作为模块级单例复用，但不得持有单次授权会话状态；每次 `run()` 必须创建新的 controller 和会话状态。工厂、HTTP adapter 与 service port 都属于内部装配细节，安装脚本不得 import 或调用。
+包入口导出的 `qrcodeAuth` 是默认 `QrCodeAuth` runtime 实例。它可以作为模块级单例复用，但不得持有单次授权会话状态；每次 `run()` 必须创建新的 controller 和会话状态。工厂、HTTP adapter 与 service port 都属于内部装配细节，统一 CLI 编排层和兼容 wrapper 都不得 import 或调用。
 内部 runtime 工厂允许以 `QrCodeAuthServicePort` 形式替换默认远端实现；未显式注入时，工厂默认装配 HTTP service adapter。
 
 #### `QrCodeAuthSessionController`
@@ -683,7 +702,7 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 
 ### 9.3 宿主安装层职责
 
-以下职责属于 OpenCode / OpenClaw 安装脚本或其宿主安装层，不属于二维码授权包：
+以下职责属于统一 `skill-plugin-cli` 编排层及其宿主 adapter，不属于二维码授权包：
 
 - host preflight
 - 插件安装
@@ -692,11 +711,22 @@ HTTP service adapter 实现 `QrCodeAuthServicePort`，负责：
 - 配置写入
 - 安装后的宿主重启或提示
 
-安装脚本在收到 `confirmed` 事件后写入 `ak/sk`；二维码授权包不写宿主配置。
+统一 CLI 在收到 `confirmed` 事件后继续执行宿主配置接入；二维码授权包不写宿主配置。
 
-## 10. OpenCode / OpenClaw 接入方式
+## 10. 统一 CLI 与兼容入口接入方式
 
-### 10.1 OpenCode
+### 10.1 统一 CLI 主接入
+
+统一 `skill-plugin-cli` 是二维码授权包的主调用方。
+
+接入原则：
+
+- 统一 CLI 在主流程阶段 7 调用 `qrcodeAuth.run()`。
+- 阶段 3 至阶段 6 的宿主环境校验、仓源配置、插件安装和插件安装校验不属于二维码授权包。
+- 二维码授权成功后，统一 CLI 在阶段 8 继续执行宿主配置接入。
+- 二维码授权包只负责返回标准化事件，不负责宿主配置写入、宿主重启或结果确认。
+
+### 10.2 OpenCode 兼容入口
 
 OpenCode 当前主接入点固定为：
 
@@ -704,13 +734,12 @@ OpenCode 当前主接入点固定为：
 
 接入原则：
 
-- 保留当前脚本作为用户入口。
-- 安装脚本负责 preflight、`environment` 选择、mac 采集和配置写入。
-- 把原先直接输入 `AK/SK` 的步骤替换为 `qrcodeAuth.run()`。
-- 在 `onSnapshot` 中输出二维码和状态提示。
-- 在收到 `confirmed` 后沿用现有配置写入逻辑。
+- 保留当前脚本作为兼容入口。
+- 兼容脚本负责参数映射并进入统一 CLI，不再直接编排完整二维码认证流程。
+- OpenCode 的二维码展示、状态提示和终态收口由统一 CLI 负责。
+- OpenCode 的宿主配置接入与结果确认语义以上位方案为准。
 
-### 10.2 OpenClaw
+### 10.3 OpenClaw 兼容入口
 
 OpenClaw 当前主接入点固定为：
 
@@ -718,10 +747,10 @@ OpenClaw 当前主接入点固定为：
 
 接入原则：
 
-- 保留当前脚本里的 preflight、版本校验、registry 配置和安装主流程。
-- 安装脚本负责 `environment` 选择、mac 采集和配置写入。
-- 在宿主安装准备完成后调用 `qrcodeAuth.run()`。
-- 在收到 `confirmed` 后通过现有或新增的宿主配置写入逻辑写入 `ak/sk`。
+- 保留当前脚本作为兼容入口。
+- 兼容脚本负责参数映射并进入统一 CLI，不再直接编排完整二维码认证流程。
+- OpenClaw 的宿主前置校验、插件安装、`openclaw gateway restart` 和 probe 确认以上位方案为准。
+- 二维码授权包只提供阶段 7 所需的认证事件与结果。
 
 约束：
 
@@ -763,7 +792,7 @@ OpenClaw 当前主接入点固定为：
 
 facade 单元测试覆盖：
 
-- 安装脚本只调用 `qrcodeAuth.run()` 即可完成授权。
+- 统一 CLI 在阶段 7 只调用 `qrcodeAuth.run()` 即可完成授权。
 - `onSnapshot` 是唯一业务输出通道。
 - `run()` 只表示流程结束，不返回业务结果。
 - `environment` 默认 `prod`，显式 `uat` / `prod` 映射到固定授权地址。
@@ -829,8 +858,8 @@ adapter 单元测试覆盖远端协议转换：
 
 实现验收应通过静态检查或代码审查确认：
 
-- OpenCode / OpenClaw 安装脚本只 import / 调用 `qrcodeAuth` public facade。
-- 安装脚本不得 import `QrCodeAuthSessionController`、`QrCodeAuthServicePort` 或 HTTP adapter。
+- 统一 CLI 编排层只 import / 调用 `qrcodeAuth` public facade。
+- 兼容 wrapper 不得 import `QrCodeAuthSessionController`、`QrCodeAuthServicePort` 或 HTTP adapter。
 - `QrCodeAuthSessionController` 不得 import HTTP adapter、fetch、HTTP client、headers 或远端响应 DTO。
 - HTTP adapter 不得依赖 OpenCode / OpenClaw host 安装逻辑。
 - OpenCode 与 OpenClaw 不复制二维码状态机、刷新策略或服务端状态映射逻辑。
@@ -840,11 +869,13 @@ adapter 单元测试覆盖远端协议转换：
 
 ## 13. 结论
 
+当前 README、现有安装脚本测试和 `packages/skill-qrcode-auth` 包内测试仍可能保留旧口径；这些实现与参考文档的同步不属于本轮设计真源修订范围，后续应单独跟进。
+
 本方案把二维码扫码授权收敛为一个安装期高层能力：
 
-- 对安装脚本，只暴露 `qrcodeAuth.run()`
+- 对统一 CLI 二维码认证阶段，只暴露 `qrcodeAuth.run()`
 - 对业务输出，只使用 `QrCodeAuthSnapshot` 事件流
 - 对内部实现，由 `@wecode/skill-qrcode-auth` 保留自己的 controller / service port / adapter 分层
-- 对宿主动作，由 OpenCode / OpenClaw 安装脚本负责
+- 对宿主动作，由统一 `skill-plugin-cli` 编排层及其宿主 adapter 负责
 
-这样既能满足双端安装脚本复用诉求，又能避免把协议细节、状态机实现和宿主安装逻辑混在同一层。
+这样既能满足统一安装 CLI 的阶段化复用诉求，又能避免把协议细节、状态机实现和宿主安装逻辑混在同一层。
