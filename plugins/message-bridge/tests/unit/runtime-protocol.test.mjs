@@ -1202,8 +1202,9 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(prompts.length, 0);
-    assert.strictEqual(sent.length, 8);
+    assert.strictEqual(sent.length, 9);
     assert.deepStrictEqual(sent.map((entry) => entry.message.type), [
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1214,10 +1215,11 @@ describe('runtime protocol strictness', () => {
       'tool_done',
     ]);
 
-    const [messageUpdatedStart, sessionBusy, stepStart, textPart, stepFinish, messageUpdatedFinish, sessionIdle, toolDone] = sent;
+    const [messageUpdatedStart, sessionBusy, stepStart, textDelta, textPart, stepFinish, messageUpdatedFinish, sessionIdle, toolDone] = sent;
     assert.strictEqual(messageUpdatedStart.message.event.type, 'message.updated');
     assert.strictEqual(sessionBusy.message.event.type, 'session.status');
     assert.strictEqual(stepStart.message.event.type, 'message.part.updated');
+    assert.strictEqual(textDelta.message.event.type, 'message.part.delta');
     assert.strictEqual(textPart.message.event.type, 'message.part.updated');
     assert.strictEqual(stepFinish.message.event.type, 'message.part.updated');
     assert.strictEqual(messageUpdatedFinish.message.event.type, 'message.updated');
@@ -1229,6 +1231,7 @@ describe('runtime protocol strictness', () => {
     const busyStatus = sessionBusy.message.event.properties;
     const idleStatus = sessionIdle.message.event.properties;
     const stepStartPart = stepStart.message.event.properties.part;
+    const textDeltaProps = textDelta.message.event.properties;
     const textReplyPart = textPart.message.event.properties.part;
     const stepFinishPart = stepFinish.message.event.properties.part;
     assert.strictEqual(startInfo.id, finishInfo.id);
@@ -1247,6 +1250,12 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(stepStartPart.type, 'step-start');
     assert.notStrictEqual(stepStartPart.id, startInfo.id);
     assert.match(stepStartPart.id, /^prt_/);
+
+    assert.strictEqual(textDeltaProps.sessionID, 'tool-group-1');
+    assert.strictEqual(textDeltaProps.messageID, startInfo.id);
+    assert.strictEqual(textDeltaProps.partID, textReplyPart.id);
+    assert.strictEqual(textDeltaProps.field, 'text');
+    assert.strictEqual(textDeltaProps.delta, '本机器人不处理群聊消息，请勿在群内@提问');
 
     assert.strictEqual(textReplyPart.sessionID, 'tool-group-1');
     assert.strictEqual(textReplyPart.messageID, startInfo.id);
@@ -1310,21 +1319,25 @@ describe('runtime protocol strictness', () => {
     });
 
     const firstMessageId = sent[0].message.event.properties.info.id;
-    const secondMessageId = sent[8].message.event.properties.info.id;
+    const secondMessageId = sent[9].message.event.properties.info.id;
     const firstStepStartPartId = sent[2].message.event.properties.part.id;
-    const secondStepStartPartId = sent[10].message.event.properties.part.id;
+    const secondStepStartPartId = sent[11].message.event.properties.part.id;
+    const firstTextDeltaPartId = sent[3].message.event.properties.partID;
+    const secondTextDeltaPartId = sent[12].message.event.properties.partID;
     assert.notStrictEqual(firstMessageId, secondMessageId);
     assert.match(firstMessageId, /^msg_/);
     assert.match(secondMessageId, /^msg_/);
     assert.strictEqual(firstMessageId.includes('tool-group-repeat-1'), false);
     assert.strictEqual(secondMessageId.includes('tool-group-repeat-1'), false);
     assert.strictEqual(sent[2].message.event.properties.part.messageID, firstMessageId);
-    assert.strictEqual(sent[10].message.event.properties.part.messageID, secondMessageId);
+    assert.strictEqual(sent[11].message.event.properties.part.messageID, secondMessageId);
     assert.notStrictEqual(firstStepStartPartId, secondStepStartPartId);
     assert.match(firstStepStartPartId, /^prt_/);
     assert.match(secondStepStartPartId, /^prt_/);
     assert.strictEqual(firstStepStartPartId.includes(firstMessageId), false);
     assert.strictEqual(secondStepStartPartId.includes(secondMessageId), false);
+    assert.strictEqual(sent[4].message.event.properties.part.id, firstTextDeltaPartId);
+    assert.strictEqual(sent[13].message.event.properties.part.id, secondTextDeltaPartId);
   });
 
   test('intercepts chat by session cache after im-group create_session success', async () => {
@@ -1374,6 +1387,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(prompts.length, 0);
     assert.strictEqual(sent[0].message.type, 'session_created');
     assert.deepStrictEqual(sent.slice(1).map((entry) => entry.message.type), [
+      'tool_event',
       'tool_event',
       'tool_event',
       'tool_event',
@@ -1474,6 +1488,7 @@ describe('runtime protocol strictness', () => {
       'tool_event',
       'tool_event',
       'tool_event',
+      'tool_event',
       'tool_done',
     ]);
   });
@@ -1561,7 +1576,7 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
-    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 8);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 9);
     assert.strictEqual(sent[sent.length - 1].message.type, 'tool_event');
     assert.strictEqual(sent[sent.length - 1].message.event.type, 'session.idle');
   });

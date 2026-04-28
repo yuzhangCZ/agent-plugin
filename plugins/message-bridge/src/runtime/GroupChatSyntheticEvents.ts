@@ -82,6 +82,20 @@ export function buildGroupChatSyntheticEvents(toolSessionId: string): {
         type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId,
         event: {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: toolSessionId,
+            messageID: messageId,
+            partID: textPartId,
+            field: 'text',
+            delta: GROUP_CHAT_REPLY_TEXT,
+          },
+        },
+      },
+      {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId,
+        event: {
           type: 'message.part.updated',
           properties: {
             part: {
