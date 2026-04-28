@@ -1228,7 +1228,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(startInfo.id, finishInfo.id);
     assert.strictEqual(startInfo.sessionID, 'tool-group-1');
     assert.strictEqual(startInfo.role, 'assistant');
-    assert.deepStrictEqual(finishInfo.finish, { reason: 'stop' });
+    assert.strictEqual('finish' in finishInfo, false);
     assert.match(startInfo.id, /^msg_/);
     assert.strictEqual(startInfo.id.includes('tool-group-1'), false);
 

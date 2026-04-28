@@ -1026,7 +1026,6 @@ export class BridgeRuntime {
               sessionID: options.toolSessionId,
               role: 'assistant',
               time: { created: now, updated: now },
-              finish: { reason: GROUP_CHAT_FINISH_REASON },
             },
           },
         },
