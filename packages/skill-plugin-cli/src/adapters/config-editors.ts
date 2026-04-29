@@ -31,8 +31,7 @@ export function buildNextBridgeConfig(content: string | null, input: { ak: strin
   if (content === null) {
     return `{
   "gateway": {
-    "url": "${escapedUrl}",
-    "channel": "openx"
+    "url": "${escapedUrl}"
   },
   "auth": {
     "ak": "${escapedAk}",
@@ -59,12 +58,11 @@ export function buildNextBridgeConfig(content: string | null, input: { ak: strin
 
   if (/"gateway"\s*:\s*\{/su.test(next)) {
     next = next.replace(/("gateway"\s*:\s*\{)([\s\S]*?)(\n\s*\})/su, (_match, start, objectBody, end) => {
-      let nextBody = upsertJsonObjectField(objectBody, "url", escapedUrl);
-      nextBody = upsertJsonObjectField(nextBody, "channel", "openx");
+      const nextBody = upsertJsonObjectField(objectBody, "url", escapedUrl);
       return `${start}${nextBody}${end}`;
     });
   } else {
-    next = next.replace(/\{\s*/u, `{\n  "gateway": {\n    "url": "${escapedUrl}",\n    "channel": "openx"\n  },\n  `);
+    next = next.replace(/\{\s*/u, `{\n  "gateway": {\n    "url": "${escapedUrl}"\n  },\n  `);
   }
 
   return next;
@@ -76,9 +74,6 @@ export function buildNextBridgeConfigWithoutUrl(content: string | null, input: {
 
   if (content === null) {
     return `{
-  "gateway": {
-    "channel": "openx"
-  },
   "auth": {
     "ak": "${escapedAk}",
     "sk": "${escapedSk}"
@@ -100,15 +95,6 @@ export function buildNextBridgeConfigWithoutUrl(content: string | null, input: {
     });
   } else {
     next = next.replace(/\n\}\s*$/su, `,\n  "auth": {\n    "ak": "${escapedAk}",\n    "sk": "${escapedSk}"\n  }\n}\n`);
-  }
-
-  if (/"gateway"\s*:\s*\{/su.test(next)) {
-    next = next.replace(/("gateway"\s*:\s*\{)([\s\S]*?)(\n\s*\})/su, (_match, start, objectBody, end) => {
-      const nextBody = upsertJsonObjectField(objectBody, "channel", "openx");
-      return `${start}${nextBody}${end}`;
-    });
-  } else {
-    next = next.replace(/\{\s*/u, `{\n  "gateway": {\n    "channel": "openx"\n  },\n  `);
   }
 
   return next;

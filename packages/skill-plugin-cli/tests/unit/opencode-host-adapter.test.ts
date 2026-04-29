@@ -98,9 +98,45 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
 
     const updatedBridgeConfig = await import("node:fs/promises").then(({ readFile }) => readFile(bridgeConfigPath, "utf8"));
     assert.match(updatedBridgeConfig, /wss:\/\/existing\.example\.com\/ws\/agent/);
-    assert.match(updatedBridgeConfig, /"channel": "openx"/);
+    assert.doesNotMatch(updatedBridgeConfig, /"channel"\s*:/);
     assert.match(updatedBridgeConfig, /"ak": "ak-1"/);
     assert.match(updatedBridgeConfig, /"sk": "sk-1"/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("OpencodeHostAdapter configureHost writes gateway url without channel when context url is provided", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-config-"));
+  try {
+    const configDir = join(dir, "opencode");
+    await mkdir(configDir, { recursive: true });
+    const bridgeConfigPath = join(configDir, "message-bridge.json");
+    await writeFile(
+      join(configDir, "opencode.json"),
+      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
+      "utf8",
+    );
+
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
+    await adapter.configureHost(
+      {
+        command: "install",
+        host: "opencode",
+        environment: "prod",
+        registry: "https://npm.example.com",
+        url: "wss://gateway.example.com/ws/agent",
+        mac: "",
+        channel: "openx",
+      },
+      { ak: "ak-2", sk: "sk-2" },
+    );
+
+    const updatedBridgeConfig = await import("node:fs/promises").then(({ readFile }) => readFile(bridgeConfigPath, "utf8"));
+    assert.match(updatedBridgeConfig, /"url": "wss:\/\/gateway\.example\.com\/ws\/agent"/);
+    assert.doesNotMatch(updatedBridgeConfig, /"channel"\s*:/);
+    assert.match(updatedBridgeConfig, /"ak": "ak-2"/);
+    assert.match(updatedBridgeConfig, /"sk": "sk-2"/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
