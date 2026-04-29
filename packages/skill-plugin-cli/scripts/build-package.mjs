@@ -26,7 +26,6 @@ async function main() {
   await build({
     bundle: true,
     entryPoints: {
-      index: path.join(PACKAGE_DIR, "src", "index.ts"),
       cli: path.join(PACKAGE_DIR, "src", "cli", "main.ts"),
     },
     outdir: DIST_DIR,
@@ -37,7 +36,6 @@ async function main() {
     minify: mode === "prod",
   });
 
-  await access(path.join(DIST_DIR, "index.js"), constants.R_OK);
   await access(path.join(DIST_DIR, "cli.js"), constants.R_OK);
 }
 

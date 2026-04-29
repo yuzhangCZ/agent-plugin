@@ -4,34 +4,30 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import process from "node:process";
 import test from "node:test";
-import { createInstallCliUseCase, parseInstallArgv } from "../../src/index.ts";
+import { parseInstallArgv } from "../../src/cli/parse-argv.ts";
+import { createInstallCliUseCase } from "../../src/cli/runtime.ts";
+import type { QrCodeAuthRuntime } from "../../src/domain/qrcode-types.ts";
 
-async function createFakeQrCodeModule(dir: string, scenario: "confirmed" | "cancelled") {
-  const filePath = join(dir, "fake-qrcode-auth.mjs");
-  const terminalEvent = scenario === "confirmed"
-    ? `input.onSnapshot({ type: "confirmed", qrcode: "qr-1", credentials: { ak: "ak-1", sk: "sk-1" } });`
-    : `input.onSnapshot({ type: "cancelled", qrcode: "qr-1" });`;
-  await writeFile(
-    filePath,
-    `export const qrcodeAuth = {
-  async run(input) {
-    input.onSnapshot({
-      type: "qrcode_generated",
-      qrcode: "qr-1",
-      display: {
+function createFakeQrCodeRuntime(scenario: "confirmed" | "cancelled"): QrCodeAuthRuntime {
+  return {
+    async run(input) {
+      input.onSnapshot({
+        type: "qrcode_generated",
         qrcode: "qr-1",
-        weUrl: "https://we.example/qr-1",
-        pcUrl: "https://pc.example/qr-1"
-      },
-      expiresAt: "2026-04-28T00:00:00.000Z"
-    });
-    ${terminalEvent}
-  }
-};
-`,
-    "utf8",
-  );
-  return filePath;
+        display: {
+          qrcode: "qr-1",
+          weUrl: "https://we.example/qr-1",
+          pcUrl: "https://pc.example/qr-1",
+        },
+        expiresAt: "2026-04-28T00:00:00.000Z",
+      });
+      if (scenario === "confirmed") {
+        input.onSnapshot({ type: "confirmed", qrcode: "qr-1", credentials: { ak: "ak-1", sk: "sk-1" } });
+        return;
+      }
+      input.onSnapshot({ type: "cancelled", qrcode: "qr-1" });
+    },
+  };
 }
 
 async function createFakeCommand(dir: string, name: "openclaw" | "opencode", body: string) {
@@ -70,7 +66,7 @@ test("direct use case completes openclaw install and prints manual restart next 
   const originalStderr = process.stderr.write.bind(process.stderr);
   try {
     const logPath = join(dir, "openclaw.log");
-    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const qrcodeRuntime = createFakeQrCodeRuntime("confirmed");
     await createFakeCommand(
       dir,
       "openclaw",
@@ -97,7 +93,6 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
     process.stdout.write = ((chunk: string | Uint8Array) => {
       stdout.push(String(chunk));
@@ -110,7 +105,7 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "openclaw", "--url", "wss://gateway.example.com/ws/agent"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "success");
     assert.deepEqual(result.warningMessages, []);
     assert.deepEqual(result.nextSteps, [
@@ -144,7 +139,7 @@ test("direct use case omits openclaw --url when user does not pass url", async (
   const originalEnv = { ...process.env };
   try {
     const logPath = join(dir, "openclaw.log");
-    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const qrcodeRuntime = createFakeQrCodeRuntime("confirmed");
     await createFakeCommand(
       dir,
       "openclaw",
@@ -174,12 +169,11 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
 
     const parsed = parseInstallArgv(["install", "--host", "openclaw"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "success");
     assert.deepEqual(result.nextSteps, [
       "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
@@ -201,7 +195,7 @@ test("direct use case returns cancelled when opencode qrcode flow is cancelled",
   const stdout: string[] = [];
   const originalStdout = process.stdout.write.bind(process.stdout);
   try {
-    const qrcodePath = await createFakeQrCodeModule(dir, "cancelled");
+    const qrcodeRuntime = createFakeQrCodeRuntime("cancelled");
     const configDir = join(dir, ".config", "opencode");
     await mkdir(configDir, { recursive: true });
     await writeFile(
@@ -223,7 +217,6 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
     process.env.XDG_CONFIG_HOME = join(dir, ".config");
     process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -233,7 +226,7 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "opencode"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "cancelled");
     const output = stdout.join("");
     assert.doesNotMatch(output, /url=ws:\/\/localhost:8081\/ws\/agent/);
@@ -250,7 +243,7 @@ test("direct use case completes opencode install and writes explicit gateway url
   const stdout: string[] = [];
   const originalStdout = process.stdout.write.bind(process.stdout);
   try {
-    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const qrcodeRuntime = createFakeQrCodeRuntime("confirmed");
     const configDir = join(dir, ".config", "opencode");
     const logPath = join(dir, "opencode.log");
     await mkdir(configDir, { recursive: true });
@@ -274,7 +267,6 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
     process.env.XDG_CONFIG_HOME = join(dir, ".config");
     process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -284,7 +276,7 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "opencode", "--url", "wss://gateway.example.com/ws/agent"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "success");
     assert.deepEqual(result.warningMessages, []);
     assert.deepEqual(result.nextSteps, [
@@ -317,7 +309,7 @@ test("direct use case omits opencode gateway url write when user does not pass u
   const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-no-url-"));
   const originalEnv = { ...process.env };
   try {
-    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const qrcodeRuntime = createFakeQrCodeRuntime("confirmed");
     const configDir = join(dir, ".config", "opencode");
     await mkdir(configDir, { recursive: true });
     await writeFile(
@@ -348,13 +340,12 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
     process.env.XDG_CONFIG_HOME = join(dir, ".config");
 
     const parsed = parseInstallArgv(["install", "--host", "opencode"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "success");
     assert.deepEqual(result.nextSteps, [
       "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
@@ -379,7 +370,7 @@ test("direct use case fails openclaw install when probe fails without restart gu
   const originalStderr = process.stderr.write.bind(process.stderr);
   try {
     const logPath = join(dir, "openclaw.log");
-    const qrcodePath = await createFakeQrCodeModule(dir, "confirmed");
+    const qrcodeRuntime = createFakeQrCodeRuntime("confirmed");
     await createFakeCommand(
       dir,
       "openclaw",
@@ -406,7 +397,6 @@ exit 0`,
     );
 
     process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
-    process.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE = qrcodePath;
     process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
     process.stdout.write = ((chunk: string | Uint8Array) => {
       stdout.push(String(chunk));
@@ -419,7 +409,7 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "openclaw"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase().execute(parsed);
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: qrcodeRuntime }).execute(parsed);
     assert.equal(result.status, "failed");
     assert.deepEqual(result.nextSteps, []);
     assert.match(result.message, /probe failed/);

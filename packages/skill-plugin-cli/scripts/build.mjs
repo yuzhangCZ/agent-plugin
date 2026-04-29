@@ -1,15 +1,12 @@
 #!/usr/bin/env node
 import { rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(SCRIPT_DIR, "..");
-const require = createRequire(import.meta.url);
-const TSC_BIN_PATH = require.resolve("typescript/bin/tsc");
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -34,10 +31,6 @@ function run(command, args, options = {}) {
 async function main() {
   await rm(path.join(PACKAGE_DIR, "dist"), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   await run(process.execPath, ["./scripts/build-package.mjs", "--mode=prod"], { cwd: PACKAGE_DIR });
-  await run(process.execPath, [TSC_BIN_PATH, "--emitDeclarationOnly", "--project", "./tsconfig.json"], {
-    cwd: PACKAGE_DIR,
-  });
-  await run(process.execPath, ["./scripts/rewrite-dts-imports.mjs"], { cwd: PACKAGE_DIR });
 }
 
 main().catch((error) => {

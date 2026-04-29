@@ -1,53 +1,21 @@
-import { pathToFileURL } from "node:url";
 import type { QrCodeAuthPort } from "../domain/ports.ts";
 import { InstallCliError } from "../domain/errors.ts";
 import type { InstallContext } from "../domain/types.ts";
 import type { QrCodeAuthRuntime, QrCodeAuthSnapshot } from "../domain/qrcode-types.ts";
-
-async function loadRuntimeFromOverride(overridePath: string) {
-  const module = await import(pathToFileURL(overridePath).href);
-  if (typeof module.qrcodeAuth?.run !== "function") {
-    throw new InstallCliError("QRCODE_AUTH_FAILED", "二维码授权模块必须导出 qrcodeAuth.run(input)。");
-  }
-  return module.qrcodeAuth as QrCodeAuthRuntime;
-}
+import { embeddedQrCodeAuthRuntime } from "./embedded-qrcode-runtime.ts";
 
 export class QrCodeAuthAdapter implements QrCodeAuthPort {
-  private readonly env: NodeJS.ProcessEnv;
+  private readonly runtime: QrCodeAuthRuntime;
 
-  constructor(env = process.env) {
-    this.env = env;
-  }
-
-  private async loadRuntime() {
-    const override = this.env.SKILL_PLUGIN_CLI_QRCODE_AUTH_MODULE;
-    if (override?.trim()) {
-      return await loadRuntimeFromOverride(override.trim());
-    }
-    const attempts = [
-      () => import("@wecode/skill-qrcode-auth"),
-      () => import(new URL("../../../skill-qrcode-auth/src/index.ts", import.meta.url).href),
-    ];
-
-    for (const load of attempts) {
-      try {
-        const module = await load();
-        if (typeof module.qrcodeAuth?.run === "function") {
-          return module.qrcodeAuth as QrCodeAuthRuntime;
-        }
-      } catch {
-        continue;
-      }
-    }
-    throw new InstallCliError("QRCODE_AUTH_FAILED", "无法加载二维码授权运行时。");
+  constructor(runtime: QrCodeAuthRuntime = embeddedQrCodeAuthRuntime) {
+    this.runtime = runtime;
   }
 
   async run(context: InstallContext, onSnapshot: (snapshot: QrCodeAuthSnapshot) => void) {
-    const runtime = await this.loadRuntime();
     let credentials: { ak: string; sk: string } | null = null;
     let terminalStatus: "confirmed" | "failed" | "cancelled" | null = null;
     let failureReason: string | null = null;
-    await runtime.run({
+    await this.runtime.run({
       environment: context.environment,
       channel: context.channel,
       mac: context.mac,

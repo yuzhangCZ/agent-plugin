@@ -7,8 +7,13 @@ import { OpenClawHostAdapter } from "../adapters/OpenClawHostAdapter.ts";
 import { QrCodeAuthAdapter } from "../adapters/QrCodeAuthAdapter.ts";
 import { TerminalCliPresenter } from "../adapters/TerminalCliPresenter.ts";
 import { NodeProcessRunner } from "../infrastructure/ProcessRunner.ts";
+import type { QrCodeAuthRuntime } from "../domain/qrcode-types.ts";
 
-export function createInstallCliUseCase() {
+export interface CreateInstallCliUseCaseOptions {
+  qrcodeAuthRuntime?: QrCodeAuthRuntime;
+}
+
+export function createInstallCliUseCase(options: CreateInstallCliUseCaseOptions = {}) {
   const processRunner = new NodeProcessRunner();
   const registryConfig = new NpmrcRegistryConfigAdapter();
   const hostAdapters = {
@@ -25,7 +30,7 @@ export function createInstallCliUseCase() {
     resolveContext,
     registryConfig,
     new TerminalCliPresenter(),
-    new QrCodeAuthAdapter(),
+    new QrCodeAuthAdapter(options.qrcodeAuthRuntime),
     hostAdapters,
   );
 }
