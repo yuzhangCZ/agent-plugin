@@ -43,6 +43,10 @@ class FakeFs {
     this.manifests.set(targetPath, structuredClone(value));
     this.existingPaths.add(targetPath);
   }
+
+  mkdir(targetPath) {
+    this.existingPaths.add(targetPath);
+  }
 }
 
 function createCapture() {
@@ -1903,6 +1907,57 @@ test("executeRelease publishes skill-plugin-cli tarball without gateway injectio
         && entry.args[1] === path.join(repoRoot, "packages/skill-plugin-cli/.tmp/release-pack/wecode-skill-plugin-cli-0.1.0.tgz")
         && entry.args.includes("--tag")
         && entry.args.includes("latest"),
+    ),
+    true,
+  );
+});
+
+test("executeRelease creates skill-plugin-cli release pack directory before npm pack", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths.filter((targetPath) => targetPath !== state.cliPackRoot),
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "skill-plugin-cli",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "skill-plugin-cli" }),
+    listTarEntries: createListTarEntriesDouble(state.tarEntries),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(fs.exists(state.cliPackRoot), true);
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm"
+        && entry.args.join(" ") === "pack --pack-destination .tmp/release-pack"
+        && entry.cwd === path.join(repoRoot, "packages/skill-plugin-cli"),
     ),
     true,
   );

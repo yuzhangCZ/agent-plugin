@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -169,6 +169,7 @@ function resolveExecutable(command) {
 function createProcessPorts(overrides = {}) {
   const fs = overrides.fs ?? {
     exists: existsSync,
+    mkdir: (targetPath) => mkdirSync(targetPath, { recursive: true }),
     readJson: parseJsonFile,
     writeJson: writeJsonFile,
   };
@@ -1119,11 +1120,34 @@ Examples:
 }
 
 function runCommand(exec, command, cwd, env) {
+  const resolvedEnv = command[0] === "npm"
+    ? createNpmCommandEnv(cwd, env)
+    : env;
   return exec(command[0], command.slice(1), {
     cwd,
-    env,
+    env: resolvedEnv,
     stdio: "inherit",
   });
+}
+
+function ensurePreparePublishTarget(fs, target) {
+  if (!target.publishArtifactAbsolute) {
+    return;
+  }
+
+  // tarball 发布需要先准备输出目录，npm pack 不会自动创建 --pack-destination。
+  fs.mkdir(path.dirname(target.publishArtifactAbsolute));
+}
+
+function createNpmCommandEnv(repoRoot, env = {}) {
+  return {
+    ...env,
+    NPM_CONFIG_CACHE: path.resolve(repoRoot, ".tmp", "release-local", "npm-cache"),
+  };
+}
+
+function ensureNpmCommandEnvironment(fs, repoRoot) {
+  fs.mkdir(path.resolve(repoRoot, ".tmp", "release-local", "npm-cache"));
 }
 
 function collectManifestDependencyNames(manifest) {
@@ -1263,6 +1287,7 @@ function prepareDependencies(plan, ports, stdout) {
 function readRegistry(exec, repoRoot) {
   return exec("npm", ["config", "get", "registry", "--force"], {
     cwd: repoRoot,
+    env: createNpmCommandEnv(repoRoot),
     stdio: "pipe",
   });
 }
@@ -1273,6 +1298,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
     const scopedRegistry = normalizeRegistryValue(
       exec("npm", ["config", "get", `${packageScope}:registry`, "--force"], {
         cwd: repoRoot,
+        env: createNpmCommandEnv(repoRoot),
         stdio: "pipe",
       }),
     );
@@ -1293,6 +1319,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
 function readWhoAmI(exec, repoRoot, registry) {
   return exec("npm", ["whoami", "--registry", registry, "--force"], {
     cwd: repoRoot,
+    env: createNpmCommandEnv(repoRoot),
     stdio: "pipe",
   });
 }
@@ -1436,6 +1463,7 @@ export function executeRelease(plan, overrides = {}) {
   }
 
   prepareDependencies(plan, { exec, fs, inspectDependencies }, stdout);
+  ensureNpmCommandEnvironment(fs, plan.repoRoot);
   const releaseBuildEnv = createReleaseBuildEnv(plan);
 
   const publishRegistries = plan.actions.publish
@@ -1472,6 +1500,7 @@ export function executeRelease(plan, overrides = {}) {
         runCommand(exec, target.verifyStep, plan.repoRoot, releaseBuildEnv);
       }
 
+      ensurePreparePublishTarget(fs, target);
       for (const command of target.preparePublishSteps) {
         stdout.write(`Preparing publish artifact for ${target.id}: ${formatCommand(command)}\n`);
         runCommand(exec, command, target.packageRootAbsolute, releaseBuildEnv);
