@@ -11,6 +11,7 @@ export interface QrCodeDisplayData {
  * 授权服务错误的安全子集，不透传敏感上下文。
  */
 export interface QrCodeAuthServiceError {
+  code?: string;
   httpStatus?: number;
   businessCode?: string;
   error?: string;

@@ -22,6 +22,16 @@ interface AuthResponseBody {
   data?: Record<string, unknown> | null;
 }
 
+type ParsedJsonBodyResult =
+  | {
+      ok: true;
+      body: AuthResponseBody;
+    }
+  | {
+      ok: false;
+      serviceError: QrCodeAuthServiceError;
+    };
+
 /**
  * HTTP adapter 负责远端协议转换和 accessToken 管理。
  */
@@ -197,16 +207,23 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
     let response: Response;
     try {
       response = await this.fetchImpl(input.url, input.init);
-    } catch {
+    } catch (error) {
+      const serviceError = buildNetworkError(error);
       return {
         kind: "failed",
         reasonCode: "network_error",
+        ...(hasServiceError(serviceError) ? { serviceError } : {}),
       };
     }
 
-    const body = await parseJsonBody(response);
-    if (!response.ok || !body) {
-      const serviceError = body ? buildServiceError(response.status, body) : { httpStatus: response.status };
+    const parsedBody = await parseJsonBody(response);
+    if (!response.ok || !parsedBody.ok) {
+      const serviceError = parsedBody.ok
+        ? buildServiceError(response.status, parsedBody.body)
+        : {
+            httpStatus: response.status,
+            ...parsedBody.serviceError,
+          };
       return {
         kind: "failed",
         reasonCode: "auth_service_error",
@@ -216,21 +233,46 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
 
     return {
       status: response.status,
-      body,
+      body: parsedBody.body,
     };
   }
 }
 
-async function parseJsonBody(response: Response): Promise<AuthResponseBody | null> {
+async function parseJsonBody(response: Response): Promise<ParsedJsonBodyResult> {
   try {
-    return (await response.json()) as AuthResponseBody;
-  } catch {
-    return null;
+    return {
+      ok: true,
+      body: (await response.json()) as AuthResponseBody,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      serviceError: buildUnknownError(error, "Failed to parse JSON response"),
+    };
   }
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+}
+
+function buildNetworkError(error: unknown): QrCodeAuthServiceError {
+  return buildUnknownError(error);
+}
+
+function buildUnknownError(error: unknown, fallbackMessage?: string): QrCodeAuthServiceError {
+  if (error instanceof Error) {
+    const code = readString((error as Error & { code?: unknown }).code);
+    return {
+      ...(code ? { code } : {}),
+      ...(error.message ? { message: error.message } : {}),
+      ...(!error.message && fallbackMessage ? { message: fallbackMessage } : {}),
+    };
+  }
+  if (typeof error === "string" && error) {
+    return { message: error };
+  }
+  return fallbackMessage ? { message: fallbackMessage } : {};
 }
 
 function readCode(body: AuthResponseBody): string {
