@@ -1,5 +1,5 @@
-import type { HostAdapter, ProcessRunner } from "../domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, InstallContext } from "../domain/types.ts";
+import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
+import type { HostAvailabilityResult, HostConfigureResult, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
@@ -36,9 +36,11 @@ export class OpenClawHostAdapter implements HostAdapter {
   readonly host = "openclaw" as const;
   readonly packageName = PACKAGE_NAME;
   private readonly processRunner: ProcessRunner;
+  private readonly pluginArtifactPort: PluginArtifactPort;
 
-  constructor(processRunner: ProcessRunner) {
+  constructor(processRunner: ProcessRunner, pluginArtifactPort: PluginArtifactPort) {
     this.processRunner = processRunner;
+    this.pluginArtifactPort = pluginArtifactPort;
   }
 
   resolveDefaultUrl() {
@@ -59,11 +61,33 @@ export class OpenClawHostAdapter implements HostAdapter {
     };
   }
 
-  async installPlugin() {
+  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
+    if (context.installStrategy === "fallback") {
+      const artifact = await this.pluginArtifactPort.fetchArtifact({
+        host: this.host,
+        installStrategy: context.installStrategy,
+        packageName: PACKAGE_NAME,
+        registry: context.registry,
+      });
+      const result = await this.processRunner.spawn("openclaw", ["plugins", "install", artifact.localTarballPath!], { stdio: "inherit" });
+      if (result.exitCode !== 0) {
+        throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${artifact.localTarballPath} 失败，退出码 ${result.exitCode}`);
+      }
+      return artifact;
+    }
     const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME], { stdio: "inherit" });
     if (result.exitCode !== 0) {
       throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${PACKAGE_NAME} 失败，退出码 ${result.exitCode}`);
     }
+    return {
+      installStrategy: "host-native",
+      pluginSpec: PACKAGE_NAME,
+      packageName: PACKAGE_NAME,
+    };
+  }
+
+  async cleanupLegacyArtifacts() {
+    return { warnings: [] };
   }
 
   async verifyPlugin() {

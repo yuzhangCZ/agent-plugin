@@ -21,6 +21,7 @@ export class ResolveInstallContextUseCase {
     return {
       command: command.command,
       host: command.host,
+      installStrategy: command.installStrategy,
       environment: command.environment ?? "prod",
       registry,
       url: command.url?.trim() || undefined,

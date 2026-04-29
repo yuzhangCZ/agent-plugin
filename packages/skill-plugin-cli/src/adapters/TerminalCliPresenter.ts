@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import process from "node:process";
 import type { Presenter } from "../domain/ports.ts";
 import type { QrCodeAuthSnapshot } from "../domain/qrcode-types.ts";
-import type { InstallContext } from "../domain/types.ts";
+import type { InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
 import type { InstallStageName } from "../domain/stages.ts";
 
 const require = createRequire(import.meta.url);
@@ -99,6 +99,22 @@ export class TerminalCliPresenter implements Presenter {
 
   warning(message: string) {
     writeLine(`[skill-plugin-cli][warning] ${message}`);
+  }
+
+  selectedInstallStrategy(context: InstallContext) {
+    writeLine(`[skill-plugin-cli] 当前安装策略：${context.installStrategy}`);
+  }
+
+  fallbackArtifactResolved(artifact: InstalledPluginArtifact) {
+    writeLine(
+      `[skill-plugin-cli] fallback 产物已解析：package=${artifact.packageName}`
+        + `${artifact.packageVersion ? ` version=${artifact.packageVersion}` : ""}`
+        + `${artifact.localTarballPath ? ` tarball=${artifact.localTarballPath}` : ""}`,
+    );
+  }
+
+  fallbackApplied(artifact: InstalledPluginArtifact) {
+    writeLine(`[skill-plugin-cli] fallback 已写入宿主目标：pluginSpec=${artifact.pluginSpec}`);
   }
 
   success(summary: string, nextSteps: string[] = []) {

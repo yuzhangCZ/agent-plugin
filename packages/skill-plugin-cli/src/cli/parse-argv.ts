@@ -6,7 +6,9 @@ const HELP_TEXT = `skill-plugin-cli
 
 用法:
   skill-plugin-cli install --host opencode [--environment uat|prod] [--registry <url>] [--url <gateway-url>]
+    [--install-strategy host-native|fallback]
   skill-plugin-cli install --host openclaw [--environment uat|prod] [--registry <url>] [--url <gateway-url>]
+    [--install-strategy host-native|fallback]
 `;
 
 function assertEnvironment(value: string | undefined) {
@@ -22,6 +24,16 @@ function assertEnvironment(value: string | undefined) {
 function assertHost(value: string | undefined) {
   if (value !== "opencode" && value !== "openclaw") {
     throw new InstallCliError("INSTALLER_USAGE_ERROR", "--host 必须为 opencode 或 openclaw");
+  }
+  return value;
+}
+
+function assertInstallStrategy(value: string | undefined) {
+  if (!value) {
+    return "host-native" as const;
+  }
+  if (value !== "host-native" && value !== "fallback") {
+    throw new InstallCliError("INSTALLER_USAGE_ERROR", "--install-strategy 仅支持 host-native 或 fallback");
   }
   return value;
 }
@@ -44,6 +56,7 @@ export function parseInstallArgv(argv: string[]): ParsedInstallCommand | { help:
     allowPositionals: true,
     options: {
       host: { type: "string" },
+      "install-strategy": { type: "string" },
       environment: { type: "string" },
       registry: { type: "string" },
       url: { type: "string" },
@@ -61,6 +74,7 @@ export function parseInstallArgv(argv: string[]): ParsedInstallCommand | { help:
   return {
     command: "install",
     host: assertHost(values.host),
+    installStrategy: assertInstallStrategy(values["install-strategy"]),
     environment: assertEnvironment(values.environment),
     registry: values.registry?.trim() || undefined,
     url: values.url?.trim() || undefined,

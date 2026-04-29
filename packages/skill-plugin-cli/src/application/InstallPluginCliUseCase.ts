@@ -1,7 +1,7 @@
 import { INSTALL_STAGES } from "../domain/stages.ts";
-import { InstallCliError, toInstallCliError } from "../domain/errors.ts";
+import { toInstallCliError } from "../domain/errors.ts";
 import type { HostAdapter, Presenter, QrCodeAuthPort, RegistryConfigAdapter } from "../domain/ports.ts";
-import type { InstallResult, ParsedInstallCommand } from "../domain/types.ts";
+import type { InstallContext, InstalledPluginArtifact, InstallResult, ParsedInstallCommand } from "../domain/types.ts";
 import { ResolveInstallContextUseCase } from "./ResolveInstallContextUseCase.ts";
 
 const SUCCESS_DETAIL_STAGES = new Set([
@@ -33,10 +33,12 @@ export class InstallPluginCliUseCase {
 
   async execute(command: ParsedInstallCommand): Promise<InstallResult> {
     let failureStage: (typeof INSTALL_STAGES)[number] = INSTALL_STAGES[0];
+    const warningMessages: string[] = [];
     try {
       const bootstrapContext = {
         command: command.command,
         host: command.host,
+        installStrategy: command.installStrategy,
         environment: command.environment ?? "prod",
         registry: command.registry ?? "",
         url: command.url ?? "",
@@ -51,6 +53,7 @@ export class InstallPluginCliUseCase {
       const hostAdapter = this.hostAdapters[context.host];
       const resolutionSummary = [
         `environment=${context.environment}`,
+        `installStrategy=${context.installStrategy}`,
         `registry=${context.registry}`,
         ...(context.url ? [`url=${context.url}`] : []),
       ].join(", ");
@@ -70,13 +73,23 @@ export class InstallPluginCliUseCase {
 
       failureStage = INSTALL_STAGES[4];
       this.presenter.stageStarted(INSTALL_STAGES[4], context);
+      this.presenter.selectedInstallStrategy(context);
       this.presenter.info("正在执行宿主安装命令，以下输出来自宿主原生命令。");
-      await hostAdapter.installPlugin(context);
+      const artifact = await hostAdapter.installPlugin(context);
+      if (artifact.installStrategy === "fallback") {
+        this.presenter.fallbackArtifactResolved(artifact);
+        this.presenter.fallbackApplied(artifact);
+      }
+      const cleanup = await hostAdapter.cleanupLegacyArtifacts(context);
+      for (const warning of cleanup.warnings) {
+        warningMessages.push(warning);
+        this.presenter.warning(warning);
+      }
       this.presenter.info("宿主安装命令执行结束。");
 
       failureStage = INSTALL_STAGES[5];
       this.presenter.stageStarted(INSTALL_STAGES[5], context);
-      await hostAdapter.verifyPlugin(context);
+      await hostAdapter.verifyPlugin(context, artifact);
 
       failureStage = INSTALL_STAGES[6];
       this.presenter.stageStarted(INSTALL_STAGES[6], context);
@@ -107,7 +120,7 @@ export class InstallPluginCliUseCase {
         status: "success",
         message: `${preflight.hostLabel} 安装完成`,
         nextSteps: availability.nextSteps,
-        warningMessages: [],
+        warningMessages,
       };
     } catch (error) {
       const installError = toInstallCliError(error);
@@ -118,7 +131,7 @@ export class InstallPluginCliUseCase {
           status: "cancelled",
           message: installError.message,
           nextSteps: [],
-          warningMessages: [],
+          warningMessages,
         };
       }
       this.presenter.failure(installError.message);
@@ -126,7 +139,7 @@ export class InstallPluginCliUseCase {
         status: "failed",
         message: installError.message,
         nextSteps: [],
-        warningMessages: [],
+        warningMessages,
       };
     }
   }
