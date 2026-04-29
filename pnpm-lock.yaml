@@ -43,9 +43,6 @@ importers:
 
   packages/skill-plugin-cli:
     dependencies:
-      '@wecode/skill-qrcode-auth':
-        specifier: workspace:*
-        version: link:../skill-qrcode-auth
       qrcode-terminal:
         specifier: ^0.12.0
         version: 0.12.0
@@ -56,6 +53,9 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15
+      '@wecode/skill-qrcode-auth':
+        specifier: workspace:*
+        version: link:../skill-qrcode-auth
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
