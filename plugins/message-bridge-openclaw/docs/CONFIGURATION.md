@@ -29,7 +29,7 @@ Not supported as user config:
 
 You can configure these fields in three ways:
 
-1. `openclaw channels add --channel message-bridge --url <gateway-url> --token <ak> --password <sk> [--name <name>]`
+1. `openclaw channels add --channel message-bridge [--url <gateway-url>] --token <ak> --password <sk> [--name <name>]`
 2. Channel onboarding flow (`openclaw onboard` / `openclaw channels add` wizard path)
 3. Manual edit in OpenClaw config file:
    - default profile: `~/.openclaw/openclaw.json`
@@ -41,11 +41,12 @@ You can configure these fields in three ways:
 For plugin-specific fields, effective values are resolved in this order:
 
 1. Explicit values in `channels.message-bridge` in active `openclaw.json`
-2. Plugin defaults for missing optional fields
+2. Plugin defaults for missing fields not provided by `channels add`
 
 Notes:
 
 - `channels add` / onboarding do not create `GatewayUrl` aliases; they write canonical fields only.
+- If `channels add` omits `--url`, the plugin first reuses the existing `channels.message-bridge.gateway.url`; if absent, it falls back to the bundle default URL chain.
 - This plugin does not define dedicated env vars such as `MESSAGE_BRIDGE_GATEWAY_URL`.
 - If you need environment-driven values, use `${VAR_NAME}` substitution in `openclaw.json`.
   See OpenClaw env docs:

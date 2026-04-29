@@ -1,0 +1,84 @@
+name: Release Skill QRCode Auth
+
+on:
+  push:
+    tags:
+      - 'release/skill-qrcode-auth/v*'
+
+concurrency:
+  group: release-skill-qrcode-auth-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      dist_tag: ${{ steps.meta.outputs.dist_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        run: node ./scripts/assert-release-version.mjs packages/skill-qrcode-auth "${{ github.ref_name }}"
+
+      - name: Resolve npm dist-tag
+        id: meta
+        run: echo "dist_tag=$(node ./scripts/npm-dist-tag.mjs packages/skill-qrcode-auth)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package core gate
+        run: pnpm --dir packages/skill-qrcode-auth run verify:core
+
+      - name: Pack release tarball
+        run: npm pack --pack-destination ../../.tmp/release-skill-qrcode-auth
+        working-directory: packages/skill-qrcode-auth
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-qrcode-auth-tgz
+          path: .tmp/release-skill-qrcode-auth/*.tgz
+
+  publish:
+    name: Publish Package
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: ${{ vars.NPM_REGISTRY_URL }}
+          scope: '@wecode'
+
+      - name: Download tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: skill-qrcode-auth-tgz
+          path: .tmp/release-skill-qrcode-auth
+
+      - name: Publish package
+        run: |
+          set -eu
+          TARBALL="$(echo ./.tmp/release-skill-qrcode-auth/*.tgz)"
+          npm publish "$TARBALL" --tag "${{ needs.prepare.outputs.dist_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

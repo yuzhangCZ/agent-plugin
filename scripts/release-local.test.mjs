@@ -127,14 +127,31 @@ function createExecDouble({
 }
 
 function createRepoState(repoRoot = "/repo") {
+  const qrcodeRoot = path.join(repoRoot, "packages/skill-qrcode-auth");
+  const cliRoot = path.join(repoRoot, "packages/skill-plugin-cli");
+  const cliPackRoot = path.join(cliRoot, ".tmp", "release-pack");
+  const cliPackFile = "wecode-skill-plugin-cli-0.1.0.tgz";
+  const cliPackPath = path.join(cliPackRoot, cliPackFile);
   const bridgeRoot = path.join(repoRoot, "plugins/message-bridge");
   const openclawRoot = path.join(repoRoot, "plugins/message-bridge-openclaw");
   const bundleRoot = path.join(openclawRoot, "bundle");
 
   return {
+    cliPackPath,
+    cliPackRoot,
+    cliRoot,
+    qrcodeRoot,
     bridgeRoot,
     bundleRoot,
     manifests: {
+      [path.join(qrcodeRoot, "package.json")]: {
+        name: "@wecode/skill-qrcode-auth",
+        version: "0.0.0",
+      },
+      [path.join(cliRoot, "package.json")]: {
+        name: "@wecode/skill-plugin-cli",
+        version: "0.0.0",
+      },
       [path.join(bridgeRoot, "package.json")]: {
         name: "@wecode/skill-opencode-plugin",
         version: "1.0.0",
@@ -149,6 +166,19 @@ function createRepoState(repoRoot = "/repo") {
       },
     },
     paths: [
+      qrcodeRoot,
+      path.join(qrcodeRoot, "package.json"),
+      path.join(qrcodeRoot, "dist"),
+      path.join(qrcodeRoot, "dist/index.js"),
+      path.join(qrcodeRoot, "dist/index.d.ts"),
+      cliRoot,
+      path.join(cliRoot, "package.json"),
+      path.join(cliRoot, "dist"),
+      path.join(cliRoot, "dist/cli.js"),
+      path.join(cliRoot, "README.md"),
+      path.join(cliRoot, ".tmp"),
+      cliPackRoot,
+      cliPackPath,
       bridgeRoot,
       path.join(bridgeRoot, "package.json"),
       path.join(bridgeRoot, "release"),
@@ -161,6 +191,23 @@ function createRepoState(repoRoot = "/repo") {
       path.join(bundleRoot, "openclaw.plugin.json"),
       path.join(bundleRoot, "README.md"),
     ],
+    tarEntries: {
+      [cliPackPath]: [
+        "package/package.json",
+        "package/README.md",
+        "package/dist/cli.js",
+      ],
+    },
+  };
+}
+
+function createListTarEntriesDouble(entriesByPath = {}) {
+  return (targetPath) => {
+    const entries = entriesByPath[targetPath];
+    if (!entries) {
+      throw new Error(`missing tar entries for ${targetPath}`);
+    }
+    return [...entries];
   };
 }
 
@@ -172,12 +219,26 @@ function missingDependencyResult(targetId, missingPackages) {
   };
 }
 
-test("descriptor schema is complete for both release targets", () => {
+test("descriptor schema is complete for all release targets", () => {
   for (const descriptor of Object.values(releaseDescriptors)) {
     for (const field of releaseDescriptorSchema) {
       assert.ok(field in descriptor, `missing field ${field}`);
     }
   }
+});
+
+test("parseReleaseLocalArgs accepts skill-qrcode-auth target", () => {
+  const parsed = parseReleaseLocalArgs(["--target", "skill-qrcode-auth", "--version", "0.1.0"]);
+
+  assert.equal(parsed.target, "skill-qrcode-auth");
+  assert.equal(parsed.version, "0.1.0");
+});
+
+test("parseReleaseLocalArgs accepts skill-plugin-cli target", () => {
+  const parsed = parseReleaseLocalArgs(["--target", "skill-plugin-cli", "--version", "0.1.0"]);
+
+  assert.equal(parsed.target, "skill-plugin-cli");
+  assert.equal(parsed.version, "0.1.0");
 });
 
 test("parseReleaseLocalArgs accepts single-target bump release", () => {
@@ -751,6 +812,10 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
     },
     { repoRoot, fs, exec },
   );
+  fs.writeJson(path.join(state.qrcodeRoot, "package.json"), {
+    name: "@wecode/skill-qrcode-auth",
+    version: "0.1.0",
+  });
 
   const readiness = evaluatePublishReadiness(plan.targets[0], { fs });
 
@@ -759,6 +824,89 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
   assert.equal(readiness.resolvedDistTag, "latest");
   assert.equal(readiness.resolvedPublishRoot, path.join("plugins", "message-bridge-openclaw", "bundle"));
   assert.ok(readiness.executedChecks.length >= 4);
+});
+
+test("evaluatePublishReadiness supports skill-qrcode-auth dist artifacts", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+  const plan = createReleasePlan(
+    {
+      target: "skill-qrcode-auth",
+      version: "0.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: false,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+  fs.writeJson(path.join(state.qrcodeRoot, "package.json"), {
+    name: "@wecode/skill-qrcode-auth",
+    version: "0.1.0",
+  });
+
+  const readiness = evaluatePublishReadiness(plan.targets[0], { fs });
+
+  assert.equal(readiness.releaseReady, true);
+  assert.equal(readiness.resolvedVersion, "0.1.0");
+  assert.equal(readiness.resolvedDistTag, "latest");
+  assert.equal(readiness.resolvedPublishRoot, path.join("packages", "skill-qrcode-auth"));
+  assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("dist/index.js")), true);
+  assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("dist/index.d.ts")), true);
+});
+
+test("evaluatePublishReadiness supports skill-plugin-cli tarball artifacts", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+  const plan = createReleasePlan(
+    {
+      target: "skill-plugin-cli",
+      version: "0.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: false,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+  fs.writeJson(path.join(state.cliRoot, "package.json"), {
+    name: "@wecode/skill-plugin-cli",
+    version: "0.1.0",
+  });
+
+  const readiness = evaluatePublishReadiness(plan.targets[0], {
+    fs,
+    listTarEntries: createListTarEntriesDouble(state.tarEntries),
+  });
+
+  assert.equal(readiness.releaseReady, true);
+  assert.equal(readiness.resolvedVersion, "0.1.0");
+  assert.equal(readiness.resolvedDistTag, "latest");
+  assert.equal(readiness.resolvedPublishRoot, path.join("packages", "skill-plugin-cli", ".tmp", "release-pack", "wecode-skill-plugin-cli-0.1.0.tgz"));
+  assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("package/README.md")), true);
+  assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("suffix absent: .d.ts")), true);
 });
 
 test("executeRelease skips publish and still stages git flow", () => {
@@ -1575,14 +1723,189 @@ test("main prints help output", async () => {
   assert.equal(exitCode, 0);
   assert.equal(stderr.toString(), "");
   assert.match(stdout.toString(), /pnpm release:local -- --target/i);
+  assert.match(stdout.toString(), /skill-qrcode-auth/i);
+  assert.match(stdout.toString(), /skill-plugin-cli/i);
   assert.match(stdout.toString(), /--default-gateway-url <url>/i);
   assert.match(stdout.toString(), /--skip-verify/);
   assert.match(stdout.toString(), /--install-deps/);
   assert.match(stdout.toString(), /presence sanity check/i);
-  assert.match(stdout.toString(), /official release path requires --default-gateway-url/i);
+  assert.match(stdout.toString(), /gateway-dependent targets require --default-gateway-url/i);
   assert.match(stdout.toString(), /pnpm install --frozen-lockfile/);
   assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
+});
+
+test("executeRelease publishes skill-qrcode-auth without gateway injection", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "skill-qrcode-auth",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "skill-qrcode-auth" }),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm" &&
+        entry.args.join(" ") === "--dir packages/skill-qrcode-auth run build" &&
+        Object.hasOwn(entry.env ?? {}, "MB_DEFAULT_GATEWAY_URL") === false,
+    ),
+    true,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) => entry.command === "pnpm" && entry.args.join(" ") === "--dir packages/skill-qrcode-auth run verify:core",
+    ),
+    true,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm" &&
+        entry.args[0] === "publish" &&
+        entry.args.includes("--tag") &&
+        entry.args.includes("latest") &&
+        entry.cwd === path.join(repoRoot, "packages/skill-qrcode-auth"),
+    ),
+    true,
+  );
+});
+
+test("createReleasePlan accepts skill-plugin-cli without default gateway url", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  const plan = createReleasePlan(
+    {
+      target: "skill-plugin-cli",
+      version: "0.1.0",
+      bump: null,
+      preid: "beta",
+      release: null,
+      dryRun: true,
+      push: false,
+      skipGit: false,
+      skipPublish: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec },
+  );
+
+  assert.equal(plan.targets[0].requiresDefaultGatewayUrl, false);
+  assert.doesNotMatch(formatReleasePlan(plan), /default gateway url is required/i);
+});
+
+test("executeRelease publishes skill-plugin-cli tarball without gateway injection", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "skill-plugin-cli",
+      version: "0.1.0",
+      bump: null,
+      defaultGatewayUrl: null,
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: false,
+      skipVerify: false,
+      allowDirty: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "skill-plugin-cli" }),
+    listTarEntries: createListTarEntriesDouble(state.tarEntries),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm"
+        && entry.args.join(" ") === "--dir packages/skill-plugin-cli run build"
+        && Object.hasOwn(entry.env ?? {}, "MB_DEFAULT_GATEWAY_URL") === false,
+    ),
+    true,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) => entry.command === "pnpm" && entry.args.join(" ") === "--dir packages/skill-plugin-cli run verify:core",
+    ),
+    true,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm"
+        && entry.args.join(" ") === "pack --pack-destination .tmp/release-pack"
+        && entry.cwd === path.join(repoRoot, "packages/skill-plugin-cli"),
+    ),
+    true,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm"
+        && entry.args[0] === "publish"
+        && entry.args[1] === path.join(repoRoot, "packages/skill-plugin-cli/.tmp/release-pack/wecode-skill-plugin-cli-0.1.0.tgz")
+        && entry.args.includes("--tag")
+        && entry.args.includes("latest"),
+    ),
+    true,
+  );
 });
 
 test("release workflows validate and forward MB_DEFAULT_GATEWAY_URL", () => {
@@ -1595,6 +1918,22 @@ test("release workflows validate and forward MB_DEFAULT_GATEWAY_URL", () => {
     assert.match(content, /Validate default gateway url/i);
     assert.match(content, /MB_DEFAULT_GATEWAY_URL is required/i);
   }
+});
+
+test("skill-plugin-cli release workflow publishes tarball without gateway injection", () => {
+  const content = readFileSync(path.resolve(".github/workflows/release-skill-plugin-cli.yml"), "utf8");
+  const publishSection = content.split("- name: Publish package")[1] ?? "";
+
+  assert.match(content, /release\/skill-plugin-cli\/v\*/i);
+  assert.match(content, /npm pack --pack-destination \.tmp\/release-pack/i);
+  assert.match(content, /name:\s*skill-plugin-cli-tgz/i);
+  assert.match(content, /path:\s*packages\/skill-plugin-cli\/\.tmp\/release-pack\/\*\.tgz/i);
+  assert.match(content, /path:\s*\.tmp\/release-skill-plugin-cli/i);
+  assert.match(content, /npm publish "\$TARBALL" --tag/i);
+  assert.doesNotMatch(publishSection, /working-directory:\s*packages\/skill-plugin-cli/i);
+  assert.doesNotMatch(publishSection, /npm publish\s+--tag/i);
+  assert.doesNotMatch(content, /MB_DEFAULT_GATEWAY_URL/i);
+  assert.doesNotMatch(content, /Validate default gateway url/i);
 });
 
 test("isCliEntry normalizes argv paths before comparing ESM entry files", () => {

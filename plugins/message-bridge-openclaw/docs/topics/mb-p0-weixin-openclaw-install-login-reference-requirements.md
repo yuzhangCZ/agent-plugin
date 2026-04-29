@@ -38,7 +38,7 @@
 2. 标准安装流仍然是：
    - `openclaw plugins install "@tencent-weixin/openclaw-weixin"`
    - `openclaw channels login --channel openclaw-weixin`
-   - `openclaw gateway restart`
+   - probe 成功后，提示用户手动执行 `openclaw gateway restart`
 3. 扫码登录链路中，插件直接依赖的微信服务接口只有 2 个：
    - 获取二维码
    - 轮询二维码状态
@@ -68,7 +68,8 @@ sequenceDiagram
     OC->>Plugin: 调用插件登录能力
     Plugin-->>OC: 进入扫码授权流程
 
-    NPX->>OC: openclaw gateway restart
+    NPX-->>User: 提示手动执行 openclaw gateway restart
+    User->>OC: openclaw gateway restart
     OC->>Gateway: 重启网关
     Gateway->>Plugin: 启动已登录账号
 ```

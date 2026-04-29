@@ -197,16 +197,11 @@ bridge 到 gateway 的上行消息当前包括：
 
 快速安装 CLI（推荐）：
 
-- `npx @wecode/skill-opencode-plugin install`
+- `npx @wecode/skill-plugin-cli install --host opencode`
 
 首次尚未配置 `@wecode` 源时，使用 bootstrap 命令：
 
-- `npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-opencode-plugin install`
-
-仓库内开发入口（兼容保留）：
-
-- `node ./scripts/setup-message-bridge.mjs install`
-- `node ./scripts/setup-message-bridge.mjs`（无子命令时默认等价 `install`）
+- `npx -y --registry=https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/ @wecode/skill-plugin-cli install --host opencode`
 
 自包含启动示例（幂等写入 `.npmrc`，通过运行时 `OPENCODE_CONFIG_CONTENT` 注入 plugin 配置，再启动 `opencode serve`）：
 
@@ -214,11 +209,11 @@ bridge 到 gateway 的上行消息当前包括：
 
 CLI 当前会：
 
-- 支持交互输入 `ak` 和 `sk`，也支持参数模式 `--ak --sk --registry --scope --yes`
-- 默认在用户级写入 `message-bridge.jsonc`
+- 正式参数仅保留 `--host`、`--environment`、`--registry`、`--url`
+- 默认在用户级写入 `message-bridge.jsonc|json`
 - 在 OpenCode `plugin` 配置中启用 `@wecode/skill-opencode-plugin`
 - 为 `@wecode` 写入 `.npmrc` scope 条目，默认值为 `https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/`
-- 预检 `opencode --version`：若未检测到 OpenCode，只输出 warning，不阻塞配置写入
+- 预检 `opencode --version`；若宿主可用则继续安装、校验、二维码认证和配置接入
 
 CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 bridge 默认值。
 
@@ -232,8 +227,8 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 
 注意：
 
-- 安装 CLI 成功仅表示配置写入完成
-- npm 插件实际下载到 OpenCode 缓存目录发生在后续启动/重启 OpenCode 时
+- 统一 CLI 成功表示仓源配置、插件安装、二维码认证和宿主配置接入已完成
+- 统一 CLI 不接管 OpenCode 启停，安装成功后会提示用户手动重启确认生效
 
 配置优先级从高到低：
 

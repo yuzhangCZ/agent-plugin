@@ -11,6 +11,7 @@ Monorepo for `message-bridge` and `message-bridge-openclaw`.
 
 ## Workspaces
 
+- `packages/skill-qrcode-auth`
 - `plugins/message-bridge`
 - `plugins/message-bridge-openclaw`
 - `integration/opencode-cui`
@@ -39,9 +40,10 @@ That workflow expects a self-hosted runner labeled `integration-smoke`.
 
 ## Release
 
+- `@wecode/skill-qrcode-auth`: push tag `release/skill-qrcode-auth/vX.Y.Z`
 - `@wecode/skill-opencode-plugin`: push tag `release/message-bridge/vX.Y.Z`
 - `@wecode/skill-openclaw-plugin`: push tag `release/message-bridge-openclaw/vX.Y.Z`
 - package version is sourced from each plugin `package.json`; the repo root version is not used for release
 - local release CLI guide: [docs/operations/local-release-cli.md](./docs/operations/local-release-cli.md)
-- local release dry-run: `pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|dual> ...`
-- local release execution: `pnpm release:local -- --target <message-bridge|message-bridge-openclaw|dual> ...`
+- local release dry-run: `pnpm release:plan -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> ...`
+- local release execution: `pnpm release:local -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> ...`
