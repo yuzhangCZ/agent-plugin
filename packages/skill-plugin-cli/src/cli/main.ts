@@ -18,7 +18,12 @@ async function main() {
     const installError = error instanceof InstallCliError
       ? error
       : new InstallCliError("INSTALLER_FAILED", error instanceof Error ? error.message : String(error));
-    process.stderr.write(`${installError.message}\n`);
+    if (installError.code === "INSTALLER_USAGE_ERROR") {
+      process.stderr.write(`[skill-plugin-cli] 参数错误：${installError.message}\n`);
+      process.stderr.write("[skill-plugin-cli] 可执行 skill-plugin-cli --help 查看用法\n");
+    } else {
+      process.stderr.write(`[skill-plugin-cli] 接入失败：${installError.message}\n`);
+    }
     process.exitCode = 1;
   }
 }

@@ -26,6 +26,7 @@ export class ResolveInstallContextUseCase {
       url: command.url?.trim() || undefined,
       mac: this.macAddressResolver.resolve(),
       channel: "openx",
+      verbose: command.verbose ?? false,
     };
   }
 }

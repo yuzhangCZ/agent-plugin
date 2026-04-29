@@ -1,5 +1,7 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { HostAdapter, ProcessRunner } from "../domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, InstallContext } from "../domain/types.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostMetadata, InstallContext } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
@@ -32,6 +34,16 @@ function assertVersionRange(versionText: string) {
   }
 }
 
+function resolveOpenClawPrimaryConfigPath(env = process.env) {
+  if (env.OPENCLAW_CONFIG?.trim()) {
+    return env.OPENCLAW_CONFIG.trim();
+  }
+  if (process.platform === "win32") {
+    return join(env.USERPROFILE || homedir(), ".openclaw", "openclaw.json");
+  }
+  return join(env.HOME || homedir(), ".openclaw", "openclaw.json");
+}
+
 export class OpenClawHostAdapter implements HostAdapter {
   readonly host = "openclaw" as const;
   readonly packageName = PACKAGE_NAME;
@@ -39,6 +51,15 @@ export class OpenClawHostAdapter implements HostAdapter {
 
   constructor(processRunner: ProcessRunner) {
     this.processRunner = processRunner;
+  }
+
+  private buildMetadata(): HostMetadata {
+    return {
+      host: "openclaw",
+      hostDisplayName: "openclaw",
+      packageName: PACKAGE_NAME,
+      primaryConfigPath: resolveOpenClawPrimaryConfigPath(),
+    };
   }
 
   resolveDefaultUrl() {
@@ -52,15 +73,26 @@ export class OpenClawHostAdapter implements HostAdapter {
       throw new InstallCliError("OPENCLAW_NOT_FOUND", (result.stderr || result.stdout || "未检测到 openclaw 命令。").trim());
     }
     const version = (result.stdout || result.stderr).trim();
-    assertVersionRange(version);
     return {
-      hostLabel: "OpenClaw",
-      detail: `openclaw 可用，版本 ${version}`,
+      metadata: this.buildMetadata(),
+      version,
+      versionSupported: (() => {
+        try {
+          assertVersionRange(version);
+          return true;
+        } catch (error) {
+          if (error instanceof InstallCliError && error.code === "OPENCLAW_VERSION_UNSUPPORTED") {
+            return false;
+          }
+          throw error;
+        }
+      })(),
+      minimumRequiredVersion: MIN_SUPPORTED_VERSION,
     };
   }
 
   async installPlugin() {
-    const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME], { stdio: "inherit" });
+    const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME]);
     if (result.exitCode !== 0) {
       throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${PACKAGE_NAME} 失败，退出码 ${result.exitCode}`);
     }
@@ -109,13 +141,13 @@ export class OpenClawHostAdapter implements HostAdapter {
     const result = await this.processRunner.spawn(
       "openclaw",
       args,
-      { stdio: "inherit" },
     );
     if (result.exitCode !== 0) {
       throw new InstallCliError("HOST_CONFIGURE_FAILED", `openclaw channels add 失败，退出码 ${result.exitCode}`);
     }
     return {
-      detail: "已完成 Message Bridge channel 接入。",
+      primaryConfigPath: this.buildMetadata().primaryConfigPath,
+      additionalConfigPaths: [],
     };
   }
 
@@ -125,11 +157,12 @@ export class OpenClawHostAdapter implements HostAdapter {
       throw new InstallCliError("HOST_AVAILABILITY_FAILED", (probe.stderr || probe.stdout).trim());
     }
     return {
-      detail: "探活通过，channel 已可用。",
-      nextSteps: [
-        "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
-        "可执行命令：openclaw gateway restart",
-      ],
+      nextAction: {
+        kind: "restart_gateway",
+        manual: true,
+        effect: "gateway_config_effective",
+        command: "openclaw gateway restart",
+      },
     };
   }
 }

@@ -12,6 +12,16 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+function invalidJsonResponse(body: string, init: ResponseInit = {}): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+    },
+    ...init,
+  });
+}
+
 test("http adapter converts create success response", async () => {
   const service = new HttpQrCodeAuthService(async () => jsonResponse({
     code: "200",
@@ -339,5 +349,111 @@ test("http adapter maps fetch failure to network_error", async () => {
   assert.deepStrictEqual(result, {
     kind: "failed",
     reasonCode: "network_error",
+    serviceError: {
+      message: "socket hang up",
+    },
+  });
+});
+
+test("http adapter maps fetch failure code and message to network_error serviceError", async () => {
+  const service = new HttpQrCodeAuthService(async () => {
+    const error = new Error("connect ECONNREFUSED 127.0.0.1:443") as Error & { code?: string };
+    error.code = "ECONNREFUSED";
+    throw error;
+  });
+
+  const result = await service.createSession({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    reasonCode: "network_error",
+    serviceError: {
+      code: "ECONNREFUSED",
+      message: "connect ECONNREFUSED 127.0.0.1:443",
+    },
+  });
+});
+
+test("http adapter maps string fetch failure to network_error serviceError", async () => {
+  const service = new HttpQrCodeAuthService(async () => {
+    throw "network down";
+  });
+
+  const result = await service.createSession({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    reasonCode: "network_error",
+    serviceError: {
+      message: "network down",
+    },
+  });
+});
+
+test("http adapter keeps parse error message for 2xx invalid json response", async () => {
+  const service = new HttpQrCodeAuthService(async () => invalidJsonResponse("<html>gateway error</html>"));
+
+  const result = await service.createSession({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+  });
+
+  assert.equal(result.kind, "failed");
+  assert.equal(result.reasonCode, "auth_service_error");
+  assert.equal(result.serviceError?.httpStatus, 200);
+  assert.match(result.serviceError?.message ?? "", /Unexpected token '<'/);
+  assert.match(result.serviceError?.message ?? "", /is not valid JSON/);
+});
+
+test("http adapter keeps parse error message for non-2xx invalid json response", async () => {
+  const service = new HttpQrCodeAuthService(async () => invalidJsonResponse("<html>bad gateway</html>", { status: 502 }));
+
+  const result = await service.createSession({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+  });
+
+  assert.equal(result.kind, "failed");
+  assert.equal(result.reasonCode, "auth_service_error");
+  assert.equal(result.serviceError?.httpStatus, 502);
+  assert.match(result.serviceError?.message ?? "", /Unexpected token '<'/);
+  assert.match(result.serviceError?.message ?? "", /is not valid JSON/);
+});
+
+test("http adapter keeps parse error code and message when response json throws", async () => {
+  const service = new HttpQrCodeAuthService(async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      const error = new Error("Unexpected token < in JSON at position 0") as Error & { code?: string };
+      error.code = "ERR_INVALID_JSON";
+      throw error;
+    },
+  } as Response));
+
+  const result = await service.createSession({
+    baseUrl: "https://auth.example.com",
+    channel: "opencode",
+    mac: "",
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "failed",
+    reasonCode: "auth_service_error",
+    serviceError: {
+      httpStatus: 200,
+      code: "ERR_INVALID_JSON",
+      message: "Unexpected token < in JSON at position 0",
+    },
   });
 });

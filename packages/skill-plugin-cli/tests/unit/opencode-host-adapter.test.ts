@@ -12,7 +12,7 @@ const noopProcessRunner: ProcessRunner = {
     return { stdout: "", stderr: "", exitCode: 0 };
   },
   async spawn() {
-    return { exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
   },
   async spawnDetached() {
     return;
@@ -34,6 +34,23 @@ test("OpencodeHostAdapter verifyPlugin uses existing json config and passes when
     await assert.doesNotReject(async () => {
       await adapter.verifyPlugin();
     });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("OpencodeHostAdapter preflight returns resolved primary config path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-preflight-"));
+  try {
+    const configDir = join(dir, "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: [] }, null, 2), "utf8");
+
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
+    const result = await adapter.preflight();
+
+    assert.equal(result.metadata.hostDisplayName, "opencode");
+    assert.equal(result.metadata.primaryConfigPath, join(configDir, "opencode.json"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -92,6 +109,7 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
         registry: "https://npm.example.com",
         mac: "",
         channel: "openx",
+        verbose: false,
       },
       { ak: "ak-1", sk: "sk-1" },
     );
@@ -128,6 +146,7 @@ test("OpencodeHostAdapter configureHost writes gateway url without channel when 
         url: "wss://gateway.example.com/ws/agent",
         mac: "",
         channel: "openx",
+        verbose: false,
       },
       { ak: "ak-2", sk: "sk-2" },
     );
@@ -148,15 +167,18 @@ test("OpencodeHostAdapter confirmAvailability returns manual restart next steps"
   const result = await adapter.confirmAvailability({
     command: "install",
     host: "opencode",
-    environment: "prod",
-    registry: "https://npm.example.com",
-    mac: "",
-    channel: "openx",
-  });
+      environment: "prod",
+      registry: "https://npm.example.com",
+      mac: "",
+      channel: "openx",
+      verbose: false,
+    });
 
-  assert.equal(result.detail, "已完成 OpenCode 可执行性确认。");
-  assert.deepEqual(result.nextSteps, [
-    "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
-    "可执行命令：opencode",
-  ]);
+  assert.deepEqual(result, {
+    nextAction: {
+      kind: "restart_host",
+      manual: true,
+      effect: "plugin_and_config_effective",
+    },
+  });
 });

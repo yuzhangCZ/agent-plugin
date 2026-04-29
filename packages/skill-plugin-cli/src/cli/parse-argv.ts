@@ -4,9 +4,25 @@ import type { ParsedInstallCommand } from "../domain/types.ts";
 
 const HELP_TEXT = `skill-plugin-cli
 
+用于安装插件、创建 WeLink 助理，并完成与 gateway 的连接配置。
+
 用法:
-  skill-plugin-cli install --host opencode [--environment uat|prod] [--registry <url>] [--url <gateway-url>]
-  skill-plugin-cli install --host openclaw [--environment uat|prod] [--registry <url>] [--url <gateway-url>]
+  skill-plugin-cli install --host opencode [--environment uat|prod] [--registry <url>] [--url <gateway-url>] [--verbose]
+  skill-plugin-cli install --host openclaw [--environment uat|prod] [--registry <url>] [--url <gateway-url>] [--verbose]
+
+示例:
+  skill-plugin-cli install --host opencode
+  skill-plugin-cli install --host openclaw --environment uat
+  skill-plugin-cli install --host openclaw --url ws://localhost:8081/ws/agent
+  skill-plugin-cli install --host opencode --verbose
+
+参数:
+  --host <opencode|openclaw>   指定接入目标
+  --environment <uat|prod>     指定 WeLink 创建助理环境，默认 prod
+  --registry <url>             指定 @wecode npm 仓源
+  --url <gateway-url>          指定插件连接 gateway 的地址
+  --verbose                    显示详细执行过程
+  -h, --help                   查看帮助
 `;
 
 function assertEnvironment(value: string | undefined) {
@@ -14,7 +30,7 @@ function assertEnvironment(value: string | undefined) {
     return undefined;
   }
   if (value !== "uat" && value !== "prod") {
-    throw new InstallCliError("INSTALLER_USAGE_ERROR", "--environment 仅支持 uat 或 prod");
+    throw new InstallCliError("INSTALLER_USAGE_ERROR", "--environment 仅支持 uat 或 prod，默认值为 prod");
   }
   return value;
 }
@@ -47,6 +63,7 @@ export function parseInstallArgv(argv: string[]): ParsedInstallCommand | { help:
       environment: { type: "string" },
       registry: { type: "string" },
       url: { type: "string" },
+      verbose: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -64,5 +81,6 @@ export function parseInstallArgv(argv: string[]): ParsedInstallCommand | { help:
     environment: assertEnvironment(values.environment),
     registry: values.registry?.trim() || undefined,
     url: values.url?.trim() || undefined,
+    verbose: values.verbose ?? false,
   };
 }
