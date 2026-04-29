@@ -1,7 +1,7 @@
-import { qrcodeAuth } from "@wecode/skill-qrcode-auth";
+import { qrcodeAuth } from "../../../skill-qrcode-auth/src/index.ts";
 import type { QrCodeAuthRuntime } from "../domain/qrcode-types.ts";
 
 /**
- * 发布态固定使用构建期内联的二维码授权运行时。
+ * 临时直接引用 workspace 源码入口，解除对已构建 dist 的隐式依赖。
  */
 export const embeddedQrCodeAuthRuntime: QrCodeAuthRuntime = qrcodeAuth;
