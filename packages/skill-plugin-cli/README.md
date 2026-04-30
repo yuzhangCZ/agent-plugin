@@ -25,9 +25,10 @@ skill-plugin-cli install --host opencode --install-strategy host-native --enviro
 ## 策略语义
 
 - `host-native`：直接调用宿主当前标准插件安装入口
-- `fallback`：由 CLI 自行执行 `npm view`、`npm pack`、缓存与发布包校验，再写入宿主目标
+- `fallback`：由 CLI 自行执行 `npm view`、`npm pack`、Node 进程内解包、缓存与发布包校验，再写入宿主目标
 - `host-native` 失败后不会自动切到 `fallback`
 - `fallback` 失败后不会回退 `host-native`
+- `fallback` 运行时依赖 `npm`，不要求宿主系统额外提供 `tar`
 - OpenCode fallback 会将受控缓存目录下的本地绝对路径写入 plugin spec
 - OpenClaw fallback 会使用本地 `.tgz` 执行 `openclaw plugins install <local-tgz>`
 

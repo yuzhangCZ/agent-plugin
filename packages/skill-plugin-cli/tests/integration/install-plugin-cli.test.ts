@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import process from "node:process";
@@ -7,6 +8,9 @@ import test from "node:test";
 import { parseInstallArgv } from "../../src/cli/parse-argv.ts";
 import { createInstallCliUseCase } from "../../src/cli/runtime.ts";
 import type { QrCodeAuthRuntime } from "../../src/domain/qrcode-types.ts";
+
+const requireFromHere = createRequire(import.meta.url);
+const tarModulePath = requireFromHere.resolve("tar");
 
 function createFakeQrCodeRuntime(scenario: "confirmed" | "cancelled"): QrCodeAuthRuntime {
   return {
@@ -68,8 +72,8 @@ async function createFakeNpm(dir: string, sourceRoot: string, logPath: string) {
     "npm",
     `
 const fs = require("node:fs");
-const { execFileSync } = require("node:child_process");
 const path = require("node:path");
+const tar = require(${toJs(tarModulePath)});
 const args = process.argv.slice(2);
 fs.appendFileSync(${toJs(logPath)}, \`\${args.join(" ")}\\n\`);
 if (args[0] === "view") {
@@ -86,9 +90,16 @@ if (args[0] === "pack") {
   const packageRoot = path.join(${toJs(sourceRoot)}, pkg);
   const safeName = pkg.replaceAll("@", "").replaceAll("/", "-");
   const tarball = \`\${safeName}-\${version}.tgz\`;
-  execFileSync("tar", ["-czf", path.join(destination, tarball), "-C", packageRoot, "package"]);
-  process.stdout.write(\`\${tarball}\\n\`);
-  process.exit(0);
+  tar.create({ cwd: packageRoot, file: path.join(destination, tarball), gzip: true }, ["package"])
+    .then(() => {
+      process.stdout.write(\`\${tarball}\\n\`);
+      process.exit(0);
+    })
+    .catch((error) => {
+      process.stderr.write(error instanceof Error ? error.message : String(error));
+      process.exit(8);
+    });
+  return;
 }
 process.stderr.write("unsupported npm command");
 process.exit(9);

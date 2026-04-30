@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { create as createTarball } from "tar";
 import { NpmPluginArtifactAdapter } from "../../src/adapters/NpmPluginArtifactAdapter.ts";
 import { InstallCliError } from "../../src/domain/errors.ts";
 import type { ProcessRunner } from "../../src/domain/ports.ts";
@@ -18,12 +19,12 @@ type PackageScenario = {
 
 class ScenarioProcessRunner implements ProcessRunner {
   private readonly scenarioRoot: string;
-  private readonly tarMode?: "fail";
+  private readonly packMode?: "corrupt";
   private packCount = 0;
 
-  constructor(scenarioRoot: string, options: { tarMode?: "fail" } = {}) {
+  constructor(scenarioRoot: string, options: { packMode?: "corrupt" } = {}) {
     this.scenarioRoot = scenarioRoot;
-    this.tarMode = options.tarMode;
+    this.packMode = options.packMode;
   }
 
   async exec(command: string, args: string[]) {
@@ -36,19 +37,12 @@ class ScenarioProcessRunner implements ProcessRunner {
       const tarballPath = join(destination, tarballName);
       const scenarioDir = join(this.scenarioRoot, `pack-${this.packCount}`);
       this.packCount += 1;
-      await import("node:child_process").then(({ execFileSync }) => {
-        execFileSync("tar", ["-czf", tarballPath, "-C", scenarioDir, "package"]);
-      });
-      return { stdout: `${tarballName}\n`, stderr: "", exitCode: 0 };
-    }
-    if (command === "tar") {
-      if (this.tarMode === "fail") {
-        return { stdout: "", stderr: "tar failed", exitCode: 2 };
+      if (this.packMode === "corrupt") {
+        await writeFile(tarballPath, "not-a-valid-tgz", "utf8");
+        return { stdout: `${tarballName}\n`, stderr: "", exitCode: 0 };
       }
-      await import("node:child_process").then(({ execFileSync }) => {
-        execFileSync("tar", args);
-      });
-      return { stdout: "", stderr: "", exitCode: 0 };
+      await createTarball({ cwd: scenarioDir, file: tarballPath, gzip: true }, ["package"]);
+      return { stdout: `${tarballName}\n`, stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "", exitCode: 1 };
   }
@@ -83,7 +77,7 @@ async function writePackageFixture(root: string, index: number, scenario: Packag
   }
 }
 
-function createAdapter(homeDir: string, scenarioRoot: string, options: { tarMode?: "fail" } = {}) {
+function createAdapter(homeDir: string, scenarioRoot: string, options: { packMode?: "corrupt" } = {}) {
   return new NpmPluginArtifactAdapter(new ScenarioProcessRunner(scenarioRoot, options), { HOME: homeDir });
 }
 
@@ -263,7 +257,7 @@ test("NpmPluginArtifactAdapter cleans temporary directory after contract failure
   }
 });
 
-test("NpmPluginArtifactAdapter cleans temporary directory after tar extraction failure and preserves formal cache", async () => {
+test("NpmPluginArtifactAdapter cleans temporary directory after tgz extraction failure and preserves formal cache", async () => {
   const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-artifact-"));
   try {
     await writePackageFixture(dir, 0, {});
@@ -280,7 +274,7 @@ test("NpmPluginArtifactAdapter cleans temporary directory after tar extraction f
     const manifestPath = join(formalRoot, "package", "package.json");
     const manifestBefore = await readFile(manifestPath, "utf8");
 
-    const failingAdapter = createAdapter(dir, dir, { tarMode: "fail" });
+    const failingAdapter = createAdapter(dir, dir, { packMode: "corrupt" });
     await assert.rejects(
       async () => {
         await failingAdapter.fetchArtifact({

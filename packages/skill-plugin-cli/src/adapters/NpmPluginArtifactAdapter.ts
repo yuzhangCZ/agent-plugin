@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import type { PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
 import type { InstalledPluginArtifact } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
+import { TarballExtractor } from "./TarballExtractor.ts";
 
 interface PackageManifest {
   main?: string;
@@ -69,11 +70,18 @@ export class NpmPluginArtifactAdapter implements PluginArtifactPort {
   private readonly processRunner: ProcessRunner;
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileOps: FileOps;
+  private readonly tarballExtractor: TarballExtractor;
 
-  constructor(processRunner: ProcessRunner, env = process.env, fileOps: FileOps = defaultFileOps) {
+  constructor(
+    processRunner: ProcessRunner,
+    env = process.env,
+    fileOps: FileOps = defaultFileOps,
+    tarballExtractor: TarballExtractor = new TarballExtractor(),
+  ) {
     this.processRunner = processRunner;
     this.env = env;
     this.fileOps = fileOps;
+    this.tarballExtractor = tarballExtractor;
   }
 
   async fetchArtifact(input: {
@@ -140,17 +148,7 @@ export class NpmPluginArtifactAdapter implements PluginArtifactPort {
     let tempRootConsumed = false;
     let backupRootCreated = false;
     try {
-      const extractResult = await this.processRunner.exec(
-        "tar",
-        ["-xzf", tarballPath, "-C", tempExtractedRoot],
-        { env: this.env },
-      );
-      if (extractResult.exitCode !== 0) {
-        throw new InstallCliError(
-          "PLUGIN_ARTIFACT_FETCH_FAILED",
-          trimOutput(extractResult.stderr || extractResult.stdout || `解包 ${tarballName} 失败。`),
-        );
-      }
+      await this.tarballExtractor.extract(tarballPath, tempExtractedRoot);
 
       const tempPackageDir = resolve(tempExtractedRoot, "package");
       const manifestPath = resolve(tempPackageDir, "package.json");
