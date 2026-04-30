@@ -27,9 +27,6 @@ function createProcessRunner(
           exitCode: options.pluginInfoExitCode ?? 0,
         };
       }
-      if (command === "openclaw" && args[0] === "channels" && args[1] === "status") {
-        return { stdout: '{"state":"ready"}', stderr: "", exitCode: 0 };
-      }
       return { stdout: "", stderr: "", exitCode: 0 };
     },
     async spawn(command, args) {
@@ -176,12 +173,29 @@ test("OpenClawHostAdapter verifyPlugin fails when info exits non-zero", async ()
   );
 });
 
-test("OpenClawHostAdapter confirmAvailability returns manual gateway restart next steps after probe", async () => {
+test("OpenClawHostAdapter confirmAvailability only checks openclaw executable availability", async () => {
   const adapter = new OpenClawHostAdapter(createProcessRunner("2026.4.12"), noopArtifactPort);
   const result = await adapter.confirmAvailability();
-  assert.equal(result.detail, "探活通过，channel 已可用。");
+  assert.equal(result.detail, "已完成 OpenClaw 可执行性确认。");
   assert.deepEqual(result.nextSteps, [
-    "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
+    "下一步：请手动重启 OpenClaw gateway，并通过实际消息链路确认 channel 生效。",
     "可执行命令：openclaw gateway restart",
   ]);
+});
+
+test("OpenClawHostAdapter confirmAvailability fails when openclaw is not executable", async () => {
+  const runner = createProcessRunner("2026.4.12");
+  runner.exec = async (command, args) => {
+    if (command === "openclaw" && args[0] === "--version") {
+      return { stdout: "", stderr: "missing", exitCode: 1 };
+    }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+  const adapter = new OpenClawHostAdapter(runner, noopArtifactPort);
+  await assert.rejects(
+    async () => {
+      await adapter.confirmAvailability();
+    },
+    (error) => error instanceof InstallCliError && error.code === "HOST_AVAILABILITY_FAILED",
+  );
 });

@@ -110,6 +110,8 @@ skill-plugin-cli install --host openclaw --install-strategy fallback
 - `HostAdapter`：宿主安装、校验、配置接入与结果确认端口
 - `Presenter`：终端输出端口
 
+OpenClaw / OpenCode 的阶段 9 当前统一收敛为宿主可执行性确认，不把 channel 级运行态探活并入本方案的安装策略完成条件。
+
 建议 `InstalledPluginArtifact` 至少包含：
 
 - `installStrategy`

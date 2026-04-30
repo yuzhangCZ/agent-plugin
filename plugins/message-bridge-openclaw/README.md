@@ -72,8 +72,8 @@ npx --yes \
 - 调用 `openclaw plugins info skill-openclaw-plugin --json` 校验安装结果
 - 执行二维码授权，只有 `confirmed` 后才进入宿主接入
 - 调用 `openclaw channels add --channel message-bridge ...`
-- 先执行 `openclaw channels status --channel message-bridge --probe --json`
-- 成功后提示用户手动执行 `openclaw gateway restart`
+- 先执行 `openclaw --version` 作为宿主可执行性确认
+- 成功后提示用户手动执行 `openclaw gateway restart`，并通过实际消息链路确认 channel 生效
 - 优先使用 `--registry`、`WECODE_NPM_REGISTRY`、现有 `.npmrc` scope registry；都未提供时才回退到默认二方仓
 
 CD 发布会先生成 `bundle/`，再把该目录作为 `@wecode/skill-openclaw-plugin` 的 npm 包根发布到私有 registry。安装命令、配置示例和 bundle 入口修改方式见 `docs/USAGE.zh-CN.md`。

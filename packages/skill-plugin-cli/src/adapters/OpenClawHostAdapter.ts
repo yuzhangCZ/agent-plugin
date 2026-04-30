@@ -142,14 +142,14 @@ export class OpenClawHostAdapter implements HostAdapter {
   }
 
   async confirmAvailability(): Promise<HostAvailabilityResult> {
-    const probe = await this.processRunner.exec("openclaw", ["channels", "status", "--channel", CHANNEL_ID, "--probe", "--json"]);
-    if (probe.exitCode !== 0) {
-      throw new InstallCliError("HOST_AVAILABILITY_FAILED", (probe.stderr || probe.stdout).trim());
+    const status = await this.processRunner.exec("openclaw", ["--version"]);
+    if (status.exitCode !== 0) {
+      throw new InstallCliError("HOST_AVAILABILITY_FAILED", "OpenClaw 进程探测失败。");
     }
     return {
-      detail: "探活通过，channel 已可用。",
+      detail: "已完成 OpenClaw 可执行性确认。",
       nextSteps: [
-        "下一步：请手动重启 OpenClaw gateway 以确认 channel 生效。",
+        "下一步：请手动重启 OpenClaw gateway，并通过实际消息链路确认 channel 生效。",
         "可执行命令：openclaw gateway restart",
       ],
     };

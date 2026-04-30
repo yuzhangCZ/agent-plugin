@@ -127,8 +127,8 @@ npx --yes \
 - 命令会先检查 `openclaw --version`，并验证版本满足最低运行时要求 `>=2026.3.24`
 - 命令会实时透传 `openclaw plugins install` 的终端输出
 - 命令会在插件安装校验后进入二维码授权，只有 `confirmed` 才会继续宿主接入
-- 命令会先执行 `openclaw channels status --channel message-bridge --probe --json`
-- 命令不会自动执行 `openclaw gateway restart`，成功后会提示用户手动执行
+- 命令会在宿主配置接入完成后执行 `openclaw --version` 作为可执行性确认
+- 命令不会自动执行 `openclaw gateway restart`，成功后会提示用户手动执行，并通过实际消息链路确认 channel 生效
 - 如果私仓需要认证，执行前要保证 npm 认证环境已可用
 
 ## 4. 手动复制 bundle

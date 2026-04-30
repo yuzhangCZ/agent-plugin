@@ -247,6 +247,7 @@ test("direct use case completes openclaw host-native install", async () => {
     });
 
     const log = await readFile(logPath, "utf8");
+    assert.match(log, /^--version$/m);
     assert.match(log, /plugins info skill-openclaw-plugin --json/);
     assert.match(log, /plugins uninstall skill-openclaw-plugin --force/);
     assert.match(log, /plugins install @wecode\/skill-openclaw-plugin/);
@@ -281,6 +282,7 @@ test("direct use case completes openclaw fallback install via npm pack and local
 
     const npmLog = await readFile(npmLogPath, "utf8");
     const openclawLog = await readFile(openclawLogPath, "utf8");
+    assert.match(openclawLog, /^--version$/m);
     assert.match(npmLog, /view @wecode\/skill-openclaw-plugin version --registry https?:\/\/\S+/);
     assert.match(npmLog, /pack @wecode\/skill-openclaw-plugin@1.2.3 --pack-destination/);
     assert.match(openclawLog, /plugins uninstall skill-openclaw-plugin --force/);
@@ -419,6 +421,7 @@ test("direct use case skips uninstall when openclaw info probe exits non-zero", 
     });
 
     const openclawLog = await readFile(openclawLogPath, "utf8");
+    assert.match(openclawLog, /^--version$/m);
     assert.match(openclawLog, /plugins info skill-openclaw-plugin --json/);
     assert.doesNotMatch(openclawLog, /plugins uninstall skill-openclaw-plugin --force/);
     assert.match(openclawLog, /plugins install @wecode\/skill-openclaw-plugin/);
