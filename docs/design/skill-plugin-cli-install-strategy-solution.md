@@ -365,10 +365,10 @@ openclaw plugins info skill-openclaw-plugin --json
 
 校验目标是 plugin identity `skill-openclaw-plugin`，而不是 channel identity `message-bridge`。
 
-安装前探测与安装后校验必须区分两套语义：
+安装前探测与安装后校验都只依赖退出码，但语义不同：
 
-- 安装前探测：只看 `openclaw plugins info skill-openclaw-plugin --json` 的退出码；`0` 表示已安装，非 `0` 表示未安装
-- 安装后校验：仍以同一命令为真源，但非 `0` 必须直接判定为校验失败
+- 安装前探测：`openclaw plugins info skill-openclaw-plugin --json` 退出 `0` 表示已安装，非 `0` 表示未安装
+- 安装后校验：仍以同一命令为真源，但退出 `0` 即视为校验通过，非 `0` 必须直接判定为校验失败
 
 ## 9. 用户可见输出与错误提示
 

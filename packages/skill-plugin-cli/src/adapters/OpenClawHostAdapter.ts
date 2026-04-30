@@ -32,11 +32,6 @@ function assertVersionRange(versionText: string) {
   }
 }
 
-interface OpenClawPluginInfo {
-  id: string;
-  channelIds: string[];
-}
-
 export class OpenClawHostAdapter implements HostAdapter {
   readonly host = "openclaw" as const;
   readonly packageName = PACKAGE_NAME;
@@ -54,30 +49,10 @@ export class OpenClawHostAdapter implements HostAdapter {
   }
 
   /**
-   * 统一执行 OpenClaw 插件信息探测，安装前只看退出码，安装后再做严格结构校验。
+   * 统一执行 OpenClaw 插件信息探测，安装前与安装后都仅依赖退出码。
    */
   private async queryInstalledPlugin() {
     return this.processRunner.exec("openclaw", ["plugins", "info", PLUGIN_ID, "--json"]);
-  }
-
-  private parseInstalledPlugin(stdout: string): OpenClawPluginInfo {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(stdout);
-    } catch (error) {
-      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", error instanceof Error ? error.message : String(error));
-    }
-    if (
-      !parsed
-      || typeof parsed !== "object"
-      || !("id" in parsed)
-      || !("channelIds" in parsed)
-      || parsed.id !== PLUGIN_ID
-      || !Array.isArray(parsed.channelIds)
-    ) {
-      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", "OpenClaw 插件信息与预期不一致。");
-    }
-    return parsed as OpenClawPluginInfo;
   }
 
   async preflight() {
@@ -134,10 +109,6 @@ export class OpenClawHostAdapter implements HostAdapter {
     const result = await this.queryInstalledPlugin();
     if (result.exitCode !== 0) {
       throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", (result.stderr || result.stdout).trim());
-    }
-    const parsed = this.parseInstalledPlugin(result.stdout);
-    if (!parsed.channelIds.includes(CHANNEL_ID)) {
-      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", "OpenClaw 插件信息与预期不一致。");
     }
   }
 
