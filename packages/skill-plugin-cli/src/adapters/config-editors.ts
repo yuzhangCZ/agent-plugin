@@ -100,11 +100,41 @@ export function buildNextBridgeConfigWithoutUrl(content: string | null, input: {
   return next;
 }
 
-export function buildNextOpencodeConfig(content: string | null, pluginName: string) {
+/**
+ * 统一解析 OpenCode 配置中的 plugin 数组，并自动还原 JSON 字符串转义后的真实路径值。
+ */
+export function readOpencodePluginItems(content: string) {
+  const match = content.match(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su);
+  if (!match) {
+    return null;
+  }
+  const items = [...match[2].matchAll(/"((?:\\.|[^"])*)"/gu)].map((entry) => JSON.parse(`"${entry[1]}"`) as string);
+  return {
+    start: match[1],
+    items,
+    end: match[3],
+  };
+}
+
+function serializePluginItems(items: string[]) {
+  return items.length > 0 ? items.map((item) => `"${escapeJsonString(item)}"`).join(", ") : "";
+}
+
+/**
+ * 统一收口 OpenCode 配置中的受控插件引用，只保留目标 pluginSpec。
+ */
+export function buildNextOpencodeConfig(
+  content: string | null,
+  pluginSpec: string,
+  options: {
+    controlledNpmSpec: string;
+    isControlledFallbackPathSpec: (value: string) => boolean;
+  },
+) {
   if (content === null) {
     return `{
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["${pluginName}"]
+  "plugin": [${serializePluginItems([pluginSpec])}]
 }
 `;
   }
@@ -112,18 +142,23 @@ export function buildNextOpencodeConfig(content: string | null, pluginName: stri
   if (!looksLikeJsonObject(content)) {
     throw new Error("opencode config invalid");
   }
-  if (content.includes(`"${pluginName}"`)) {
-    return content;
-  }
+  const nextItems = (() => {
+    const parsed = readOpencodePluginItems(content);
+    const existingItems = parsed?.items ?? [];
+    const preserved = existingItems.filter((value) => {
+      if (value === options.controlledNpmSpec) {
+        return false;
+      }
+      return !options.isControlledFallbackPathSpec(value);
+    });
+    const merged = [...preserved, pluginSpec];
+    return merged.filter((value, index) => merged.indexOf(value) === index);
+  })();
+
   if (/"plugin"\s*:\s*\[/su.test(content)) {
-    if (/"plugin"\s*:\s*\[\s*\]/su.test(content)) {
-      return content.replace(/"plugin"\s*:\s*\[\s*\]/su, `"plugin": ["${pluginName}"]`);
-    }
-    return content.replace(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su, (_match, start, items, end) => {
-      const trimmedItems = items.trimEnd();
-      const separator = /\S/u.test(trimmedItems) ? ", " : "";
-      return `${start}${trimmedItems}${separator}"${pluginName}"${end}`;
+    return content.replace(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su, (_match, start, _items, end) => {
+      return `${start}${serializePluginItems(nextItems)}${end}`;
     });
   }
-  return content.replace(/\n\}\s*$/su, `,\n  "plugin": ["${pluginName}"]\n}\n`);
+  return content.replace(/\n\}\s*$/su, `,\n  "plugin": [${serializePluginItems(nextItems)}]\n}\n`);
 }
