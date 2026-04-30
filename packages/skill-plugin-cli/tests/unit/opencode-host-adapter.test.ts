@@ -95,7 +95,7 @@ test("OpencodeHostAdapter host-native install reconciles controlled fallback pat
       registry: "https://npm.example.com",
       mac: "",
       channel: "openx",
-    });
+    }, { info() {} });
 
     const content = await import("node:fs/promises").then(({ readFile }) => readFile(join(configDir, "opencode.json"), "utf8"));
     assert.match(content, /other-plugin/);
@@ -127,7 +127,7 @@ test("OpencodeHostAdapter fallback install reconciles npm spec to controlled fal
       registry: "https://npm.example.com",
       mac: "",
       channel: "openx",
-    });
+    }, { info() {} });
 
     const content = await import("node:fs/promises").then(({ readFile }) => readFile(join(configDir, "opencode.json"), "utf8"));
     assert.equal(artifact.pluginSpec, fallbackPath);

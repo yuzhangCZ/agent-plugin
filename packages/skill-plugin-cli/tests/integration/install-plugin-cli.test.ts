@@ -107,13 +107,27 @@ process.exit(9);
   );
 }
 
-async function createFakeOpenClaw(dir: string, logPath: string, options: { installExitCode?: number; installStderr?: string } = {}) {
+async function createFakeOpenClaw(
+  dir: string,
+  logPath: string,
+  options: {
+    installExitCode?: number;
+    installStderr?: string;
+    pluginInfoExitCode?: number;
+    pluginInfoExitCodes?: number[];
+    pluginInfoStdout?: string;
+    pluginInfoStderr?: string;
+  uninstallExitCode?: number;
+  } = {},
+) {
   await createExecutable(
     dir,
     "openclaw",
     `
 const fs = require("node:fs");
+const path = require("node:path");
 const args = process.argv.slice(2);
+const statePath = path.join(path.dirname(${toJs(logPath)}), "openclaw-plugin-info-index");
 fs.appendFileSync(${toJs(logPath)}, \`\${args.join(" ")}\\n\`);
 if (args[0] === "--version") {
   process.stdout.write("2026.3.24");
@@ -126,8 +140,24 @@ if (args[0] === "plugins" && args[1] === "install") {
   process.exit(${options.installExitCode ?? 0});
 }
 if (args[0] === "plugins" && args[1] === "info") {
-  process.stdout.write('{"id":"skill-openclaw-plugin","channelIds":["message-bridge"]}');
-  process.exit(0);
+  const exitCodes = ${toJs(options.pluginInfoExitCodes || [])};
+  const pluginInfoIndex = fs.existsSync(statePath) ? Number(fs.readFileSync(statePath, "utf8") || "0") : 0;
+  if (${toJs(options.pluginInfoStdout || "")}) {
+    process.stdout.write(${toJs(options.pluginInfoStdout || "")});
+  } else {
+    process.stdout.write('{"id":"skill-openclaw-plugin","channelIds":["message-bridge"]}');
+  }
+  if (${toJs(options.pluginInfoStderr || "")}) {
+    process.stderr.write(${toJs(options.pluginInfoStderr || "")});
+  }
+  const selectedExitCode = exitCodes.length > pluginInfoIndex
+    ? exitCodes[pluginInfoIndex]
+    : ${options.pluginInfoExitCode ?? 0};
+  fs.writeFileSync(statePath, String(pluginInfoIndex + 1));
+  process.exit(selectedExitCode);
+}
+if (args[0] === "plugins" && args[1] === "uninstall") {
+  process.exit(${options.uninstallExitCode ?? 0});
 }
 if (args[0] === "channels" && args[1] === "add") {
   process.exit(0);
@@ -210,12 +240,15 @@ test("direct use case completes openclaw host-native install", async () => {
       const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
       assert.equal(result.status, "success");
       assert.deepEqual(result.warningMessages, []);
+      assert.match(stdout.join(""), /检测到已安装 OpenClaw 插件，正在卸载后重装。/);
       assert.match(stdout.join(""), /当前安装策略：host-native/);
       assert.doesNotMatch(stdout.join(""), /fallback 产物已解析/);
       assert.equal(stderr.length, 0);
     });
 
     const log = await readFile(logPath, "utf8");
+    assert.match(log, /plugins info skill-openclaw-plugin --json/);
+    assert.match(log, /plugins uninstall skill-openclaw-plugin --force/);
     assert.match(log, /plugins install @wecode\/skill-openclaw-plugin/);
     assert.match(log, /channels add --channel message-bridge --url wss:\/\/gateway\.example\.com\/ws\/agent --token ak-1 --password sk-1/);
   } finally {
@@ -250,6 +283,7 @@ test("direct use case completes openclaw fallback install via npm pack and local
     const openclawLog = await readFile(openclawLogPath, "utf8");
     assert.match(npmLog, /view @wecode\/skill-openclaw-plugin version --registry https?:\/\/\S+/);
     assert.match(npmLog, /pack @wecode\/skill-openclaw-plugin@1.2.3 --pack-destination/);
+    assert.match(openclawLog, /plugins uninstall skill-openclaw-plugin --force/);
     assert.match(openclawLog, /plugins install .*\.tgz/);
     assert.match(openclawLog, /plugins info skill-openclaw-plugin --json/);
   } finally {
@@ -356,6 +390,67 @@ test("direct use case fails host-native install without auto-switching to fallba
     const openclawLog = await readFile(openclawLogPath, "utf8");
     assert.match(openclawLog, /plugins install @wecode\/skill-openclaw-plugin/);
     assert.doesNotMatch(openclawLog, /\.tgz/);
+  } finally {
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("direct use case skips uninstall when openclaw info probe exits non-zero", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-openclaw-probe-miss-"));
+  const originalEnv = { ...process.env };
+  try {
+    const openclawLogPath = join(dir, "openclaw.log");
+    await createFakeOpenClaw(dir, openclawLogPath, {
+      pluginInfoExitCodes: [1, 0],
+      pluginInfoStderr: "Plugin not found: skill-openclaw-plugin",
+    });
+
+    process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+
+    await withCapturedOutput(async (stdout) => {
+      const parsed = parseInstallArgv(["install", "--host", "openclaw"]);
+      assert.ok(!("help" in parsed));
+      const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
+      assert.equal(result.status, "success");
+      assert.doesNotMatch(stdout.join(""), /检测到已安装 OpenClaw 插件/);
+      assert.doesNotMatch(stdout.join(""), /未安装/);
+    });
+
+    const openclawLog = await readFile(openclawLogPath, "utf8");
+    assert.match(openclawLog, /plugins info skill-openclaw-plugin --json/);
+    assert.doesNotMatch(openclawLog, /plugins uninstall skill-openclaw-plugin --force/);
+    assert.match(openclawLog, /plugins install @wecode\/skill-openclaw-plugin/);
+  } finally {
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("direct use case fails when openclaw uninstall exits non-zero", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-openclaw-uninstall-failed-"));
+  const originalEnv = { ...process.env };
+  try {
+    const openclawLogPath = join(dir, "openclaw.log");
+    await createFakeOpenClaw(dir, openclawLogPath, {
+      uninstallExitCode: 12,
+    });
+
+    process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+
+    await withCapturedOutput(async (_stdout, stderr) => {
+      const parsed = parseInstallArgv(["install", "--host", "openclaw"]);
+      assert.ok(!("help" in parsed));
+      const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
+      assert.equal(result.status, "failed");
+      assert.match(stderr.join(""), /plugins uninstall skill-openclaw-plugin --force 失败/);
+    });
+
+    const openclawLog = await readFile(openclawLogPath, "utf8");
+    assert.match(openclawLog, /plugins uninstall skill-openclaw-plugin --force/);
+    assert.doesNotMatch(openclawLog, /plugins install @wecode\/skill-openclaw-plugin/);
   } finally {
     process.env = originalEnv;
     await rm(dir, { recursive: true, force: true });

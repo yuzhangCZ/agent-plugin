@@ -85,7 +85,7 @@ skill-plugin-cli install --host openclaw --install-strategy fallback
 `host-native` 表示调用宿主当前标准插件安装入口。
 
 - OpenCode：`opencode plugin -g -f @wecode/skill-opencode-plugin`
-- OpenClaw：`openclaw plugins install @wecode/skill-openclaw-plugin`
+- OpenClaw：先执行 `openclaw plugins info skill-openclaw-plugin --json`；若退出码为 `0` 则执行 `openclaw plugins uninstall skill-openclaw-plugin --force`，再执行 `openclaw plugins install @wecode/skill-openclaw-plugin`
 
 ### 4.2 `fallback`
 
@@ -365,6 +365,11 @@ openclaw plugins info skill-openclaw-plugin --json
 
 校验目标是 plugin identity `skill-openclaw-plugin`，而不是 channel identity `message-bridge`。
 
+安装前探测与安装后校验必须区分两套语义：
+
+- 安装前探测：只看 `openclaw plugins info skill-openclaw-plugin --json` 的退出码；`0` 表示已安装，非 `0` 表示未安装
+- 安装后校验：仍以同一命令为真源，但非 `0` 必须直接判定为校验失败
+
 ## 9. 用户可见输出与错误提示
 
 固定输出语义：
@@ -494,6 +499,15 @@ sequenceDiagram
 
   alt host-native
     U->>CLI: install --host openclaw
+    CLI->>OC: openclaw plugins info skill-openclaw-plugin --json
+    alt already installed
+      OC-->>CLI: exitCode=0
+      CLI-->>U: 检测到已安装 OpenClaw 插件，正在卸载后重装。
+      CLI->>OC: openclaw plugins uninstall skill-openclaw-plugin --force
+      OC-->>CLI: uninstall result
+    else not installed
+      OC-->>CLI: exitCode!=0
+    end
     CLI->>OC: openclaw plugins install @wecode/skill-openclaw-plugin
     OC-->>CLI: install result
     CLI->>OC: openclaw plugins info skill-openclaw-plugin --json
@@ -505,6 +519,15 @@ sequenceDiagram
     CLI->>REG: npm pack @wecode/skill-openclaw-plugin@<resolved-version> --registry <resolved-registry>
     REG-->>CLI: plugin tarball
     CLI->>C: write tarball, extract into temp dir, validate, then replace formal package/
+    CLI->>OC: openclaw plugins info skill-openclaw-plugin --json
+    alt already installed
+      OC-->>CLI: exitCode=0
+      CLI-->>U: 检测到已安装 OpenClaw 插件，正在卸载后重装。
+      CLI->>OC: openclaw plugins uninstall skill-openclaw-plugin --force
+      OC-->>CLI: uninstall result
+    else not installed
+      OC-->>CLI: exitCode!=0
+    end
     CLI->>OC: openclaw plugins install <local-tgz>
     CLI->>OC: openclaw plugins info skill-openclaw-plugin --json
     OC-->>CLI: verification result

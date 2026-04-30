@@ -32,6 +32,11 @@ function assertVersionRange(versionText: string) {
   }
 }
 
+interface OpenClawPluginInfo {
+  id: string;
+  channelIds: string[];
+}
+
 export class OpenClawHostAdapter implements HostAdapter {
   readonly host = "openclaw" as const;
   readonly packageName = PACKAGE_NAME;
@@ -48,6 +53,33 @@ export class OpenClawHostAdapter implements HostAdapter {
     return typeof candidate === "string" && candidate.trim() ? candidate.trim() : DEFAULT_GATEWAY_URL;
   }
 
+  /**
+   * 统一执行 OpenClaw 插件信息探测，安装前只看退出码，安装后再做严格结构校验。
+   */
+  private async queryInstalledPlugin() {
+    return this.processRunner.exec("openclaw", ["plugins", "info", PLUGIN_ID, "--json"]);
+  }
+
+  private parseInstalledPlugin(stdout: string): OpenClawPluginInfo {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (error) {
+      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", error instanceof Error ? error.message : String(error));
+    }
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || !("id" in parsed)
+      || !("channelIds" in parsed)
+      || parsed.id !== PLUGIN_ID
+      || !Array.isArray(parsed.channelIds)
+    ) {
+      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", "OpenClaw 插件信息与预期不一致。");
+    }
+    return parsed as OpenClawPluginInfo;
+  }
+
   async preflight() {
     const result = await this.processRunner.exec("openclaw", ["--version"]);
     if (result.exitCode !== 0) {
@@ -61,7 +93,15 @@ export class OpenClawHostAdapter implements HostAdapter {
     };
   }
 
-  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
+  async installPlugin(context: InstallContext, presenter: { info(message: string): void }): Promise<InstalledPluginArtifact> {
+    const probe = await this.queryInstalledPlugin();
+    if (probe.exitCode === 0) {
+      presenter.info("检测到已安装 OpenClaw 插件，正在卸载后重装。");
+      const uninstall = await this.processRunner.spawn("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"], { stdio: "inherit" });
+      if (uninstall.exitCode !== 0) {
+        throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins uninstall ${PLUGIN_ID} --force 失败，退出码 ${uninstall.exitCode}`);
+      }
+    }
     if (context.installStrategy === "fallback") {
       const artifact = await this.pluginArtifactPort.fetchArtifact({
         host: this.host,
@@ -91,25 +131,12 @@ export class OpenClawHostAdapter implements HostAdapter {
   }
 
   async verifyPlugin() {
-    const result = await this.processRunner.exec("openclaw", ["plugins", "info", PLUGIN_ID, "--json"]);
+    const result = await this.queryInstalledPlugin();
     if (result.exitCode !== 0) {
       throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", (result.stderr || result.stdout).trim());
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(result.stdout);
-    } catch (error) {
-      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", error instanceof Error ? error.message : String(error));
-    }
-    if (
-      !parsed
-      || typeof parsed !== "object"
-      || !("id" in parsed)
-      || !("channelIds" in parsed)
-      || parsed.id !== PLUGIN_ID
-      || !Array.isArray(parsed.channelIds)
-      || !parsed.channelIds.includes(CHANNEL_ID)
-    ) {
+    const parsed = this.parseInstalledPlugin(result.stdout);
+    if (!parsed.channelIds.includes(CHANNEL_ID)) {
       throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", "OpenClaw 插件信息与预期不一致。");
     }
   }

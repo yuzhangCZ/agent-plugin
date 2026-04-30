@@ -74,7 +74,7 @@ function createHostAdapter(options: {
     async preflight(): Promise<HostPreflightResult> {
       return { hostLabel: "OpenCode", detail: "ok" };
     },
-    async installPlugin() {
+    async installPlugin(_context, _presenter) {
       if (options.installError) throw options.installError;
       return options.installResult || {
         installStrategy: "host-native",

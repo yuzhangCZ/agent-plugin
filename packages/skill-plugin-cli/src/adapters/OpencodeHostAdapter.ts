@@ -92,7 +92,7 @@ export class OpencodeHostAdapter implements HostAdapter {
     };
   }
 
-  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
+  async installPlugin(context: InstallContext, _presenter: { info(message: string): void }): Promise<InstalledPluginArtifact> {
     if (context.installStrategy === "host-native") {
       const result = await this.processRunner.spawn("opencode", ["plugin", "-g", "-f", PLUGIN_NAME], { stdio: "inherit" });
       if (result.exitCode !== 0) {

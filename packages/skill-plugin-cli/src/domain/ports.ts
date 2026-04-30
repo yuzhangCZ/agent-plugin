@@ -51,7 +51,7 @@ export interface HostAdapter {
   readonly packageName: string;
   resolveDefaultUrl(): string;
   preflight(context: InstallContext): Promise<HostPreflightResult>;
-  installPlugin(context: InstallContext): Promise<InstalledPluginArtifact>;
+  installPlugin(context: InstallContext, presenter: Pick<Presenter, "info">): Promise<InstalledPluginArtifact>;
   cleanupLegacyArtifacts(context: InstallContext): Promise<{ warnings: string[] }>;
   verifyPlugin(context: InstallContext, artifact: InstalledPluginArtifact): Promise<void>;
   configureHost(context: InstallContext, credentials: { ak: string; sk: string }): Promise<HostConfigureResult>;

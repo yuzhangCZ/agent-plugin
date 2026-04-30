@@ -75,7 +75,7 @@ export class InstallPluginCliUseCase {
       this.presenter.stageStarted(INSTALL_STAGES[4], context);
       this.presenter.selectedInstallStrategy(context);
       this.presenter.info("正在执行宿主安装命令，以下输出来自宿主原生命令。");
-      const artifact = await hostAdapter.installPlugin(context);
+      const artifact = await hostAdapter.installPlugin(context, this.presenter);
       if (artifact.installStrategy === "fallback") {
         this.presenter.fallbackArtifactResolved(artifact);
         this.presenter.fallbackApplied(artifact);
