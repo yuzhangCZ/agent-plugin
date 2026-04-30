@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { QrCodeAuth, QrCodeAuthSnapshot } from "../src/index.ts";
+import type { QrCodeAuthSnapshot } from "../src/index.ts";
 import { createQrCodeAuthRuntime } from "../src/internal/createQrCodeAuthRuntime.ts";
 
 test("integration run emits terminal snapshot before resolve", async () => {
@@ -54,11 +54,11 @@ test("integration run emits terminal snapshot before resolve", async () => {
   assert.equal(snapshots.at(-1)?.type, "confirmed");
 });
 
-test("public qrcodeAuth creates isolated session state for repeated runs", async () => {
+test("runtime created with injected fetch keeps repeated runs isolated", async () => {
   const runSnapshots: QrCodeAuthSnapshot[][] = [];
   let nextRun = 0;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input) => {
+  const runtime = createQrCodeAuthRuntime({
+    fetch: async (input) => {
     const url = String(input);
     if (url.endsWith("/qrcode")) {
       nextRun += 1;
@@ -84,28 +84,23 @@ test("public qrcodeAuth creates isolated session state for repeated runs", async
         sk: `${qrcode}-sk`,
       },
     }));
-  }) as typeof fetch;
+    },
+    wait: async () => {},
+  });
 
-  try {
-    const imported = await import(`../src/index.ts?isolated=${Date.now()}`);
-    const runtime = imported.qrcodeAuth as QrCodeAuth;
-
-    for (let index = 0; index < 2; index += 1) {
-      const snapshots: QrCodeAuthSnapshot[] = [];
-      runSnapshots.push(snapshots);
-      await runtime.run({
-        channel: "opencode",
-        mac: "",
-        policy: {
-          pollIntervalMs: 1,
-        },
-        onSnapshot(snapshot) {
-          snapshots.push(snapshot);
-        },
-      });
-    }
-  } finally {
-    globalThis.fetch = originalFetch;
+  for (let index = 0; index < 2; index += 1) {
+    const snapshots: QrCodeAuthSnapshot[] = [];
+    runSnapshots.push(snapshots);
+    await runtime.run({
+      channel: "opencode",
+      mac: "",
+      policy: {
+        pollIntervalMs: 1,
+      },
+      onSnapshot(snapshot) {
+        snapshots.push(snapshot);
+      },
+    });
   }
 
   assert.deepStrictEqual(runSnapshots.map((snapshots) => snapshots.map((snapshot) => snapshot.type)), [

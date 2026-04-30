@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HttpQrCodeAuthService } from "../src/internal/HttpQrCodeAuthService.ts";
+import {
+  HttpQrCodeAuthService,
+  INSECURE_TLS_REQUEST_OPTIONS,
+  createNodeRequestFetch,
+  createNodeRequestInvocation,
+  type NodeRequestInvocation,
+} from "../src/internal/HttpQrCodeAuthService.ts";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -11,6 +17,87 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
     ...init,
   });
 }
+
+test("default tls request options disable certificate verification", () => {
+  assert.deepStrictEqual(INSECURE_TLS_REQUEST_OPTIONS, {
+    rejectUnauthorized: false,
+  });
+});
+
+test("createNodeRequestInvocation keeps request fields for https", () => {
+  const invocation = createNodeRequestInvocation("https://auth.example.com/qrcode?step=1", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: '{"hello":"world"}',
+  });
+
+  assert.equal(invocation.protocol, "https:");
+  assert.equal(invocation.options.method, "POST");
+  assert.equal(invocation.options.path, "/qrcode?step=1");
+  assert.deepStrictEqual(invocation.options.headers, {
+    "content-type": "application/json",
+  });
+  assert.equal(invocation.options.rejectUnauthorized, false);
+  assert.equal(invocation.bodyText, '{"hello":"world"}');
+});
+
+test("createNodeRequestInvocation does not add tls options for http", () => {
+  const invocation = createNodeRequestInvocation("http://auth.example.com/qrcode", {
+    method: "GET",
+  });
+
+  assert.equal(invocation.protocol, "http:");
+  assert.equal(invocation.options.method, "GET");
+  assert.equal(invocation.options.path, "/qrcode");
+  assert.equal("rejectUnauthorized" in invocation.options, false);
+});
+
+test("createNodeRequestInvocation rejects unsupported protocols", () => {
+  assert.throws(
+    () => createNodeRequestInvocation("ws://auth.example.com/qrcode"),
+    /http: and https:|ws:/,
+  );
+});
+
+test("createNodeRequestFetch routes https requests with insecure tls option", async () => {
+  let received: NodeRequestInvocation | null = null;
+  const fetchLike = createNodeRequestFetch({
+    async http() {
+      throw new Error("http should not be used");
+    },
+    async https(invocation) {
+      received = invocation;
+      return jsonResponse({ code: "200", data: {} });
+    },
+  });
+
+  await fetchLike("https://auth.example.com", { method: "GET" });
+
+  assert.equal(received?.protocol, "https:");
+  assert.equal(received?.options.method, "GET");
+  assert.equal(received?.options.rejectUnauthorized, false);
+});
+
+test("createNodeRequestFetch routes http requests without tls options", async () => {
+  let received: NodeRequestInvocation | null = null;
+  const fetchLike = createNodeRequestFetch({
+    async http(invocation) {
+      received = invocation;
+      return jsonResponse({ code: "200", data: {} });
+    },
+    async https() {
+      throw new Error("https should not be used");
+    },
+  });
+
+  await fetchLike("http://auth.example.com", { method: "GET" });
+
+  assert.equal(received?.protocol, "http:");
+  assert.equal(received?.options.method, "GET");
+  assert.equal("rejectUnauthorized" in (received?.options ?? {}), false);
+});
 
 test("http adapter converts create success response", async () => {
   const service = new HttpQrCodeAuthService(async () => jsonResponse({

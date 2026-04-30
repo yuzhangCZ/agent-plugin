@@ -1,3 +1,5 @@
+import { request as httpRequest, type RequestOptions as HttpRequestOptions } from "node:http";
+import { request as httpsRequest, type RequestOptions as HttpsRequestOptions } from "node:https";
 import type {
   QrCodeAuthServiceError,
   QrCodeDisplayData,
@@ -14,6 +16,10 @@ export interface FetchLike {
   (input: string | URL, init?: RequestInit): Promise<Response>;
 }
 
+export const INSECURE_TLS_REQUEST_OPTIONS = {
+  rejectUnauthorized: false,
+} as const;
+
 interface AuthResponseBody {
   code?: unknown;
   error?: unknown;
@@ -22,13 +28,25 @@ interface AuthResponseBody {
   data?: Record<string, unknown> | null;
 }
 
+export interface NodeRequestInvocation {
+  bodyText?: string;
+  options: HttpRequestOptions | HttpsRequestOptions;
+  protocol: "http:" | "https:";
+  url: URL;
+}
+
+export interface NodeRequestTransport {
+  http(input: NodeRequestInvocation): Promise<Response>;
+  https(input: NodeRequestInvocation): Promise<Response>;
+}
+
 /**
  * HTTP adapter 负责远端协议转换和 accessToken 管理。
  */
 export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
   private readonly fetchImpl: FetchLike;
 
-  public constructor(fetchImpl: FetchLike = fetch) {
+  public constructor(fetchImpl: FetchLike = createNodeRequestFetch()) {
     this.fetchImpl = fetchImpl;
   }
 
@@ -221,6 +239,97 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
   }
 }
 
+/**
+ * 默认对授权服务请求关闭证书校验，兼容企业内网自签或未下发系统信任链的部署环境。
+ */
+export function createNodeRequestFetch(
+  transport: NodeRequestTransport = defaultNodeRequestTransport,
+): FetchLike {
+  return async (input, init) => {
+    const invocation = createNodeRequestInvocation(input, init);
+    if (invocation.protocol === "https:") {
+      return transport.https(invocation);
+    }
+    return transport.http(invocation);
+  };
+}
+
+export function createNodeRequestInvocation(
+  input: string | URL,
+  init?: RequestInit,
+): NodeRequestInvocation {
+  const url = input instanceof URL ? input : new URL(input);
+  const method = init?.method ?? "GET";
+  const headers = toNodeHeaders(init?.headers);
+  const bodyText = toBodyText(init?.body);
+  const options: HttpRequestOptions | HttpsRequestOptions = {
+    headers,
+    method,
+    path: `${url.pathname}${url.search}`,
+  };
+
+  if (url.protocol === "https:") {
+    return {
+      bodyText,
+      options: {
+        ...options,
+        ...INSECURE_TLS_REQUEST_OPTIONS,
+      },
+      protocol: "https:",
+      url,
+    };
+  }
+
+  if (url.protocol !== "http:") {
+    throw new TypeError(`QrCodeAuth HTTP transport only supports http: and https: URLs, got ${url.protocol}`);
+  }
+
+  return {
+    bodyText,
+    options,
+    protocol: "http:",
+    url,
+  };
+}
+
+const defaultNodeRequestTransport: NodeRequestTransport = {
+  http(input) {
+    return executeNodeRequest(input, httpRequest);
+  },
+  https(input) {
+    return executeNodeRequest(input, httpsRequest);
+  },
+};
+
+async function executeNodeRequest(
+  input: NodeRequestInvocation,
+  requestImpl: typeof httpRequest | typeof httpsRequest,
+): Promise<Response> {
+  return await new Promise((resolve, reject) => {
+    const request = requestImpl(input.url, input.options, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const body = Buffer.concat(chunks);
+        resolve(new Response(body, {
+          headers: toResponseHeaders(response.headers),
+          status: response.statusCode ?? 500,
+          statusText: response.statusMessage ?? "",
+        }));
+      });
+      response.on("error", reject);
+    });
+
+    request.on("error", reject);
+    if (input.bodyText) {
+      request.write(input.bodyText);
+    }
+    request.end();
+  });
+}
+
 async function parseJsonBody(response: Response): Promise<AuthResponseBody | null> {
   try {
     return (await response.json()) as AuthResponseBody;
@@ -231,6 +340,41 @@ async function parseJsonBody(response: Response): Promise<AuthResponseBody | nul
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+}
+
+function toNodeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+
+  return Object.fromEntries(new Headers(headers).entries());
+}
+
+function toResponseHeaders(headers: Record<string, string | string[] | undefined>): Headers {
+  const normalized = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") {
+      normalized.append(key, value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        normalized.append(key, item);
+      }
+    }
+  }
+  return normalized;
+}
+
+function toBodyText(body: BodyInit | null | undefined): string | undefined {
+  if (body === undefined || body === null) {
+    return undefined;
+  }
+  if (typeof body === "string") {
+    return body;
+  }
+
+  throw new TypeError("QrCodeAuth HTTP transport only supports string request bodies.");
 }
 
 function readCode(body: AuthResponseBody): string {
