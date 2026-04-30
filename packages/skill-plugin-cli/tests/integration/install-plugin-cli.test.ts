@@ -340,7 +340,8 @@ test("direct use case succeeds with opencode cleanup warning when legacy path ca
   const originalEnv = { ...process.env };
   try {
     const configDir = join(dir, ".config", "opencode");
-    await mkdir(join(configDir, "plugins", "message-bridge.js"), { recursive: true });
+    await mkdir(join(configDir, "plugins", "message-bridge.plugin.js"), { recursive: true });
+    await writeFile(join(configDir, "plugins", "message-bridge.plugin.js", "nested.txt"), "legacy", "utf8");
     await writeFile(
       join(configDir, "opencode.json"),
       JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),

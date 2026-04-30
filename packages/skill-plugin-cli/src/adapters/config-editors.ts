@@ -105,7 +105,7 @@ function readPluginItems(content: string) {
   if (!match) {
     return null;
   }
-  const items = [...match[2].matchAll(/"([^"]+)"/gu)].map((entry) => entry[1]);
+  const items = [...match[2].matchAll(/"((?:\\.|[^"])*)"/gu)].map((entry) => JSON.parse(`"${entry[1]}"`) as string);
   return {
     start: match[1],
     items,
@@ -114,7 +114,7 @@ function readPluginItems(content: string) {
 }
 
 function serializePluginItems(items: string[]) {
-  return items.length > 0 ? items.map((item) => `"${item}"`).join(", ") : "";
+  return items.length > 0 ? items.map((item) => `"${escapeJsonString(item)}"`).join(", ") : "";
 }
 
 /**
@@ -131,7 +131,7 @@ export function buildNextOpencodeConfig(
   if (content === null) {
     return `{
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["${pluginSpec}"]
+  "plugin": [${serializePluginItems([pluginSpec])}]
 }
 `;
   }

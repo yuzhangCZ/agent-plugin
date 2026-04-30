@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join, normalize, resolve } from "node:path";
+import { join, normalize, resolve, posix, win32 } from "node:path";
 import { rm } from "node:fs/promises";
 import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
 import type { HostAvailabilityResult, HostConfigureResult, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
@@ -52,7 +52,7 @@ export class OpencodeHostAdapter implements HostAdapter {
       configDir,
       bridgeConfig: await resolvePreferredExistingPath(join(configDir, "message-bridge.jsonc"), join(configDir, "message-bridge.json")),
       opencodeConfig: await resolvePreferredExistingPath(join(configDir, "opencode.jsonc"), join(configDir, "opencode.json")),
-      legacyPluginEntry: join(configDir, "plugins", "message-bridge.js"),
+      legacyPluginEntry: join(configDir, "plugins", "message-bridge.plugin.js"),
     };
   }
 
@@ -63,10 +63,18 @@ export class OpencodeHostAdapter implements HostAdapter {
     return normalize(resolve(cacheRoot, "opencode", "extracted", PLUGIN_NAME));
   }
 
+  private normalizeForHostPathStyle(value: string) {
+    if (/^[A-Za-z]:[\\/]/u.test(value) || value.startsWith("\\\\")) {
+      return win32.normalize(win32.resolve(value));
+    }
+    return posix.normalize(posix.resolve(value));
+  }
+
   private isControlledFallbackPathSpec(value: string) {
-    const normalizedSpec = normalize(resolve(value));
-    const controlledRoot = this.resolveControlledFallbackRoot();
-    return normalizedSpec === controlledRoot || normalizedSpec.startsWith(`${controlledRoot}${process.platform === "win32" ? "\\" : "/"}`);
+    const normalizedSpec = this.normalizeForHostPathStyle(value);
+    const controlledRoot = this.normalizeForHostPathStyle(this.resolveControlledFallbackRoot());
+    const separator = /^[A-Za-z]:[\\/]/u.test(normalizedSpec) || normalizedSpec.startsWith("\\\\") ? "\\" : "/";
+    return normalizedSpec === controlledRoot || normalizedSpec.startsWith(`${controlledRoot}${separator}`);
   }
 
   private async reconcilePluginReference(pluginSpec: string) {
