@@ -100,7 +100,10 @@ export function buildNextBridgeConfigWithoutUrl(content: string | null, input: {
   return next;
 }
 
-function readPluginItems(content: string) {
+/**
+ * 统一解析 OpenCode 配置中的 plugin 数组，并自动还原 JSON 字符串转义后的真实路径值。
+ */
+export function readOpencodePluginItems(content: string) {
   const match = content.match(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su);
   if (!match) {
     return null;
@@ -140,7 +143,7 @@ export function buildNextOpencodeConfig(
     throw new Error("opencode config invalid");
   }
   const nextItems = (() => {
-    const parsed = readPluginItems(content);
+    const parsed = readOpencodePluginItems(content);
     const existingItems = parsed?.items ?? [];
     const preserved = existingItems.filter((value) => {
       if (value === options.controlledNpmSpec) {

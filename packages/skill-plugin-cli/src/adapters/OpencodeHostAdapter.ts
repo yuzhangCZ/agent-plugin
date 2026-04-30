@@ -4,7 +4,7 @@ import { rm } from "node:fs/promises";
 import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
 import type { HostAvailabilityResult, HostConfigureResult, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
-import { buildNextBridgeConfig, buildNextBridgeConfigWithoutUrl, buildNextOpencodeConfig } from "./config-editors.ts";
+import { buildNextBridgeConfig, buildNextBridgeConfigWithoutUrl, buildNextOpencodeConfig, readOpencodePluginItems } from "./config-editors.ts";
 import { readOptionalTextFile, writeFileAtomically } from "../infrastructure/fs-utils.ts";
 
 const PLUGIN_NAME = "@wecode/skill-opencode-plugin";
@@ -143,7 +143,8 @@ export class OpencodeHostAdapter implements HostAdapter {
   async verifyPlugin(_context: InstallContext, artifact: InstalledPluginArtifact) {
     const paths = await this.resolvePaths();
     const content = await readOptionalTextFile(paths.opencodeConfig);
-    if (content !== null && content.includes(`"${artifact.pluginSpec}"`)) {
+    const configuredPluginItems = content ? readOpencodePluginItems(content)?.items ?? [] : [];
+    if (configuredPluginItems.includes(artifact.pluginSpec)) {
       return;
     }
     throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", `未在 ${paths.opencodeConfig} 中确认到插件 ${artifact.pluginSpec}`);

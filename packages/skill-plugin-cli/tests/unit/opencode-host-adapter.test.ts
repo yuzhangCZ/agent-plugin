@@ -75,6 +75,42 @@ test("OpencodeHostAdapter verifyPlugin uses pluginSpec from artifact", async () 
   }
 });
 
+test("OpencodeHostAdapter verifyPlugin accepts windows absolute plugin path from JSON content", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-config-"));
+  try {
+    const configDir = join(dir, "opencode");
+    const fallbackPath = "C:\\Users\\zy\\AppData\\Local\\skill-plugin-cli\\opencode\\extracted\\@wecode\\skill-opencode-plugin\\1.2.3\\package";
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "opencode.json"),
+      JSON.stringify({ plugin: [fallbackPath] }, null, 2),
+      "utf8",
+    );
+
+    const adapter = new OpencodeHostAdapter(createProcessRunner(), createArtifactPort(fallbackPath), { XDG_CONFIG_HOME: dir, HOME: dir });
+    await assert.doesNotReject(async () => {
+      await adapter.verifyPlugin(
+        {
+          command: "install",
+          host: "opencode",
+          installStrategy: "fallback",
+          environment: "prod",
+          registry: "https://npm.example.com",
+          mac: "",
+          channel: "openx",
+        },
+        {
+          installStrategy: "fallback",
+          pluginSpec: fallbackPath,
+          packageName: "@wecode/skill-opencode-plugin",
+        },
+      );
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("OpencodeHostAdapter host-native install reconciles controlled fallback path to npm spec", async () => {
   const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-config-"));
   try {
