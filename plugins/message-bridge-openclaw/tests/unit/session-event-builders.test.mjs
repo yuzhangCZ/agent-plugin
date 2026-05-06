@@ -141,6 +141,7 @@ test("permission and question events use gateway-compatible payload shape", () =
     status: "resolved",
     decision: "allow-once",
     resolvedAt: 501,
+    metadata: { approvalSource: "plugin_preflight" },
     sourceEvent: "exec.approval.resolved",
   });
   const questionAsked = buildQuestionAskedEvent("ses_tool_q", {
@@ -167,6 +168,7 @@ test("permission and question events use gateway-compatible payload shape", () =
   assert.equal(permissionUpdated.properties.status, "resolved");
   assert.equal(permissionUpdated.properties.decision, "allow-once");
   assert.equal(permissionUpdated.properties.resolvedAt, 501);
+  assert.equal(permissionUpdated.properties.metadata.approvalSource, "plugin_preflight");
 
   assert.equal(questionAsked.type, "question.asked");
   assert.equal(questionAsked.properties.id, "question_1");

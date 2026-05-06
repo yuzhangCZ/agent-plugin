@@ -266,6 +266,7 @@ export function buildPermissionUpdatedEvent(
       ...(options.decision !== undefined ? { decision: options.decision } : {}),
       ...(options.resolvedAt !== undefined ? { resolvedAt: options.resolvedAt } : {}),
       ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
+      ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
       ...(options.sourceEvent !== undefined ? { sourceEvent: options.sourceEvent } : {}),
     },
   };

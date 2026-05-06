@@ -1,9 +1,11 @@
 export type ApprovalStatus = "pending" | "resolved" | "expired";
+export type ApprovalSource = "host" | "plugin_preflight";
 
 export interface ApprovalRecord {
   toolSessionId: string;
   permissionId: string;
   status: ApprovalStatus;
+  source?: ApprovalSource;
   welinkSessionId?: string;
   expiresAt?: number;
   resolvedAt?: number;

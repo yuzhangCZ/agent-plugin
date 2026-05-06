@@ -56,6 +56,16 @@
 | 发送 tool_error | `runtime.tool_error.sending` | error | `gatewayMessageId`,`action`,`welinkSessionId`,`toolSessionId`,`error`,`reason` | 发送 `tool_error` 前 |
 | tool_error 跳过 | `runtime.tool_error.skipped_no_connection` | warn | `gatewayMessageId`,`action`,`welinkSessionId`,`toolSessionId` | 无连接，`tool_error` 未实际发出 |
 
+## 4.1 审批兜底（插件预审批）
+
+| 阶段 | 事件名 | 级别 | 关键字段 | 说明 |
+| --- | --- | --- | --- | --- |
+| 风险识别 | `runtime.approval.preflight_detected` | info | `toolSessionId`,`riskReason`,`targetPath`,`approvalSource`,`messagePreview` | 插件识别到高风险文件写入请求 |
+| 使用兜底 | `runtime.approval.host_missing_fallback_used` | warn | `toolSessionId`,`riskReason`,`targetPath`,`approvalSource`,`hostApprovalObserved`,`messagePreview` | 宿主未先发审批事件，插件改走兜底预审批 |
+| 阻断执行 | `runtime.approval.preflight_blocked` | info | `toolSessionId`,`riskReason`,`targetPath`,`approvalSource`,`hostApprovalObserved`,`messagePreview` | 请求被挂起，等待 `permission_reply` |
+| 恢复执行 | `runtime.approval.preflight_resumed` | info | `toolSessionId`,`riskReason`,`targetPath`,`approvalSource`,`hostApprovalObserved`,`decision`,`messagePreview` | 收到允许决策后恢复原始 chat 执行 |
+| 拒绝执行 | `runtime.approval.preflight_rejected` | warn | `toolSessionId`,`riskReason`,`targetPath`,`approvalSource`,`hostApprovalObserved`,`messagePreview` | 收到拒绝决策，请求不会继续执行 |
+
 ## 5. Chat 业务链路（明文）
 
 | 阶段 | 事件名 | 级别 | 关键字段 | 说明 |

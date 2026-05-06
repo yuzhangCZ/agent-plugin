@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
+import path from "node:path";
 import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
 import {
   type OpenClawConfig,
@@ -31,7 +32,7 @@ import {
   type StreamMode,
 } from "./resolveStreamingExecutionPlan.js";
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
-import { ApprovalRegistry } from "./runtime/ApprovalRegistry.js";
+import { ApprovalRegistry, type ApprovalRecord } from "./runtime/ApprovalRegistry.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import {
   RuntimeApprovalPort,
@@ -278,6 +279,83 @@ interface RuntimeReplyApi {
   }) => Promise<void>;
 }
 
+interface PreflightApprovalRisk {
+  action: string;
+  riskReason: string;
+  targetPath?: string;
+  requiresExplicitAuthorization: boolean;
+  messagePreview: string;
+}
+
+interface PendingPreflightApproval {
+  message: Extract<InvokeMessage, { action: "chat" }>;
+  context: UpstreamSendContext;
+  risk: PreflightApprovalRisk;
+  createdAt: number;
+  hostApprovalObserved: boolean;
+}
+
+const WRITE_INTENT_RE =
+  /\b(mkdir|touch|rm|mv|cp|rename|move|delete|remove|write|overwrite|modify|create|make|save)\b|创建|新建|写入|删除|移除|移动|重命名|修改|覆盖/iu;
+const EXPLICIT_AUTH_RE =
+  /需要.*(授权|同意|确认)|经过.*(授权|同意|确认)|先.*(授权|同意|确认)|with(?:out)?\s+my\s+(?:authorization|approval|consent)|ask\s+for\s+my\s+(?:approval|permission)|require\s+my\s+(?:approval|authorization|consent)/iu;
+const SUGGESTED_ACTION_PATTERNS = [
+  { action: "mkdir", pattern: /\bmkdir\b|创建(?:文件)?夹|新建(?:文件)?夹/iu },
+  { action: "touch", pattern: /\btouch\b|创建文件|新建文件/iu },
+  { action: "rm", pattern: /\brm\b|删除|移除/iu },
+  { action: "mv", pattern: /\bmv\b|移动|重命名/iu },
+  { action: "cp", pattern: /\bcp\b|复制/iu },
+  { action: "write", pattern: /\b(write|overwrite|modify|save)\b|写入|覆盖|修改/iu },
+] as const;
+const ABSOLUTE_PATH_RE = /(?:~\/|\/(?:Users|tmp|etc|var|private|opt|Volumes|Applications)\/[^\s"'`，。；：！？]+|\/Users\/[^\s"'`，。；：！？]+)/g;
+
+function normalizePathCandidate(value: string): string {
+  if (value.startsWith("~/")) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+}
+
+function extractTargetPath(text: string): string | undefined {
+  const matches = Array.from(text.matchAll(ABSOLUTE_PATH_RE));
+  if (matches.length === 0) {
+    return undefined;
+  }
+  const raw = matches[0]?.[0]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  return path.resolve(normalizePathCandidate(raw.replace(/[，。；：！？]$/, "")));
+}
+
+function resolveSuggestedAction(text: string): string {
+  for (const candidate of SUGGESTED_ACTION_PATTERNS) {
+    if (candidate.pattern.test(text)) {
+      return candidate.action;
+    }
+  }
+  return "write";
+}
+
+function isPathOutsideWorkspace(targetPath: string, workspaceDir?: string): boolean {
+  if (!workspaceDir) {
+    return true;
+  }
+  const relative = path.relative(path.resolve(workspaceDir), path.resolve(targetPath));
+  return relative.startsWith("..") || path.isAbsolute(relative);
+}
+
+function resolveConfiguredWorkspaceDir(config: OpenClawConfig): string | undefined {
+  const agents = isRecord(config.agents) ? config.agents : undefined;
+  const defaults = isRecord(agents?.defaults) ? agents.defaults : undefined;
+  const workspace = asString(defaults?.workspace);
+  return workspace ? path.resolve(normalizePathCandidate(workspace)) : undefined;
+}
+
 function createSelectedModelState(): SelectedModelState {
   return {
     provider: null,
@@ -331,6 +409,7 @@ export class OpenClawGatewayBridge {
   private readonly questionRegistry = new QuestionRegistry();
   private readonly approvalPort: ApprovalPort;
   private readonly questionReplyPort: QuestionReplyPort;
+  private readonly pendingPreflightApprovals = new Map<string, PendingPreflightApproval>();
   private readonly activeToolSessions = new Map<
     string,
     {
@@ -538,6 +617,7 @@ export class OpenClawGatewayBridge {
     this.activeToolSessions.clear();
     this.activeRunToSessionKey.clear();
     this.approvalRegistry.clearAll();
+    this.pendingPreflightApprovals.clear();
     this.questionRegistry.clearAll();
     this.status.running = false;
     this.status.connected = false;
@@ -643,6 +723,9 @@ export class OpenClawGatewayBridge {
   ): Promise<{ success: boolean; reason?: string }> {
     switch (message.action) {
       case "chat":
+        if (this.maybeBlockChatForPreflight(message, context)) {
+          return { success: true };
+        }
         if (await this.handleChat(message, context)) {
           return { success: true };
         }
@@ -673,6 +756,113 @@ export class OpenClawGatewayBridge {
         }
         return { success: false, reason: "question_reply_failed" };
     }
+  }
+
+  private buildPreflightApprovalRisk(
+    message: Extract<InvokeMessage, { action: "chat" }>,
+  ): PreflightApprovalRisk | null {
+    const text = message.payload.text.trim();
+    if (!text) {
+      return null;
+    }
+
+    const requiresExplicitAuthorization = EXPLICIT_AUTH_RE.test(text);
+    const writeIntent = WRITE_INTENT_RE.test(text);
+    const targetPath = extractTargetPath(text);
+    const workspaceDir = resolveConfiguredWorkspaceDir(this.options.config);
+    const outsideWorkspace = targetPath ? isPathOutsideWorkspace(targetPath, workspaceDir) : false;
+    const touchesRiskyAbsolutePath = Boolean(targetPath && outsideWorkspace);
+
+    if (!requiresExplicitAuthorization && !(writeIntent && touchesRiskyAbsolutePath)) {
+      return null;
+    }
+
+    const riskReason = requiresExplicitAuthorization
+      ? "explicit_authorization_requested"
+      : "absolute_path_write_outside_workspace";
+    return {
+      action: resolveSuggestedAction(text),
+      riskReason,
+      targetPath,
+      requiresExplicitAuthorization,
+      messagePreview: truncateText(text.replace(/\s+/g, " "), 160),
+    };
+  }
+
+  private maybeBlockChatForPreflight(
+    message: Extract<InvokeMessage, { action: "chat" }>,
+    context: UpstreamSendContext,
+  ): boolean {
+    const risk = this.buildPreflightApprovalRisk(message);
+    if (!risk) {
+      return false;
+    }
+
+    const permissionId = `perm_preflight_${randomUUID()}`;
+    const title = "检测到高风险文件写入请求，需先授权";
+    const metadata = {
+      approvalSource: "plugin_preflight",
+      riskReason: risk.riskReason,
+      targetPath: risk.targetPath,
+      suggestedAction: risk.action,
+      messagePreview: risk.messagePreview,
+      hostApprovalObserved: false,
+      requiresExplicitAuthorization: risk.requiresExplicitAuthorization,
+    } satisfies Record<string, unknown>;
+    const record = this.approvalRegistry.upsertPending({
+      toolSessionId: message.payload.toolSessionId,
+      permissionId,
+      welinkSessionId: message.welinkSessionId,
+      title,
+      metadata,
+      source: "plugin_preflight",
+    });
+    this.pendingPreflightApprovals.set(permissionId, {
+      message,
+      context,
+      risk,
+      createdAt: Date.now(),
+      hostApprovalObserved: false,
+    });
+
+    this.options.logger.info("runtime.approval.preflight_detected", {
+      toolSessionId: message.payload.toolSessionId,
+      welinkSessionId: message.welinkSessionId,
+      riskReason: risk.riskReason,
+      targetPath: risk.targetPath,
+      approvalSource: "plugin_preflight",
+      hostApprovalObserved: false,
+      messagePreview: risk.messagePreview,
+    });
+    this.options.logger.warn("runtime.approval.host_missing_fallback_used", {
+      toolSessionId: message.payload.toolSessionId,
+      welinkSessionId: message.welinkSessionId,
+      riskReason: risk.riskReason,
+      targetPath: risk.targetPath,
+      approvalSource: "plugin_preflight",
+      hostApprovalObserved: false,
+      messagePreview: risk.messagePreview,
+    });
+    this.options.logger.info("runtime.approval.preflight_blocked", {
+      toolSessionId: message.payload.toolSessionId,
+      welinkSessionId: message.welinkSessionId,
+      riskReason: risk.riskReason,
+      targetPath: risk.targetPath,
+      approvalSource: "plugin_preflight",
+      hostApprovalObserved: false,
+      messagePreview: risk.messagePreview,
+    });
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId: message.payload.toolSessionId,
+      event: buildPermissionAskedEvent(message.payload.toolSessionId, permissionId, {
+        title: record.title,
+        metadata: record.metadata,
+        sourceEvent: "plugin.approval.preflight.requested",
+        status: record.status,
+      }),
+    }, context);
+    return true;
   }
 
   private async handleChat(
@@ -1331,6 +1521,7 @@ export class OpenClawGatewayBridge {
     this.markSessionTerminated(record);
     try {
       this.approvalRegistry.clearSession(record.toolSessionId);
+      this.clearPendingPreflightApprovalsForSession(record.toolSessionId);
       this.questionRegistry.clearSession(record.toolSessionId);
       await this.deleteHostSession(record);
       this.clearActiveToolSession(record.sessionKey);
@@ -1368,6 +1559,7 @@ export class OpenClawGatewayBridge {
     this.markSessionTerminated(record);
     try {
       this.approvalRegistry.clearSession(record.toolSessionId);
+      this.clearPendingPreflightApprovalsForSession(record.toolSessionId);
       this.questionRegistry.clearSession(record.toolSessionId);
       this.clearActiveToolSession(record.sessionKey);
       this.sendToolDone({
@@ -1438,6 +1630,10 @@ export class OpenClawGatewayBridge {
           ? "allow-always"
           : "deny";
 
+    if (record.source === "plugin_preflight") {
+      return await this.handlePluginPreflightPermissionReply(message, context, record, decision);
+    }
+
     try {
       await this.approvalPort.resolve({
         permissionId: message.payload.permissionId,
@@ -1453,6 +1649,77 @@ export class OpenClawGatewayBridge {
       }, context);
       return false;
     }
+  }
+
+  private async handlePluginPreflightPermissionReply(
+    message: Extract<InvokeMessage, { action: "permission_reply" }>,
+    context: UpstreamSendContext,
+    record: ApprovalRecord,
+    decision: "allow-once" | "allow-always" | "deny",
+  ): Promise<boolean> {
+    const pending = this.pendingPreflightApprovals.get(message.payload.permissionId);
+    if (!pending) {
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_not_found",
+      }, context);
+      return false;
+    }
+
+    const resolved = this.approvalRegistry.markResolved(message.payload.permissionId);
+    this.sendToolEvent({
+      type: "tool_event",
+      toolSessionId: message.payload.toolSessionId,
+      event: buildPermissionUpdatedEvent(message.payload.toolSessionId, message.payload.permissionId, {
+        status: resolved?.status ?? "resolved",
+        decision,
+        resolvedAt: resolved?.resolvedAt,
+        metadata: {
+          approvalSource: "plugin_preflight",
+          riskReason: pending.risk.riskReason,
+          targetPath: pending.risk.targetPath,
+          suggestedAction: pending.risk.action,
+          hostApprovalObserved: pending.hostApprovalObserved,
+        },
+        sourceEvent: "plugin.approval.preflight.resolved",
+      }),
+    }, pending.context);
+
+    if (decision === "deny") {
+      this.options.logger.warn("runtime.approval.preflight_rejected", {
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        riskReason: pending.risk.riskReason,
+        targetPath: pending.risk.targetPath,
+        approvalSource: "plugin_preflight",
+        hostApprovalObserved: pending.hostApprovalObserved,
+        messagePreview: pending.risk.messagePreview,
+      });
+      this.clearPendingPreflightApproval(message.payload.permissionId);
+      this.sendToolError({
+        type: "tool_error",
+        toolSessionId: message.payload.toolSessionId,
+        welinkSessionId: message.welinkSessionId,
+        error: "permission_rejected",
+        reason: TOOL_ERROR_REASON.PERMISSION_DENIED,
+      }, context);
+      return true;
+    }
+
+    this.options.logger.info("runtime.approval.preflight_resumed", {
+      toolSessionId: message.payload.toolSessionId,
+      welinkSessionId: message.welinkSessionId,
+      riskReason: pending.risk.riskReason,
+      targetPath: pending.risk.targetPath,
+      approvalSource: "plugin_preflight",
+      hostApprovalObserved: pending.hostApprovalObserved,
+      messagePreview: pending.risk.messagePreview,
+      decision,
+    });
+    this.clearPendingPreflightApproval(message.payload.permissionId);
+    return await this.handleChat(pending.message, pending.context);
   }
 
   private async handleQuestionReply(
@@ -1897,6 +2164,18 @@ export class OpenClawGatewayBridge {
     this.activeToolSessions.delete(sessionKey);
   }
 
+  private clearPendingPreflightApproval(permissionId: string): void {
+    this.pendingPreflightApprovals.delete(permissionId);
+  }
+
+  private clearPendingPreflightApprovalsForSession(toolSessionId: string): void {
+    for (const [permissionId, pending] of this.pendingPreflightApprovals.entries()) {
+      if (pending.message.payload.toolSessionId === toolSessionId) {
+        this.pendingPreflightApprovals.delete(permissionId);
+      }
+    }
+  }
+
   private isSessionTerminated(record: { toolSessionId: string; sessionKey: string }): boolean {
     return (
       this.terminatedToolSessionIds.has(record.toolSessionId) ||
@@ -1951,7 +2230,13 @@ export class OpenClawGatewayBridge {
         messageId: asString(payload.messageId),
         metadata: isRecord(payload.metadata) ? payload.metadata : undefined,
         expiresAt: typeof payload.expiresAt === "number" ? payload.expiresAt : undefined,
+        source: "host",
       });
+      for (const pending of this.pendingPreflightApprovals.values()) {
+        if (pending.message.payload.toolSessionId === toolSessionId) {
+          pending.hostApprovalObserved = true;
+        }
+      }
       this.sendToolEvent({
         type: "tool_event",
         toolSessionId,

@@ -37,6 +37,7 @@ export interface ToolDoneMessage {
 
 export const TOOL_ERROR_REASON = {
   SESSION_NOT_FOUND: "session_not_found",
+  PERMISSION_DENIED: "permission_denied",
 } as const;
 
 export type ToolErrorReason = (typeof TOOL_ERROR_REASON)[keyof typeof TOOL_ERROR_REASON];

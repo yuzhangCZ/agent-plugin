@@ -31,11 +31,17 @@ class FakeGatewayConnection extends EventEmitter {
   }
 }
 
-function createLogger() {
+function createLogger(logs = []) {
   return {
-    info() {},
-    warn() {},
-    error() {},
+    info(message, meta) {
+      logs.push({ level: "info", message, meta });
+    },
+    warn(message, meta) {
+      logs.push({ level: "warn", message, meta });
+    },
+    error(message, meta) {
+      logs.push({ level: "error", message, meta });
+    },
   };
 }
 
@@ -183,17 +189,18 @@ function createRuntimeEventBus() {
   };
 }
 
-function createBridge({ runtime, connection = new FakeGatewayConnection(), setStatus = () => {}, config = {} } = {}) {
+function createBridge({ runtime, connection = new FakeGatewayConnection(), setStatus = () => {}, config = {}, logs } = {}) {
+  const logger = createLogger(logs);
   const bridge = new OpenClawGatewayBridge({
     account: createAccount(),
     config,
-    logger: createLogger(),
+    logger,
     runtime: runtime ?? createFallbackRuntime(),
     setStatus,
     connectionFactory: () => connection,
   });
 
-  return { bridge, connection };
+  return { bridge, connection, logger };
 }
 
 function getToolEvents(connection) {
@@ -391,6 +398,209 @@ test("permission_reply resolves through exec.approval.resolve after requested ev
     },
   ]);
   assert.equal(connection.sent.some(({ message }) => message.type === "tool_error"), false);
+});
+
+test("chat requesting workspace-external mkdir emits plugin preflight permission.asked without executing", async () => {
+  const runs = [];
+  const logs = [];
+  const runtime = createFallbackRuntime({
+    subagent: {
+      async run(params) {
+        runs.push(params);
+        return { runId: "run_preflight_1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "done" }],
+        };
+      },
+      async deleteSession() {},
+    },
+  });
+  const { bridge, connection } = createBridge({ runtime, logs });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_preflight_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_preflight_1",
+      text: "帮我在 /Users/limuyan 目录下创建文件夹 A01-01，需要经过我的授权",
+    },
+  });
+
+  assert.equal(runs.length, 0);
+  const asked = connection.sent.find(({ message }) => {
+    return message.type === "tool_event" && message.event.type === "permission.asked";
+  });
+  assert.ok(asked);
+  assert.equal(asked.message.event.properties.metadata.approvalSource, "plugin_preflight");
+  assert.equal(asked.message.event.properties.metadata.riskReason, "explicit_authorization_requested");
+  assert.equal(
+    logs.some((entry) => entry.message === "runtime.approval.preflight_blocked" && entry.meta.toolSessionId === "ses_tool_preflight_1"),
+    true,
+  );
+});
+
+test("plugin preflight permission_reply once resumes blocked chat exactly once", async () => {
+  const runs = [];
+  const runtime = createFallbackRuntime({
+    subagent: {
+      async run(params) {
+        runs.push(params);
+        return { runId: "run_preflight_resume_1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "approved result" }],
+        };
+      },
+      async deleteSession() {},
+    },
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_preflight_resume_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_preflight_resume_1",
+      text: "请在 /Users/limuyan 下 mkdir A01-01，需要经过我的授权",
+    },
+  });
+
+  const asked = connection.sent.find(({ message }) => {
+    return message.type === "tool_event" && message.event.type === "permission.asked";
+  });
+  assert.ok(asked);
+  const permissionId = asked.message.event.properties.id;
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_preflight_resume_1",
+    action: "permission_reply",
+    payload: {
+      toolSessionId: "ses_tool_preflight_resume_1",
+      permissionId,
+      response: "once",
+    },
+  });
+
+  assert.equal(runs.length, 1);
+  const updated = connection.sent.find(({ message }) => {
+    return message.type === "tool_event"
+      && message.event.type === "permission.updated"
+      && message.event.properties.id === permissionId;
+  });
+  assert.ok(updated);
+  assert.equal(updated.message.event.properties.decision, "allow-once");
+  assert.equal(updated.message.event.properties.metadata.approvalSource, "plugin_preflight");
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_done" && message.toolSessionId === "ses_tool_preflight_resume_1"), true);
+});
+
+test("plugin preflight reject returns tool_error and never executes blocked chat", async () => {
+  const runs = [];
+  const runtime = createFallbackRuntime({
+    subagent: {
+      async run(params) {
+        runs.push(params);
+        return { runId: "run_preflight_reject_1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "should not happen" }],
+        };
+      },
+      async deleteSession() {},
+    },
+  });
+  const { bridge, connection } = createBridge({ runtime });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_preflight_reject_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_preflight_reject_1",
+      text: "帮我在 /Users/limuyan 下创建文件夹 A01-01，需要经过我的授权",
+    },
+  });
+
+  const asked = connection.sent.find(({ message }) => {
+    return message.type === "tool_event" && message.event.type === "permission.asked";
+  });
+  assert.ok(asked);
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_preflight_reject_1",
+    action: "permission_reply",
+    payload: {
+      toolSessionId: "ses_tool_preflight_reject_1",
+      permissionId: asked.message.event.properties.id,
+      response: "reject",
+    },
+  });
+
+  assert.equal(runs.length, 0);
+  const rejected = connection.sent.find(({ message }) => {
+    return message.type === "tool_error" && message.error === "permission_rejected";
+  });
+  assert.ok(rejected);
+});
+
+test("workspace-local read-only chat does not trigger plugin preflight", async () => {
+  const runs = [];
+  const runtime = createFallbackRuntime({
+    subagent: {
+      async run(params) {
+        runs.push(params);
+        return { runId: "run_read_only_1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "read-only result" }],
+        };
+      },
+      async deleteSession() {},
+    },
+  });
+  const { bridge, connection } = createBridge({
+    runtime,
+    config: {
+      agents: {
+        defaults: {
+          workspace: "/Users/limuyan/.openclaw/workspace-dev",
+        },
+      },
+    },
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_read_only_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_read_only_1",
+      text: "请帮我读取 /Users/limuyan/.openclaw/workspace-dev/README.md 的内容",
+    },
+  });
+
+  assert.equal(runs.length, 1);
+  assert.equal(connection.sent.some(({ message }) => message.type === "tool_event" && message.event.type === "permission.asked"), false);
 });
 
 test("question.asked event is projected and question_reply uses host adapter when available", async () => {
