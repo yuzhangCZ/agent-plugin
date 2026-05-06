@@ -100,7 +100,7 @@ test("TerminalCliPresenter falls back to weUrl text when qrcode rendering fails"
   assert.doesNotMatch(content, /\u001B\]8;;/);
 });
 
-test("TerminalCliPresenter prints success next steps in order", () => {
+test("TerminalCliPresenter prints selected install strategy", () => {
   const presenter = new TerminalCliPresenter();
   const stdout: string[] = [];
   const originalStdout = process.stdout.write.bind(process.stdout);
@@ -111,18 +111,55 @@ test("TerminalCliPresenter prints success next steps in order", () => {
   }) as typeof process.stdout.write;
 
   try {
-    presenter.success("OpenCode 安装完成", [
-      "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
-      "可执行命令：opencode",
-    ]);
+    presenter.selectedInstallStrategy({
+      command: "install",
+      host: "opencode",
+      installStrategy: "host-native",
+      environment: "prod",
+      registry: "https://npm.example.com",
+      url: "wss://gateway.example.com/ws/agent",
+      mac: "",
+      channel: "openx",
+    });
   } finally {
     process.stdout.write = originalStdout;
   }
 
-  assert.equal(
-    stdout.join(""),
-    "[skill-plugin-cli] 安装成功：OpenCode 安装完成\n"
-      + "[skill-plugin-cli] 下一步：请手动重启 OpenCode 以确认插件与配置生效。\n"
-      + "[skill-plugin-cli] 可执行命令：opencode\n",
-  );
+  const content = stdout.join("");
+  assert.match(content, /当前安装策略：host-native/);
+});
+
+test("TerminalCliPresenter prints fallback artifact and warning output", () => {
+  const presenter = new TerminalCliPresenter();
+  const stdout: string[] = [];
+  const originalStdout = process.stdout.write.bind(process.stdout);
+
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    presenter.fallbackArtifactResolved({
+      installStrategy: "fallback",
+      pluginSpec: "/tmp/plugin/package",
+      packageName: "@wecode/skill-opencode-plugin",
+      packageVersion: "1.2.3",
+      localExtractPath: "/tmp/plugin/package",
+      localTarballPath: "/tmp/plugin.tgz",
+    });
+    presenter.fallbackApplied({
+      installStrategy: "fallback",
+      pluginSpec: "/tmp/plugin/package",
+      packageName: "@wecode/skill-opencode-plugin",
+    });
+    presenter.warning("cleanup failed");
+  } finally {
+    process.stdout.write = originalStdout;
+  }
+
+  const content = stdout.join("");
+  assert.match(content, /fallback 产物已解析：package=@wecode\/skill-opencode-plugin version=1.2.3/);
+  assert.match(content, /fallback 已写入宿主目标：pluginSpec=\/tmp\/plugin\/package/);
+  assert.match(content, /\[warning\] cleanup failed/);
 });

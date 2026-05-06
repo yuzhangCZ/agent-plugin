@@ -21,7 +21,7 @@ function ensureHooks() {
       }
       if (specifier === "openclaw/plugin-sdk/core") {
         return {
-          url: "data:text/javascript,export const deleteAccountFromConfigSection = ({ cfg }) => cfg; export const setAccountEnabledInConfigSection = ({ cfg }) => cfg;",
+          url: "data:text/javascript,export const setAccountEnabledInConfigSection = ({ cfg }) => cfg;",
           shortCircuit: true,
         };
       }
@@ -226,4 +226,55 @@ test("applyMessageBridgeSetupConfig does not materialize default gateway url whe
   });
 
   assert.equal("url" in (nextCfg.channels["message-bridge"].gateway ?? {}), false);
+});
+
+test("deleteMessageBridgeAccount removes message bridge channel section for default account", async () => {
+  const { deleteMessageBridgeAccount } = await loadConfigModule({
+    cacheKey: "delete-default-channel-section",
+  });
+  const cfg = {
+    channels: {
+      "message-bridge": {
+        enabled: true,
+        gateway: {
+          url: "wss://configured.example/ws/agent",
+        },
+        auth: {
+          ak: "ak-1",
+          sk: "sk-1",
+        },
+      },
+      slack: {
+        enabled: true,
+      },
+    },
+  };
+
+  const nextCfg = deleteMessageBridgeAccount({
+    cfg,
+    accountId: "default",
+  });
+
+  assert.equal("message-bridge" in nextCfg.channels, false);
+  assert.deepEqual(nextCfg.channels.slack, { enabled: true });
+});
+
+test("deleteMessageBridgeAccount is idempotent when channel section is already missing", async () => {
+  const { deleteMessageBridgeAccount } = await loadConfigModule({
+    cacheKey: "delete-missing-channel-section",
+  });
+  const cfg = {
+    channels: {
+      slack: {
+        enabled: true,
+      },
+    },
+  };
+
+  const nextCfg = deleteMessageBridgeAccount({
+    cfg,
+    accountId: "default",
+  });
+
+  assert.deepEqual(nextCfg, cfg);
 });
