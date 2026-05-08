@@ -7,6 +7,7 @@ export interface QrCodeDisplayData {
 }
 
 export interface QrCodeAuthServiceError {
+  code?: string;
   httpStatus?: number;
   businessCode?: string;
   error?: string;
@@ -54,6 +55,11 @@ export interface QrCodeAuthRunInput {
   environment?: QrCodeAuthEnvironment;
   channel: string;
   mac: string;
+  policy?: {
+    refreshOnExpired?: boolean;
+    maxRefreshCount?: number;
+    pollIntervalMs?: number;
+  };
   onSnapshot: (snapshot: QrCodeAuthSnapshot) => void;
 }
 

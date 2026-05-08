@@ -1,5 +1,7 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostMetadata, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
 
 const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
@@ -28,8 +30,18 @@ function assertVersionRange(versionText: string) {
   }
   const lower = parseVersion(MIN_SUPPORTED_VERSION);
   if (!lower || compareVersion(parsed, lower) < 0) {
-    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `当前 OpenClaw 版本 ${versionText} 不满足 >=${MIN_SUPPORTED_VERSION}`);
+    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `当前 OpenClaw 版本 ${versionText} 不满足 >= ${MIN_SUPPORTED_VERSION}`);
   }
+}
+
+function resolveOpenClawPrimaryConfigPath(env = process.env) {
+  if (env.OPENCLAW_CONFIG?.trim()) {
+    return env.OPENCLAW_CONFIG.trim();
+  }
+  if (process.platform === "win32") {
+    return join(env.USERPROFILE || homedir(), ".openclaw", "openclaw.json");
+  }
+  return join(env.HOME || homedir(), ".openclaw", "openclaw.json");
 }
 
 export class OpenClawHostAdapter implements HostAdapter {
@@ -41,6 +53,15 @@ export class OpenClawHostAdapter implements HostAdapter {
   constructor(processRunner: ProcessRunner, pluginArtifactPort: PluginArtifactPort) {
     this.processRunner = processRunner;
     this.pluginArtifactPort = pluginArtifactPort;
+  }
+
+  private buildMetadata(): HostMetadata {
+    return {
+      host: "openclaw",
+      hostDisplayName: "openclaw",
+      packageName: PACKAGE_NAME,
+      primaryConfigPath: resolveOpenClawPrimaryConfigPath(),
+    };
   }
 
   resolveDefaultUrl() {
@@ -61,22 +82,35 @@ export class OpenClawHostAdapter implements HostAdapter {
       throw new InstallCliError("OPENCLAW_NOT_FOUND", (result.stderr || result.stdout || "未检测到 openclaw 命令。").trim());
     }
     const version = (result.stdout || result.stderr).trim();
-    assertVersionRange(version);
+    const existingPluginProbe = await this.queryInstalledPlugin();
     return {
-      hostLabel: "OpenClaw",
-      detail: `openclaw 可用，版本 ${version}`,
+      metadata: this.buildMetadata(),
+      version,
+      versionSupported: (() => {
+        try {
+          assertVersionRange(version);
+          return true;
+        } catch (error) {
+          if (error instanceof InstallCliError && error.code === "OPENCLAW_VERSION_UNSUPPORTED") {
+            return false;
+          }
+          throw error;
+        }
+      })(),
+      minimumRequiredVersion: MIN_SUPPORTED_VERSION,
+      existingPluginDetected: existingPluginProbe.exitCode === 0,
     };
   }
 
-  async installPlugin(context: InstallContext, presenter: { info(message: string): void }): Promise<InstalledPluginArtifact> {
+  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
     const probe = await this.queryInstalledPlugin();
     if (probe.exitCode === 0) {
-      presenter.info("检测到已安装 OpenClaw 插件，正在卸载后重装。");
-      const uninstall = await this.processRunner.spawn("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"], { stdio: "inherit" });
+      const uninstall = await this.processRunner.spawn("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"]);
       if (uninstall.exitCode !== 0) {
         throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins uninstall ${PLUGIN_ID} --force 失败，退出码 ${uninstall.exitCode}`);
       }
     }
+
     if (context.installStrategy === "fallback") {
       const artifact = await this.pluginArtifactPort.fetchArtifact({
         host: this.host,
@@ -84,13 +118,14 @@ export class OpenClawHostAdapter implements HostAdapter {
         packageName: PACKAGE_NAME,
         registry: context.registry,
       });
-      const result = await this.processRunner.spawn("openclaw", ["plugins", "install", artifact.localTarballPath!], { stdio: "inherit" });
+      const result = await this.processRunner.spawn("openclaw", ["plugins", "install", artifact.localTarballPath!]);
       if (result.exitCode !== 0) {
         throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${artifact.localTarballPath} 失败，退出码 ${result.exitCode}`);
       }
       return artifact;
     }
-    const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME], { stdio: "inherit" });
+
+    const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME]);
     if (result.exitCode !== 0) {
       throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${PACKAGE_NAME} 失败，退出码 ${result.exitCode}`);
     }
@@ -122,22 +157,14 @@ export class OpenClawHostAdapter implements HostAdapter {
     if (context.url) {
       args.push("--url", context.url);
     }
-    args.push(
-      "--token",
-      credentials.ak,
-      "--password",
-      credentials.sk,
-    );
-    const result = await this.processRunner.spawn(
-      "openclaw",
-      args,
-      { stdio: "inherit" },
-    );
+    args.push("--token", credentials.ak, "--password", credentials.sk);
+    const result = await this.processRunner.spawn("openclaw", args);
     if (result.exitCode !== 0) {
       throw new InstallCliError("HOST_CONFIGURE_FAILED", `openclaw channels add 失败，退出码 ${result.exitCode}`);
     }
     return {
-      detail: "已完成 Message Bridge channel 接入。",
+      primaryConfigPath: this.buildMetadata().primaryConfigPath,
+      additionalConfigPaths: [],
     };
   }
 
@@ -147,11 +174,12 @@ export class OpenClawHostAdapter implements HostAdapter {
       throw new InstallCliError("HOST_AVAILABILITY_FAILED", "OpenClaw 进程探测失败。");
     }
     return {
-      detail: "已完成 OpenClaw 可执行性确认。",
-      nextSteps: [
-        "下一步：请手动重启 OpenClaw gateway，并通过实际消息链路确认 channel 生效。",
-        "可执行命令：openclaw gateway restart",
-      ],
+      nextAction: {
+        kind: "restart_gateway",
+        manual: true,
+        effect: "gateway_config_effective",
+        command: "openclaw gateway restart",
+      },
     };
   }
 }

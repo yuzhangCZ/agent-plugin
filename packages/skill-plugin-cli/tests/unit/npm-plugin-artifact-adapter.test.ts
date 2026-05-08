@@ -48,7 +48,7 @@ class ScenarioProcessRunner implements ProcessRunner {
   }
 
   async spawn() {
-    return { exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
   }
 
   async spawnDetached() {
