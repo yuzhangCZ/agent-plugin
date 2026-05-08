@@ -4,6 +4,8 @@ import type {
   HostConfigureResult,
   HostPreflightResult,
   InstallContext,
+  InstalledPluginArtifact,
+  InstallHost,
   PresenterFailure,
 } from "./types.ts";
 import type { InstallStageKey } from "./stages.ts";
@@ -45,6 +47,18 @@ export interface RegistryConfigAdapter {
   ensureRegistry(registry: string): Promise<{ path: string; changed: boolean }>;
 }
 
+/**
+ * 统一发布包获取端口，负责 fallback 所需的取包、缓存与完整性校验。
+ */
+export interface PluginArtifactPort {
+  fetchArtifact(input: {
+    host: InstallHost;
+    installStrategy: InstallContext["installStrategy"];
+    packageName: string;
+    registry: string;
+  }): Promise<InstalledPluginArtifact>;
+}
+
 export interface MacAddressResolver {
   resolve(): string;
 }
@@ -54,8 +68,9 @@ export interface HostAdapter {
   readonly packageName: string;
   resolveDefaultUrl(): string;
   preflight(context: InstallContext): Promise<HostPreflightResult>;
-  installPlugin(context: InstallContext): Promise<void>;
-  verifyPlugin(context: InstallContext): Promise<void>;
+  installPlugin(context: InstallContext): Promise<InstalledPluginArtifact>;
+  cleanupLegacyArtifacts(context: InstallContext): Promise<{ warnings: string[] }>;
+  verifyPlugin(context: InstallContext, artifact: InstalledPluginArtifact): Promise<void>;
   configureHost(context: InstallContext, credentials: { ak: string; sk: string }): Promise<HostConfigureResult>;
   confirmAvailability(context: InstallContext): Promise<HostAvailabilityResult>;
 }
@@ -79,6 +94,18 @@ export interface Presenter {
     status: "started" | "succeeded" | "failed";
     packageName?: string;
     verboseDetail?: string;
+  }): void;
+  installStrategyResolved(input: {
+    strategy: InstallContext["installStrategy"];
+  }): void;
+  fallbackArtifactResolved(input: {
+    artifact: InstalledPluginArtifact;
+  }): void;
+  fallbackApplied(input: {
+    artifact: InstalledPluginArtifact;
+  }): void;
+  warningRaised(input: {
+    message: string;
   }): void;
   commandBoundary(input: {
     phase: "started" | "finished";

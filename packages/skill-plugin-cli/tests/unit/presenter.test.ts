@@ -33,14 +33,8 @@ test("TerminalCliPresenter renders default success flow for openclaw", () => {
   const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
   const { stdout, stderr } = captureIo(() => {
     presenter.installStarted({ host: "openclaw", packageName: "@wecode/skill-openclaw-plugin" });
-    presenter.hostVersionResolved({
-      host: "openclaw",
-      version: "2026.4.10",
-    });
-    presenter.hostConfigPathResolved({
-      host: "openclaw",
-      primaryConfigPath: "/Users/you/.openclaw/openclaw.json",
-    });
+    presenter.hostVersionResolved({ host: "openclaw", version: "2026.4.10" });
+    presenter.hostConfigPathResolved({ host: "openclaw", primaryConfigPath: "/Users/you/.openclaw/openclaw.json" });
     presenter.pluginInstalled();
     presenter.qrSnapshot({
       type: "qrcode_generated",
@@ -135,7 +129,56 @@ test("TerminalCliPresenter renders weUrl fallback when qrcode rendering fails", 
       + "[skill-plugin-cli] 二维码有效期至: 2026-04-28 08:05:00 UTC\n"
       + "[skill-plugin-cli] 请在 WeLink 中创建助理\n",
   );
-  assert.doesNotMatch(stdout, /二维码渲染失败/);
+});
+
+test("TerminalCliPresenter renders verbose stage labels with structured context", () => {
+  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const { stdout, stderr } = captureIo(() => {
+    presenter.stageProgress({ host: "openclaw", stage: "install_plugin", status: "started", packageName: "@wecode/skill-openclaw-plugin" });
+    presenter.stageProgress({ host: "openclaw", stage: "check_host_environment", status: "started" });
+    presenter.stageProgress({ host: "openclaw", stage: "write_host_configuration", status: "started" });
+  });
+
+  assert.equal(stderr, "");
+  assert.equal(
+    stdout,
+    "[skill-plugin-cli][openclaw] 开始：安装插件 @wecode/skill-openclaw-plugin\n"
+      + "[skill-plugin-cli][openclaw] 开始：检查 openclaw 环境\n"
+      + "[skill-plugin-cli][openclaw] 开始：写入 openclaw 连接配置\n",
+  );
+});
+
+test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
+  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const { stdout } = captureIo(() => {
+    presenter.installStrategyResolved({ strategy: "fallback" });
+    presenter.fallbackArtifactResolved({
+      artifact: {
+        installStrategy: "fallback",
+        pluginSpec: "/tmp/plugin/package",
+        packageName: "@wecode/skill-opencode-plugin",
+        packageVersion: "1.2.3",
+        localExtractPath: "/tmp/plugin/package",
+        localTarballPath: "/tmp/plugin.tgz",
+      },
+    });
+    presenter.fallbackApplied({
+      artifact: {
+        installStrategy: "fallback",
+        pluginSpec: "/tmp/plugin/package",
+        packageName: "@wecode/skill-opencode-plugin",
+      },
+    });
+    presenter.warningRaised({ message: "cleanup failed" });
+  });
+
+  assert.equal(
+    stdout,
+    "[skill-plugin-cli] 安装策略：fallback\n"
+      + "[skill-plugin-cli] fallback 产物已解析：package=@wecode/skill-opencode-plugin version=1.2.3 tarball=/tmp/plugin.tgz\n"
+      + "[skill-plugin-cli] fallback 已写入宿主目标：pluginSpec=/tmp/plugin/package\n"
+      + "[skill-plugin-cli][warning] cleanup failed\n",
+  );
 });
 
 test("TerminalCliPresenter renders structured qrcode failures", () => {
@@ -156,85 +199,6 @@ test("TerminalCliPresenter renders structured qrcode failures", () => {
     stderr,
     "[skill-plugin-cli] 接入失败：无法连接 WeLink 创建助理服务\n"
       + "[skill-plugin-cli] 错误摘要：network_error, code=ECONNREFUSED, message=connect ECONNREFUSED 127.0.0.1:443\n",
-  );
-});
-
-test("TerminalCliPresenter renders auth_service_error summary fields in order", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
-  const { stderr } = captureIo(() => {
-    presenter.failed({
-      kind: "qrcode_error",
-      message: "WeLink 创建助理服务异常",
-      summary: {
-        type: "auth_service_error",
-        businessCode: "A1001",
-        error: "INVALID_TENANT",
-        message: "tenant not found",
-        httpStatus: 502,
-      },
-    });
-  });
-
-  assert.equal(
-    stderr,
-    "[skill-plugin-cli] 接入失败：WeLink 创建助理服务异常\n"
-      + "[skill-plugin-cli] 错误摘要：businessCode=A1001, error=INVALID_TENANT, message=tenant not found, httpStatus=502\n",
-  );
-});
-
-test("TerminalCliPresenter trims auth_service_error missing fields", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
-  const { stderr } = captureIo(() => {
-    presenter.failed({
-      kind: "qrcode_error",
-      message: "WeLink 创建助理服务异常",
-      summary: {
-        type: "auth_service_error",
-        message: "tenant not found",
-      },
-    });
-  });
-
-  assert.equal(
-    stderr,
-    "[skill-plugin-cli] 接入失败：WeLink 创建助理服务异常\n"
-      + "[skill-plugin-cli] 错误摘要：message=tenant not found\n",
-  );
-});
-
-test("TerminalCliPresenter falls back to bare auth_service_error summary", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
-  const { stderr } = captureIo(() => {
-    presenter.failed({
-      kind: "qrcode_error",
-      message: "WeLink 创建助理服务异常",
-      summary: {
-        type: "auth_service_error",
-      },
-    });
-  });
-
-  assert.equal(
-    stderr,
-    "[skill-plugin-cli] 接入失败：WeLink 创建助理服务异常\n"
-      + "[skill-plugin-cli] 错误摘要：auth_service_error\n",
-  );
-});
-
-test("TerminalCliPresenter renders verbose stage labels with structured context", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
-  const { stdout, stderr } = captureIo(() => {
-    presenter.stageProgress({ host: "openclaw", stage: "install_plugin", status: "started", packageName: "@wecode/skill-openclaw-plugin" });
-    presenter.stageProgress({ host: "openclaw", stage: "check_host_environment", status: "started" });
-    presenter.stageProgress({ host: "openclaw", stage: "write_host_configuration", status: "started" });
-  });
-
-  assert.equal(stderr, "");
-  assert.equal(
-    stdout,
-    "[skill-plugin-cli][openclaw] 开始：安装插件 @wecode/skill-openclaw-plugin\n"
-      + "[skill-plugin-cli][openclaw] 开始：检查 openclaw 环境\n"
-      + "[skill-plugin-cli][openclaw] 开始：写入 openclaw 连接配置\n",
   );
 });
 

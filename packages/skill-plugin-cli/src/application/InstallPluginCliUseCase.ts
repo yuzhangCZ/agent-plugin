@@ -1,7 +1,7 @@
 import { InstallCliError, toInstallCliError } from "../domain/errors.ts";
 import type { HostAdapter, Presenter, ProcessTraceSink, QrCodeAuthPort, RegistryConfigAdapter } from "../domain/ports.ts";
 import { INSTALL_STAGE_KEYS, type InstallStageKey } from "../domain/stages.ts";
-import type { CliQrFailureSummary, HostPreflightResult, InstallResult, ParsedInstallCommand, PresenterFailure } from "../domain/types.ts";
+import type { CliQrFailureSummary, InstallResult, ParsedInstallCommand, PresenterFailure } from "../domain/types.ts";
 import { ResolveInstallContextUseCase } from "./ResolveInstallContextUseCase.ts";
 
 function formatCommand(command: string, args: string[]) {
@@ -94,11 +94,11 @@ export class InstallPluginCliUseCase {
   }
 
   async execute(command: ParsedInstallCommand): Promise<InstallResult> {
-    let currentStage: InstallStageKey | undefined = undefined;
+    let currentStage: InstallStageKey | undefined;
     let contextHost = command.host;
-    let preflight: HostPreflightResult | null = null;
-    let nextSteps: string[] = [];
     let currentStageInput: { packageName?: string } = {};
+    const warningMessages: string[] = [];
+
     try {
       this.presenter.installStarted({
         host: command.host,
@@ -106,14 +106,15 @@ export class InstallPluginCliUseCase {
       });
 
       currentStage = INSTALL_STAGE_KEYS[0];
-      currentStageInput = {};
       if (command.verbose) {
         this.emitStage(command.host, currentStage, "started");
       }
+
       const context = await this.resolveContext.execute(command);
       contextHost = context.host;
       const resolutionSummary = [
         `environment=${context.environment}`,
+        `installStrategy=${context.installStrategy}`,
         `registry=${context.registry}`,
         ...(context.url ? [`url=${context.url}`] : []),
       ].join(", ");
@@ -124,11 +125,10 @@ export class InstallPluginCliUseCase {
       const hostAdapter = this.hostAdapters[context.host];
 
       currentStage = INSTALL_STAGE_KEYS[1];
-      currentStageInput = {};
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
-      preflight = await hostAdapter.preflight(context);
+      const preflight = await hostAdapter.preflight(context);
       this.flushCommandTrace(context.verbose);
       if (context.host === "openclaw" && preflight.version) {
         this.presenter.hostVersionResolved({
@@ -156,7 +156,6 @@ export class InstallPluginCliUseCase {
       });
 
       currentStage = INSTALL_STAGE_KEYS[2];
-      currentStageInput = {};
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
@@ -169,9 +168,22 @@ export class InstallPluginCliUseCase {
       currentStageInput = { packageName: hostAdapter.packageName };
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started", currentStageInput);
+        this.presenter.installStrategyResolved({ strategy: context.installStrategy });
       }
-      await hostAdapter.installPlugin(context);
+
+      const artifact = await hostAdapter.installPlugin(context);
       this.flushCommandTrace(context.verbose);
+      if (context.verbose && artifact.installStrategy === "fallback") {
+        this.presenter.fallbackArtifactResolved({ artifact });
+        this.presenter.fallbackApplied({ artifact });
+      }
+
+      const cleanup = await hostAdapter.cleanupLegacyArtifacts(context);
+      for (const warning of cleanup.warnings) {
+        warningMessages.push(warning);
+        this.presenter.warningRaised({ message: warning });
+      }
+
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "succeeded", currentStageInput);
       }
@@ -182,14 +194,13 @@ export class InstallPluginCliUseCase {
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
-      await hostAdapter.verifyPlugin(context);
+      await hostAdapter.verifyPlugin(context, artifact);
       this.flushCommandTrace(context.verbose);
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "succeeded");
       }
 
       currentStage = INSTALL_STAGE_KEYS[5];
-      currentStageInput = {};
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
@@ -201,7 +212,6 @@ export class InstallPluginCliUseCase {
       }
 
       currentStage = INSTALL_STAGE_KEYS[6];
-      currentStageInput = {};
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
@@ -224,7 +234,6 @@ export class InstallPluginCliUseCase {
       }
 
       currentStage = INSTALL_STAGE_KEYS[7];
-      currentStageInput = {};
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
@@ -239,19 +248,18 @@ export class InstallPluginCliUseCase {
         availability,
       });
 
-      if (availability.nextAction.kind === "restart_gateway") {
-        nextSteps = [
-          "下一步：请手动重启 openclaw gateway 以使新配置生效",
-          ...(availability.nextAction.command ? [`可执行命令：${availability.nextAction.command}`] : []),
-        ];
-      } else {
-        nextSteps = [`下一步：请重启 ${context.host} 以使插件与配置生效`];
-      }
+      const nextSteps = availability.nextAction.kind === "restart_gateway"
+        ? [
+            "下一步：请手动重启 openclaw gateway 以使新配置生效",
+            ...(availability.nextAction.command ? [`可执行命令：${availability.nextAction.command}`] : []),
+          ]
+        : [`下一步：请重启 ${context.host} 以使插件与配置生效`];
+
       return {
         status: "success",
         message: `${context.host} 已完成插件安装、助理创建与 gateway 配置`,
         nextSteps,
-        warningMessages: [],
+        warningMessages,
       };
     } catch (error) {
       const installError = toInstallCliError(error);
@@ -269,14 +277,14 @@ export class InstallPluginCliUseCase {
           status: "cancelled",
           message: failure.message,
           nextSteps: [],
-          warningMessages: [],
+          warningMessages,
         };
       }
       return {
         status: "failed",
         message: installError.message,
         nextSteps: [],
-        warningMessages: [],
+        warningMessages,
       };
     }
   }

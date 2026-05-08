@@ -113,6 +113,7 @@ adapter 与 presenter 之间传递结构化事实，而不是 `detail`、`hostLa
 export interface ParsedInstallCommand {
   command: "install";
   host: "opencode" | "openclaw";
+  installStrategy: "host-native" | "fallback";
   environment?: "uat" | "prod";
   registry?: string;
   url?: string;
@@ -122,6 +123,7 @@ export interface ParsedInstallCommand {
 export interface InstallContext {
   command: "install";
   host: "opencode" | "openclaw";
+  installStrategy: "host-native" | "fallback";
   environment: "uat" | "prod";
   registry: string;
   url?: string;
@@ -134,6 +136,7 @@ export interface InstallContext {
 约束如下：
 
 - `parseInstallArgv()` 新增 `--verbose`
+- `parseInstallArgv()` 保留 `--install-strategy host-native|fallback`
 - `ResolveInstallContextUseCase` 补齐 `verbose=false`
 - `formatHelp()` 完全对齐 `OUTPUT_SPEC.md` 6.1
 
@@ -266,7 +269,27 @@ export interface Presenter {
 }
 ```
 
-`stageProgress` 只在 `--verbose` 使用，阶段名使用规格层 8 个固定名称，不暴露内部 `INSTALL_STAGES`。其中 `install_plugin` 必须通过 `packageName` 渲染为 `安装插件 <packageName>`，而不是由 use case 直接传完整中文句子。
+在保留 `stageProgress` 的同时，安装策略、fallback 产物与 warning 不再复用 `verboseDetail` 兜底拼接，而是使用独立结构化事件：
+
+```ts
+installStrategyResolved(input: {
+  strategy: "host-native" | "fallback";
+}): void;
+
+fallbackArtifactResolved(input: {
+  artifact: InstalledPluginArtifact;
+}): void;
+
+fallbackApplied(input: {
+  artifact: InstalledPluginArtifact;
+}): void;
+
+warningRaised(input: {
+  message: string;
+}): void;
+```
+
+`stageProgress` 只在 `--verbose` 使用，阶段名使用规格层 8 个固定名称，不暴露内部 `INSTALL_STAGES`。其中 `install_plugin` 必须通过 `packageName` 渲染为 `安装插件 <packageName>`，而不是由 use case 直接传完整中文句子。`verboseDetail` 仅承载参数摘要、版本号、`additionalConfigPaths` 这类阶段附属信息。
 
 ### 7.4 PresenterFailure
 
@@ -385,7 +408,8 @@ export type CliQrSnapshot =
 默认模式只允许以下规格事件落文本：
 
 - `installStarted`
-- `contextResolved`
+- `hostVersionResolved`
+- `hostConfigPathResolved`
 - `pluginInstalled`
 - `qrSnapshot`
 - `assistantCreated`
@@ -407,8 +431,9 @@ export type CliQrSnapshot =
 `--verbose` 在同一业务流程上追加：
 
 - 固定 8 个阶段名
-- 参数摘要：`environment=<env>, registry=<registry>, url=<url>`
+- 参数摘要：`environment=<env>, installStrategy=<strategy>, registry=<registry>, url=<url>`
 - 命令边界
+- 安装策略、fallback 产物与 warning 事实
 - 阶段失败上下文
 - 附加配置路径
 
@@ -441,6 +466,8 @@ export type CliQrSnapshot =
 - 只有完成可用性检查后才允许输出 `接入完成`
 - `openclaw` 版本不满足时，只允许输出 `hostVersionResolved`，不得输出 `hostConfigPathResolved`
 - `assistantCreated` 必须在 `configureHost()` 返回之后触发，并消费真实 `primaryConfigPath` 与 `additionalConfigPaths`
+- fallback 默认模式 transcript 必须与 host-native 同形；fallback 差异只允许出现在 `--verbose`、warning 与 tracing
+- openclaw reinstall 的专属诊断事实通过 `--verbose` 命令边界体现，不额外新增默认模式文案
 
 ## 10. `TerminalCliPresenter` 渲染规则
 

@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { OpencodeHostAdapter } from "../../src/adapters/OpencodeHostAdapter.ts";
 import { InstallCliError } from "../../src/domain/errors.ts";
-import type { ProcessRunner } from "../../src/domain/ports.ts";
+import type { PluginArtifactPort, ProcessRunner } from "../../src/domain/ports.ts";
+
+const noopArtifactPort: PluginArtifactPort = {
+  async fetchArtifact() {
+    return {
+      installStrategy: "fallback",
+      pluginSpec: "/tmp/plugin/package",
+      packageName: "@wecode/skill-opencode-plugin",
+      packageVersion: "1.2.3",
+      localExtractPath: "/tmp/plugin/package",
+      localTarballPath: "/tmp/plugin.tgz",
+    };
+  },
+};
 
 const noopProcessRunner: ProcessRunner = {
   async exec() {
@@ -24,15 +37,15 @@ test("OpencodeHostAdapter verifyPlugin uses existing json config and passes when
   try {
     const configDir = join(dir, "opencode");
     await mkdir(configDir, { recursive: true });
-    await writeFile(
-      join(configDir, "opencode.json"),
-      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
-      "utf8",
-    );
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
 
-    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, { XDG_CONFIG_HOME: dir });
     await assert.doesNotReject(async () => {
-      await adapter.verifyPlugin();
+      await adapter.verifyPlugin({} as never, {
+        installStrategy: "host-native",
+        pluginSpec: "@wecode/skill-opencode-plugin",
+        packageName: "@wecode/skill-opencode-plugin",
+      });
     });
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -46,8 +59,8 @@ test("OpencodeHostAdapter preflight returns resolved primary config path", async
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: [] }, null, 2), "utf8");
 
-    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
-    const result = await adapter.preflight();
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, { XDG_CONFIG_HOME: dir });
+    const result = await adapter.preflight({} as never);
 
     assert.equal(result.metadata.hostDisplayName, "opencode");
     assert.equal(result.metadata.primaryConfigPath, join(configDir, "opencode.json"));
@@ -61,16 +74,16 @@ test("OpencodeHostAdapter verifyPlugin fails when plugin is absent from resolved
   try {
     const configDir = join(dir, "opencode");
     await mkdir(configDir, { recursive: true });
-    await writeFile(
-      join(configDir, "opencode.json"),
-      JSON.stringify({ plugin: [] }, null, 2),
-      "utf8",
-    );
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: [] }, null, 2), "utf8");
 
-    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, { XDG_CONFIG_HOME: dir });
     await assert.rejects(
       async () => {
-        await adapter.verifyPlugin();
+        await adapter.verifyPlugin({} as never, {
+          installStrategy: "host-native",
+          pluginSpec: "@wecode/skill-opencode-plugin",
+          packageName: "@wecode/skill-opencode-plugin",
+        });
       },
       (error) => error instanceof InstallCliError && error.code === "PLUGIN_INSTALL_VERIFICATION_FAILED",
     );
@@ -94,17 +107,14 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
       }, null, 2),
       "utf8",
     );
-    await writeFile(
-      join(configDir, "opencode.json"),
-      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
-      "utf8",
-    );
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
 
-    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
-    await adapter.configureHost(
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, { XDG_CONFIG_HOME: dir });
+    const result = await adapter.configureHost(
       {
         command: "install",
         host: "opencode",
+        installStrategy: "host-native",
         environment: "prod",
         registry: "https://npm.example.com",
         mac: "",
@@ -114,7 +124,11 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
       { ak: "ak-1", sk: "sk-1" },
     );
 
-    const updatedBridgeConfig = await import("node:fs/promises").then(({ readFile }) => readFile(bridgeConfigPath, "utf8"));
+    assert.deepEqual(result, {
+      primaryConfigPath: join(configDir, "opencode.json"),
+      additionalConfigPaths: [bridgeConfigPath],
+    });
+    const updatedBridgeConfig = await readFile(bridgeConfigPath, "utf8");
     assert.match(updatedBridgeConfig, /wss:\/\/existing\.example\.com\/ws\/agent/);
     assert.doesNotMatch(updatedBridgeConfig, /"channel"\s*:/);
     assert.match(updatedBridgeConfig, /"ak": "ak-1"/);
@@ -124,49 +138,23 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
   }
 });
 
-test("OpencodeHostAdapter configureHost writes gateway url without channel when context url is provided", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-config-"));
+test("OpencodeHostAdapter fallback install reconciles plugin spec to local path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-fallback-"));
   try {
     const configDir = join(dir, "opencode");
     await mkdir(configDir, { recursive: true });
-    const bridgeConfigPath = join(configDir, "message-bridge.json");
-    await writeFile(
-      join(configDir, "opencode.json"),
-      JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2),
-      "utf8",
-    );
+    const opencodeConfigPath = join(configDir, "opencode.json");
+    await writeFile(opencodeConfigPath, JSON.stringify({ plugin: [] }, null, 2), "utf8");
 
-    const adapter = new OpencodeHostAdapter(noopProcessRunner, { XDG_CONFIG_HOME: dir });
-    await adapter.configureHost(
-      {
-        command: "install",
-        host: "opencode",
-        environment: "prod",
-        registry: "https://npm.example.com",
-        url: "wss://gateway.example.com/ws/agent",
-        mac: "",
-        channel: "openx",
-        verbose: false,
-      },
-      { ak: "ak-2", sk: "sk-2" },
-    );
-
-    const updatedBridgeConfig = await import("node:fs/promises").then(({ readFile }) => readFile(bridgeConfigPath, "utf8"));
-    assert.match(updatedBridgeConfig, /"url": "wss:\/\/gateway\.example\.com\/ws\/agent"/);
-    assert.doesNotMatch(updatedBridgeConfig, /"channel"\s*:/);
-    assert.match(updatedBridgeConfig, /"ak": "ak-2"/);
-    assert.match(updatedBridgeConfig, /"sk": "sk-2"/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("OpencodeHostAdapter confirmAvailability returns manual restart next steps", async () => {
-  const adapter = new OpencodeHostAdapter(noopProcessRunner, {});
-
-  const result = await adapter.confirmAvailability({
-    command: "install",
-    host: "opencode",
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, {
+      XDG_CONFIG_HOME: dir,
+      XDG_CACHE_HOME: join(dir, ".cache"),
+      HOME: dir,
+    });
+    const artifact = await adapter.installPlugin({
+      command: "install",
+      host: "opencode",
+      installStrategy: "fallback",
       environment: "prod",
       registry: "https://npm.example.com",
       mac: "",
@@ -174,11 +162,10 @@ test("OpencodeHostAdapter confirmAvailability returns manual restart next steps"
       verbose: false,
     });
 
-  assert.deepEqual(result, {
-    nextAction: {
-      kind: "restart_host",
-      manual: true,
-      effect: "plugin_and_config_effective",
-    },
-  });
+    assert.equal(artifact.pluginSpec, "/tmp/plugin/package");
+    const nextConfig = await readFile(opencodeConfigPath, "utf8");
+    assert.match(nextConfig, /\/tmp\/plugin\/package/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

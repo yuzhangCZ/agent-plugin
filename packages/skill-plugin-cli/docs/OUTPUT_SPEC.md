@@ -14,6 +14,7 @@
 ### 2.1 基本原则
 
 - `--url` 定义为“指定插件连接 gateway 的地址”。
+- `--install-strategy` 定义为“指定插件安装策略”，支持 `host-native` 与 `fallback`，默认 `host-native`。
 - 默认流程文案统一，不拆成两套流程。
 - `opencode/openclaw` 的差异仅体现在宿主名、插件名、版本信息、配置路径和 next step。
 - 成功结论统一使用“接入完成”，不使用“安装完成”。
@@ -53,6 +54,14 @@
 - 自动化测试不逐字断言二维码图案本身。
 - 自动化测试只断言二维码块前后文案和二维码块存在性。
 - 刷新场景必须重新输出新的二维码块。
+
+### 2.6 fallback / warning / reinstall 规则
+
+- fallback 与 host-native 在默认模式下的成功 transcript 必须同形。
+- 默认模式不得输出 `fallback`、`installStrategy`、`artifact`、`tarball` 等实现路径术语。
+- warning 默认可见性以当前主线行为为准；当前 contract 允许默认模式输出 `[skill-plugin-cli][warning] <message>`。
+- openclaw reinstall 默认模式不额外区分首次安装与重装。
+- openclaw reinstall 的专属诊断事实只在 `--verbose` 通过命令边界体现，例如卸载旧插件命令。
 
 ## 3. 默认模式文本输出格式
 
@@ -118,7 +127,7 @@
 
 `--verbose` 允许输出参数摘要：
 
-- `environment=<env>, registry=<registry>, url=<url>`
+- `environment=<env>, installStrategy=<strategy>, registry=<registry>, url=<url>`
 
 ### 4.3 命令执行边界
 
@@ -127,6 +136,16 @@
 - `正在执行命令：<完整命令>`
 - 后面直接接命令原始输出
 - `命令执行结束：<完整命令>`
+
+### 4.4 fallback / warning 诊断输出
+
+- `--verbose` 允许输出安装策略：
+  - `安装策略：<host-native|fallback>`
+- `--verbose` 下 fallback 允许输出：
+  - `fallback 产物已解析：package=<packageName> ...`
+  - `fallback 已写入宿主目标：pluginSpec=<pluginSpec>`
+- warning 输出固定为：
+  - `[skill-plugin-cli][warning] <message>`
 
 ## 5. 错误摘要与二维码刷新规则
 
@@ -179,21 +198,25 @@ skill-plugin-cli
 
 用法:
   skill-plugin-cli install --host opencode [--environment uat|prod] [--registry <url>] [--url <gateway-url>] [--verbose]
+    [--install-strategy host-native|fallback]
   skill-plugin-cli install --host openclaw [--environment uat|prod] [--registry <url>] [--url <gateway-url>] [--verbose]
+    [--install-strategy host-native|fallback]
 
 示例:
   skill-plugin-cli install --host opencode
   skill-plugin-cli install --host openclaw --environment uat
   skill-plugin-cli install --host openclaw --url ws://localhost:8081/ws/agent
   skill-plugin-cli install --host opencode --verbose
+  skill-plugin-cli install --host openclaw --install-strategy fallback
 
 参数:
-  --host <opencode|openclaw>   指定接入目标
-  --environment <uat|prod>     指定 WeLink 创建助理环境，默认 prod
-  --registry <url>             指定 @wecode npm 仓源
-  --url <gateway-url>          指定插件连接 gateway 的地址
-  --verbose                    显示详细执行过程
-  -h, --help                   查看帮助
+  --host <opencode|openclaw>                 指定接入目标
+  --environment <uat|prod>                   指定 WeLink 创建助理环境，默认 prod
+  --registry <url>                           指定 @wecode npm 仓源
+  --url <gateway-url>                        指定插件连接 gateway 的地址
+  --verbose                                  显示详细执行过程
+  --install-strategy <host-native|fallback>  指定插件安装策略，默认 host-native
+  -h, --help                                 查看帮助
 ```
 
 ### 6.2 默认成功流：openclaw

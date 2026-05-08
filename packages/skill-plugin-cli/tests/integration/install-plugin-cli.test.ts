@@ -291,7 +291,7 @@ exit 0`,
     assert.equal(result.status, "success");
     const output = io.stdout.join("");
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：解析安装参数/);
-    assert.match(output, /完成：解析安装参数 · environment=prod, registry=/);
+    assert.match(output, /完成：解析安装参数 · environment=prod, installStrategy=host-native, registry=/);
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：检查 openclaw 环境/);
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：安装插件 @wecode\/skill-openclaw-plugin/);
     assert.match(output, /\[skill-plugin-cli\] 正在执行命令：openclaw plugins install @wecode\/skill-openclaw-plugin/);

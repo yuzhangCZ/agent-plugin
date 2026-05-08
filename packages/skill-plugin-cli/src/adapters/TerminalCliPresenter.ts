@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import process from "node:process";
 import type { Presenter } from "../domain/ports.ts";
 import { INSTALL_STAGE_LABELS } from "../domain/stages.ts";
-import type { CliQrFailureSummary, CliQrSnapshot, HostAvailabilityResult, PresenterFailure } from "../domain/types.ts";
+import type { CliQrFailureSummary, CliQrSnapshot, HostAvailabilityResult, InstalledPluginArtifact, PresenterFailure } from "../domain/types.ts";
 
 const require = createRequire(import.meta.url);
 const qrcodeTerminal = require("qrcode-terminal") as {
@@ -62,9 +62,7 @@ function formatAvailabilityNextSteps(host: "opencode" | "openclaw", availability
       availability.nextAction.command ? `可执行命令：${availability.nextAction.command}` : undefined,
     ].filter(Boolean) as string[];
   }
-  return [
-    `下一步：请重启 ${host} 以使插件与配置生效`,
-  ];
+  return [`下一步：请重启 ${host} 以使插件与配置生效`];
 }
 
 function formatQrFailureSummary(summary: CliQrFailureSummary) {
@@ -93,6 +91,12 @@ function formatQrFailureSummary(summary: CliQrFailureSummary) {
     parts.push(`httpStatus=${summary.httpStatus}`);
   }
   return parts.length > 0 ? parts.join(", ") : "auth_service_error";
+}
+
+function formatArtifactSummary(artifact: InstalledPluginArtifact) {
+  return `[skill-plugin-cli] fallback 产物已解析：package=${artifact.packageName}`
+    + `${artifact.packageVersion ? ` version=${artifact.packageVersion}` : ""}`
+    + `${artifact.localTarballPath ? ` tarball=${artifact.localTarballPath}` : ""}`;
 }
 
 export class TerminalCliPresenter implements Presenter {
@@ -136,6 +140,22 @@ export class TerminalCliPresenter implements Presenter {
     writeStderr(`[skill-plugin-cli] 失败：${label}${input.verboseDetail ? ` · ${input.verboseDetail}` : ""}`);
   }
 
+  installStrategyResolved(input: { strategy: "host-native" | "fallback" }) {
+    writeStdout(`[skill-plugin-cli] 安装策略：${input.strategy}`);
+  }
+
+  fallbackArtifactResolved(input: { artifact: InstalledPluginArtifact }) {
+    writeStdout(formatArtifactSummary(input.artifact));
+  }
+
+  fallbackApplied(input: { artifact: InstalledPluginArtifact }) {
+    writeStdout(`[skill-plugin-cli] fallback 已写入宿主目标：pluginSpec=${input.artifact.pluginSpec}`);
+  }
+
+  warningRaised(input: { message: string }) {
+    writeStdout(`[skill-plugin-cli][warning] ${input.message}`);
+  }
+
   commandBoundary(input: { phase: "started" | "finished"; command: string; stdout?: string; stderr?: string; exitCode?: number }) {
     if (input.phase === "started") {
       writeStdout(`[skill-plugin-cli] 正在执行命令：${input.command}`);
@@ -164,8 +184,7 @@ export class TerminalCliPresenter implements Presenter {
     switch (snapshot.type) {
       case "qrcode_generated": {
         if (snapshot.refresh) {
-          writeStdout("[skill-plugin-cli] ========= 已刷新二维码（第 "
-            + `${snapshot.refresh.index}/${snapshot.refresh.max} 次） =========`);
+          writeStdout(`[skill-plugin-cli] ========= 已刷新二维码（第 ${snapshot.refresh.index}/${snapshot.refresh.max} 次） =========`);
           writeStdout();
         } else {
           writeStdout("[skill-plugin-cli] 请使用 WeLink 扫码创建助理");
@@ -185,9 +204,7 @@ export class TerminalCliPresenter implements Presenter {
         writeStdout();
         return;
       case "confirmed":
-        return;
       case "cancelled":
-        return;
       case "failed":
         return;
     }

@@ -2,6 +2,7 @@ import { ResolveInstallContextUseCase } from "../application/ResolveInstallConte
 import { InstallPluginCliUseCase } from "../application/InstallPluginCliUseCase.ts";
 import { DefaultMacAddressResolver } from "../adapters/MacAddressResolver.ts";
 import { NpmrcRegistryConfigAdapter } from "../adapters/NpmrcRegistryConfigAdapter.ts";
+import { NpmPluginArtifactAdapter } from "../adapters/NpmPluginArtifactAdapter.ts";
 import { OpencodeHostAdapter } from "../adapters/OpencodeHostAdapter.ts";
 import { OpenClawHostAdapter } from "../adapters/OpenClawHostAdapter.ts";
 import { QrCodeAuthAdapter } from "../adapters/QrCodeAuthAdapter.ts";
@@ -32,9 +33,10 @@ export function createInstallCliUseCase(options: CreateInstallCliUseCaseOptions 
   const traceSink = new InMemoryProcessTraceSink();
   const processRunner = new NodeProcessRunner(traceSink);
   const registryConfig = new NpmrcRegistryConfigAdapter();
+  const pluginArtifactPort = new NpmPluginArtifactAdapter(processRunner);
   const hostAdapters = {
-    opencode: new OpencodeHostAdapter(processRunner),
-    openclaw: new OpenClawHostAdapter(processRunner),
+    opencode: new OpencodeHostAdapter(processRunner, pluginArtifactPort),
+    openclaw: new OpenClawHostAdapter(processRunner, pluginArtifactPort),
   } as const;
   const resolveContext = new ResolveInstallContextUseCase(
     registryConfig,

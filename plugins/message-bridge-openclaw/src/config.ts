@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { deleteAccountFromConfigSection, setAccountEnabledInConfigSection } from "openclaw/plugin-sdk/core";
+import { setAccountEnabledInConfigSection } from "openclaw/plugin-sdk/core";
 import {
   type ChannelSetupInput,
   type OpenClawConfig,
@@ -305,12 +305,16 @@ export function deleteMessageBridgeAccount(params: {
   accountId: string;
 }): OpenClawConfig {
   resolveSupportedAccountId(params.accountId);
-  return deleteAccountFromConfigSection({
-    cfg: params.cfg,
-    sectionKey: CHANNEL_ID,
-    accountId: params.accountId,
-    clearBaseFields: ["enabled", "streaming", "name", "gateway", "auth", "agentIdPrefix", "runTimeoutMs"],
-  });
+  const channels = asRecord((params.cfg as Record<string, unknown>).channels);
+  if (!channels || !(CHANNEL_ID in channels)) {
+    return params.cfg;
+  }
+
+  const { [CHANNEL_ID]: _removedSection, ...nextChannels } = channels;
+  return {
+    ...params.cfg,
+    channels: nextChannels,
+  };
 }
 
 export function resolveConfigSearchPaths(workspaceDir?: string): string[] {
