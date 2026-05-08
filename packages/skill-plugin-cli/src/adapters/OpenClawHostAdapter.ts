@@ -82,6 +82,7 @@ export class OpenClawHostAdapter implements HostAdapter {
       throw new InstallCliError("OPENCLAW_NOT_FOUND", (result.stderr || result.stdout || "未检测到 openclaw 命令。").trim());
     }
     const version = (result.stdout || result.stderr).trim();
+    const existingPluginProbe = await this.queryInstalledPlugin();
     return {
       metadata: this.buildMetadata(),
       version,
@@ -97,6 +98,7 @@ export class OpenClawHostAdapter implements HostAdapter {
         }
       })(),
       minimumRequiredVersion: MIN_SUPPORTED_VERSION,
+      existingPluginDetected: existingPluginProbe.exitCode === 0,
     };
   }
 

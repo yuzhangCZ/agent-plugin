@@ -113,3 +113,29 @@ test("OpenClawHostAdapter fallback install uses local tarball path", async () =>
     args: ["plugins", "install", "/tmp/plugin.tgz"],
   });
 });
+
+
+test("OpenClawHostAdapter preflight reports existing plugin when probe succeeds", async () => {
+  const processRunner: ProcessRunner = {
+    async exec(command, args) {
+      if (command === "openclaw" && args[0] === "--version") {
+        return { stdout: "2026.4.12", stderr: "", exitCode: 0 };
+      }
+      if (command === "openclaw" && args[0] === "plugins" && args[1] === "info") {
+        return { stdout: '{"id":"skill-openclaw-plugin"}', stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    },
+    async spawn() {
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    async spawnDetached() {
+      return;
+    },
+  };
+  const adapter = new OpenClawHostAdapter(processRunner, noopArtifactPort);
+
+  const result = await adapter.preflight({} as never);
+
+  assert.equal(result.existingPluginDetected, true);
+});

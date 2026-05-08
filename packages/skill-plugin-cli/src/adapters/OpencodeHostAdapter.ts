@@ -96,6 +96,12 @@ export class OpencodeHostAdapter implements HostAdapter {
     await writeFileAtomically(paths.opencodeConfig, nextOpencode);
   }
 
+  private async detectExistingPlugin(opencodeConfigPath: string) {
+    const content = await readOptionalTextFile(opencodeConfigPath);
+    const configuredPluginItems = content ? readOpencodePluginItems(content)?.items ?? [] : [];
+    return configuredPluginItems.some((item) => item === PLUGIN_NAME || this.isControlledFallbackPathSpec(item));
+  }
+
   async preflight() {
     const version = await this.processRunner.exec("opencode", ["--version"]);
     if (version.exitCode !== 0) {
@@ -105,6 +111,7 @@ export class OpencodeHostAdapter implements HostAdapter {
     const paths = await this.resolvePaths();
     return {
       metadata: this.buildMetadata(paths.opencodeConfig),
+      existingPluginDetected: await this.detectExistingPlugin(paths.opencodeConfig),
     };
   }
 

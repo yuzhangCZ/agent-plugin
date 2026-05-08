@@ -57,11 +57,19 @@
 
 ### 2.6 fallback / warning / reinstall 规则
 
+- 默认模式只暴露用户完成安装所需的业务事实。
+- `--verbose` 暴露安装策略、fallback 诊断、命令边界、附加配置路径等排障信息。
 - fallback 与 host-native 在默认模式下的成功 transcript 必须同形。
-- 默认模式不得输出 `fallback`、`installStrategy`、`artifact`、`tarball` 等实现路径术语。
-- warning 默认可见性以当前主线行为为准；当前 contract 允许默认模式输出 `[skill-plugin-cli][warning] <message>`。
-- openclaw reinstall 默认模式不额外区分首次安装与重装。
-- openclaw reinstall 的专属诊断事实只在 `--verbose` 通过命令边界体现，例如卸载旧插件命令。
+- 当 `--install-strategy fallback` 且安装成功时，默认模式 transcript 与基础成功流完全一致，此处不再重复示例。
+- 默认模式不得输出 `fallback`、`installStrategy`、`artifact`、`tarball`、`pluginSpec` 等实现路径术语。
+- 若检测到目标 host 已存在同名插件，默认模式统一输出：`检测到已安装插件，将执行重装`。
+- `opencode` 与 `openclaw` 的重装提示文案必须完全一致，并出现在真正进入 install 阶段之前。
+- warning 仅用于表达“非致命、已发生、与本次安装结果直接相关、值得调用方感知”的事实。
+- warning 文案固定为：`[skill-plugin-cli][warning] <message>`。
+- 最终成功时，warning 出现在成功结论之前；最终失败时，warning 允许出现在失败结论之前，但不得替代最终成功/失败结论。
+- 同一 warning 事实不得重复输出。
+- 安装策略信息、fallback 产物信息、命令边界、纯 verbose 诊断信息、潜在风险提示不得以 warning 形式输出。
+- reinstall 提示属于默认模式业务事实；fallback 产物与命令边界属于 `--verbose` 诊断事实；warning 属于默认模式可见事实，但不等价于 verbose 诊断。
 
 ## 3. 默认模式文本输出格式
 
@@ -75,6 +83,8 @@
 - 配置路径：
   - openclaw：`openclaw 配置路径: <resolvedPath>`
   - opencode：`opencode 配置路径: <resolvedPath>`
+- 重装提示：
+  - 当检测到已安装插件时：`检测到已安装插件，将执行重装`
 - 插件安装完成：
   - `插件安装完成`
 - 创建助理开始：
@@ -142,8 +152,12 @@
 - `--verbose` 允许输出安装策略：
   - `安装策略：<host-native|fallback>`
 - `--verbose` 下 fallback 允许输出：
-  - `fallback 产物已解析：package=<packageName> ...`
+  - `fallback 产物已解析：package=<packageName> [version=<version>] [tarball=<tarball>]`
   - `fallback 已写入宿主目标：pluginSpec=<pluginSpec>`
+- `package=<packageName>` 必须存在。
+- `version=<version>` 与 `tarball=<tarball>` 仅在有值时输出；方括号表示条件字段，不是字面量。
+- `pluginSpec=<pluginSpec>` 作为 presenter 统一 contract，对 `opencode` / `openclaw` 都使用同一字段名。
+- 当进入 reinstall 路径时，`--verbose` 允许通过命令边界暴露安装前探测、卸载旧插件和重新安装等额外命令；这些输出属于诊断边界，不新增额外中文过程文案。
 - warning 输出固定为：
   - `[skill-plugin-cli][warning] <message>`
 
@@ -189,6 +203,12 @@
 
 ## 6. 场景示例
 
+以下示例中：
+
+- 6.2、6.3、6.5、6.6-6.15 为完整 transcript 示例
+- 6.4、6.16-6.18 为“基于基础流程补充差异”的扩展示例
+- 若文档明确标注“与基础成功流同形，因此不重复列示”，则以对应基础成功流为准
+
 ### 6.1 `--help`
 
 ```text
@@ -219,7 +239,7 @@ skill-plugin-cli
   -h, --help                                 查看帮助
 ```
 
-### 6.2 默认成功流：openclaw
+### 6.2 默认成功流：openclaw（首次安装）
 
 ```text
 [skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
@@ -238,7 +258,7 @@ skill-plugin-cli
 [skill-plugin-cli] 可执行命令：openclaw gateway restart
 ```
 
-### 6.3 默认成功流：opencode
+### 6.3 默认成功流：opencode（首次安装）
 
 ```text
 [skill-plugin-cli] 正在为 opencode 安装 @wecode/skill-opencode-plugin，请稍候
@@ -255,7 +275,11 @@ skill-plugin-cli
 [skill-plugin-cli] 下一步：请重启 opencode 以使插件与配置生效
 ```
 
+当 `--install-strategy fallback` 且安装成功时，默认模式 transcript 与 6.2 / 6.3 的基础成功流完全一致，不额外输出 `fallback`、`installStrategy`、`artifact`、`tarball`、`pluginSpec`，因此不再重复列示完整 transcript。
+
 ### 6.4 带 `--url` 的成功流
+
+该场景用于说明：`--url` 仅影响内部写入的 gateway 地址，默认模式 transcript 不新增额外用户可见文案，因此除实际写入结果外，与 6.2 的 openclaw 成功流保持同形。
 
 ```text
 [skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
@@ -274,7 +298,29 @@ skill-plugin-cli
 [skill-plugin-cli] 可执行命令：openclaw gateway restart
 ```
 
-### 6.5 二维码过期并刷新 1 次
+### 6.5 默认成功流：检测到已安装插件并重装
+
+```text
+[skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
+[skill-plugin-cli] openclaw 版本：2026.4.10
+[skill-plugin-cli] openclaw 配置路径: /Users/you/.openclaw/openclaw.json
+[skill-plugin-cli] 检测到已安装插件，将执行重装
+[skill-plugin-cli] 插件安装完成
+[skill-plugin-cli] 请使用 WeLink 扫码创建助理
+<二维码渲染块>
+[skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
+[skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
+[skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
+[skill-plugin-cli] 已完成连接可用性检查
+[skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
+[skill-plugin-cli] 下一步：请手动重启 openclaw gateway 以使新配置生效
+[skill-plugin-cli] 可执行命令：openclaw gateway restart
+```
+
+`opencode` 检测到已安装插件时，默认模式同样只在配置路径后、插件安装完成前输出 `检测到已安装插件，将执行重装`，其余 transcript 与 6.3 保持一致，因此不再重复列示。
+
+### 6.6 二维码过期并刷新 1 次
 
 ```text
 [skill-plugin-cli] 二维码已过期，正在刷新
@@ -288,7 +334,7 @@ skill-plugin-cli
 [skill-plugin-cli] 请在 WeLink 中创建助理
 ```
 
-### 6.6 二维码连续刷新
+### 6.7 二维码连续刷新
 
 ```text
 [skill-plugin-cli] 二维码已过期，正在刷新
@@ -311,7 +357,7 @@ skill-plugin-cli
 [skill-plugin-cli] 请在 WeLink 中创建助理
 ```
 
-### 6.7 刷新耗尽超时
+### 6.8 刷新耗尽超时
 
 ```text
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
@@ -332,7 +378,7 @@ skill-plugin-cli
 [skill-plugin-cli] 错误摘要：auth_service_error
 ```
 
-### 6.8 用户取消
+### 6.9 用户取消
 
 ```text
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
@@ -343,14 +389,14 @@ skill-plugin-cli
 [skill-plugin-cli] 接入已取消：WeLink 创建助理已取消
 ```
 
-### 6.9 未安装 openclaw
+### 6.10 未安装 openclaw
 
 ```text
 [skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
 [skill-plugin-cli] 接入失败：未检测到 openclaw 命令。
 ```
 
-### 6.10 OpenClaw 版本不满足
+### 6.11 OpenClaw 版本不满足
 
 ```text
 [skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
@@ -358,7 +404,7 @@ skill-plugin-cli
 [skill-plugin-cli] 接入失败：当前 openclaw 版本 2026.3.10 不满足 >= 2026.3.24
 ```
 
-### 6.11 插件安装失败
+### 6.12 插件安装失败
 
 ```text
 [skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
@@ -367,7 +413,7 @@ skill-plugin-cli
 [skill-plugin-cli] 接入失败：openclaw plugins install @wecode/skill-openclaw-plugin 失败，退出码 1
 ```
 
-### 6.12 qrcode-server 业务错误
+### 6.13 qrcode-server 业务错误
 
 ```text
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
@@ -375,7 +421,7 @@ skill-plugin-cli
 [skill-plugin-cli] 错误摘要：businessCode=50012, error=assistant_limit_exceeded, message=assistant count exceeded
 ```
 
-### 6.13 fetch 网络异常
+### 6.14 fetch 网络异常
 
 ```text
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
@@ -383,7 +429,7 @@ skill-plugin-cli
 [skill-plugin-cli] 错误摘要：network_error, code=ECONNREFUSED, message=connect ECONNREFUSED 127.0.0.1:443
 ```
 
-### 6.14 参数错误
+### 6.15 参数错误
 
 ```text
 [skill-plugin-cli] 参数错误：--host 必须为 opencode 或 openclaw
@@ -400,34 +446,96 @@ skill-plugin-cli
 [skill-plugin-cli] 可执行 skill-plugin-cli --help 查看用法
 ```
 
-### 6.15 `--verbose` 示例
+### 6.16 `--verbose` 示例
+
+以下示例覆盖的是“openclaw + host-native + 检测到已安装插件并重装”的正常详细流程。`opencode` 的 `--verbose` 成功流沿用相同阶段结构；`fallback` 策略会在此基础上额外追加 4.4 中定义的安装策略与 fallback 诊断文本。
 
 ```text
 [skill-plugin-cli][openclaw] 开始：解析安装参数
-[skill-plugin-cli] 完成：解析安装参数 · environment=prod, registry=https://registry.example.com/, url=ws://localhost:8081/ws/agent
+[skill-plugin-cli] 完成：解析安装参数 · environment=prod, installStrategy=host-native, registry=https://registry.example.com/, url=ws://localhost:8081/ws/agent
 [skill-plugin-cli][openclaw] 开始：检查 openclaw 环境
 [skill-plugin-cli] 完成：检查 openclaw 环境 · version=2026.4.10
+[skill-plugin-cli] openclaw 版本：2026.4.10
+[skill-plugin-cli] openclaw 配置路径: /Users/you/.openclaw/openclaw.json
+[skill-plugin-cli] 检测到已安装插件，将执行重装
 [skill-plugin-cli][openclaw] 开始：准备 npm 仓源配置
+[skill-plugin-cli] 完成：准备 npm 仓源配置
 [skill-plugin-cli][openclaw] 开始：安装插件 @wecode/skill-openclaw-plugin
+[skill-plugin-cli] 安装策略：host-native
 [skill-plugin-cli] 正在执行命令：openclaw plugins install @wecode/skill-openclaw-plugin
 Installing plugin @wecode/skill-openclaw-plugin...
 Done.
 [skill-plugin-cli] 命令执行结束：openclaw plugins install @wecode/skill-openclaw-plugin
+[skill-plugin-cli] 完成：安装插件 @wecode/skill-openclaw-plugin
+[skill-plugin-cli] 插件安装完成
 [skill-plugin-cli][openclaw] 开始：校验插件安装结果
+[skill-plugin-cli] 完成：校验插件安装结果
 [skill-plugin-cli][openclaw] 开始：执行 WeLink 创建助理
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
 <二维码渲染块>
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 完成：执行 WeLink 创建助理
 [skill-plugin-cli][openclaw] 开始：写入 openclaw 连接配置
+[skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
+[skill-plugin-cli] 完成：写入 openclaw 连接配置
 [skill-plugin-cli][openclaw] 开始：检查连接可用性
+[skill-plugin-cli] 完成：检查连接可用性
+[skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
 [skill-plugin-cli] 下一步：请手动重启 openclaw gateway 以使新配置生效
 [skill-plugin-cli] 可执行命令：openclaw gateway restart
 ```
 
-### 6.16 配置路径的 Unix/mac 与 Windows 示例
+### 6.17 `--verbose` fallback 诊断示例
+
+以下示例仅展示 `fallback` 策略相对 6.16 新增的诊断文本；其余 transcript 与对应的基础 verbose 成功流一致。
+
+```text
+[skill-plugin-cli] 安装策略：fallback
+[skill-plugin-cli] fallback 产物已解析：package=@wecode/skill-opencode-plugin version=1.2.3 tarball=/tmp/plugin.tgz
+[skill-plugin-cli] fallback 已写入宿主目标：pluginSpec=/tmp/plugin/package
+```
+
+若 `version` 或 `tarball` 无值，则对应字段不输出：
+
+```text
+[skill-plugin-cli] fallback 产物已解析：package=@wecode/skill-openclaw-plugin
+```
+
+### 6.18 二维码 ASCII 渲染失败 fallback
+
+```text
+[skill-plugin-cli] 请使用 WeLink 扫码创建助理
+[skill-plugin-cli] weUrl: https://we.example/qr-fallback
+[skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-fallback
+[skill-plugin-cli] 二维码有效期至: 2026-04-28 08:05:00 UTC
+[skill-plugin-cli] 请在 WeLink 中创建助理
+```
+
+### 6.19 默认模式 warning 示例
+
+成功流 warning 必须出现在最终成功结论之前：
+
+```text
+[skill-plugin-cli] 检测到已安装插件，将执行重装
+[skill-plugin-cli][warning] OpenCode 历史残留文件清理失败，请手动删除：/Users/you/.config/opencode/plugins/message-bridge.plugin.js
+[skill-plugin-cli] 插件安装完成
+...
+[skill-plugin-cli] 接入完成：opencode 已完成插件安装、助理创建与 gateway 配置
+```
+
+失败流 warning 允许出现在最终失败结论之前，但不得替代失败结论：
+
+```text
+[skill-plugin-cli][warning] OpenCode 历史残留文件清理失败，请手动删除：/Users/you/.config/opencode/plugins/message-bridge.plugin.js
+...
+[skill-plugin-cli] 接入失败：无法连接 WeLink 创建助理服务
+[skill-plugin-cli] 错误摘要：network_error, code=ECONNREFUSED, message=connect ECONNREFUSED 127.0.0.1:443
+```
+
+### 6.20 配置路径的 Unix/mac 与 Windows 示例
 
 ```text
 [skill-plugin-cli] openclaw 配置路径: /Users/you/.openclaw/openclaw.json

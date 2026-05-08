@@ -75,19 +75,25 @@ async function createFakeCommand(dir: string, name: "openclaw" | "opencode", bod
 function captureIo() {
   const stdout: string[] = [];
   const stderr: string[] = [];
+  const events: Array<{ stream: "stdout" | "stderr"; chunk: string }> = [];
   const originalStdout = process.stdout.write.bind(process.stdout);
   const originalStderr = process.stderr.write.bind(process.stderr);
   process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout.push(String(chunk));
+    const value = String(chunk);
+    stdout.push(value);
+    events.push({ stream: "stdout", chunk: value });
     return true;
   }) as typeof process.stdout.write;
   process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderr.push(String(chunk));
+    const value = String(chunk);
+    stderr.push(value);
+    events.push({ stream: "stderr", chunk: value });
     return true;
   }) as typeof process.stderr.write;
   return {
     stdout,
     stderr,
+    events,
     restore() {
       process.stdout.write = originalStdout;
       process.stderr.write = originalStderr;
@@ -111,6 +117,7 @@ test("cli --help transcript matches output spec", () => {
   assert.equal(result.stderr, "");
   assert.match(result.stdout, /^skill-plugin-cli\n\n用于安装插件、创建 WeLink 助理，并完成与 gateway 的连接配置。\n/m);
   assert.match(result.stdout, /skill-plugin-cli install --host opencode .* \[--verbose\]/);
+  assert.equal(result.stdout.endsWith("\n\n"), false);
 });
 
 test("cli usage error transcript appends help hint", () => {
@@ -173,6 +180,7 @@ exit 0`,
       `[skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
 [skill-plugin-cli] openclaw 版本：2026.4.10
 [skill-plugin-cli] openclaw 配置路径: ${join(dir, ".openclaw", "openclaw.json")}
+[skill-plugin-cli] 检测到已安装插件，将执行重装
 [skill-plugin-cli] 插件安装完成
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
 <二维码渲染块>
@@ -230,6 +238,7 @@ exit 0`,
       normalizeQrBlock(io.stdout.join("")),
       `[skill-plugin-cli] 正在为 opencode 安装 @wecode/skill-opencode-plugin，请稍候
 [skill-plugin-cli] opencode 配置路径: ${join(configDir, "opencode.json")}
+[skill-plugin-cli] 检测到已安装插件，将执行重装
 [skill-plugin-cli] 插件安装完成
 [skill-plugin-cli] 请使用 WeLink 扫码创建助理
 <二维码渲染块>
@@ -294,6 +303,7 @@ exit 0`,
     assert.match(output, /完成：解析安装参数 · environment=prod, installStrategy=host-native, registry=/);
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：检查 openclaw 环境/);
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：安装插件 @wecode\/skill-openclaw-plugin/);
+    assert.match(output, /\[skill-plugin-cli\] 检测到已安装插件，将执行重装/);
     assert.match(output, /\[skill-plugin-cli\] 正在执行命令：openclaw plugins install @wecode\/skill-openclaw-plugin/);
     assert.match(output, /Installing plugin @wecode\/skill-openclaw-plugin\.\.\.\nDone\./);
     assert.match(output, /\[skill-plugin-cli\] 命令执行结束：openclaw plugins install @wecode\/skill-openclaw-plugin/);
@@ -337,6 +347,7 @@ exit 0`,
     assert.equal(result.status, "success");
     const output = io.stdout.join("");
     assert.match(output, /\[skill-plugin-cli\]\[opencode\] 开始：安装插件 @wecode\/skill-opencode-plugin/);
+    assert.match(output, /\[skill-plugin-cli\] 检测到已安装插件，将执行重装/);
     assert.match(output, /\[skill-plugin-cli\]\[opencode\] 开始：检查 opencode 环境/);
     assert.match(output, /\[skill-plugin-cli\]\[opencode\] 开始：写入 opencode 连接配置/);
     assert.match(output, new RegExp(`完成：写入 opencode 连接配置 · additionalConfigPaths=${join(configDir, "message-bridge.json").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
@@ -503,6 +514,85 @@ exit 0`,
     assert.match(output, /\[skill-plugin-cli\] ========= 已刷新二维码（第 1\/3 次） =========/);
     assert.match(output, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-2/);
     assert.match(output, /\[skill-plugin-cli\] 二维码有效期至: 2026-04-28 08:05:00 UTC/);
+  } finally {
+    io.restore();
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("default success flow prints cleanup warning before completion transcript", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-warning-success-"));
+  const originalEnv = { ...process.env };
+  const io = captureIo();
+  try {
+    const configDir = join(dir, ".config", "opencode");
+    await mkdir(join(configDir, "plugins", "message-bridge.plugin.js"), { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
+    await createFakeCommand(
+      dir,
+      "opencode",
+      `if [ "$1" = "--version" ]; then
+  printf 1.0.0
+  exit 0
+fi
+if [ "$1" = "plugin" ]; then
+  exit 0
+fi
+exit 0`,
+    );
+
+    process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
+    process.env.XDG_CONFIG_HOME = join(dir, ".config");
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+
+    const parsed = parseInstallArgv(["install", "--host", "opencode"]);
+    assert.ok(!("help" in parsed));
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
+
+    assert.equal(result.status, "success");
+    const combined = io.events.map(({ stream, chunk }) => `${stream}:${chunk}`).join("");
+    assert.match(combined, /stdout:\[skill-plugin-cli\] 检测到已安装插件，将执行重装\nstdout:\[skill-plugin-cli\]\[warning\] OpenCode 历史残留文件清理失败，请手动删除：.*message-bridge\.plugin\.js\nstdout:\[skill-plugin-cli\] 插件安装完成\n/s);
+    assert.match(combined, /stdout:\[skill-plugin-cli\]\[warning\] OpenCode 历史残留文件清理失败，请手动删除：.*message-bridge\.plugin\.js\n(?:stdout:.*\n)*stdout:\[skill-plugin-cli\] 接入完成：opencode 已完成插件安装、助理创建与 gateway 配置\n/s);
+  } finally {
+    io.restore();
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("default failure flow keeps cleanup warning before qrcode failure transcript", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-warning-failed-"));
+  const originalEnv = { ...process.env };
+  const io = captureIo();
+  try {
+    const configDir = join(dir, ".config", "opencode");
+    await mkdir(join(configDir, "plugins", "message-bridge.plugin.js"), { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
+    await createFakeCommand(
+      dir,
+      "opencode",
+      `if [ "$1" = "--version" ]; then
+  printf 1.0.0
+  exit 0
+fi
+if [ "$1" = "plugin" ]; then
+  exit 0
+fi
+exit 0`,
+    );
+
+    process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
+    process.env.XDG_CONFIG_HOME = join(dir, ".config");
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+
+    const parsed = parseInstallArgv(["install", "--host", "opencode"]);
+    assert.ok(!("help" in parsed));
+    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("network_error") }).execute(parsed);
+
+    assert.equal(result.status, "failed");
+    const combined = io.events.map(({ stream, chunk }) => `${stream}:${chunk}`).join("");
+    assert.match(combined, /stdout:\[skill-plugin-cli\]\[warning\] OpenCode 历史残留文件清理失败，请手动删除：.*message-bridge\.plugin\.js\n(?:stdout:.*\n)*stderr:\[skill-plugin-cli\] 接入失败：无法连接 WeLink 创建助理服务\n/s);
   } finally {
     io.restore();
     process.env = originalEnv;

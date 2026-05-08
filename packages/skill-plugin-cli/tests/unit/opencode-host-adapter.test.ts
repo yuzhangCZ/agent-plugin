@@ -64,6 +64,23 @@ test("OpencodeHostAdapter preflight returns resolved primary config path", async
 
     assert.equal(result.metadata.hostDisplayName, "opencode");
     assert.equal(result.metadata.primaryConfigPath, join(configDir, "opencode.json"));
+    assert.equal(result.existingPluginDetected, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("OpencodeHostAdapter preflight detects existing managed plugin reference", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-preflight-existing-"));
+  try {
+    const configDir = join(dir, "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
+
+    const adapter = new OpencodeHostAdapter(noopProcessRunner, noopArtifactPort, { XDG_CONFIG_HOME: dir });
+    const result = await adapter.preflight({} as never);
+
+    assert.equal(result.existingPluginDetected, true);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

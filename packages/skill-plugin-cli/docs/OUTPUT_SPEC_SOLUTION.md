@@ -434,6 +434,7 @@ export type CliQrSnapshot =
 - 参数摘要：`environment=<env>, installStrategy=<strategy>, registry=<registry>, url=<url>`
 - 命令边界
 - 安装策略、fallback 产物与 warning 事实
+- 重装提示属于默认模式业务事实，不下沉到命令边界或 warning 兜底
 - 阶段失败上下文
 - 附加配置路径
 
@@ -467,7 +468,11 @@ export type CliQrSnapshot =
 - `openclaw` 版本不满足时，只允许输出 `hostVersionResolved`，不得输出 `hostConfigPathResolved`
 - `assistantCreated` 必须在 `configureHost()` 返回之后触发，并消费真实 `primaryConfigPath` 与 `additionalConfigPaths`
 - fallback 默认模式 transcript 必须与 host-native 同形；fallback 差异只允许出现在 `--verbose`、warning 与 tracing
-- openclaw reinstall 的专属诊断事实通过 `--verbose` 命令边界体现，不额外新增默认模式文案
+- 若检测到目标 host 已存在同名插件，默认模式输出统一重装提示：`检测到已安装插件，将执行重装`
+- 重装提示在 `opencode` / `openclaw` 上保持相同文案，并在真正进入 install 阶段前输出
+- reinstall 的专属诊断事实继续通过 `--verbose` 命令边界体现，不新增额外中文过程文案
+- 规格示例层应显式区分“首次安装成功流”与“检测到已安装插件并重装”的成功流，避免把重装提示误解为可省略实现细节
+- 规格示例层还应覆盖：完整 `--verbose` 成功流、fallback 诊断增量、默认模式 warning 顺序、二维码 `weUrl` fallback，避免只有规则没有对应 transcript 示例
 
 ## 10. `TerminalCliPresenter` 渲染规则
 

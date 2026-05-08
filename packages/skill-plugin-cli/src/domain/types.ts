@@ -53,6 +53,7 @@ export interface HostPreflightResult {
   version?: string;
   versionSupported?: boolean;
   minimumRequiredVersion?: string;
+  existingPluginDetected?: boolean;
 }
 
 export interface HostConfigureResult {

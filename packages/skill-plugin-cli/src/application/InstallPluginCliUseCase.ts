@@ -154,6 +154,9 @@ export class InstallPluginCliUseCase {
         host: context.host,
         primaryConfigPath: preflight.metadata.primaryConfigPath,
       });
+      if (preflight.existingPluginDetected) {
+        this.presenter.reinstallDetected({ host: context.host });
+      }
 
       currentStage = INSTALL_STAGE_KEYS[2];
       if (context.verbose) {

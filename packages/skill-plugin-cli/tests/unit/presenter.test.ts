@@ -181,6 +181,33 @@ test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
   );
 });
 
+
+
+test("TerminalCliPresenter renders reinstall notice in default mode", () => {
+  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const { stdout, stderr } = captureIo(() => {
+    presenter.reinstallDetected({ host: "openclaw" });
+  });
+
+  assert.equal(stderr, "");
+  assert.equal(stdout, "[skill-plugin-cli] 检测到已安装插件，将执行重装\n");
+});
+
+test("TerminalCliPresenter omits optional fallback artifact fields when absent", () => {
+  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const { stdout } = captureIo(() => {
+    presenter.fallbackArtifactResolved({
+      artifact: {
+        installStrategy: "fallback",
+        pluginSpec: "/tmp/plugin/package",
+        packageName: "@wecode/skill-openclaw-plugin",
+      },
+    });
+  });
+
+  assert.equal(stdout, "[skill-plugin-cli] fallback 产物已解析：package=@wecode/skill-openclaw-plugin\n");
+});
+
 test("TerminalCliPresenter renders structured qrcode failures", () => {
   const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
   const { stderr } = captureIo(() => {

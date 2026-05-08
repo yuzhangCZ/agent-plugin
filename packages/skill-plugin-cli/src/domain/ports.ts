@@ -88,6 +88,9 @@ export interface Presenter {
     host: InstallContext["host"];
     primaryConfigPath: string;
   }): void;
+  reinstallDetected(input: {
+    host: InstallContext["host"];
+  }): void;
   stageProgress(input: {
     host: InstallContext["host"];
     stage: InstallStageKey;

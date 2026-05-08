@@ -33,10 +33,14 @@ class EmptyTraceSink implements ProcessTraceSink {
 class RecordingPresenter implements Presenter {
   readonly warnings: string[] = [];
   readonly infos: string[] = [];
+  readonly events: string[] = [];
 
   installStarted() {}
   hostVersionResolved() {}
   hostConfigPathResolved() {}
+  reinstallDetected() {
+    this.events.push("reinstall");
+  }
   stageProgress(input: { verboseDetail?: string }) {
     if (input.verboseDetail) {
       this.infos.push(input.verboseDetail);
@@ -53,15 +57,21 @@ class RecordingPresenter implements Presenter {
   }
   warningRaised(input: { message: string }) {
     this.warnings.push(input.message);
+    this.events.push(`warning=${input.message}`);
   }
   commandBoundary() {}
-  pluginInstalled() {}
+  pluginInstalled() {
+    this.events.push("pluginInstalled");
+  }
   qrSnapshot() {}
   assistantCreated() {}
   availabilityChecked() {}
-  completed() {}
+  completed() {
+    this.events.push("completed");
+  }
   failed(input: { message: string }) {
     this.infos.push(input.message);
+    this.events.push(`failed=${input.message}`);
   }
 }
 
@@ -70,6 +80,7 @@ function createHostAdapter(options: {
   installError?: Error;
   cleanupWarnings?: string[];
   verifySpy?: (artifact: InstalledPluginArtifact) => void;
+  existingPluginDetected?: boolean;
 }): HostAdapter {
   return {
     host: "opencode",
@@ -85,6 +96,7 @@ function createHostAdapter(options: {
           packageName: "@wecode/skill-opencode-plugin",
           primaryConfigPath: "/tmp/opencode.json",
         },
+        existingPluginDetected: options.existingPluginDetected ?? false,
       };
     },
     async installPlugin() {
@@ -168,6 +180,7 @@ test("InstallPluginCliUseCase passes artifact from install stage into verify sta
     verifySpy: (artifact) => {
       verifiedArtifact = artifact;
     },
+    existingPluginDetected: true,
   }), presenter);
 
   const result = await useCase.execute(createCommand("fallback"));
@@ -177,6 +190,7 @@ test("InstallPluginCliUseCase passes artifact from install stage into verify sta
   assert.deepEqual(presenter.warnings, ["cleanup failed"]);
   assert.match(presenter.infos.join("\n"), /strategy=fallback/);
   assert.match(presenter.infos.join("\n"), /resolved=@wecode\/skill-opencode-plugin/);
+  assert.deepEqual(presenter.events, ["reinstall", "warning=cleanup failed", "pluginInstalled", "completed"]);
 });
 
 test("InstallPluginCliUseCase fails host-native install without suggesting fallback retry", async () => {

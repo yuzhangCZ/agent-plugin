@@ -121,6 +121,10 @@ export class TerminalCliPresenter implements Presenter {
     writeStdout(`[skill-plugin-cli] ${input.host} 配置路径: ${input.primaryConfigPath}`);
   }
 
+  reinstallDetected() {
+    writeStdout("[skill-plugin-cli] 检测到已安装插件，将执行重装");
+  }
+
   stageProgress(input: {
     host: "opencode" | "openclaw";
     stage: keyof typeof INSTALL_STAGE_LABELS;
