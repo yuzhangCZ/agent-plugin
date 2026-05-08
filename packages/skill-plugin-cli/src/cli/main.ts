@@ -8,7 +8,7 @@ async function main() {
   try {
     const parsed = parseInstallArgv(process.argv.slice(2));
     if ("help" in parsed) {
-      process.stdout.write(`${formatHelp()}\n`);
+      process.stdout.write(formatHelp());
       return;
     }
     const useCase = createInstallCliUseCase();
