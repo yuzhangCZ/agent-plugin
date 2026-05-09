@@ -21,7 +21,6 @@ export interface ChatPayload {
   assistantAccount?: string;
   sendUserAccount?: string;
   imGroupId?: string;
-  allowReply?: boolean;
 }
 
 export interface CreateSessionPayload {
@@ -131,7 +130,7 @@ type InvokeMessageBase<K extends InvokeAction> = {
 };
 
 export type InvokeMessageByAction = {
-  chat: InvokeMessageBase<'chat'> & { welinkSessionId?: string };
+  chat: InvokeMessageBase<'chat'> & { welinkSessionId?: string; suppressReply?: boolean };
   create_session: InvokeMessageBase<'create_session'> & { welinkSessionId: string };
   close_session: InvokeMessageBase<'close_session'> & { welinkSessionId?: string };
   permission_reply: InvokeMessageBase<'permission_reply'> & { welinkSessionId?: string };

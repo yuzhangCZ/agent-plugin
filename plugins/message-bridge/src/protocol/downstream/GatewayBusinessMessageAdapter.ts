@@ -28,6 +28,7 @@ function adaptInvokeMessage(
         type: 'invoke',
         action: 'chat',
         welinkSessionId: withOptionalWelinkSessionId(message),
+        ...(message.suppressReply !== undefined ? { suppressReply: message.suppressReply } : {}),
         payload: {
           toolSessionId: message.payload.toolSessionId,
           text: message.payload.text,
@@ -35,7 +36,6 @@ function adaptInvokeMessage(
           ...(message.payload.assistantAccount ? { assistantAccount: message.payload.assistantAccount } : {}),
           ...(message.payload.sendUserAccount ? { sendUserAccount: message.payload.sendUserAccount } : {}),
           ...(message.payload.imGroupId ? { imGroupId: message.payload.imGroupId } : {}),
-          ...(message.payload.allowReply !== undefined ? { allowReply: message.payload.allowReply } : {}),
         },
       });
     case 'create_session':

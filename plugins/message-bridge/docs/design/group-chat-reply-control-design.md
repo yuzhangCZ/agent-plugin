@@ -10,18 +10,18 @@
 
 本方案将原“插件侧基于群聊特征自行判定并拦截”的设计，修正为“由服务端显式下发群聊回复许可，`message-bridge` 仅按协议执行”。
 
-当 `invoke.chat.payload.allowReply === false` 时，bridge 不进入 OpenCode 真正推理链路，不调用 `session.prompt`，而是回放一组符合当前共享 schema 与 OpenCode 事件模型的助手提示消息事件，正文固定为：
+当 `invoke.chat.suppressReply === true` 时，bridge 不进入 OpenCode 真正推理链路，不调用 `session.prompt`，而是回放一组符合当前共享 schema 与 OpenCode 事件模型的助手提示消息事件，正文固定为：
 
 `本机器人不处理群聊消息，请勿在群内@提问`
 
 随后发送 `tool_done`，让上游按成功完成处理。  
-当 `allowReply` 缺失或为 `true` 时，保持现有 chat 行为不变。
+当 `suppressReply` 缺失或为 `false` 时，保持现有 chat 行为不变。
 
 ## In Scope
 
-- 扩展 `gateway-schema` 中 `invoke.chat.payload` 的正式契约
+- 扩展 `gateway-schema` 中 `invoke.chat` 顶层元数据契约
 - 使共享 schema 与 `opencode-cui` 当前实际下行 chat payload 对齐
-- 在 `message-bridge` 的 `invoke.chat` 链路前增加 `allowReply` 判定
+- 在 `message-bridge` 的 `invoke.chat` 链路前增加 `suppressReply` 判定
 - 在禁止回复分支中回放固定助手消息事件并发送 `tool_done`
 - 更新 `message-bridge` 设计文档与时序图
 - 补充共享契约测试与 `message-bridge` 单元测试所需的设计依据
@@ -37,10 +37,10 @@
 
 ## External Dependencies
 
-- `opencode-cui` / 上游服务：负责在下发 `invoke.chat` 时显式给出 `allowReply`
+- `opencode-cui` / 上游服务：负责在下发 `invoke.chat` 时显式给出顶层 `suppressReply`
 - `packages/gateway-schema`：需要将 `chat payload` 从当前精简版扩展为正式业务契约
 - `skill-server`：当前实际已下发 `assistantAccount`、`sendUserAccount`、`imGroupId` 等字段；本方案要求共享契约正式承认这些字段
-- 若上游暂未下发 `allowReply`，bridge 默认按“允许回复”处理，保持兼容
+- 若上游暂未下发 `suppressReply`，bridge 默认按“允许回复”处理，保持兼容
 
 ## 设计目标
 
@@ -48,13 +48,13 @@
 
 1. 群聊 chat 是否允许进入真实回复链路由服务端单点决定
 2. `message-bridge` 不再持有群聊业务判定逻辑
-3. 历史未携带 `allowReply` 的请求继续兼容
+3. 历史未携带 `suppressReply` 的请求继续兼容
 4. 非允许回复的群聊 chat 不触发 OpenCode 推理链路
 5. 成功完成态仍使用现有 `tool_done`
 
 ### 非目标
 
-1. 不在本轮定义服务端如何计算 `allowReply`
+1. 不在本轮定义服务端如何计算 `suppressReply`
 2. 不在本轮修复消费侧重复 `step.done`
 3. 不将 `imGroupId` 继续作为插件侧拦截依据
 
@@ -70,7 +70,16 @@ interface ChatPayload {
   assistantAccount?: string;
   sendUserAccount?: string;
   imGroupId?: string;
-  allowReply?: boolean;
+}
+```
+
+```ts
+interface ChatInvokeMessage {
+  type: 'invoke';
+  action: 'chat';
+  welinkSessionId?: string;
+  suppressReply?: boolean;
+  payload: ChatPayload;
 }
 ```
 
@@ -79,24 +88,24 @@ interface ChatPayload {
 - `toolSessionId`：必填，非空字符串
 - `text`：必填，非空字符串
 - `assistantId`、`assistantAccount`、`sendUserAccount`、`imGroupId`：可选，非空字符串时保留
-- `allowReply`：可选布尔值
 - 可选字符串字段为空串或空白串时按缺失处理
-- `allowReply` 缺失时，语义等价于“允许回复”
-- 除 `allowReply` 外，其余新增字段本轮仅用于契约对齐与兼容保留，不参与 bridge 行为判定
+- `suppressReply`：`invoke.chat` 顶层可选布尔值
+- `suppressReply` 缺失时，语义等价于“允许回复”
+- 除 `suppressReply` 外，其余新增字段本轮仅用于契约对齐与兼容保留，不参与 bridge 行为判定
 
 ### 语义约束
 
-- `allowReply === false`：仅表示“当前群聊消息禁止进入真实回复链路”
-- `allowReply === true`：允许正常回复
-- `allowReply` 不是通用静音/禁回开关
-- 服务端不会把 `allowReply=false` 用于非群聊业务场景
+- `suppressReply === true`：仅表示“当前群聊消息禁止进入真实回复链路”
+- `suppressReply === false`：允许正常回复
+- `suppressReply` 不是通用静音/禁回开关
+- 服务端不会把 `suppressReply=true` 用于非群聊业务场景
 
 ## 关键流程
 
 ### `invoke.chat` 判定顺序
 
-1. 读取 `payload.allowReply`
-2. 若 `allowReply === false`：
+1. 读取顶层 `suppressReply`
+2. 若 `suppressReply === true`：
    - runtime 在进入普通 `chat` 生命周期前直接短路
    - 不调用 `toolDoneCompat.handleInvokeStarted()`
    - 不进入 `ChatAction` / `ChatUseCase`
@@ -110,7 +119,7 @@ interface ChatPayload {
 
 ### deny 分支与 `tool_done` 收口
 
-当 `payload.allowReply === false` 时，本方案不复用普通 `chat` invoke 成功后的 compat 完成态链路，而是在 runtime 的 `invoke.chat` 分发层直接走独立 deny fast path，由 deny 分支自行发送唯一一次 `tool_done`。
+当顶层 `suppressReply === true` 时，本方案不复用普通 `chat` invoke 成功后的 compat 完成态链路，而是在 runtime 的 `invoke.chat` 分发层直接走独立 deny fast path，由 deny 分支自行发送唯一一次 `tool_done`。
 
 这样设计的原因是：
 
@@ -134,7 +143,7 @@ interface ChatPayload {
 正文来源规则：
 
 - 本轮由插件固定写死
-- 服务端只负责给出 `allowReply=false`
+- 服务端只负责给出顶层 `suppressReply=true`
 - 不新增 `denyReplyText` 之类协议字段
 
 ## 回放事件模型
@@ -198,7 +207,7 @@ stepFinishPartId = `prt_${randomUUID().replace(/-/g, '')}`;
 
 ### 事件序列
 
-命中 `allowReply === false` 后，按固定顺序发送：
+命中 `suppressReply === true` 后，按固定顺序发送：
 
 1. `tool_event(message.updated)`
 2. `tool_event(message.part.updated)`，`part.type = "step-start"`
@@ -324,9 +333,9 @@ sequenceDiagram
   participant MB as message-bridge
   participant OC as OpenCode SDK
 
-  SS->>GW: invoke.chat(payload.allowReply=true, toolSessionId, text, ...)
+  SS->>GW: invoke.chat(suppressReply=false/缺失, toolSessionId, text, ...)
   GW->>MB: invoke.chat
-  MB->>MB: 读取 payload.allowReply
+  MB->>MB: 读取顶层 suppressReply
   MB->>MB: 判定为允许回复
   MB->>OC: session.prompt(...)
   OC-->>MB: 产生正常上行事件
@@ -344,9 +353,9 @@ sequenceDiagram
   participant MB as message-bridge
   participant OC as OpenCode SDK
 
-  SS->>GW: invoke.chat(payload.allowReply=false, toolSessionId, text, ...)
+  SS->>GW: invoke.chat(suppressReply=true, toolSessionId, text, ...)
   GW->>MB: invoke.chat
-  MB->>MB: 读取 payload.allowReply
+  MB->>MB: 读取顶层 suppressReply
   MB->>MB: 判定为群聊禁止回复
   MB-->>OC: 不调用 session.prompt
   MB->>GW: tool_event(message.updated)
@@ -366,9 +375,9 @@ sequenceDiagram
   participant MB as message-bridge
   participant OC as OpenCode SDK
 
-  SS->>GW: invoke.chat(payload 无 allowReply)
+  SS->>GW: invoke.chat(无 suppressReply)
   GW->>MB: invoke.chat
-  MB->>MB: allowReply 缺失
+  MB->>MB: suppressReply 缺失
   MB->>MB: 按兼容规则视为允许回复
   MB->>OC: session.prompt(...)
   OC-->>MB: 产生正常上行事件
@@ -382,9 +391,9 @@ sequenceDiagram
 ### 共享契约测试
 
 1. `chat payload` 带完整扩展字段时校验通过并保留有效值
-2. `allowReply: false` 时校验通过并保留
-3. `allowReply: true` 时校验通过并保留
-4. 不带 `allowReply` 的历史请求继续通过
+2. 顶层 `suppressReply: true` 时校验通过并保留
+3. 顶层 `suppressReply: false` 时校验通过并保留
+4. 不带 `suppressReply` 的历史请求继续通过
 5. `assistantAccount`、`sendUserAccount`、`imGroupId` 为空串或空白串时按缺失处理
 
 ### `message-bridge` 单测
@@ -411,7 +420,7 @@ sequenceDiagram
 
 ### 已接受风险
 
-1. 上游若未及时下发 `allowReply`
+1. 上游若未及时下发 `suppressReply`
 - bridge 将按“允许回复”处理
 - 不会自动退回到插件本地群聊推断
 
@@ -420,13 +429,13 @@ sequenceDiagram
 - 不由插件侧兜底修正
 
 3. 共享契约扩宽后，bridge 会正式接受更多 chat 业务字段
-- 但本轮仅 `allowReply` 参与插件行为判定
+- 但本轮仅顶层 `suppressReply` 参与插件行为判定
 - 其余字段仅用于契约对齐与兼容保留
 
 ## 假设
 
-1. `allowReply` 是服务端下发的一手群聊回复许可信号
-2. 服务端不会把 `allowReply=false` 用于非群聊业务场景
+1. `suppressReply` 是服务端下发的一手群聊回复抑制信号
+2. 服务端不会把 `suppressReply=true` 用于非群聊业务场景
 3. 固定提示文案本轮由插件维护，不由服务端下发
 4. synthetic `messageId` 与 `part.id` 无需完全复刻 OpenCode 内部算法，但必须保持真实前缀风格与高熵唯一性
 5. `assistantAccount`、`sendUserAccount`、`imGroupId` 是 `opencode-cui` 现有 chat payload 的真实组成部分，应纳入正式共享契约

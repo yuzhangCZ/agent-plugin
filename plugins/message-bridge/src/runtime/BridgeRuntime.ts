@@ -699,7 +699,7 @@ export class BridgeRuntime {
       return;
     }
 
-    if (invokeMessage.action === 'chat' && invokeMessage.payload.allowReply === false && toolSessionId) {
+    if (invokeMessage.action === 'chat' && invokeMessage.suppressReply === true && toolSessionId) {
       invokeLogger.info('runtime.invoke.chat_deny_fast_path', {
         toolSessionId,
         welinkSessionId,

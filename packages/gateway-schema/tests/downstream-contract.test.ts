@@ -27,6 +27,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
       'chat',
       createChatInvokeMessage({
         welinkSessionId: 'wl-chat',
+        suppressReply: true,
         payload: {
           toolSessionId: 'tool-chat',
           text: 'hello',
@@ -34,13 +35,13 @@ test('normalizeDownstream accepts the full downstream contract', () => {
           assistantAccount: 'assistant-account-a',
           sendUserAccount: 'sender-account-a',
           imGroupId: 'group-a',
-          allowReply: false,
         },
       }),
       {
         type: 'invoke',
         welinkSessionId: 'wl-chat',
         action: 'chat',
+        suppressReply: true,
         payload: {
           toolSessionId: 'tool-chat',
           text: 'hello',
@@ -48,7 +49,6 @@ test('normalizeDownstream accepts the full downstream contract', () => {
           assistantAccount: 'assistant-account-a',
           sendUserAccount: 'sender-account-a',
           imGroupId: 'group-a',
-          allowReply: false,
         },
       },
     ],
@@ -255,16 +255,16 @@ test('normalizeDownstream rejects non-string chat assistantId', () => {
   });
 });
 
-test('normalizeDownstream trims optional chat compat fields and preserves boolean allowReply', () => {
+test('normalizeDownstream trims optional chat compat fields and preserves top-level boolean suppressReply', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
+      suppressReply: true,
       payload: {
         toolSessionId: 'tool-chat-trim',
         text: 'hello',
         assistantAccount: ' assistant-account-trim ',
         sendUserAccount: ' sender-account-trim ',
         imGroupId: ' group-trim ',
-        allowReply: true,
       },
     }),
   );
@@ -278,13 +278,13 @@ test('normalizeDownstream trims optional chat compat fields and preserves boolea
     type: 'invoke',
     welinkSessionId: 'wl-chat',
     action: 'chat',
+    suppressReply: true,
     payload: {
       toolSessionId: 'tool-chat-trim',
       text: 'hello',
       assistantAccount: 'assistant-account-trim',
       sendUserAccount: 'sender-account-trim',
       imGroupId: 'group-trim',
-      allowReply: true,
     },
   });
 });
@@ -318,13 +318,13 @@ test('normalizeDownstream drops blank optional chat compat fields', () => {
   });
 });
 
-test('normalizeDownstream rejects non-boolean chat allowReply', () => {
+test('normalizeDownstream rejects non-boolean chat suppressReply', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
+      suppressReply: 'false',
       payload: {
-        toolSessionId: 'tool-chat-invalid-allow-reply',
+        toolSessionId: 'tool-chat-invalid-suppress-reply',
         text: 'hello',
-        allowReply: 'false',
       },
     }),
   );
@@ -333,7 +333,7 @@ test('normalizeDownstream rejects non-boolean chat allowReply', () => {
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'payload.allowReply',
+    field: 'suppressReply',
     messageType: 'invoke',
     action: 'chat',
   });

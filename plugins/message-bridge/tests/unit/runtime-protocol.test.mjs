@@ -1170,7 +1170,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].welinkSessionId, '100');
   });
 
-  test('short-circuits chat when allowReply is false and emits synthetic deny events', async () => {
+  test('short-circuits chat when suppressReply is true and emits synthetic deny events', async () => {
     const prompts = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -1191,13 +1191,13 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'deny-100',
       action: 'chat',
+      suppressReply: true,
       payload: {
         toolSessionId: 'tool-deny-100',
         text: 'hello',
         assistantAccount: 'assistant-account-a',
         sendUserAccount: 'sender-account-a',
         imGroupId: 'group-a',
-        allowReply: false,
       },
     });
 
@@ -1260,13 +1260,15 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'deny-101',
       action: 'chat',
-      payload: { toolSessionId: 'tool-deny-101', text: 'hello', allowReply: false },
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-101', text: 'hello' },
     });
     await runtime.handleDownstreamMessage({
       type: 'invoke',
       welinkSessionId: 'deny-102',
       action: 'chat',
-      payload: { toolSessionId: 'tool-deny-102', text: 'hello again', allowReply: false },
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-102', text: 'hello again' },
     });
 
     const firstMessageId = sent[0].event.properties.info.id;
@@ -1308,7 +1310,8 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'deny-104',
       action: 'chat',
-      payload: { toolSessionId: 'tool-deny-104', text: 'hello', allowReply: false },
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-104', text: 'hello' },
     });
 
     assert.strictEqual(prompts.length, 0);
@@ -1978,7 +1981,8 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'deny-103',
       action: 'chat',
-      payload: { toolSessionId: 'tool-deny-103', text: 'hello', allowReply: false },
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-103', text: 'hello' },
     });
 
     await runtime.handleEvent({
@@ -1994,7 +1998,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[5].message.type, 'tool_event');
   });
 
-  test('allowReply true keeps the existing chat prompt path', async () => {
+  test('missing suppressReply keeps the existing chat prompt path', async () => {
     const prompts = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -2015,7 +2019,7 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'allow-100',
       action: 'chat',
-      payload: { toolSessionId: 'tool-allow-100', text: 'hello', allowReply: true },
+      payload: { toolSessionId: 'tool-allow-100', text: 'hello' },
     });
 
     assert.strictEqual(prompts.length, 1);
