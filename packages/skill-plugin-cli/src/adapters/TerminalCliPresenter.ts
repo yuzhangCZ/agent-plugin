@@ -1,13 +1,9 @@
-import { createRequire } from "node:module";
 import process from "node:process";
+import qrcodeTerminal from "qrcode-terminal";
+import supportsHyperlinks from "supports-hyperlinks";
 import type { Presenter } from "../domain/ports.ts";
 import { INSTALL_STAGE_LABELS } from "../domain/stages.ts";
 import type { CliQrFailureSummary, CliQrSnapshot, HostAvailabilityResult, InstalledPluginArtifact, PresenterFailure } from "../domain/types.ts";
-
-const require = createRequire(import.meta.url);
-const qrcodeTerminal = require("qrcode-terminal") as {
-  generate(input: string, options: { small?: boolean }, callback: (qrcode: string) => void): void;
-};
 
 function writeStdout(message = "") {
   process.stdout.write(`${message}\n`);
@@ -23,6 +19,34 @@ function renderQrCode(data: string) {
     rendered = qrcode.replace(/\s*$/u, "");
   });
   return rendered;
+}
+
+function isClassicWindowsConsole(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
+  if (platform !== "win32") {
+    return false;
+  }
+
+  // 经典 cmd.exe / powershell.exe 保持纯 URL，避免输出不可见控制序列。
+  return !env.WT_SESSION && !env.TERM_PROGRAM && !env.ConEmuPID;
+}
+
+function probeHyperlinkSupport(env = process.env, platform = process.platform) {
+  if (isClassicWindowsConsole(env, platform)) {
+    return false;
+  }
+
+  const stdoutProbe = supportsHyperlinks.stdout;
+  if (typeof stdoutProbe === "boolean") {
+    return stdoutProbe;
+  }
+  if (typeof stdoutProbe === "function") {
+    return stdoutProbe(process.stdout);
+  }
+  return typeof supportsHyperlinks === "function" ? supportsHyperlinks(process.stdout) : false;
+}
+
+function formatTerminalHyperlink(url: string) {
+  return `\u001B]8;;${url}\u001B\\${url}\u001B]8;;\u001B\\`;
 }
 
 function formatUtcTimestamp(value: string) {
@@ -99,11 +123,19 @@ function formatArtifactSummary(artifact: InstalledPluginArtifact) {
     + `${artifact.localTarballPath ? ` tarball=${artifact.localTarballPath}` : ""}`;
 }
 
+/**
+ * 统一收口 CLI 终端输出，确保默认 transcript、verbose 诊断和二维码展示 contract 保持稳定。
+ */
 export class TerminalCliPresenter implements Presenter {
   private readonly qrCodeRenderer: (data: string) => string;
+  private readonly shouldRenderHyperlink: () => boolean;
 
-  constructor(qrCodeRenderer: (data: string) => string = renderQrCode) {
+  constructor(
+    qrCodeRenderer: (data: string) => string = renderQrCode,
+    shouldRenderHyperlink: () => boolean = probeHyperlinkSupport,
+  ) {
     this.qrCodeRenderer = qrCodeRenderer;
+    this.shouldRenderHyperlink = shouldRenderHyperlink;
   }
 
   installStarted(input: { host: "opencode" | "openclaw"; packageName: string }) {
@@ -198,7 +230,11 @@ export class TerminalCliPresenter implements Presenter {
         } catch {
           writeStdout(`[skill-plugin-cli] weUrl: ${snapshot.weUrl}`);
         }
-        writeStdout(`[skill-plugin-cli] pc WeLink 创建助理地址: ${snapshot.pcUrl}`);
+        writeStdout(
+          `[skill-plugin-cli] pc WeLink 创建助理地址: ${
+            this.shouldRenderHyperlink() ? formatTerminalHyperlink(snapshot.pcUrl) : snapshot.pcUrl
+          }`,
+        );
         writeStdout(`[skill-plugin-cli] 二维码有效期至: ${formatUtcTimestamp(snapshot.expiresAt)}`);
         writeStdout("[skill-plugin-cli] 请在 WeLink 中创建助理");
         return;

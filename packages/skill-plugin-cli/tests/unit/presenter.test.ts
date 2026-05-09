@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { TerminalCliPresenter } from "../../src/adapters/TerminalCliPresenter.ts";
 
+function createPresenter(qrCodeRenderer: (data: string) => string = () => "<二维码渲染块>") {
+  return new TerminalCliPresenter(qrCodeRenderer, () => false);
+}
+
 function captureIo(run: () => void) {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -30,7 +34,7 @@ function captureIo(run: () => void) {
 }
 
 test("TerminalCliPresenter renders default success flow for openclaw", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout, stderr } = captureIo(() => {
     presenter.installStarted({ host: "openclaw", packageName: "@wecode/skill-openclaw-plugin" });
     presenter.hostVersionResolved({ host: "openclaw", version: "2026.4.10" });
@@ -82,7 +86,7 @@ test("TerminalCliPresenter renders default success flow for openclaw", () => {
 });
 
 test("TerminalCliPresenter renders qrcode refresh transcript", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout } = captureIo(() => {
     presenter.qrSnapshot({ type: "expired" });
     presenter.qrSnapshot({
@@ -108,7 +112,7 @@ test("TerminalCliPresenter renders qrcode refresh transcript", () => {
 });
 
 test("TerminalCliPresenter renders weUrl fallback when qrcode rendering fails", () => {
-  const presenter = new TerminalCliPresenter(() => {
+  const presenter = createPresenter(() => {
     throw new Error("render failed");
   });
   const { stdout, stderr } = captureIo(() => {
@@ -132,7 +136,7 @@ test("TerminalCliPresenter renders weUrl fallback when qrcode rendering fails", 
 });
 
 test("TerminalCliPresenter renders verbose stage labels with structured context", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout, stderr } = captureIo(() => {
     presenter.stageProgress({ host: "openclaw", stage: "install_plugin", status: "started", packageName: "@wecode/skill-openclaw-plugin" });
     presenter.stageProgress({ host: "openclaw", stage: "check_host_environment", status: "started" });
@@ -149,7 +153,7 @@ test("TerminalCliPresenter renders verbose stage labels with structured context"
 });
 
 test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout } = captureIo(() => {
     presenter.installStrategyResolved({ strategy: "fallback" });
     presenter.fallbackArtifactResolved({
@@ -184,7 +188,7 @@ test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
 
 
 test("TerminalCliPresenter renders reinstall notice in default mode", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout, stderr } = captureIo(() => {
     presenter.reinstallDetected({ host: "openclaw" });
   });
@@ -194,7 +198,7 @@ test("TerminalCliPresenter renders reinstall notice in default mode", () => {
 });
 
 test("TerminalCliPresenter omits optional fallback artifact fields when absent", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stdout } = captureIo(() => {
     presenter.fallbackArtifactResolved({
       artifact: {
@@ -209,7 +213,7 @@ test("TerminalCliPresenter omits optional fallback artifact fields when absent",
 });
 
 test("TerminalCliPresenter renders structured qrcode failures", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stderr } = captureIo(() => {
     presenter.failed({
       kind: "qrcode_error",
@@ -230,7 +234,7 @@ test("TerminalCliPresenter renders structured qrcode failures", () => {
 });
 
 test("TerminalCliPresenter renders usage errors with help hint", () => {
-  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>");
+  const presenter = createPresenter();
   const { stderr } = captureIo(() => {
     presenter.failed({
       kind: "usage_error",
@@ -244,4 +248,36 @@ test("TerminalCliPresenter renders usage errors with help hint", () => {
     "[skill-plugin-cli] 参数错误：--host 必须为 opencode 或 openclaw\n"
       + "[skill-plugin-cli] 可执行 skill-plugin-cli --help 查看用法\n",
   );
+});
+
+test("TerminalCliPresenter renders OSC 8 hyperlink when terminal supports hyperlinks", () => {
+  const presenter = new TerminalCliPresenter(() => "<二维码渲染块>", () => true);
+  const { stdout } = captureIo(() => {
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://we.example/qr-3",
+      pcUrl: "https://pc.example/qr-3",
+      expiresAt: "2026-04-28T08:10:00.000Z",
+    });
+  });
+
+  assert.ok(
+    stdout.includes(
+      "[skill-plugin-cli] pc WeLink 创建助理地址: \u001B]8;;https://pc.example/qr-3\u001B\\https://pc.example/qr-3\u001B]8;;\u001B\\\n",
+    ),
+  );
+});
+
+test("TerminalCliPresenter renders plain URL when hyperlink support is disabled", () => {
+  const presenter = createPresenter();
+  const { stdout } = captureIo(() => {
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://we.example/qr-4",
+      pcUrl: "https://pc.example/qr-4",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  assert.match(stdout, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-4\n/u);
 });
