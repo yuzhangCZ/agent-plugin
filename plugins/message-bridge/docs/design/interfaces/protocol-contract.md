@@ -269,7 +269,7 @@ type StatusResponseMessage = {
 
 - `chat` 成功时可能发送兼容层 `tool_done`
 - `session.idle` 继续作为 `tool_event` 向上游转发
-- 如果同一次执行尚未发送兼容完成态，`session.idle` 可能触发回退 `tool_done`
+- 仅当该 `toolSessionId` 已进入 compat `chat` 生命周期、且尚未完成 compat 收口时，`session.idle` 才可能触发回退 `tool_done`
 - 当前实现中，`create_session`、`close_session`、`abort_session`、`permission_reply`、`question_reply` 不会主动发送 `tool_done`
 
 ## 5. 失败语义
