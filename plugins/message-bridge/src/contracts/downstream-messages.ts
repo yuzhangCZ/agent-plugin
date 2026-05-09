@@ -18,6 +18,10 @@ export interface ChatPayload {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  assistantAccount?: string;
+  sendUserAccount?: string;
+  imGroupId?: string;
+  allowReply?: boolean;
 }
 
 export interface CreateSessionPayload {

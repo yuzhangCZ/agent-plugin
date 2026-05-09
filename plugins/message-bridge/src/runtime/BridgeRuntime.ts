@@ -59,6 +59,7 @@ import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { ToolDoneCompat, type ToolDoneSource } from './compat/ToolDoneCompat.js';
+import { SyntheticAssistantReplySender } from './SyntheticAssistantReplySender.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
@@ -114,6 +115,9 @@ interface DownstreamLogFields {
   toolSessionId?: string;
 }
 
+type RuntimeToolDoneSource = ToolDoneSource | 'deny_fast_path';
+const GROUP_CHAT_DENY_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
+
 function isGatewayClientErrorShape(error: unknown): error is GatewayClientErrorShape {
   return typeof error === 'object'
     && error !== null
@@ -152,6 +156,7 @@ export class BridgeRuntime {
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
   private readonly lifecycleCoordinator: GatewayLifecycleCoordinator;
   private readonly sessionSender: GatewaySessionSenderPort;
+  private readonly syntheticAssistantReplySender: SyntheticAssistantReplySender;
   private gatewayConnectionOverride: GatewayClient | null = null;
   private sessionDirectoryPolicyContext: {
     channel?: string;
@@ -198,6 +203,10 @@ export class BridgeRuntime {
       getActiveConnection: () => this.getActiveGatewayConnection(),
       getLogger: () => this.logger,
     });
+    this.syntheticAssistantReplySender = new SyntheticAssistantReplySender(
+      this.sessionSender,
+      (message, logContext, logger) => this.validateGatewayUplinkBusinessMessageOrLog(message, logContext, logger),
+    );
     this.registerActions();
     this.actionRouter.setRegistry(this.registry);
   }
@@ -462,12 +471,25 @@ export class BridgeRuntime {
         logger: forwardingLogger,
       });
       if (decision.emit && decision.source) {
-        this.sendToolDone(normalized.common.toolSessionId, undefined, decision.source, {
+        const sent = this.sendToolDone(normalized.common.toolSessionId, undefined, decision.source, {
           connection,
           logger: forwardingLogger,
           traceId: bridgeMessageId,
           gatewayMessageId: bridgeMessageId,
         });
+        if (sent) {
+          this.toolDoneCompat.handleToolDoneSent({
+            toolSessionId: normalized.common.toolSessionId,
+            source: decision.source,
+            logger: forwardingLogger,
+          });
+        } else {
+          this.toolDoneCompat.handleToolDoneSendFailed({
+            toolSessionId: normalized.common.toolSessionId,
+            source: decision.source,
+            logger: forwardingLogger,
+          });
+        }
       }
     }
   }
@@ -677,6 +699,43 @@ export class BridgeRuntime {
       return;
     }
 
+    if (invokeMessage.action === 'chat' && invokeMessage.payload.allowReply === false && toolSessionId) {
+      invokeLogger.info('runtime.invoke.chat_deny_fast_path', {
+        toolSessionId,
+        welinkSessionId,
+      });
+      const denyResult = this.syntheticAssistantReplySender.execute({
+        connection,
+        toolSessionId,
+        welinkSessionId,
+        text: GROUP_CHAT_DENY_REPLY_TEXT,
+        logger: invokeLogger,
+        traceId,
+        gatewayMessageId: downstreamFields.gatewayMessageId,
+        action: 'chat',
+        sendToolDone: (nextToolSessionId, nextWelinkSessionId, logOptions) =>
+          this.sendToolDone(nextToolSessionId, nextWelinkSessionId, 'deny_fast_path', logOptions),
+      });
+      if (!denyResult.success) {
+        invokeLogger.error('runtime.invoke.chat_deny_fast_path_failed', {
+          toolSessionId,
+          welinkSessionId,
+          failureStage: denyResult.failureStage,
+          latencyMs: Date.now() - startedAt,
+        });
+        return;
+      }
+
+      invokeLogger.info('runtime.invoke.completed', {
+        action: 'chat',
+        welinkSessionId,
+        toolSessionId,
+        completionSource: 'deny_fast_path',
+        latencyMs: Date.now() - startedAt,
+      });
+      return;
+    }
+
     this.toolDoneCompat.handleInvokeStarted({
       action: invokeMessage.action,
       toolSessionId,
@@ -716,13 +775,26 @@ export class BridgeRuntime {
       logger: invokeLogger,
     });
     if (decision.emit && toolSessionId && decision.source) {
-      this.sendToolDone(toolSessionId, welinkSessionId, decision.source, {
+      const sent = this.sendToolDone(toolSessionId, welinkSessionId, decision.source, {
         connection,
         logger: invokeLogger,
         traceId,
         gatewayMessageId: downstreamFields.gatewayMessageId,
         action: invokeMessage.action,
       });
+      if (sent) {
+        this.toolDoneCompat.handleToolDoneSent({
+          toolSessionId,
+          source: decision.source,
+          logger: invokeLogger,
+        });
+      } else {
+        this.toolDoneCompat.handleToolDoneSendFailed({
+          toolSessionId,
+          source: decision.source,
+          logger: invokeLogger,
+        });
+      }
     }
   }
 
@@ -992,7 +1064,7 @@ export class BridgeRuntime {
   private sendToolDone(
     toolSessionId: string,
     welinkSessionId: string | undefined,
-    source: ToolDoneSource,
+    source: RuntimeToolDoneSource,
     logOptions?: {
       connection?: GatewayClient | null;
       logger?: BridgeLogger;
@@ -1000,11 +1072,11 @@ export class BridgeRuntime {
       gatewayMessageId?: string;
       action?: string;
     },
-  ): void {
+  ): boolean {
     const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
     if (!connection) {
       this.logger.warn('runtime.tool_done.skipped_no_connection', { toolSessionId, welinkSessionId, source });
-      return;
+      return false;
     }
 
     const logger = logOptions?.logger ?? this.logger;
@@ -1035,9 +1107,9 @@ export class BridgeRuntime {
       logger,
     );
     if (!validatedToolDone) {
-      return;
+      return false;
     }
-    this.sessionSender.sendIfActive(connection, validatedToolDone, toolDoneLogContext);
+    return this.sessionSender.sendIfActive(connection, validatedToolDone, toolDoneLogContext);
   }
 
   private validateGatewayUplinkBusinessMessageOrLog(

@@ -31,6 +31,10 @@ test('normalizeDownstream accepts the full downstream contract', () => {
           toolSessionId: 'tool-chat',
           text: 'hello',
           assistantId: 'persona-a',
+          assistantAccount: 'assistant-account-a',
+          sendUserAccount: 'sender-account-a',
+          imGroupId: 'group-a',
+          allowReply: false,
         },
       }),
       {
@@ -41,6 +45,10 @@ test('normalizeDownstream accepts the full downstream contract', () => {
           toolSessionId: 'tool-chat',
           text: 'hello',
           assistantId: 'persona-a',
+          assistantAccount: 'assistant-account-a',
+          sendUserAccount: 'sender-account-a',
+          imGroupId: 'group-a',
+          allowReply: false,
         },
       },
     ],
@@ -242,6 +250,90 @@ test('normalizeDownstream rejects non-string chat assistantId', () => {
     stage: 'payload',
     code: 'invalid_field_type',
     field: 'payload.assistantId',
+    messageType: 'invoke',
+    action: 'chat',
+  });
+});
+
+test('normalizeDownstream trims optional chat compat fields and preserves boolean allowReply', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-trim',
+        text: 'hello',
+        assistantAccount: ' assistant-account-trim ',
+        sendUserAccount: ' sender-account-trim ',
+        imGroupId: ' group-trim ',
+        allowReply: true,
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value, {
+    type: 'invoke',
+    welinkSessionId: 'wl-chat',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-chat-trim',
+      text: 'hello',
+      assistantAccount: 'assistant-account-trim',
+      sendUserAccount: 'sender-account-trim',
+      imGroupId: 'group-trim',
+      allowReply: true,
+    },
+  });
+});
+
+test('normalizeDownstream drops blank optional chat compat fields', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-blank',
+        text: 'hello',
+        assistantAccount: '   ',
+        sendUserAccount: '',
+        imGroupId: '\n\t',
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value, {
+    type: 'invoke',
+    welinkSessionId: 'wl-chat',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-chat-blank',
+      text: 'hello',
+    },
+  });
+});
+
+test('normalizeDownstream rejects non-boolean chat allowReply', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-invalid-allow-reply',
+        text: 'hello',
+        allowReply: 'false',
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.allowReply',
     messageType: 'invoke',
     action: 'chat',
   });

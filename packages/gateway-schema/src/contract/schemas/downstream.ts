@@ -25,11 +25,19 @@ export const chatPayloadSchema = z
     toolSessionId: requiredTrimmedString,
     text: requiredTrimmedString,
     assistantId: optionalStrictTrimmedString,
+    assistantAccount: optionalStrictTrimmedString,
+    sendUserAccount: optionalStrictTrimmedString,
+    imGroupId: optionalStrictTrimmedString,
+    allowReply: z.boolean().optional(),
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
     text: payload.text,
     ...(payload.assistantId ? { assistantId: payload.assistantId } : {}),
+    ...(payload.assistantAccount ? { assistantAccount: payload.assistantAccount } : {}),
+    ...(payload.sendUserAccount ? { sendUserAccount: payload.sendUserAccount } : {}),
+    ...(payload.imGroupId ? { imGroupId: payload.imGroupId } : {}),
+    ...(payload.allowReply !== undefined ? { allowReply: payload.allowReply } : {}),
   }));
 export type ChatPayload = z.output<typeof chatPayloadSchema>;
 
