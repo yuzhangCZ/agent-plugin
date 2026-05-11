@@ -2,3 +2,11 @@
 	path = integration/opencode-cui
 	url = https://github.com/Llllviaaaa/opencode-CUI.git
 	branch = main
+[submodule "integration/opencode"]
+	path = integration/opencode
+	url = https://github.com/yuzhangCZ/opencode.git
+	branch = learn-opencode
+[submodule "integration/openclaw"]
+	path = integration/openclaw
+	url = https://github.com/yuzhangCZ/openclaw.git
+	branch = feat/learn-openclaw
