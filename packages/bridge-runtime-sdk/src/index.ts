@@ -44,6 +44,7 @@ export type {
   RuntimeTraceTerminal,
 } from './application/runtime-trace.ts';
 export { createBridgeRuntime } from './application/create-runtime.ts';
+export { resolvePackageVersion } from './packageVersion.ts';
 export { qrcodeAuth } from '@wecode/skill-qrcode-auth';
 export type {
   QrCodeAuth,

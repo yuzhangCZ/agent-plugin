@@ -26,3 +26,4 @@ export * from "./OpenClawGatewayBridge.js";
 export * from "./gateway-wire/index.js";
 export * from "./config.js";
 export * from "./runtime/RegisterMetadata.js";
+export * from "./runtime/packageVersion.js";

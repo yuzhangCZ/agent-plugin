@@ -124,6 +124,34 @@ export const releaseDescriptors = Object.freeze({
       tagPrefix: "release/message-bridge-openclaw/v",
     }),
   }),
+  "bridge-runtime-sdk": Object.freeze({
+    id: "bridge-runtime-sdk",
+    packageRoot: "packages/bridge-runtime-sdk",
+    versionSource: "package.json",
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "tarball",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
+        Object.freeze({ type: "file-exists", relativePath: ".tmp/release-pack/{packFile}" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/package.json" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/index.js" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/index.d.ts" }),
+        Object.freeze({ type: "tarball-entry-missing", relativePath: ".tmp/release-pack/{packFile}", entry: "package/src/index.ts" }),
+      ]),
+      root: ".",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([["npm", "pack", "--pack-destination", ".tmp/release-pack"]]),
+      requiresDefaultGatewayUrl: true,
+      steps: Object.freeze([["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "verify:release"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/bridge-runtime-sdk/v",
+    }),
+  }),
 });
 
 const validTargets = new Set([...Object.keys(releaseDescriptors), "dual"]);
@@ -1055,8 +1083,8 @@ function formatReadiness(readiness) {
 export function formatHelp() {
   return `
 Usage:
-  pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|dual> [options]
-  pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|dual> [options]
+  pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
+  pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
 
 Required version input:
   Single target:
@@ -1102,6 +1130,7 @@ Defaults:
   - skill-plugin-cli publishes from packages/skill-plugin-cli/.tmp/release-pack/<package-version>.tgz
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
+  - bridge-runtime-sdk publishes from packages/bridge-runtime-sdk/.tmp/release-pack/<package-version>.tgz
   - dual releases are non-atomic
 
 Examples:
@@ -1109,7 +1138,9 @@ Examples:
   pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
   pnpm release:plan -- --target skill-plugin-cli --bump patch
   pnpm release:local -- --target skill-plugin-cli --version 0.1.0
+  pnpm release:plan -- --target bridge-runtime-sdk --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:plan -- --target message-bridge --bump patch
+  pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta

@@ -17,7 +17,11 @@ export interface RegisterMetadataDeps {
 
 const UNKNOWN_TOOL_VERSION = "unknown";
 
-function resolvePackageVersion(logger: BridgeLogger): string {
+/**
+ * 解析注册元数据中的 toolVersion。
+ * @remarks 这里表达的是宿主 agent 版本，不是插件包版本；因此不读取构建期注入的 package version。
+ */
+function resolveHostToolVersion(logger: BridgeLogger): string {
   const moduleFile = fileURLToPath(import.meta.url);
   let currentDir = path.dirname(moduleFile);
 
@@ -54,7 +58,7 @@ export function resolveRegisterMetadata(
 ): RegisterMetadata {
   return {
     toolType: MESSAGE_BRIDGE_TOOL_TYPE,
-    toolVersion: deps.toolVersion?.trim() || resolvePackageVersion(logger),
+    toolVersion: deps.toolVersion?.trim() || resolveHostToolVersion(logger),
   };
 }
 
