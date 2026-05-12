@@ -9,10 +9,6 @@ importers:
   .: {}
 
   packages/bridge-runtime-sdk:
-    dependencies:
-      '@wecode/skill-qrcode-auth':
-        specifier: workspace:*
-        version: link:../skill-qrcode-auth
     devDependencies:
       '@agent-plugin/gateway-client':
         specifier: workspace:*
@@ -20,6 +16,9 @@ importers:
       '@agent-plugin/gateway-schema':
         specifier: workspace:*
         version: link:../gateway-schema
+      '@wecode/skill-qrcode-auth':
+        specifier: workspace:*
+        version: link:../skill-qrcode-auth
       '@types/node':
         specifier: ^22.10.2
         version: 22.19.15

@@ -14,9 +14,6 @@
   "files": [
     "dist"
   ],
-  "dependencies": {
-    "@wecode/skill-qrcode-auth": "workspace:*"
-  },
   "scripts": {
     "build": "node ./scripts/build-package.mjs",
     "build:dev": "BRIDGE_RUNTIME_SDK_MINIFY=0 node ./scripts/build-package.mjs",
@@ -33,6 +30,7 @@
   "devDependencies": {
     "@agent-plugin/gateway-client": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",
+    "@wecode/skill-qrcode-auth": "workspace:*",
     "@types/node": "^22.10.2",
     "dts-bundle-generator": "^9.5.1",
     "esbuild": "^0.27.4",

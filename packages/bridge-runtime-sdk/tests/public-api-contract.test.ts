@@ -37,5 +37,5 @@ test('package publish contract keeps gateway-client internal to the SDK facade',
 
   assert.equal(pkg.exports['./gateway-client'], undefined);
   assert.equal('@agent-plugin/gateway-client' in (pkg.dependencies ?? {}), false);
-  assert.equal('@wecode/skill-qrcode-auth' in (pkg.dependencies ?? {}), true);
+  assert.equal('@wecode/skill-qrcode-auth' in (pkg.dependencies ?? {}), false);
 });
