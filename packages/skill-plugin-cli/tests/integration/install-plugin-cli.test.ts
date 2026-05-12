@@ -101,8 +101,15 @@ function captureIo() {
   };
 }
 
-function normalizeQrBlock(output: string) {
-  return output.replace(/(?:[ \u2580-\u259f]+\n)+/gu, "<二维码渲染块>\n");
+function stripOsc8Hyperlinks(output: string) {
+  return output.replace(
+    /\u001B\]8;;[^\u0007\u001B]*(?:\u0007|\u001B\\)(.*?)\u001B\]8;;(?:\u0007|\u001B\\)/gu,
+    "$1",
+  );
+}
+
+function normalizeTerminalOutput(output: string) {
+  return stripOsc8Hyperlinks(output).replace(/(?:[ \u2580-\u259f]+\n)+/gu, "<二维码渲染块>\n");
 }
 
 const mainEntry = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
@@ -176,7 +183,7 @@ exit 0`,
     assert.equal(result.status, "success");
     assert.equal(io.stderr.join(""), "");
     assert.equal(
-      normalizeQrBlock(io.stdout.join("")),
+      normalizeTerminalOutput(io.stdout.join("")),
       `[skill-plugin-cli] 正在为 openclaw 安装 @wecode/skill-openclaw-plugin，请稍候
 [skill-plugin-cli] openclaw 版本：2026.4.10
 [skill-plugin-cli] openclaw 配置路径: ${join(dir, ".openclaw", "openclaw.json")}
@@ -235,7 +242,7 @@ exit 0`,
     assert.equal(result.status, "success");
     assert.equal(io.stderr.join(""), "");
     assert.equal(
-      normalizeQrBlock(io.stdout.join("")),
+      normalizeTerminalOutput(io.stdout.join("")),
       `[skill-plugin-cli] 正在为 opencode 安装 @wecode/skill-opencode-plugin，请稍候
 [skill-plugin-cli] opencode 配置路径: ${join(configDir, "opencode.json")}
 [skill-plugin-cli] 检测到已安装插件，将执行重装
@@ -509,7 +516,7 @@ exit 0`,
     const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("refresh") }).execute(parsed);
 
     assert.equal(result.status, "success");
-    const output = io.stdout.join("");
+    const output = normalizeTerminalOutput(io.stdout.join(""));
     assert.match(output, /\[skill-plugin-cli\] 二维码已过期，正在刷新/);
     assert.match(output, /\[skill-plugin-cli\] ========= 已刷新二维码（第 1\/3 次） =========/);
     assert.match(output, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-2/);

@@ -29,6 +29,10 @@ async function main() {
       cli: path.join(PACKAGE_DIR, "src", "cli", "main.ts"),
     },
     outdir: DIST_DIR,
+    banner: {
+      // 允许 bundle 后的 CJS 依赖在 ESM 产物内继续访问 Node 内建模块。
+      js: "import { createRequire as __createRequire } from 'node:module';const require=__createRequire(import.meta.url);",
+    },
     format: "esm",
     platform: "node",
     target: "node24",

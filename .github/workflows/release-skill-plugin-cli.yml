@@ -46,7 +46,7 @@ jobs:
         run: pnpm --dir packages/skill-plugin-cli run verify:core
 
       - name: Pack release tarball
-        run: npm pack --pack-destination .tmp/release-pack
+        run: node ./scripts/build-release-tarball.mjs --pack-destination .tmp/release-pack
         working-directory: packages/skill-plugin-cli
 
       - name: Upload tarball

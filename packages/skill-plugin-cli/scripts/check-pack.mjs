@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -31,7 +31,36 @@ async function main() {
     const packageDir = path.join(nodeModulesDir, "@wecode", "skill-plugin-cli");
     await mkdir(packageDir, { recursive: true });
     execFileSync("tar", ["-xzf", tgzPath, "-C", packageDir, "--strip-components=1"], { stdio: "pipe" });
+    const extractedManifest = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8"));
+    assert.equal(
+      Object.hasOwn(extractedManifest, "dependencies"),
+      false,
+      "pack check failed: published package.json must not contain runtime dependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "devDependencies"),
+      false,
+      "pack check failed: published package.json must not contain devDependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "optionalDependencies"),
+      false,
+      "pack check failed: published package.json must not contain optionalDependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "peerDependencies"),
+      false,
+      "pack check failed: published package.json must not contain peerDependencies",
+    );
     await writeFile(path.join(importProbeRoot, "package.json"), JSON.stringify({ type: "module" }), "utf8");
+
+    const helpProbe = spawnSync(process.execPath, ["./dist/cli.js", "--help"], {
+      cwd: packageDir,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    assert.equal(helpProbe.status, 0, helpProbe.stderr || helpProbe.stdout);
+    assert.match(`${helpProbe.stdout}${helpProbe.stderr}`, /skill-plugin-cli|\u7528\u6CD5/u);
 
     const probe = spawnSync(
       process.execPath,
