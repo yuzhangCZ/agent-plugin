@@ -1,7 +1,9 @@
 # 本地发布 CLI
 
-本仓库为三个工作区包提供统一的本地发布 CLI：
+本仓库为五个工作区包提供统一的本地发布 CLI：
 
+- `@wecode/skill-qrcode-auth`
+- `@wecode/skill-plugin-cli`
 - `@wecode/skill-opencode-plugin`
 - `@wecode/skill-openclaw-plugin`
 - `@agent-plugin/bridge-runtime-sdk`
@@ -11,8 +13,8 @@
 ## 入口
 
 ```bash
-pnpm release:local -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
-pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
+pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
+pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
 ```
 
 - `release:local` 执行完整发布流程。
@@ -40,18 +42,22 @@ npm whoami
 
 如果你使用的是类似 `@wecode:registry=...` 的 scope 私仓配置，CLI 会优先解析该 scope 对应的真实 registry，并对这个 registry 做认证检查，而不是只看默认 registry。
 
-## 当前三个包的发布差异
+## 当前五个包的发布差异
 
-CLI 对外接口统一，但三个 target 当前的发布根目录和构建模式不同：
+CLI 对外接口统一，但五个包当前的发布入口不同：
 
+- `skill-qrcode-auth` 从 `packages/skill-qrcode-auth` 发布
+- `skill-plugin-cli` 先基于 `packages/skill-plugin-cli` 构建发布专用 tarball，再从 `.tmp/release-pack/*.tgz` 发布
 - `message-bridge` 从 `plugins/message-bridge` 发布
 - `message-bridge-openclaw` 从 `plugins/message-bridge-openclaw/bundle` 发布
-- `bridge-runtime-sdk` 从 `packages/bridge-runtime-sdk` 发布
+- `bridge-runtime-sdk` 先基于 `packages/bridge-runtime-sdk` 构建并打包，再从 `.tmp/release-pack/*.tgz` 发布
 
 构建差异：
 
-- `message-bridge`、`message-bridge-openclaw` 在官方发布路径中都要求注入默认网关地址
-- `bridge-runtime-sdk` 同样要求注入默认网关地址，且默认 `build` 就会输出压缩混淆后的 `dist/index.js`
+- `skill-qrcode-auth`、`skill-plugin-cli` 不要求注入默认网关地址
+- `message-bridge`、`message-bridge-openclaw`、`bridge-runtime-sdk` 的官方发布路径都要求注入默认网关地址
+- `bridge-runtime-sdk` 默认 `build` 就会输出压缩混淆后的 `dist/index.js`
+- `bridge-runtime-sdk` 在本地 release CLI 中会先生成 tarball，再发布该 tarball，避免 publish 阶段依赖切换到包目录
 - `bridge-runtime-sdk` 如需本地排查可读产物，需要显式使用包内 `pnpm run build:dev`
 
 这是当前仓库状态下的有意设计。后续统一为源码根发包的重构问题记录在 [openclaw-root-publish-refactor-issue.md](./openclaw-root-publish-refactor-issue.md)。
@@ -83,6 +89,8 @@ CLI 对外接口统一，但三个 target 当前的发布根目录和构建模�
 
 - `--target message-bridge`
 - `--target message-bridge-openclaw`
+- `--target skill-qrcode-auth`
+- `--target skill-plugin-cli`
 - `--target bridge-runtime-sdk`
 - `--target dual`
 
@@ -120,7 +128,7 @@ CLI 对外接口统一，但三个 target 当前的发布根目录和构建模�
 - 只有显式传 `--push` 才会把当前分支和新 tag 推到 `origin`
 - `--skip-publish` 不能和 `--push` 一起使用
 - 对于要求构建期默认网关地址的 target，官方发布路径必须显式传 `--default-gateway-url`
-- 该值会作为构建期环境变量 `MB_DEFAULT_GATEWAY_URL` 注入到 build / verify / publish 子进程
+- 该值会作为构建期环境变量 `MB_DEFAULT_GATEWAY_URL` 注入到需要该配置的 build / verify / publish 子进程
 
 当前需要 `--default-gateway-url` 的 target：
 
@@ -139,6 +147,12 @@ CLI 对外接口统一，但三个 target 当前的发布根目录和构建模�
 
 ## 正式发布示例
 
+给 `skill-qrcode-auth` 发布一个显式版本：
+
+```bash
+pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
+```
+
 给 `message-bridge` 做一次 patch 版本发布：
 
 ```bash
@@ -151,16 +165,16 @@ pnpm release:local -- --target message-bridge --bump patch --default-gateway-url
 pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-给 `bridge-runtime-sdk` 发布一个显式版本：
-
-```bash
-pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
-```
-
 仅预览一次正式发布计划，不改 npm，也不改 git：
 
 ```bash
 pnpm release:plan -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
+```
+
+给 `bridge-runtime-sdk` 发布一个显式版本：
+
+```bash
+pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
 仅预览一次 `bridge-runtime-sdk` 的正式发布计划：
@@ -205,7 +219,7 @@ pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.
 
 1. 解析目标版本和 dist-tag
 2. 执行依赖存在性检查
-3. 校验 `--default-gateway-url` 是否存在且为合法 `ws://` / `wss://`
+3. 对需要网关注入的 target 校验 `--default-gateway-url` 是否存在且为合法 `ws://` / `wss://`
 4. 改写目标包版本
 5. 执行 target 对应的构建步骤
 6. 执行 target 对应的 `verify:release`
@@ -246,9 +260,9 @@ publish readiness 是进入不可逆 `npm publish` 之前的最后一道门禁�
 
 ### 默认网关地址缺失或非法
 
-- 未传 `--default-gateway-url` 时，CLI 会在首次 build 前失败
-- 传入非 `ws://` / `wss://` 地址时，CLI 会在首次 build 前失败
-- 该校验只覆盖官方发布路径；手工发包不在当前保障范围内
+- `message-bridge` / `message-bridge-openclaw` / `bridge-runtime-sdk` 未传 `--default-gateway-url` 时，CLI 会在首次 build 前失败
+- 对这些 target 传入非 `ws://` / `wss://` 地址时，CLI 会在首次 build 前失败
+- `skill-qrcode-auth`、`skill-plugin-cli` 不要求该参数
 
 ### 发布成功但 Git 失败
 

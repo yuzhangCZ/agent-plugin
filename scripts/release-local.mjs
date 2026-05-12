@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { listTarEntries } from "./tar-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = path.resolve(scriptDir, "..");
@@ -12,67 +13,144 @@ export const releaseDescriptorSchema = Object.freeze([
   "id",
   "packageRoot",
   "versionSource",
-  "publishRoot",
-  "buildSteps",
-  "verifyStep",
-  "tagPrefix",
-  "distTagSource",
-  "requiresDefaultGatewayUrl",
-  "releaseReadinessChecks",
+  "publish",
+  "build",
+  "release",
 ]);
 
 export const releaseDescriptors = Object.freeze({
+  "skill-qrcode-auth": Object.freeze({
+    id: "skill-qrcode-auth",
+    packageRoot: "packages/skill-qrcode-auth",
+    versionSource: "package.json",
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "directory",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "path-exists", relativePath: "." }),
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
+        Object.freeze({ type: "file-exists", relativePath: "package.json" }),
+        Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
+      ]),
+      root: ".",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([]),
+      requiresDefaultGatewayUrl: false,
+      steps: Object.freeze([["pnpm", "--dir", "packages/skill-qrcode-auth", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "packages/skill-qrcode-auth", "run", "verify:core"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/skill-qrcode-auth/v",
+    }),
+  }),
+  "skill-plugin-cli": Object.freeze({
+    id: "skill-plugin-cli",
+    packageRoot: "packages/skill-plugin-cli",
+    versionSource: "package.json",
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "tarball",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "file-exists", relativePath: ".tmp/release-pack/{packFile}" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/package.json" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/README.md" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/cli.js" }),
+        Object.freeze({ type: "tarball-entry-missing", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/index.js" }),
+        Object.freeze({ type: "tarball-no-entry-suffix", relativePath: ".tmp/release-pack/{packFile}", suffix: ".d.ts" }),
+        Object.freeze({ type: "tarball-no-entry-suffix", relativePath: ".tmp/release-pack/{packFile}", suffix: ".map" }),
+      ]),
+      root: ".",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([["node", "./scripts/build-release-tarball.mjs", "--pack-destination", ".tmp/release-pack"]]),
+      requiresDefaultGatewayUrl: false,
+      steps: Object.freeze([["pnpm", "--dir", "packages/skill-plugin-cli", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "packages/skill-plugin-cli", "run", "verify:core"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/skill-plugin-cli/v",
+    }),
+  }),
   "message-bridge": Object.freeze({
     id: "message-bridge",
     packageRoot: "plugins/message-bridge",
     versionSource: "package.json",
-    publishRoot: ".",
-    buildSteps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge", "run", "build"]]),
-    verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge", "run", "verify:release"]),
-    tagPrefix: "release/message-bridge/v",
-    distTagSource: "version",
-    requiresDefaultGatewayUrl: true,
-    releaseReadinessChecks: Object.freeze([
-      Object.freeze({ type: "path-exists", relativePath: "." }),
-      Object.freeze({ type: "file-exists", relativePath: "release/message-bridge.plugin.js" }),
-      Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
-    ]),
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "directory",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "path-exists", relativePath: "." }),
+        Object.freeze({ type: "file-exists", relativePath: "release/message-bridge.plugin.js" }),
+        Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
+      ]),
+      root: ".",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([]),
+      requiresDefaultGatewayUrl: true,
+      steps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge", "run", "verify:release"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/message-bridge/v",
+    }),
   }),
   "message-bridge-openclaw": Object.freeze({
     id: "message-bridge-openclaw",
     packageRoot: "plugins/message-bridge-openclaw",
     versionSource: "package.json",
-    publishRoot: "bundle",
-    buildSteps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"]]),
-    verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "verify:release"]),
-    tagPrefix: "release/message-bridge-openclaw/v",
-    distTagSource: "version",
-    requiresDefaultGatewayUrl: true,
-    releaseReadinessChecks: Object.freeze([
-      Object.freeze({ type: "path-exists", relativePath: "." }),
-      Object.freeze({ type: "file-exists", relativePath: "index.js" }),
-      Object.freeze({ type: "file-exists", relativePath: "package.json" }),
-      Object.freeze({ type: "file-exists", relativePath: "openclaw.plugin.json" }),
-      Object.freeze({ type: "file-exists", relativePath: "README.md" }),
-      Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
-    ]),
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "directory",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "path-exists", relativePath: "." }),
+        Object.freeze({ type: "file-exists", relativePath: "index.js" }),
+        Object.freeze({ type: "file-exists", relativePath: "package.json" }),
+        Object.freeze({ type: "file-exists", relativePath: "openclaw.plugin.json" }),
+        Object.freeze({ type: "file-exists", relativePath: "README.md" }),
+        Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
+      ]),
+      root: "bundle",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([]),
+      requiresDefaultGatewayUrl: true,
+      steps: Object.freeze([["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "plugins/message-bridge-openclaw", "run", "verify:release"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/message-bridge-openclaw/v",
+    }),
   }),
   "bridge-runtime-sdk": Object.freeze({
     id: "bridge-runtime-sdk",
     packageRoot: "packages/bridge-runtime-sdk",
     versionSource: "package.json",
-    publishRoot: ".",
-    buildSteps: Object.freeze([["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "build"]]),
-    verifyStep: Object.freeze(["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "verify:release"]),
-    tagPrefix: "release/bridge-runtime-sdk/v",
-    distTagSource: "version",
-    requiresDefaultGatewayUrl: true,
-    releaseReadinessChecks: Object.freeze([
-      Object.freeze({ type: "path-exists", relativePath: "." }),
-      Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
-      Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
-      Object.freeze({ type: "manifest-version-match", relativePath: "package.json" }),
-    ]),
+    publish: Object.freeze({
+      distTagSource: "version",
+      mode: "tarball",
+      readinessChecks: Object.freeze([
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.js" }),
+        Object.freeze({ type: "file-exists", relativePath: "dist/index.d.ts" }),
+        Object.freeze({ type: "file-exists", relativePath: ".tmp/release-pack/{packFile}" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/package.json" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/index.js" }),
+        Object.freeze({ type: "tarball-entry-exists", relativePath: ".tmp/release-pack/{packFile}", entry: "package/dist/index.d.ts" }),
+        Object.freeze({ type: "tarball-entry-missing", relativePath: ".tmp/release-pack/{packFile}", entry: "package/src/index.ts" }),
+      ]),
+      root: ".",
+    }),
+    build: Object.freeze({
+      preparePublishSteps: Object.freeze([["npm", "pack", "--pack-destination", ".tmp/release-pack"]]),
+      requiresDefaultGatewayUrl: true,
+      steps: Object.freeze([["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "build"]]),
+      verifyStep: Object.freeze(["pnpm", "--dir", "packages/bridge-runtime-sdk", "run", "verify:release"]),
+    }),
+    release: Object.freeze({
+      tagPrefix: "release/bridge-runtime-sdk/v",
+    }),
   }),
 });
 
@@ -119,6 +197,7 @@ function resolveExecutable(command) {
 function createProcessPorts(overrides = {}) {
   const fs = overrides.fs ?? {
     exists: existsSync,
+    mkdir: (targetPath) => mkdirSync(targetPath, { recursive: true }),
     readJson: parseJsonFile,
     writeJson: writeJsonFile,
   };
@@ -148,6 +227,7 @@ function createProcessPorts(overrides = {}) {
     fs,
     exec,
     inspectDependencies,
+    listTarEntries: overrides.listTarEntries ?? listTarEntries,
   };
 }
 
@@ -164,6 +244,10 @@ function getDescriptor(target) {
   }
 
   return descriptor;
+}
+
+function toPackFilename(packageName, version) {
+  return `${packageName.replace(/^@/, "").replace(/\//g, "-")}-${version}.tgz`;
 }
 
 export function parseSemver(version) {
@@ -317,11 +401,6 @@ function validateDefaultGatewayUrl(value) {
   }
 
   return normalized;
-}
-
-function requiresDefaultGatewayUrl(planOrTargets) {
-  const targets = Array.isArray(planOrTargets) ? planOrTargets : planOrTargets.targets;
-  return targets.some((target) => target.requiresDefaultGatewayUrl);
 }
 
 function readOptionValue(argv, index, flag) {
@@ -649,13 +728,25 @@ function resolveReleaseTarget(target, repoRoot, fs) {
     throw new Error(`missing package version in ${versionSourcePath}`);
   }
 
+  const packageName = typeof manifest.name === "string" && manifest.name.length > 0 ? manifest.name : target;
+  const publishRootAbsolute = path.resolve(packageRoot, descriptor.publish.root);
+  const publishRootRelative = path.relative(repoRoot, publishRootAbsolute) || ".";
+
   return {
     ...descriptor,
-    packageName: typeof manifest.name === "string" && manifest.name.length > 0 ? manifest.name : target,
+    buildSteps: descriptor.build.steps,
+    packageName,
     currentVersion: manifest.version,
     packageRootAbsolute: packageRoot,
-    publishRootAbsolute: path.resolve(packageRoot, descriptor.publishRoot),
-    publishRootRelative: path.relative(repoRoot, path.resolve(packageRoot, descriptor.publishRoot)) || ".",
+    preparePublishSteps: descriptor.build.preparePublishSteps,
+    publishMode: descriptor.publish.mode,
+    publishRootAbsolute,
+    publishRootRelative,
+    releaseReadinessChecks: descriptor.publish.readinessChecks,
+    requiresDefaultGatewayUrl: descriptor.build.requiresDefaultGatewayUrl,
+    tagPrefix: descriptor.release.tagPrefix,
+    distTagSource: descriptor.publish.distTagSource,
+    verifyStep: descriptor.build.verifyStep,
     versionSourceAbsolute: versionSourcePath,
     versionSourceRelative: path.relative(repoRoot, versionSourcePath),
   };
@@ -682,8 +773,8 @@ function createGeneratedPathPrefixes() {
     prefixes.add(`${packageRoot}/release`);
     prefixes.add(`${packageRoot}/bundle`);
 
-    if (descriptor.publishRoot !== ".") {
-      prefixes.add(normalizeRepoRelativePath(path.join(descriptor.packageRoot, descriptor.publishRoot)));
+    if (descriptor.publish.root !== ".") {
+      prefixes.add(normalizeRepoRelativePath(path.join(descriptor.packageRoot, descriptor.publish.root)));
     }
   }
 
@@ -731,13 +822,16 @@ function toCommitMessage(targets) {
 }
 
 export function evaluatePublishReadiness(targetPlan, options = {}) {
-  const fs = options.fs ?? createProcessPorts().fs;
+  const ports = createProcessPorts(options);
+  const fs = options.fs ?? ports.fs;
   const executedChecks = [];
   const publishRoot = targetPlan.publishRootAbsolute;
+  let tarballEntries = null;
 
   for (const check of targetPlan.releaseReadinessChecks) {
+    const relativePath = resolveReadinessRelativePath(check.relativePath ?? ".", targetPlan);
     if (check.type === "path-exists") {
-      const absolutePath = path.resolve(publishRoot, check.relativePath);
+      const absolutePath = path.resolve(publishRoot, relativePath);
       const ok = fs.exists(absolutePath);
       executedChecks.push({
         check: `path exists: ${path.relative(targetPlan.repoRoot, absolutePath) || "."}`,
@@ -747,7 +841,7 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
     }
 
     if (check.type === "file-exists") {
-      const absolutePath = path.resolve(publishRoot, check.relativePath);
+      const absolutePath = path.resolve(publishRoot, relativePath);
       const ok = fs.exists(absolutePath);
       executedChecks.push({
         check: `file exists: ${path.relative(targetPlan.repoRoot, absolutePath)}`,
@@ -757,7 +851,7 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
     }
 
     if (check.type === "manifest-version-match") {
-      const manifestPath = path.resolve(publishRoot, check.relativePath);
+      const manifestPath = path.resolve(publishRoot, relativePath);
       let ok = false;
       try {
         const manifest = fs.readJson(manifestPath);
@@ -772,6 +866,35 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
       continue;
     }
 
+    if (check.type === "tarball-entry-exists" || check.type === "tarball-entry-missing" || check.type === "tarball-no-entry-suffix") {
+      const tarballPath = path.resolve(publishRoot, relativePath);
+      if (tarballEntries === null) {
+        tarballEntries = ports.listTarEntries(tarballPath);
+      }
+
+      if (check.type === "tarball-entry-exists") {
+        executedChecks.push({
+          check: `tarball entry exists: ${check.entry} in ${path.relative(targetPlan.repoRoot, tarballPath)}`,
+          ok: tarballEntries.includes(check.entry),
+        });
+        continue;
+      }
+
+      if (check.type === "tarball-entry-missing") {
+        executedChecks.push({
+          check: `tarball entry missing: ${check.entry} in ${path.relative(targetPlan.repoRoot, tarballPath)}`,
+          ok: !tarballEntries.includes(check.entry),
+        });
+        continue;
+      }
+
+      executedChecks.push({
+        check: `tarball entry suffix absent: ${check.suffix} in ${path.relative(targetPlan.repoRoot, tarballPath)}`,
+        ok: !tarballEntries.some((entry) => entry.endsWith(check.suffix)),
+      });
+      continue;
+    }
+
     throw new Error(`unsupported readiness check type: ${check.type}`);
   }
 
@@ -779,9 +902,13 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
     executedChecks,
     releaseReady: executedChecks.every((entry) => entry.ok),
     resolvedDistTag: targetPlan.distTag,
-    resolvedPublishRoot: targetPlan.publishRootRelative,
+    resolvedPublishRoot: targetPlan.publishSourceRelative,
     resolvedVersion: targetPlan.targetVersion,
   };
+}
+
+function resolveReadinessRelativePath(relativePath, targetPlan) {
+  return String(relativePath ?? ".").replaceAll("{packFile}", targetPlan.publishArtifactFileName ?? "");
 }
 
 export function createReleasePlan(input = {}, overrides = {}) {
@@ -819,12 +946,22 @@ export function createReleasePlan(input = {}, overrides = {}) {
     return {
       ...resolved,
       distTag: determineDistTag(targetVersion),
+      publishArtifactFileName: resolved.publishMode === "tarball" ? toPackFilename(resolved.packageName, targetVersion) : null,
       releaseKind,
       repoRoot,
       tagName: `${resolved.tagPrefix}${targetVersion}`,
       targetVersion,
     };
   });
+
+  for (const target of targets) {
+    target.publishArtifactAbsolute = target.publishArtifactFileName
+      ? path.resolve(target.packageRootAbsolute, ".tmp", "release-pack", target.publishArtifactFileName)
+      : null;
+    target.publishSourceRelative = target.publishArtifactFileName
+      ? path.relative(repoRoot, target.publishArtifactAbsolute)
+      : target.publishRootRelative;
+  }
 
   const blockers = [];
   const warnings = [];
@@ -879,7 +1016,7 @@ function formatTargetPlan(target, options = {}) {
     `  target version: ${target.targetVersion}`,
     `  release kind: ${target.releaseKind}`,
     `  dist-tag: ${target.distTag}`,
-    `  publish root: ${target.publishRootRelative}`,
+    `  publish root: ${target.publishSourceRelative}`,
     `  tag: ${target.tagName}`,
     `  build steps: ${target.buildSteps.map((command) => formatCommand(command)).join(" ; ")}`,
     `  verify step: ${verifyLabel}`,
@@ -888,7 +1025,7 @@ function formatTargetPlan(target, options = {}) {
 
 export function formatReleasePlan(plan) {
   const skipVerify = Boolean(plan.parsed?.skipVerify);
-  const defaultGatewayUrl = requiresDefaultGatewayUrl(plan) ? normalizeOptionalString(plan.parsed?.defaultGatewayUrl) : null;
+  const defaultGatewayUrl = normalizeOptionalString(plan.parsed?.defaultGatewayUrl);
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
@@ -898,7 +1035,7 @@ export function formatReleasePlan(plan) {
     `verify: ${skipVerify ? "no" : "yes"}`,
     `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
     `push remote: ${plan.actions.push ? "yes" : "no"}`,
-    `default gateway url: ${requiresDefaultGatewayUrl(plan) ? defaultGatewayUrl ?? "missing" : "not required"}`,
+    `default gateway url: ${defaultGatewayUrl ?? "missing"}`,
     "",
     "Targets:",
     ...plan.targets.map((target) => formatTargetPlan(target, { skipVerify })),
@@ -946,8 +1083,8 @@ function formatReadiness(readiness) {
 export function formatHelp() {
   return `
 Usage:
-  pnpm release:local -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
-  pnpm release:plan -- --target <message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
+  pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
+  pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
 
 Required version input:
   Single target:
@@ -988,19 +1125,25 @@ Defaults:
   - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
   - missing packages fail fast unless an install flag is provided
   - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
-  - targets that require a build-time default gateway url need --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
+  - gateway-dependent targets require --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
+  - skill-qrcode-auth publishes from packages/skill-qrcode-auth
+  - skill-plugin-cli publishes from packages/skill-plugin-cli/.tmp/release-pack/<package-version>.tgz
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
-  - bridge-runtime-sdk publishes from packages/bridge-runtime-sdk
+  - bridge-runtime-sdk publishes from packages/bridge-runtime-sdk/.tmp/release-pack/<package-version>.tgz
   - dual releases are non-atomic
 
 Examples:
-  pnpm release:plan -- --target message-bridge --bump patch
+  pnpm release:plan -- --target skill-qrcode-auth --bump patch
+  pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
+  pnpm release:plan -- --target skill-plugin-cli --bump patch
+  pnpm release:local -- --target skill-plugin-cli --version 0.1.0
   pnpm release:plan -- --target bridge-runtime-sdk --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:plan -- --target message-bridge --bump patch
+  pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
   pnpm release:local -- --target message-bridge --bump prerelease --preid beta
-  pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
   pnpm release:local -- --target message-bridge --bump patch --push --default-gateway-url wss://gateway.example.com/ws/agent
@@ -1008,11 +1151,34 @@ Examples:
 }
 
 function runCommand(exec, command, cwd, env) {
+  const resolvedEnv = command[0] === "npm"
+    ? createNpmCommandEnv(cwd, env)
+    : env;
   return exec(command[0], command.slice(1), {
     cwd,
-    env,
+    env: resolvedEnv,
     stdio: "inherit",
   });
+}
+
+function ensurePreparePublishTarget(fs, target) {
+  if (!target.publishArtifactAbsolute) {
+    return;
+  }
+
+  // tarball 发布需要先准备输出目录，npm pack 不会自动创建 --pack-destination。
+  fs.mkdir(path.dirname(target.publishArtifactAbsolute));
+}
+
+function createNpmCommandEnv(repoRoot, env = {}) {
+  return {
+    ...env,
+    NPM_CONFIG_CACHE: path.resolve(repoRoot, ".tmp", "release-local", "npm-cache"),
+  };
+}
+
+function ensureNpmCommandEnvironment(fs, repoRoot) {
+  fs.mkdir(path.resolve(repoRoot, ".tmp", "release-local", "npm-cache"));
 }
 
 function collectManifestDependencyNames(manifest) {
@@ -1152,6 +1318,7 @@ function prepareDependencies(plan, ports, stdout) {
 function readRegistry(exec, repoRoot) {
   return exec("npm", ["config", "get", "registry", "--force"], {
     cwd: repoRoot,
+    env: createNpmCommandEnv(repoRoot),
     stdio: "pipe",
   });
 }
@@ -1162,6 +1329,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
     const scopedRegistry = normalizeRegistryValue(
       exec("npm", ["config", "get", `${packageScope}:registry`, "--force"], {
         cwd: repoRoot,
+        env: createNpmCommandEnv(repoRoot),
         stdio: "pipe",
       }),
     );
@@ -1182,6 +1350,7 @@ function resolvePublishRegistry(exec, repoRoot, packageName) {
 function readWhoAmI(exec, repoRoot, registry) {
   return exec("npm", ["whoami", "--registry", registry, "--force"], {
     cwd: repoRoot,
+    env: createNpmCommandEnv(repoRoot),
     stdio: "pipe",
   });
 }
@@ -1218,7 +1387,7 @@ function getCurrentBranch(exec, repoRoot) {
 
 function printPublishedFact(stdout, target) {
   stdout.write(
-    `[published] ${target.id} ${target.targetVersion} -> ${target.packageName} (${target.distTag}) from ${target.publishRootRelative}\n`,
+    `[published] ${target.id} ${target.targetVersion} -> ${target.packageName} (${target.distTag}) from ${target.publishSourceRelative}\n`,
   );
 }
 
@@ -1229,7 +1398,8 @@ function restoreManifestVersion(fs, manifestPath, version) {
 }
 
 function createReleaseBuildEnv(plan) {
-  if (!requiresDefaultGatewayUrl(plan)) {
+  const requiresGatewayUrl = plan.targets.some((target) => target.requiresDefaultGatewayUrl);
+  if (!requiresGatewayUrl) {
     return {};
   }
 
@@ -1304,7 +1474,7 @@ function normalizeWindowsCwd(cwd) {
 }
 
 export function executeRelease(plan, overrides = {}) {
-  const { fs, exec, inspectDependencies } = createProcessPorts(overrides);
+  const { fs, exec, inspectDependencies, listTarEntries: listTarEntriesPort } = createProcessPorts(overrides);
   const stdout = overrides.stdout ?? process.stdout;
 
   if (plan.blockers.length > 0) {
@@ -1324,6 +1494,7 @@ export function executeRelease(plan, overrides = {}) {
   }
 
   prepareDependencies(plan, { exec, fs, inspectDependencies }, stdout);
+  ensureNpmCommandEnvironment(fs, plan.repoRoot);
   const releaseBuildEnv = createReleaseBuildEnv(plan);
 
   const publishRegistries = plan.actions.publish
@@ -1360,8 +1531,15 @@ export function executeRelease(plan, overrides = {}) {
         runCommand(exec, target.verifyStep, plan.repoRoot, releaseBuildEnv);
       }
 
+      ensurePreparePublishTarget(fs, target);
+      for (const command of target.preparePublishSteps) {
+        stdout.write(`Preparing publish artifact for ${target.id}: ${formatCommand(command)}\n`);
+        runCommand(exec, command, target.packageRootAbsolute, releaseBuildEnv);
+      }
+
       const readiness = evaluatePublishReadiness(target, {
         fs,
+        listTarEntries: listTarEntriesPort,
       });
       stdout.write(formatReadiness(readiness));
 
@@ -1383,10 +1561,12 @@ export function executeRelease(plan, overrides = {}) {
 
       if (plan.actions.publish) {
         maybeInjectFailure(target, "before-publish");
-        const publishCommand = ["npm", "publish", "--tag", target.distTag, "--registry", publishRegistries[target.id]];
+        const publishCommand = target.publishMode === "tarball"
+          ? ["npm", "publish", target.publishArtifactAbsolute, "--tag", target.distTag, "--registry", publishRegistries[target.id]]
+          : ["npm", "publish", "--tag", target.distTag, "--registry", publishRegistries[target.id]];
         stdout.write(`Publishing ${target.id}: ${formatCommand(publishCommand)}\n`);
         publishAttemptedTargetIds.add(target.id);
-        runCommand(exec, publishCommand, target.publishRootAbsolute, releaseBuildEnv);
+        runCommand(exec, publishCommand, target.publishMode === "tarball" ? plan.repoRoot : target.publishRootAbsolute, releaseBuildEnv);
         publishedTargets.push(target);
         printPublishedFact(stdout, target);
         maybeInjectFailure(target, "after-publish");

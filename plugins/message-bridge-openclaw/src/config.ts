@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { deleteAccountFromConfigSection, setAccountEnabledInConfigSection } from "openclaw/plugin-sdk/core";
+import { setAccountEnabledInConfigSection } from "openclaw/plugin-sdk/core";
 import {
   type ChannelSetupInput,
   type OpenClawConfig,
@@ -14,7 +14,7 @@ const LOCALHOST_DEFAULT_GATEWAY_URL = "ws://localhost:8081/ws/agent";
 export const LEGACY_ACCOUNTS_MIGRATION_FIX =
   "删除 channels.message-bridge.accounts，并把唯一账号配置迁移到 channels.message-bridge 顶层。";
 export const CHANNEL_ADD_FIX =
-  "运行 openclaw channels add --channel message-bridge --url <gateway-url> --token <ak> --password <sk>。";
+  "运行 openclaw channels add --channel message-bridge [--url <gateway-url>] --token <ak> --password <sk>。未传 --url 时将复用现有配置或插件默认值。";
 const NON_DEFAULT_ACCOUNT_ERROR_PREFIX = "message_bridge_single_account_only";
 
 function resolveBuildDefaultGatewayUrl() {
@@ -143,9 +143,9 @@ export function getMissingRequiredConfigPaths(
   const section = cfg ? stripLegacyAccounts(readChannelSection(cfg)) : undefined;
   const gatewaySection = cfg ? getSectionField(section, "gateway") : undefined;
   const authSection = cfg ? getSectionField(section, "auth") : undefined;
-  const gatewayUrl = cfg ? trimOrUndefined(gatewaySection?.url) : trimOrUndefined(account.gateway.url);
-  const authAk = cfg ? trimOrUndefined(authSection?.ak) : trimOrUndefined(account.auth.ak);
-  const authSk = cfg ? trimOrUndefined(authSection?.sk) : trimOrUndefined(account.auth.sk);
+  const gatewayUrl = trimOrUndefined(gatewaySection?.url) ?? trimOrUndefined(account.gateway.url);
+  const authAk = trimOrUndefined(authSection?.ak) ?? trimOrUndefined(account.auth.ak);
+  const authSk = trimOrUndefined(authSection?.sk) ?? trimOrUndefined(account.auth.sk);
   const missing: string[] = [];
   if (!gatewayUrl) {
     missing.push(`channels.${CHANNEL_ID}.gateway.url`);
@@ -225,7 +225,7 @@ export function validateMessageBridgeSetupInput(params: {
   }
 
   if (input.useEnv) {
-    return "Message Bridge 当前不支持 --use-env，请显式传入 --url、--token、--password。";
+    return "Message Bridge 当前不支持 --use-env，请显式传入 --token、--password；如需覆盖地址可额外传入 --url。";
   }
 
   const nextCfg = applyMessageBridgeSetupConfig({
@@ -305,12 +305,16 @@ export function deleteMessageBridgeAccount(params: {
   accountId: string;
 }): OpenClawConfig {
   resolveSupportedAccountId(params.accountId);
-  return deleteAccountFromConfigSection({
-    cfg: params.cfg,
-    sectionKey: CHANNEL_ID,
-    accountId: params.accountId,
-    clearBaseFields: ["enabled", "streaming", "name", "gateway", "auth", "agentIdPrefix", "runTimeoutMs"],
-  });
+  const channels = asRecord((params.cfg as Record<string, unknown>).channels);
+  if (!channels || !(CHANNEL_ID in channels)) {
+    return params.cfg;
+  }
+
+  const { [CHANNEL_ID]: _removedSection, ...nextChannels } = channels;
+  return {
+    ...params.cfg,
+    channels: nextChannels,
+  };
 }
 
 export function resolveConfigSearchPaths(workspaceDir?: string): string[] {

@@ -28,6 +28,16 @@ import type {
   ThirdPartyAgentProvider,
   ToolUpdateFact,
 } from './domain/provider.ts';
+import type {
+  QrCodeAuth,
+  QrCodeAuthEnvironment,
+  QrCodeAuthFailureReasonCode,
+  QrCodeAuthPolicy,
+  QrCodeAuthRunInput,
+  QrCodeAuthServiceError,
+  QrCodeAuthSnapshot,
+  QrCodeDisplayData,
+} from '@wecode/skill-qrcode-auth';
 
 export type {
   EmitOutboundMessageInput,
@@ -59,6 +69,14 @@ export type {
   ThinkingDoneFact,
   ThirdPartyAgentProvider,
   ToolUpdateFact,
+  QrCodeAuth,
+  QrCodeAuthEnvironment,
+  QrCodeAuthFailureReasonCode,
+  QrCodeAuthPolicy,
+  QrCodeAuthRunInput,
+  QrCodeAuthServiceError,
+  QrCodeAuthSnapshot,
+  QrCodeDisplayData,
 };
 
 export type BridgeGatewayToolType = 'openx' | 'openclaw' | 'opencode';
@@ -192,5 +210,6 @@ export interface BridgeRuntimeOptions {
   onTelemetryUpdated?: () => void;
 }
 
+export declare const qrcodeAuth: QrCodeAuth;
 export declare function resolvePackageVersion(): string;
 export declare function createBridgeRuntime(options: BridgeRuntimeOptions): Promise<BridgeRuntime>;

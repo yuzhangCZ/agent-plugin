@@ -129,7 +129,7 @@
 ### Concrete Work Items
 1. 定义 compat 层输入输出接口
 2. 在 `chat` 成功后接入 compat 判定，并在需要时发送 `tool_done`
-3. 在 `session.idle` 上游路径保留 `tool_event` 透传，再由 compat 兜底补发 `tool_done`
+3. 在 `session.idle` 上游路径保留 `tool_event` 透传，并仅对已进入 compat `chat` 生命周期的 session 触发 compat 判定
 4. 在 compat 内部维护“已主动完成，等待 idle 去重”的状态集合
 5. 增加 compat 专属日志，避免与主协议日志混淆
 6. 更新测试、架构说明、日志参考和实施文档中“当前不发送 tool_done”的旧结论
@@ -140,7 +140,8 @@
 - `permission_reply` 成功不发送 `tool_done`
 - `create_session` 成功不发送 `tool_done`
 - `close_session` / `abort_session` 成功不发送 `tool_done`
-- 仅收到 `session.idle` 时会兜底发送 `tool_done`
+- 仅收到未跟踪的 `session.idle` 时不会兜底发送 `tool_done`
+- 已进入 compat `chat` 生命周期但尚未完成 compat 收口时，`session.idle` 仍可兜底发送 `tool_done`
 - action 成功后再收到 `session.idle` 不重复发送
 - `session.idle` 仍继续透传为 `tool_event`
 - 失败路径只发 `tool_error`，不发 `tool_done`

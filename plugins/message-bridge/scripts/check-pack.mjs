@@ -37,10 +37,6 @@ async function main() {
     'pack check failed: release/message-bridge.plugin.js missing in tarball',
   );
   assert.ok(
-    archiveEntries.includes('package/scripts/setup-message-bridge.mjs'),
-    'pack check failed: scripts/setup-message-bridge.mjs missing in tarball (required by bin)',
-  );
-  assert.ok(
     !archiveEntries.some((entry) => entry.startsWith('package/dist/')),
     'pack check failed: tarball must not include dist/',
   );
@@ -60,6 +56,7 @@ async function main() {
     0,
     `pack check failed: dependencies must be empty, got ${dependencyCount}`,
   );
+  assert.equal('bin' in manifest, false, 'pack check failed: source package must not expose bin');
 
   console.log('Pack check passed: release-only artifact, no sourcemap, zero runtime dependencies.');
 }

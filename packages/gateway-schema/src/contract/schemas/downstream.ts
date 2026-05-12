@@ -25,11 +25,17 @@ export const chatPayloadSchema = z
     toolSessionId: requiredTrimmedString,
     text: requiredTrimmedString,
     assistantId: optionalStrictTrimmedString,
+    assistantAccount: optionalStrictTrimmedString,
+    sendUserAccount: optionalStrictTrimmedString,
+    imGroupId: optionalStrictTrimmedString,
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
     text: payload.text,
     ...(payload.assistantId ? { assistantId: payload.assistantId } : {}),
+    ...(payload.assistantAccount ? { assistantAccount: payload.assistantAccount } : {}),
+    ...(payload.sendUserAccount ? { sendUserAccount: payload.sendUserAccount } : {}),
+    ...(payload.imGroupId ? { imGroupId: payload.imGroupId } : {}),
   }));
 export type ChatPayload = z.output<typeof chatPayloadSchema>;
 
@@ -88,6 +94,7 @@ export const chatInvokeSchema = z
     type: z.literal(INVOKE_MESSAGE_TYPE),
     action: z.literal(CHAT_ACTION),
     welinkSessionId: optionalLooseTrimmedString,
+    suppressReply: z.boolean().optional(),
     payload: chatPayloadSchema,
   })
   .transform((message) => ({
@@ -95,6 +102,7 @@ export const chatInvokeSchema = z
     action: CHAT_ACTION,
     payload: message.payload,
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
+    ...(message.suppressReply !== undefined ? { suppressReply: message.suppressReply } : {}),
   }));
 
 export const createSessionInvokeSchema = z

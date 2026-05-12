@@ -2,5 +2,6 @@ node_modules/
 .DS_Store
 logs/
 .tmp/
-packages/bridge-runtime-sdk/dist/
+packages/*/dist/
+plugins/*/dist/
 plugins/message-bridge/release/

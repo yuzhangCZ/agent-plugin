@@ -14,11 +14,15 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@wecode/skill-qrcode-auth": "workspace:*"
+  },
   "scripts": {
     "build": "node ./scripts/build-package.mjs",
     "build:dev": "BRIDGE_RUNTIME_SDK_MINIFY=0 node ./scripts/build-package.mjs",
     "typecheck": "pnpm exec tsc -p ./tsconfig.json",
     "pack:check": "node ./scripts/check-pack.mjs",
+    "pretest": "pnpm --dir ../skill-qrcode-auth run build",
     "prepack": "node ./scripts/prepare-publish-manifest.mjs",
     "prepublishOnly": "pnpm run verify:release",
     "postpack": "node ./scripts/restore-publish-manifest.mjs",

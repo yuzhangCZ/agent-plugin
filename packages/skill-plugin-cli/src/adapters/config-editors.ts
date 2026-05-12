@@ -1,0 +1,164 @@
+export function looksLikeJsonObject(content: string) {
+  const trimmed = content.trim();
+  return trimmed.startsWith("{") && trimmed.endsWith("}");
+}
+
+function escapeJsonString(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+function upsertJsonObjectField(objectBody: string, key: string, escapedValue: string) {
+  const existingFieldPattern = new RegExp(`("${key}"\\s*:\\s*")[^"]*(")`, "s");
+  if (existingFieldPattern.test(objectBody)) {
+    return objectBody.replace(existingFieldPattern, `$1${escapedValue}$2`);
+  }
+
+  const trimmedBody = objectBody.replace(/\s*$/su, "");
+  const trailingWhitespace = objectBody.slice(trimmedBody.length);
+  if (!trimmedBody) {
+    return `\n    "${key}": "${escapedValue}"${trailingWhitespace}`;
+  }
+
+  const separator = /,\s*$/u.test(trimmedBody) ? "" : ",";
+  return `${trimmedBody}${separator}\n    "${key}": "${escapedValue}"${trailingWhitespace}`;
+}
+
+export function buildNextBridgeConfig(content: string | null, input: { ak: string; sk: string; url: string }) {
+  const escapedAk = escapeJsonString(input.ak);
+  const escapedSk = escapeJsonString(input.sk);
+  const escapedUrl = escapeJsonString(input.url);
+
+  if (content === null) {
+    return `{
+  "gateway": {
+    "url": "${escapedUrl}"
+  },
+  "auth": {
+    "ak": "${escapedAk}",
+    "sk": "${escapedSk}"
+  }
+}
+`;
+  }
+
+  if (!looksLikeJsonObject(content)) {
+    throw new Error("bridge config invalid");
+  }
+
+  let next = content;
+  if (/"auth"\s*:/su.test(next)) {
+    next = next.replace(/("auth"\s*:\s*\{)([\s\S]*?)(\n\s*\})/su, (_match, start, objectBody, end) => {
+      let nextBody = upsertJsonObjectField(objectBody, "ak", escapedAk);
+      nextBody = upsertJsonObjectField(nextBody, "sk", escapedSk);
+      return `${start}${nextBody}${end}`;
+    });
+  } else {
+    next = next.replace(/\n\}\s*$/su, `,\n  "auth": {\n    "ak": "${escapedAk}",\n    "sk": "${escapedSk}"\n  }\n}\n`);
+  }
+
+  if (/"gateway"\s*:\s*\{/su.test(next)) {
+    next = next.replace(/("gateway"\s*:\s*\{)([\s\S]*?)(\n\s*\})/su, (_match, start, objectBody, end) => {
+      const nextBody = upsertJsonObjectField(objectBody, "url", escapedUrl);
+      return `${start}${nextBody}${end}`;
+    });
+  } else {
+    next = next.replace(/\{\s*/u, `{\n  "gateway": {\n    "url": "${escapedUrl}"\n  },\n  `);
+  }
+
+  return next;
+}
+
+export function buildNextBridgeConfigWithoutUrl(content: string | null, input: { ak: string; sk: string }) {
+  const escapedAk = escapeJsonString(input.ak);
+  const escapedSk = escapeJsonString(input.sk);
+
+  if (content === null) {
+    return `{
+  "auth": {
+    "ak": "${escapedAk}",
+    "sk": "${escapedSk}"
+  }
+}
+`;
+  }
+
+  if (!looksLikeJsonObject(content)) {
+    throw new Error("bridge config invalid");
+  }
+
+  let next = content;
+  if (/"auth"\s*:/su.test(next)) {
+    next = next.replace(/("auth"\s*:\s*\{)([\s\S]*?)(\n\s*\})/su, (_match, start, objectBody, end) => {
+      let nextBody = upsertJsonObjectField(objectBody, "ak", escapedAk);
+      nextBody = upsertJsonObjectField(nextBody, "sk", escapedSk);
+      return `${start}${nextBody}${end}`;
+    });
+  } else {
+    next = next.replace(/\n\}\s*$/su, `,\n  "auth": {\n    "ak": "${escapedAk}",\n    "sk": "${escapedSk}"\n  }\n}\n`);
+  }
+
+  return next;
+}
+
+/**
+ * 统一解析 OpenCode 配置中的 plugin 数组，并自动还原 JSON 字符串转义后的真实路径值。
+ */
+export function readOpencodePluginItems(content: string) {
+  const match = content.match(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su);
+  if (!match) {
+    return null;
+  }
+  const items = [...match[2].matchAll(/"((?:\\.|[^"])*)"/gu)].map((entry) => JSON.parse(`"${entry[1]}"`) as string);
+  return {
+    start: match[1],
+    items,
+    end: match[3],
+  };
+}
+
+function serializePluginItems(items: string[]) {
+  return items.length > 0 ? items.map((item) => `"${escapeJsonString(item)}"`).join(", ") : "";
+}
+
+/**
+ * 统一收口 OpenCode 配置中的受控插件引用，只保留目标 pluginSpec。
+ */
+export function buildNextOpencodeConfig(
+  content: string | null,
+  pluginSpec: string,
+  options: {
+    controlledNpmSpec: string;
+    isControlledFallbackPathSpec: (value: string) => boolean;
+  },
+) {
+  if (content === null) {
+    return `{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [${serializePluginItems([pluginSpec])}]
+}
+`;
+  }
+
+  if (!looksLikeJsonObject(content)) {
+    throw new Error("opencode config invalid");
+  }
+  const nextItems = (() => {
+    const parsed = readOpencodePluginItems(content);
+    const existingItems = parsed?.items ?? [];
+    const preserved = existingItems.filter((value) => {
+      if (value === options.controlledNpmSpec) {
+        return false;
+      }
+      return !options.isControlledFallbackPathSpec(value);
+    });
+    const merged = [...preserved, pluginSpec];
+    return merged.filter((value, index) => merged.indexOf(value) === index);
+  })();
+
+  if (/"plugin"\s*:\s*\[/su.test(content)) {
+    return content.replace(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/su, (_match, start, _items, end) => {
+      return `${start}${serializePluginItems(nextItems)}${end}`;
+    });
+  }
+  return content.replace(/\n\}\s*$/su, `,\n  "plugin": [${serializePluginItems(nextItems)}]\n}\n`);
+}

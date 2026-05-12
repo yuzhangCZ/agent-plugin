@@ -28,10 +28,14 @@ function adaptInvokeMessage(
         type: 'invoke',
         action: 'chat',
         welinkSessionId: withOptionalWelinkSessionId(message),
+        ...(message.suppressReply !== undefined ? { suppressReply: message.suppressReply } : {}),
         payload: {
           toolSessionId: message.payload.toolSessionId,
           text: message.payload.text,
           ...(message.payload.assistantId ? { assistantId: message.payload.assistantId } : {}),
+          ...(message.payload.assistantAccount ? { assistantAccount: message.payload.assistantAccount } : {}),
+          ...(message.payload.sendUserAccount ? { sendUserAccount: message.payload.sendUserAccount } : {}),
+          ...(message.payload.imGroupId ? { imGroupId: message.payload.imGroupId } : {}),
         },
       });
     case 'create_session':

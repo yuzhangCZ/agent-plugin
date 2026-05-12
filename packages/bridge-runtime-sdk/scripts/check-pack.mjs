@@ -72,6 +72,7 @@ async function main() {
     });
     assert.equal(runtimeDeps.includes('@agent-plugin/gateway-client'), false);
     assert.equal(runtimeDeps.includes('@agent-plugin/gateway-schema'), false);
+    assert.equal(runtimeDeps.includes('@wecode/skill-qrcode-auth'), true);
   } finally {
     await rm(tmpDir, { force: true, recursive: true });
   }

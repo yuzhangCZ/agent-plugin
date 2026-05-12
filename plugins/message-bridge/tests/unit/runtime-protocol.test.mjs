@@ -1170,6 +1170,160 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].welinkSessionId, '100');
   });
 
+  test('short-circuits chat when suppressReply is true and emits synthetic deny events', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'deny-100',
+      action: 'chat',
+      suppressReply: true,
+      payload: {
+        toolSessionId: 'tool-deny-100',
+        text: 'hello',
+        assistantAccount: 'assistant-account-a',
+        sendUserAccount: 'sender-account-a',
+        imGroupId: 'group-a',
+      },
+    });
+
+    assert.strictEqual(prompts.length, 0);
+    assert.strictEqual(sent.length, 5);
+
+    const [messageUpdated, stepStart, text, stepFinish, toolDone] = sent;
+    assert.strictEqual(messageUpdated.type, 'tool_event');
+    assert.strictEqual(messageUpdated.event.type, 'message.updated');
+    assert.strictEqual(messageUpdated.event.properties.info.role, 'assistant');
+    assert.match(messageUpdated.event.properties.info.id, /^msg_[a-f0-9]{32}$/);
+    assert.strictEqual(messageUpdated.event.properties.info.sessionID, 'tool-deny-100');
+    assert.strictEqual('finish' in messageUpdated.event.properties.info, false);
+
+    assert.strictEqual(stepStart.type, 'tool_event');
+    assert.strictEqual(stepStart.event.type, 'message.part.updated');
+    assert.strictEqual(stepStart.event.properties.part.type, 'step-start');
+
+    assert.strictEqual(text.type, 'tool_event');
+    assert.strictEqual(text.event.type, 'message.part.updated');
+    assert.strictEqual(text.event.properties.part.type, 'text');
+    assert.strictEqual(text.event.properties.part.text, '本机器人不处理群聊消息，请勿在群内@提问');
+
+    assert.strictEqual(stepFinish.type, 'tool_event');
+    assert.strictEqual(stepFinish.event.type, 'message.part.updated');
+    assert.strictEqual(stepFinish.event.properties.part.type, 'step-finish');
+    assert.strictEqual(stepFinish.event.properties.part.reason, 'stop');
+
+    const messageId = messageUpdated.event.properties.info.id;
+    const partIds = [
+      stepStart.event.properties.part.id,
+      text.event.properties.part.id,
+      stepFinish.event.properties.part.id,
+    ];
+    assert.ok(partIds.every((id) => /^prt_[a-f0-9]{32}$/.test(id)));
+    assert.strictEqual(new Set(partIds).size, 3);
+    assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
+    assert.strictEqual(text.event.properties.part.messageID, messageId);
+    assert.strictEqual(stepFinish.event.properties.part.messageID, messageId);
+
+    assert.strictEqual(toolDone.type, 'tool_done');
+    assert.strictEqual(toolDone.toolSessionId, 'tool-deny-100');
+    assert.strictEqual(toolDone.welinkSessionId, 'deny-100');
+  });
+
+  test('uses fresh synthetic ids across deny chat invokes', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'deny-101',
+      action: 'chat',
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-101', text: 'hello' },
+    });
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'deny-102',
+      action: 'chat',
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-102', text: 'hello again' },
+    });
+
+    const firstMessageId = sent[0].event.properties.info.id;
+    const secondMessageId = sent[5].event.properties.info.id;
+    const firstPartIds = sent.slice(1, 4).map((entry) => entry.event.properties.part.id);
+    const secondPartIds = sent.slice(6, 9).map((entry) => entry.event.properties.part.id);
+
+    assert.notStrictEqual(firstMessageId, secondMessageId);
+    for (const firstPartId of firstPartIds) {
+      assert.ok(!secondPartIds.includes(firstPartId));
+    }
+  });
+
+  test('deny fast path fails closed when a synthetic event cannot pass uplink validation', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+    const originalValidate = runtime.validateGatewayUplinkBusinessMessageOrLog.bind(runtime);
+    runtime.validateGatewayUplinkBusinessMessageOrLog = (message, logContext, logger) => {
+      if (message.type === 'tool_event' && message.event.type === 'message.part.updated' && message.event.properties.part.type === 'text') {
+        return null;
+      }
+      return originalValidate(message, logContext, logger);
+    };
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'deny-104',
+      action: 'chat',
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-104', text: 'hello' },
+    });
+
+    assert.strictEqual(prompts.length, 0);
+    assert.strictEqual(sent.length, 2);
+    assert.strictEqual(sent[0].type, 'tool_event');
+    assert.strictEqual(sent[0].event.type, 'message.updated');
+    assert.strictEqual(sent[1].type, 'tool_event');
+    assert.strictEqual(sent[1].event.type, 'message.part.updated');
+    assert.strictEqual(sent[1].event.properties.part.type, 'step-start');
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+  });
+
   test('accepts question_reply invoke shape and routes answer via question API', async () => {
     const getCalls = [];
     const postCalls = [];
@@ -1544,7 +1698,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].context.opencodePartId, 'part-1');
   });
 
-  test('forwards session.idle as tool_event and emits fallback tool_done', async () => {
+  test('forwards session.idle as tool_event without compat tool_done for untracked sessions', async () => {
     const runtime = new BridgeRuntime({ client: {} });
     const sent = [];
 
@@ -1561,11 +1715,58 @@ describe('runtime protocol strictness', () => {
       },
     });
 
-    assert.strictEqual((sent).length, 2);
+    assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].message.type, 'tool_event');
     assert.strictEqual(sent[0].message.toolSessionId, 'tool-idle-1');
+  });
+
+  test('emits fallback tool_done from session.idle after invoke_complete tool_done send fails', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+        },
+      }),
+    });
+    const sent = [];
+    const originalSendToolDone = runtime.sendToolDone.bind(runtime);
+    let toolDoneAttempts = 0;
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+    runtime.sendToolDone = (...args) => {
+      toolDoneAttempts += 1;
+      if (toolDoneAttempts === 1) {
+        return false;
+      }
+      return originalSendToolDone(...args);
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'idle-fallback-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-idle-tracked-1', text: 'hello' },
+    });
+
+    assert.strictEqual(sent.length, 0);
+
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-idle-tracked-1',
+      },
+    });
+
+    assert.strictEqual(sent.length, 2);
+    assert.strictEqual(sent[0].message.type, 'tool_event');
+    assert.strictEqual(sent[0].message.toolSessionId, 'tool-idle-tracked-1');
     assert.strictEqual(sent[1].message.type, 'tool_done');
-    assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-1');
+    assert.strictEqual(sent[1].message.toolSessionId, 'tool-idle-tracked-1');
+    assert.strictEqual(toolDoneAttempts, 2);
   });
 
   test('session.created primes child mapping outside the allowlist and rewrites later child events to parent envelope', async () => {
@@ -1758,6 +1959,72 @@ describe('runtime protocol strictness', () => {
 
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
+  });
+
+  test('deny fast path does not trigger duplicate tool_done when session.idle follows later', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async () => ({ data: { ok: true } }),
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message, context) => sent.push({ message, context }),
+    };
+    runtime.eventFilter = new EventFilter(['session.idle']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'deny-103',
+      action: 'chat',
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-deny-103', text: 'hello' },
+    });
+
+    await runtime.handleEvent({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'tool-deny-103',
+      },
+    });
+
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 5);
+    assert.strictEqual(sent[4].message.type, 'tool_done');
+    assert.strictEqual(sent[5].message.type, 'tool_event');
+  });
+
+  test('missing suppressReply keeps the existing chat prompt path', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'allow-100',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-allow-100', text: 'hello' },
+    });
+
+    assert.strictEqual(prompts.length, 1);
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].type, 'tool_done');
   });
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {

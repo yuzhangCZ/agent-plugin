@@ -11,7 +11,6 @@ const sourcePackageJsonPath = path.join(rootDir, "package.json");
 const sourcePluginManifestPath = path.join(rootDir, "openclaw.plugin.json");
 const sourceReadmePath = path.join(rootDir, "README.bundle.md");
 const localhostDefaultGatewayUrl = "ws://localhost:8081/ws/agent";
-const sourceInstallScriptPath = path.join(rootDir, "scripts", "install-openclaw-plugin.mjs");
 
 async function main() {
   const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || localhostDefaultGatewayUrl;
@@ -37,15 +36,6 @@ async function main() {
     },
   });
 
-  await build({
-    entryPoints: [sourceInstallScriptPath],
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    target: "es2022",
-    outfile: path.join(bundleDir, "install.mjs"),
-  });
-
   const bundlePackageJson = {
     name: sourcePackageJson.name,
     version: sourcePackageJson.version,
@@ -58,8 +48,7 @@ async function main() {
         default: "./index.js",
       },
     },
-    files: ["index.js", "install.mjs", "package.json", "openclaw.plugin.json", "README.md"],
-    bin: "./install.mjs",
+    files: ["index.js", "package.json", "openclaw.plugin.json", "README.md"],
     peerDependencies: sourcePackageJson.peerDependencies,
     peerDependenciesMeta: sourcePackageJson.peerDependenciesMeta,
     openclaw: {

@@ -1,0 +1,185 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostMetadata, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
+import { InstallCliError } from "../domain/errors.ts";
+
+const PACKAGE_NAME = "@wecode/skill-openclaw-plugin";
+const PLUGIN_ID = "skill-openclaw-plugin";
+const CHANNEL_ID = "message-bridge";
+const DEFAULT_GATEWAY_URL = "ws://localhost:8081/ws/agent";
+const MIN_SUPPORTED_VERSION = "2026.3.24";
+
+function parseVersion(text: string) {
+  const match = text.match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function compareVersion(a: number[], b: number[]) {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] > b[index]) return 1;
+    if (a[index] < b[index]) return -1;
+  }
+  return 0;
+}
+
+function assertVersionRange(versionText: string) {
+  const parsed = parseVersion(versionText);
+  if (!parsed) {
+    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `无法识别 OpenClaw 版本：${versionText}`);
+  }
+  const lower = parseVersion(MIN_SUPPORTED_VERSION);
+  if (!lower || compareVersion(parsed, lower) < 0) {
+    throw new InstallCliError("OPENCLAW_VERSION_UNSUPPORTED", `当前 OpenClaw 版本 ${versionText} 不满足 >= ${MIN_SUPPORTED_VERSION}`);
+  }
+}
+
+function resolveOpenClawPrimaryConfigPath(env = process.env) {
+  if (env.OPENCLAW_CONFIG?.trim()) {
+    return env.OPENCLAW_CONFIG.trim();
+  }
+  if (process.platform === "win32") {
+    return join(env.USERPROFILE || homedir(), ".openclaw", "openclaw.json");
+  }
+  return join(env.HOME || homedir(), ".openclaw", "openclaw.json");
+}
+
+export class OpenClawHostAdapter implements HostAdapter {
+  readonly host = "openclaw" as const;
+  readonly packageName = PACKAGE_NAME;
+  private readonly processRunner: ProcessRunner;
+  private readonly pluginArtifactPort: PluginArtifactPort;
+
+  constructor(processRunner: ProcessRunner, pluginArtifactPort: PluginArtifactPort) {
+    this.processRunner = processRunner;
+    this.pluginArtifactPort = pluginArtifactPort;
+  }
+
+  private buildMetadata(): HostMetadata {
+    return {
+      host: "openclaw",
+      hostDisplayName: "openclaw",
+      packageName: PACKAGE_NAME,
+      primaryConfigPath: resolveOpenClawPrimaryConfigPath(),
+    };
+  }
+
+  resolveDefaultUrl() {
+    const candidate = (globalThis as typeof globalThis & { __MB_DEFAULT_GATEWAY_URL__?: unknown }).__MB_DEFAULT_GATEWAY_URL__;
+    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : DEFAULT_GATEWAY_URL;
+  }
+
+  /**
+   * 统一执行 OpenClaw 插件信息探测，安装前与安装后都仅依赖退出码。
+   */
+  private async queryInstalledPlugin() {
+    return this.processRunner.exec("openclaw", ["plugins", "info", PLUGIN_ID, "--json"]);
+  }
+
+  async preflight() {
+    const result = await this.processRunner.exec("openclaw", ["--version"]);
+    if (result.exitCode !== 0) {
+      throw new InstallCliError("OPENCLAW_NOT_FOUND", (result.stderr || result.stdout || "未检测到 openclaw 命令。").trim());
+    }
+    const version = (result.stdout || result.stderr).trim();
+    const existingPluginProbe = await this.queryInstalledPlugin();
+    return {
+      metadata: this.buildMetadata(),
+      version,
+      versionSupported: (() => {
+        try {
+          assertVersionRange(version);
+          return true;
+        } catch (error) {
+          if (error instanceof InstallCliError && error.code === "OPENCLAW_VERSION_UNSUPPORTED") {
+            return false;
+          }
+          throw error;
+        }
+      })(),
+      minimumRequiredVersion: MIN_SUPPORTED_VERSION,
+      existingPluginDetected: existingPluginProbe.exitCode === 0,
+    };
+  }
+
+  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
+    const probe = await this.queryInstalledPlugin();
+    if (probe.exitCode === 0) {
+      const uninstall = await this.processRunner.spawn("openclaw", ["plugins", "uninstall", PLUGIN_ID, "--force"]);
+      if (uninstall.exitCode !== 0) {
+        throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins uninstall ${PLUGIN_ID} --force 失败，退出码 ${uninstall.exitCode}`);
+      }
+    }
+
+    if (context.installStrategy === "fallback") {
+      const artifact = await this.pluginArtifactPort.fetchArtifact({
+        host: this.host,
+        installStrategy: context.installStrategy,
+        packageName: PACKAGE_NAME,
+        registry: context.registry,
+      });
+      const result = await this.processRunner.spawn("openclaw", ["plugins", "install", artifact.localTarballPath!]);
+      if (result.exitCode !== 0) {
+        throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${artifact.localTarballPath} 失败，退出码 ${result.exitCode}`);
+      }
+      return artifact;
+    }
+
+    const result = await this.processRunner.spawn("openclaw", ["plugins", "install", PACKAGE_NAME]);
+    if (result.exitCode !== 0) {
+      throw new InstallCliError("PLUGIN_INSTALL_FAILED", `openclaw plugins install ${PACKAGE_NAME} 失败，退出码 ${result.exitCode}`);
+    }
+    return {
+      installStrategy: "host-native",
+      pluginSpec: PACKAGE_NAME,
+      packageName: PACKAGE_NAME,
+    };
+  }
+
+  async cleanupLegacyArtifacts() {
+    return { warnings: [] };
+  }
+
+  async verifyPlugin() {
+    const result = await this.queryInstalledPlugin();
+    if (result.exitCode !== 0) {
+      throw new InstallCliError("PLUGIN_INSTALL_VERIFICATION_FAILED", (result.stderr || result.stdout).trim());
+    }
+  }
+
+  async configureHost(context: InstallContext, credentials: { ak: string; sk: string }): Promise<HostConfigureResult> {
+    const args = [
+      "channels",
+      "add",
+      "--channel",
+      CHANNEL_ID,
+    ];
+    if (context.url) {
+      args.push("--url", context.url);
+    }
+    args.push("--token", credentials.ak, "--password", credentials.sk);
+    const result = await this.processRunner.spawn("openclaw", args);
+    if (result.exitCode !== 0) {
+      throw new InstallCliError("HOST_CONFIGURE_FAILED", `openclaw channels add 失败，退出码 ${result.exitCode}`);
+    }
+    return {
+      primaryConfigPath: this.buildMetadata().primaryConfigPath,
+      additionalConfigPaths: [],
+    };
+  }
+
+  async confirmAvailability(): Promise<HostAvailabilityResult> {
+    const status = await this.processRunner.exec("openclaw", ["--version"]);
+    if (status.exitCode !== 0) {
+      throw new InstallCliError("HOST_AVAILABILITY_FAILED", "OpenClaw 进程探测失败。");
+    }
+    return {
+      nextAction: {
+        kind: "restart_gateway",
+        manual: true,
+        effect: "gateway_config_effective",
+        command: "openclaw gateway restart",
+      },
+    };
+  }
+}

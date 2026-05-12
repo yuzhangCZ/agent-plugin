@@ -5,7 +5,6 @@
   "private": true,
   "type": "module",
   "main": "bundle/index.js",
-  "bin": "./scripts/install-openclaw-plugin.mjs",
   "exports": {
     ".": {
       "default": "./bundle/index.js"

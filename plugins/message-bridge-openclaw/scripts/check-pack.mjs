@@ -55,7 +55,6 @@ async function main() {
 
   for (const entry of [
     "package/index.js",
-    "package/install.mjs",
     "package/package.json",
     "package/openclaw.plugin.json",
     "package/README.md",
@@ -79,11 +78,7 @@ async function main() {
   const manifest = await readPackedManifest(tgzPath);
   assert.equal(manifest.name, "@wecode/skill-openclaw-plugin", "pack check failed: unexpected package name");
   assert.equal(manifest.main, "index.js", "pack check failed: main must point to bundle root");
-  assert.equal(
-    manifest.bin,
-    "./install.mjs",
-    "pack check failed: bin must point to install.mjs",
-  );
+  assert.equal("bin" in manifest, false, "pack check failed: bundle manifest must not expose bin");
 
   console.log("Pack check passed: bundle-only artifact, no docs, no dist, no sourcemap.");
 }
