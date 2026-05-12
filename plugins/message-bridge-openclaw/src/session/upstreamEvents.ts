@@ -8,8 +8,9 @@ export interface ToolPartEventState {
   messageId: string;
   status: "running" | "completed" | "error";
   time?: number;
-  output?: string;
-  error?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
   title?: string;
 }
 
@@ -360,6 +361,7 @@ export function buildToolPartUpdated(
         callID: state.toolCallId,
         state: {
           status: state.status,
+          ...(state.input !== undefined ? { input: state.input } : {}),
           ...(state.output !== undefined ? { output: state.output } : {}),
           ...(state.error !== undefined ? { error: state.error } : {}),
           ...(state.title !== undefined ? { title: state.title } : {}),

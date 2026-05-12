@@ -120,6 +120,9 @@ test("tool part events use toolSessionId instead of internal sessionKey", () => 
     messageId: "msg_2",
     status: "running",
     time: 405,
+    input: {
+      query: "latest news",
+    },
   });
 
   assert.equal(event.properties.sessionID, "ses_tool_3");
@@ -128,6 +131,9 @@ test("tool part events use toolSessionId instead of internal sessionKey", () => 
   assert.equal(event.properties.part.messageID, "msg_2");
   assert.equal(event.properties.part.id, "part_2");
   assert.equal(event.properties.part.type, "tool");
+  assert.deepEqual(event.properties.part.state.input, {
+    query: "latest news",
+  });
 });
 
 test("permission and question events use gateway-compatible payload shape", () => {

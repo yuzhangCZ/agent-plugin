@@ -229,8 +229,9 @@ interface ToolPartState {
   messageId: string;
   sessionKey: string;
   status: "running" | "completed" | "error";
-  output?: string;
-  error?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
   title?: string;
 }
 
@@ -316,6 +317,23 @@ function extractToolResultText(value: unknown): string | undefined {
     const nested = extractToolResultText(value[key]);
     if (nested) {
       return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function hasOwnDefinedProperty(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key) && value[key] !== undefined;
+}
+
+function pickToolPayload(
+  value: Record<string, unknown>,
+  keys: string[],
+): unknown {
+  for (const key of keys) {
+    if (hasOwnDefinedProperty(value, key)) {
+      return value[key];
     }
   }
 
@@ -2146,6 +2164,10 @@ export class OpenClawGatewayBridge {
 
     toolState.toolName = toolName;
     toolState.title = extractToolResultTitle(evt.data.meta, toolName) ?? toolState.title;
+    const directInput = pickToolPayload(evt.data, ["input"]);
+    if (directInput !== undefined) {
+      toolState.input = directInput;
+    }
 
     if (phase === "start" || phase === "update") {
       toolState.status = "running";
@@ -2156,9 +2178,9 @@ export class OpenClawGatewayBridge {
     if (phase === "result") {
       const isError = evt.data.isError === true;
       toolState.status = isError ? "error" : "completed";
-      const directOutput = extractToolResultText(evt.data.output) ?? extractToolResultText(evt.data.result);
-      const directError = extractToolResultText(evt.data.error) ?? extractToolResultText(evt.data.result);
-      toolState.output = !isError && directOutput ? directOutput : toolState.output;
+      const directOutput = pickToolPayload(evt.data, ["output", "result"]);
+      const directError = pickToolPayload(evt.data, ["error", "result"]);
+      toolState.output = !isError && directOutput !== undefined ? directOutput : toolState.output;
       toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
       activeSession.pendingToolResultTarget = toolCallId;
       this.emitToolPartUpdate(activeSession.toolSessionId, toolState, context);

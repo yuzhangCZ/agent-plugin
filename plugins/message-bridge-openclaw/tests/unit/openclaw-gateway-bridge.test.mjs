@@ -1078,6 +1078,9 @@ test("runtime tool agent events project to message.part.updated tool states", as
         phase: "start",
         toolCallId: "call_1",
         name: "search",
+        input: {
+          query: "docs",
+        },
       },
     });
     bridgeRef.handleRuntimeAgentEvent({
@@ -1122,27 +1125,38 @@ test("runtime tool agent events project to message.part.updated tool states", as
   assert.deepEqual(
     toolEvents.map((message) => ({
       status: message.event.properties.part.state.status,
+      input: message.event.properties.part.state.input,
       output: message.event.properties.part.state.output,
       error: message.event.properties.part.state.error,
     })),
     [
       {
         status: "running",
+        input: {
+          query: "docs",
+        },
         output: undefined,
         error: undefined,
       },
       {
         status: "completed",
+        input: {
+          query: "docs",
+        },
         output: undefined,
         error: undefined,
       },
       {
         status: "completed",
+        input: {
+          query: "docs",
+        },
         output: "tool output",
         error: undefined,
       },
       {
         status: "error",
+        input: undefined,
         output: undefined,
         error: "tool_search_failed",
       },
@@ -1164,8 +1178,15 @@ test("runtime tool result can project output and error directly from agent event
       data: {
         phase: "result",
         toolCallId: "call_payload_1",
-        name: "search",
-        output: "payload tool output",
+        name: "bash",
+        input: {
+          command: "pwd",
+          description: "查看当前工作目录",
+        },
+        output: {
+          stdout: "/workspace\n",
+          exitCode: 0,
+        },
       },
     });
     bridgeRef.handleRuntimeAgentEvent({
@@ -1174,9 +1195,15 @@ test("runtime tool result can project output and error directly from agent event
       data: {
         phase: "result",
         toolCallId: "call_payload_2",
-        name: "search",
+        name: "read",
         isError: true,
-        error: "payload tool error",
+        input: {
+          path: "/tmp/demo.txt",
+        },
+        error: {
+          message: "payload tool error",
+          code: "ENOENT",
+        },
       },
     });
     await reply.block({ text: "done" });
@@ -1202,19 +1229,106 @@ test("runtime tool result can project output and error directly from agent event
   assert.deepEqual(
     toolEvents.map((message) => ({
       status: message.event.properties.part.state.status,
+      input: message.event.properties.part.state.input,
       output: message.event.properties.part.state.output,
       error: message.event.properties.part.state.error,
     })),
     [
       {
         status: "completed",
-        output: "payload tool output",
+        input: {
+          command: "pwd",
+          description: "查看当前工作目录",
+        },
+        output: {
+          stdout: "/workspace\n",
+          exitCode: 0,
+        },
         error: undefined,
       },
       {
         status: "error",
+        input: {
+          path: "/tmp/demo.txt",
+        },
         output: undefined,
-        error: "payload tool error",
+        error: {
+          message: "payload tool error",
+          code: "ENOENT",
+        },
+      },
+    ],
+  );
+});
+
+test("runtime tool update preserves structured input before tool completion", async () => {
+  let bridgeRef;
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    bridgeRef.handleRuntimeAgentEvent({
+      stream: "tool",
+      sessionKey: ctx.SessionKey,
+      data: {
+        phase: "update",
+        toolCallId: "call_update_1",
+        name: "web_search",
+        input: {
+          query: "OpenAI API latest docs",
+          limit: 5,
+        },
+      },
+    });
+    bridgeRef.handleRuntimeAgentEvent({
+      stream: "tool",
+      sessionKey: ctx.SessionKey,
+      data: {
+        phase: "result",
+        toolCallId: "call_update_1",
+        name: "web_search",
+        result: {
+          items: [{ title: "Docs", url: "https://platform.openai.com/docs" }],
+        },
+      },
+    });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
+  });
+  const created = createBridge({ runtime });
+  bridgeRef = created.bridge;
+
+  await created.bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_tool_update_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_update_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvents = created.connection.sent
+    .map(({ message }) => message)
+    .filter((message) => message.type === "tool_event" && message.event.type === "message.part.updated" && message.event.properties.part.type === "tool");
+
+  assert.deepEqual(
+    toolEvents.map((message) => message.event.properties.part.state),
+    [
+      {
+        status: "running",
+        input: {
+          query: "OpenAI API latest docs",
+          limit: 5,
+        },
+      },
+      {
+        status: "completed",
+        input: {
+          query: "OpenAI API latest docs",
+          limit: 5,
+        },
+        output: {
+          items: [{ title: "Docs", url: "https://platform.openai.com/docs" }],
+        },
       },
     ],
   );
