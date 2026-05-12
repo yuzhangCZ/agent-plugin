@@ -28,9 +28,10 @@
 ### 架构
 
 1. [架构总览](./architecture/overview.md)
-2. [源码目录说明](./architecture/source-layout.md)
-3. [ADR 索引](./architecture/adr/README.md)
-4. [方案设计](./design/solution-design.md)
+2. [OpenCode 插件交互架构](./architecture/opencode-gateway-interaction-architecture.md)
+3. [源码目录说明](./architecture/source-layout.md)
+4. [ADR 索引](./architecture/adr/README.md)
+5. [方案设计](./design/solution-design.md)
 
 ### 开发
 
@@ -38,8 +39,9 @@
 2. [实施计划](./design/implementation-plan.md)
 3. [协议契约](./design/interfaces/protocol-contract.md)
 4. [端到端消息链路说明](./design/interfaces/end-to-end-message-flow.md)
-5. [配置契约](./design/interfaces/config-contract.md)
-6. [源码目录说明](./architecture/source-layout.md)
+5. [OpenCode 插件交互架构](./architecture/opencode-gateway-interaction-architecture.md)
+6. [配置契约](./design/interfaces/config-contract.md)
+7. [源码目录说明](./architecture/source-layout.md)
 
 ### 测试
 
