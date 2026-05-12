@@ -12,9 +12,11 @@
   },
   "dependencies": {
     "@agent-plugin/gateway-client": "workspace:*",
-    "@agent-plugin/gateway-schema": "workspace:*"
+    "@agent-plugin/gateway-schema": "workspace:*",
+    "@wecode/skill-qrcode-auth": "workspace:*"
   },
   "scripts": {
+    "pretest": "pnpm --dir ../skill-qrcode-auth run build",
     "test": "node --experimental-strip-types --test tests/**/*.test.ts"
   },
   "devDependencies": {
