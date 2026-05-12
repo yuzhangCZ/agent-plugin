@@ -32,6 +32,19 @@ async function main() {
   });
 
   await build({
+    entryPoints: [path.join(rootDir, "src", "setup-entry.ts")],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "es2022",
+    outfile: path.join(bundleDir, "setup-entry.js"),
+    external: ["openclaw", "openclaw/*"],
+    define: {
+      "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
+    },
+  });
+
+  await build({
     entryPoints: [sourceInstallScriptPath],
     bundle: true,
     platform: "node",
@@ -53,13 +66,14 @@ async function main() {
         default: "./index.js",
       },
     },
-    files: ["index.js", "install.mjs", "package.json", "openclaw.plugin.json", "README.md"],
+    files: ["index.js", "setup-entry.js", "install.mjs", "package.json", "openclaw.plugin.json", "README.md"],
     bin: "./install.mjs",
     peerDependencies: sourcePackageJson.peerDependencies,
     peerDependenciesMeta: sourcePackageJson.peerDependenciesMeta,
     openclaw: {
       ...sourcePackageJson.openclaw,
       extensions: ["./index.js"],
+      setupEntry: "./setup-entry.js",
     },
   };
 

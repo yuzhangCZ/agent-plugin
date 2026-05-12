@@ -13,5 +13,6 @@ test("source package exports runtime entry and installer subpath", async () => {
   assert.equal(manifest.bin, "./scripts/install-openclaw-plugin.mjs");
   assert.deepEqual(manifest.files, ["bundle", "README.md", "openclaw.plugin.json"]);
   assert.equal(manifest.peerDependencies.openclaw, ">=2026.3.24");
+  assert.equal(manifest.openclaw.setupEntry, "./bundle/setup-entry.js");
   assert.equal(manifest.openclaw.install.minHostVersion, ">=2026.3.24");
 });

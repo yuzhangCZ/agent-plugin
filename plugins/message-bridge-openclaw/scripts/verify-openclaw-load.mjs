@@ -80,6 +80,10 @@ async function writeDevConfig(homeDir, config) {
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+function getInstalledPluginDir(homeDir) {
+  return path.join(homeDir, ".openclaw-dev", "extensions", "skill-openclaw-plugin");
+}
+
 function execCapture(cmd, args, { env, cwd = ROOT_DIR, expectedStatus = 0, label }) {
   const result = spawn(cmd, args, {
     cwd,
@@ -303,6 +307,13 @@ async function main() {
     env: isolatedEnv,
     stdio: "ignore",
   });
+  const installedPluginDir = getInstalledPluginDir(tmpHome);
+  const installedManifest = JSON.parse(
+    await readFile(path.join(installedPluginDir, "package.json"), "utf8"),
+  );
+  assert.equal(installedManifest.openclaw?.setupEntry, "./setup-entry.js");
+  await readFile(path.join(installedPluginDir, "setup-entry.js"), "utf8");
+  contractChecks.push("installed bundle exposes setup-entry.js and openclaw.setupEntry metadata");
   const baselineConfig = JSON.parse(
     (await readFile(getDevConfigPath(tmpHome), "utf8").catch(() => "{}")) || "{}",
   );

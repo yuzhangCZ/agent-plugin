@@ -53,6 +53,7 @@
     "extensions": [
       "./bundle/index.js"
     ],
+    "setupEntry": "./bundle/setup-entry.js",
     "channel": {
       "id": "message-bridge",
       "label": "Message Bridge",
