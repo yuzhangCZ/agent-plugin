@@ -13,9 +13,8 @@ import { InboundFrameRouter } from './InboundFrameRouter.ts';
 import { OutboundSender } from './OutboundSender.ts';
 import { ReconnectOrchestrator } from './ReconnectOrchestrator.ts';
 import { HeartbeatLoop } from './HeartbeatLoop.ts';
-import { shouldRetryOnClose } from './shouldRetryOnClose.ts';
-
-const GATEWAY_REJECTION_CLOSE_CODES = new Set([4403, 4408, 4409]);
+import { evaluateReconnectOnClose, isGatewayRejectedCloseCode } from './evaluateReconnectOnClose.ts';
+import { ReconnectContinueSignal } from './ReconnectContinueSignal.ts';
 
 type GatewayCloseEventLike = Partial<CloseEvent> & {
   code?: unknown;
@@ -25,9 +24,18 @@ type GatewayCloseEventLike = Partial<CloseEvent> & {
 
 type ConnectAttemptPhase = 'transport-opening' | 'register-sent' | 'ready' | 'terminal';
 
-function isGatewayRejectedCloseCode(code: unknown): boolean {
-  return typeof code === 'number' && Number.isFinite(code) && GATEWAY_REJECTION_CLOSE_CODES.has(code);
-}
+type CloseContext = {
+  closeCode?: unknown;
+  closeReason?: unknown;
+  wasClean?: unknown;
+  opened: boolean;
+  phase: ConnectAttemptPhase;
+  manuallyDisconnected: boolean;
+  aborted: boolean;
+  rejected: boolean;
+  reconnectDecision: ReturnType<typeof evaluateReconnectOnClose>;
+  reconnectPlanned: boolean;
+};
 
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -56,7 +64,7 @@ class ConnectAttempt {
   private readonly reconnectAttempt: boolean;
   private readonly connectPromise: Promise<void>;
   private resolveConnect!: () => void;
-  private rejectConnect!: (error: GatewayClientError) => void;
+  private rejectConnect!: (error: unknown) => void;
   private phase: ConnectAttemptPhase = 'transport-opening';
   private opened = false;
   private connectSettled = false;
@@ -307,44 +315,88 @@ class ConnectAttempt {
     if (this.isTerminal()) {
       return;
     }
-    const close = event as GatewayCloseEventLike | undefined;
-    const rejected = isGatewayRejectedCloseCode(close?.code);
-    const reconnectPlanned =
-      this.phase === 'ready'
-      && shouldRetryOnClose({
-        closeCode: close?.code,
-        manuallyDisconnected: this.state.isManuallyDisconnected(),
-        aborted: !!this.context.abortSignal?.aborted,
-      })
-      && this.context.reconnectEnabled;
-
-    this.context.telemetry.logClose({
-      opened: this.opened,
-      manuallyDisconnected: this.state.isManuallyDisconnected(),
-      aborted: !!this.context.abortSignal?.aborted,
-      rejected,
-      reconnectPlanned,
-      code: close?.code,
-      reason: close?.reason,
-      wasClean: close?.wasClean,
-    });
+    this.context.telemetry.logRawFrame('onClose', event);
+    const closeContext = this.buildCloseContext(event);
+    this.logClose(closeContext);
 
     this.state.setState('DISCONNECTED');
 
-    if (this.state.isManuallyDisconnected() || this.context.abortSignal?.aborted) {
+    switch (closeContext.reconnectDecision.action) {
+      case 'continue-window':
+        this.continueReconnectWindow();
+        return;
+      case 'start-window':
+        this.handleStartReconnectWindow(closeContext);
+        return;
+      case 'stop':
+        this.handleStopClose(closeContext);
+        return;
+    }
+  }
+
+  private buildCloseContext(event?: unknown): CloseContext {
+    const close = event as GatewayCloseEventLike | undefined;
+    const manuallyDisconnected = this.state.isManuallyDisconnected();
+    const aborted = !!this.context.abortSignal?.aborted;
+    const reconnectDecision = evaluateReconnectOnClose({
+      closeCode: close?.code,
+      manuallyDisconnected,
+      aborted,
+      reconnectEnabled: this.context.reconnectEnabled,
+      reconnectAttempt: this.reconnectAttempt,
+      phase: this.phase,
+    });
+
+    return {
+      closeCode: close?.code,
+      closeReason: close?.reason,
+      wasClean: close?.wasClean,
+      opened: this.opened,
+      phase: this.phase,
+      manuallyDisconnected,
+      aborted,
+      rejected: isGatewayRejectedCloseCode(close?.code),
+      reconnectDecision,
+      reconnectPlanned: reconnectDecision.action === 'start-window'
+        || reconnectDecision.action === 'continue-window',
+    };
+  }
+
+  private logClose(closeContext: CloseContext): void {
+    this.context.telemetry.logClose({
+      opened: closeContext.opened,
+      manuallyDisconnected: closeContext.manuallyDisconnected,
+      aborted: closeContext.aborted,
+      rejected: closeContext.rejected,
+      reconnectPlanned: closeContext.reconnectPlanned,
+      code: closeContext.closeCode,
+      reason: closeContext.closeReason,
+      wasClean: closeContext.wasClean,
+    });
+  }
+
+  private handleStartReconnectWindow(closeContext: CloseContext): void {
+    this.failAtRuntime(this.resolveTransportTerminalError(this.buildTransportCloseError(
+      closeContext,
+      'runtime_failure',
+      'ready',
+      true,
+      'gateway_runtime_transport_closed',
+    )), { closeTransport: false });
+    this.reconnectOrchestrator.scheduleReconnect();
+  }
+
+  private handleStopClose(closeContext: CloseContext): void {
+    if (closeContext.manuallyDisconnected || closeContext.aborted) {
       const cancelled = this.commitTerminalError(this.terminalError ?? new GatewayClientError({
         code: 'GATEWAY_CONNECT_ABORTED',
         disposition: 'cancelled',
-        stage: this.opened && this.phase !== 'ready' ? 'handshake' : this.resolveStage(),
+        stage: closeContext.opened && closeContext.phase !== 'ready' ? 'handshake' : this.resolveStage(),
         retryable: false,
         message: 'gateway_connection_aborted',
-        details: {
-          closeCode: isNumber(close?.code) ? close.code : undefined,
-          closeReason: isString(close?.reason) ? close.reason : undefined,
-          wasClean: isBoolean(close?.wasClean) ? close.wasClean : undefined,
-        },
+        details: this.buildCloseDetails(closeContext),
       }));
-      if (this.phase === 'ready') {
+      if (closeContext.phase === 'ready') {
         this.enterTerminal();
         return;
       }
@@ -352,83 +404,99 @@ class ConnectAttempt {
       return;
     }
 
-    if (!this.opened) {
-      const startupTerminalError = rejected
+    if (!closeContext.opened) {
+      const startupTerminalError = closeContext.rejected
         ? new GatewayClientError({
           code: 'GATEWAY_AUTH_REJECTED',
           disposition: 'startup_failure',
           stage: 'pre_open',
           retryable: false,
           message: 'gateway_auth_rejected',
-          details: {
-            closeCode: isNumber(close?.code) ? close.code : undefined,
-            closeReason: isString(close?.reason) ? close.reason : undefined,
-            wasClean: isBoolean(close?.wasClean) ? close.wasClean : undefined,
-          },
+          details: this.buildCloseDetails(closeContext),
         })
-        : this.resolveTransportTerminalError(new GatewayClientError({
-          code: 'GATEWAY_TRANSPORT_ERROR',
-          disposition: 'startup_failure',
-          stage: 'pre_open',
-          retryable: true,
-          message: 'gateway_websocket_closed_before_open',
-          details: {
-            closeCode: isNumber(close?.code) ? close.code : undefined,
-            closeReason: isString(close?.reason) ? close.reason : undefined,
-            wasClean: isBoolean(close?.wasClean) ? close.wasClean : undefined,
-          },
-        }));
+        : this.resolveTransportTerminalError(this.buildTransportCloseError(
+          closeContext,
+          'startup_failure',
+          'pre_open',
+          true,
+          'gateway_websocket_closed_before_open',
+        ));
       this.failBeforeReady(startupTerminalError, { closeTransport: false });
       return;
     }
 
-    if (this.phase !== 'ready') {
-      const terminalError = this.terminalError ?? this.resolveTransportTerminalError(new GatewayClientError({
-        code: 'GATEWAY_TRANSPORT_ERROR',
-        disposition: 'startup_failure',
-        stage: 'handshake',
-        retryable: !rejected,
-        message: 'gateway_unexpected_close_before_ready',
-        details: {
-          closeCode: isNumber(close?.code) ? close.code : undefined,
-          closeReason: isString(close?.reason) ? close.reason : undefined,
-          wasClean: isBoolean(close?.wasClean) ? close.wasClean : undefined,
-        },
-      }));
+    if (closeContext.phase !== 'ready') {
+      const terminalError = this.terminalError ?? this.resolveTransportTerminalError(this.buildTransportCloseError(
+        closeContext,
+        'startup_failure',
+        'handshake',
+        !closeContext.rejected,
+        'gateway_unexpected_close_before_ready',
+      ));
       this.failBeforeReady(terminalError, { closeTransport: false });
-      if (rejected) {
-        this.context.logger?.warn?.('gateway.close.rejected', {
-          code: close?.code,
-          reason: close?.reason,
-          rejected: true,
-        });
-      }
+      this.logRejectedClose(closeContext);
       return;
     }
 
-    this.failAtRuntime(this.resolveTransportTerminalError(new GatewayClientError({
+    this.failAtRuntime(this.resolveTransportTerminalError(this.buildTransportCloseError(
+      closeContext,
+      'runtime_failure',
+      'ready',
+      true,
+      'gateway_runtime_transport_closed',
+    )), { closeTransport: false });
+    this.logRejectedClose(closeContext);
+  }
+
+  private buildCloseDetails(closeContext: CloseContext) {
+    return {
+      closeCode: isNumber(closeContext.closeCode) ? closeContext.closeCode : undefined,
+      closeReason: isString(closeContext.closeReason) ? closeContext.closeReason : undefined,
+      wasClean: isBoolean(closeContext.wasClean) ? closeContext.wasClean : undefined,
+    };
+  }
+
+  private buildTransportCloseError(
+    closeContext: CloseContext,
+    disposition: GatewayConnectionDisposition,
+    stage: GatewayConnectionStage,
+    retryable: boolean,
+    message: string,
+  ): GatewayClientError {
+    return new GatewayClientError({
       code: 'GATEWAY_TRANSPORT_ERROR',
-      disposition: 'runtime_failure',
-      stage: 'ready',
-      retryable: true,
-      message: 'gateway_runtime_transport_closed',
-      details: {
-        closeCode: isNumber(close?.code) ? close.code : undefined,
-        closeReason: isString(close?.reason) ? close.reason : undefined,
-        wasClean: isBoolean(close?.wasClean) ? close.wasClean : undefined,
-      },
-    })), { closeTransport: false });
-    if (rejected) {
-      this.context.logger?.warn?.('gateway.close.rejected', {
-        code: close?.code,
-        reason: close?.reason,
-        rejected: true,
-      });
+      disposition,
+      stage,
+      retryable,
+      message,
+      details: this.buildCloseDetails(closeContext),
+    });
+  }
+
+  private logRejectedClose(closeContext: CloseContext): void {
+    if (!closeContext.rejected) {
       return;
     }
-    if (reconnectPlanned) {
-      this.reconnectOrchestrator.scheduleReconnect();
+    this.context.logger?.warn?.('gateway.close.rejected', {
+      code: closeContext.closeCode,
+      reason: closeContext.closeReason,
+      rejected: true,
+    });
+  }
+
+  private continueReconnectWindow(): void {
+    if (this.terminalCleanupCompleted) {
+      return;
     }
+    this.phase = 'terminal';
+    this.terminalCleanupCompleted = true;
+    this.pendingTransportError = null;
+    this.clearHandshakeTimeout();
+    this.cleanupAbortListener();
+    this.heartbeatLoop.stop();
+    this.releaseHandshakeOwnership();
+    this.rejectConnect(new ReconnectContinueSignal());
+    this.onTerminal();
   }
 
   private failBeforeReady(

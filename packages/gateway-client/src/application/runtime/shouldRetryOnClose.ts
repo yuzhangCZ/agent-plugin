@@ -4,7 +4,7 @@ type RetryOnCloseInput = {
   aborted: boolean;
 };
 
-const RETRYABLE_CLOSE_CODES = new Set([1006, 1012, 1013]);
+const RETRYABLE_CLOSE_CODES = new Set([1006, 1012, 1013, 4408]);
 
 /**
  * 自动重试采用 close code 白名单；未命中白名单时默认 fail-closed。
