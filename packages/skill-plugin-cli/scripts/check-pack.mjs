@@ -32,9 +32,26 @@ async function main() {
     await mkdir(packageDir, { recursive: true });
     execFileSync("tar", ["-xzf", tgzPath, "-C", packageDir, "--strip-components=1"], { stdio: "pipe" });
     const extractedManifest = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8"));
-    assert.ok(!("dependencies" in extractedManifest), "pack check failed: publish manifest must not include dependencies");
-    assert.ok(!("optionalDependencies" in extractedManifest), "pack check failed: publish manifest must not include optionalDependencies");
-    assert.ok(!("peerDependencies" in extractedManifest), "pack check failed: publish manifest must not include peerDependencies");
+    assert.equal(
+      Object.hasOwn(extractedManifest, "dependencies"),
+      false,
+      "pack check failed: published package.json must not contain runtime dependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "devDependencies"),
+      false,
+      "pack check failed: published package.json must not contain devDependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "optionalDependencies"),
+      false,
+      "pack check failed: published package.json must not contain optionalDependencies",
+    );
+    assert.equal(
+      Object.hasOwn(extractedManifest, "peerDependencies"),
+      false,
+      "pack check failed: published package.json must not contain peerDependencies",
+    );
     await writeFile(path.join(importProbeRoot, "package.json"), JSON.stringify({ type: "module" }), "utf8");
 
     const helpProbe = spawnSync(process.execPath, ["./dist/cli.js", "--help"], {

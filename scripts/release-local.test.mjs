@@ -1893,8 +1893,8 @@ test("executeRelease publishes skill-plugin-cli tarball without gateway injectio
   assert.equal(
     execDouble.calls.some(
       (entry) =>
-        entry.command === "npm"
-        && entry.args.join(" ") === "pack --pack-destination .tmp/release-pack"
+        entry.command === "node"
+        && entry.args.join(" ") === "./scripts/build-release-tarball.mjs --pack-destination .tmp/release-pack"
         && entry.cwd === path.join(repoRoot, "packages/skill-plugin-cli"),
     ),
     true,
@@ -1912,7 +1912,7 @@ test("executeRelease publishes skill-plugin-cli tarball without gateway injectio
   );
 });
 
-test("executeRelease creates skill-plugin-cli release pack directory before npm pack", () => {
+test("executeRelease creates skill-plugin-cli release pack directory before tarball build", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1955,8 +1955,8 @@ test("executeRelease creates skill-plugin-cli release pack directory before npm 
   assert.equal(
     execDouble.calls.some(
       (entry) =>
-        entry.command === "npm"
-        && entry.args.join(" ") === "pack --pack-destination .tmp/release-pack"
+        entry.command === "node"
+        && entry.args.join(" ") === "./scripts/build-release-tarball.mjs --pack-destination .tmp/release-pack"
         && entry.cwd === path.join(repoRoot, "packages/skill-plugin-cli"),
     ),
     true,
@@ -1980,7 +1980,7 @@ test("skill-plugin-cli release workflow publishes tarball without gateway inject
   const publishSection = content.split("- name: Publish package")[1] ?? "";
 
   assert.match(content, /release\/skill-plugin-cli\/v\*/i);
-  assert.match(content, /npm pack --pack-destination \.tmp\/release-pack/i);
+  assert.match(content, /node \.\/scripts\/build-release-tarball\.mjs --pack-destination \.tmp\/release-pack/i);
   assert.match(content, /name:\s*skill-plugin-cli-tgz/i);
   assert.match(content, /path:\s*packages\/skill-plugin-cli\/\.tmp\/release-pack\/\*\.tgz/i);
   assert.match(content, /path:\s*\.tmp\/release-skill-plugin-cli/i);

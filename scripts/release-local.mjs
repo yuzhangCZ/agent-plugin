@@ -64,7 +64,7 @@ export const releaseDescriptors = Object.freeze({
       root: ".",
     }),
     build: Object.freeze({
-      preparePublishSteps: Object.freeze([["npm", "pack", "--pack-destination", ".tmp/release-pack"]]),
+      preparePublishSteps: Object.freeze([["node", "./scripts/build-release-tarball.mjs", "--pack-destination", ".tmp/release-pack"]]),
       requiresDefaultGatewayUrl: false,
       steps: Object.freeze([["pnpm", "--dir", "packages/skill-plugin-cli", "run", "build"]]),
       verifyStep: Object.freeze(["pnpm", "--dir", "packages/skill-plugin-cli", "run", "verify:core"]),

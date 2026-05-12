@@ -1,8 +1,9 @@
 # 本地发布 CLI
 
-本仓库为三个工作区包提供统一的本地发布 CLI：
+本仓库为四个工作区包提供统一的本地发布 CLI：
 
 - `@wecode/skill-qrcode-auth`
+- `@wecode/skill-plugin-cli`
 - `@wecode/skill-opencode-plugin`
 - `@wecode/skill-openclaw-plugin`
 
@@ -11,8 +12,8 @@
 ## 入口
 
 ```bash
-pnpm release:local -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> ...
-pnpm release:plan -- --target <skill-qrcode-auth|message-bridge|message-bridge-openclaw|dual> ...
+pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|dual> ...
+pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|dual> ...
 ```
 
 - `release:local` 执行完整发布流程。
@@ -40,11 +41,12 @@ npm whoami
 
 如果你使用的是类似 `@wecode:registry=...` 的 scope 私仓配置，CLI 会优先解析该 scope 对应的真实 registry，并对这个 registry 做认证检查，而不是只看默认 registry。
 
-## 当前三个包的发布差异
+## 当前四个包的发布差异
 
-CLI 对外接口统一，但三个包当前的发布根目录不同：
+CLI 对外接口统一，但四个包当前的发布入口不同：
 
 - `skill-qrcode-auth` 从 `packages/skill-qrcode-auth` 发布
+- `skill-plugin-cli` 先基于 `packages/skill-plugin-cli` 构建发布专用 tarball，再从 `.tmp/release-pack/*.tgz` 发布
 - `message-bridge` 从 `plugins/message-bridge` 发布
 - `message-bridge-openclaw` 从 `plugins/message-bridge-openclaw/bundle` 发布
 
@@ -78,6 +80,7 @@ CLI 对外接口统一，但三个包当前的发布根目录不同：
 - `--target message-bridge`
 - `--target message-bridge-openclaw`
 - `--target skill-qrcode-auth`
+- `--target skill-plugin-cli`
 - `--target dual`
 
 ### 版本选择
