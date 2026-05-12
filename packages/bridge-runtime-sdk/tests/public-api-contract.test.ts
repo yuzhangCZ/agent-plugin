@@ -9,7 +9,6 @@ test('stable entry exports executable runtime factory and public contracts', () 
   assert.equal(typeof runtimeSdk.resolvePackageVersion, 'function');
   assert.equal(typeof runtimeSdk.qrcodeAuth, 'object');
   assert.equal(typeof runtimeSdk.qrcodeAuth.run, 'function');
-  assert.equal(typeof runtimeSdk.resolvePackageVersion, 'function');
 });
 
 test('stable entry does not expose internal facade skeleton symbols', () => {

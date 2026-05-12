@@ -56,4 +56,3 @@ export type {
   QrCodeAuthSnapshot,
   QrCodeDisplayData,
 } from '@wecode/skill-qrcode-auth';
-export { resolvePackageVersion } from './packageVersion.ts';
