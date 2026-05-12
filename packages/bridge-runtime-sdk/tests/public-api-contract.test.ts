@@ -6,6 +6,8 @@ import * as runtimeSdk from '../src/index.ts';
 
 test('stable entry exports executable runtime factory and public contracts', () => {
   assert.equal(typeof runtimeSdk.createBridgeRuntime, 'function');
+  assert.equal(typeof runtimeSdk.qrcodeAuth, 'object');
+  assert.equal(typeof runtimeSdk.qrcodeAuth.run, 'function');
 });
 
 test('stable entry does not expose internal facade skeleton symbols', () => {
@@ -14,6 +16,9 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('toRuntimeCommand' in runtimeSdk, false);
   assert.equal('createGatewayClientBridgeRuntime' in runtimeSdk, false);
   assert.equal('probeBridgeGatewayHost' in runtimeSdk, false);
+  assert.equal('createQrCodeAuthRuntime' in runtimeSdk, false);
+  assert.equal('HttpQrCodeAuthService' in runtimeSdk, false);
+  assert.equal('QrCodeAuthSessionController' in runtimeSdk, false);
 });
 
 test('stable entry source does not re-export gateway connection internals', async () => {

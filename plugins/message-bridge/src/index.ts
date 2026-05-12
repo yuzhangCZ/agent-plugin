@@ -1,3 +1,4 @@
+import { qrcodeAuth, type QrCodeAuth } from '../../../packages/skill-qrcode-auth/src/index.ts';
 import {
   cacheLoadedPluginInput,
   dispatchEventToActiveRuntime,
@@ -23,6 +24,7 @@ interface MessageBridgeRuntimeApi {
   ): () => void;
   startMessageBridgeRuntime(): Promise<void>;
   stopMessageBridgeRuntime(): void;
+  qrcodeAuth: QrCodeAuth;
 }
 
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
@@ -107,6 +109,7 @@ const runtimeApi: MessageBridgeRuntimeApi = getInstalledRuntimeApi() ?? Object.f
   subscribeMessageBridgeStatus,
   startMessageBridgeRuntime,
   stopMessageBridgeRuntime,
+  qrcodeAuth,
 });
 
 installRuntimeApi(runtimeApi);

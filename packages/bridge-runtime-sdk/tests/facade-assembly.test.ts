@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 
-import { createBridgeRuntime } from '../src/index.ts';
+import { qrcodeAuth as sourceQrCodeAuth } from '@wecode/skill-qrcode-auth';
+import { createBridgeRuntime, qrcodeAuth } from '../src/index.ts';
 import type { BridgeGatewayHostConnection, BridgeGatewayHostState } from '../src/application/gateway-host.ts';
 
 class AssemblyGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
@@ -147,4 +148,9 @@ test('createBridgeRuntime does not create gateway connection during construction
   assert.equal(factoryCalls, 0);
   await runtime.start();
   assert.equal(factoryCalls, 1);
+});
+
+test('sdk root re-exports qrcode auth singleton facade', () => {
+  assert.strictEqual(qrcodeAuth, sourceQrCodeAuth);
+  assert.equal(typeof qrcodeAuth.run, 'function');
 });
