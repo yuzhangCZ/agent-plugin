@@ -1232,6 +1232,134 @@ test('debug mode logs raw onError and onClose frames before close-based settleme
   assert.equal(logs.some((entry) => entry.message === 'gateway.close'), true);
 });
 
+test('debug mode extracts non-enumerable websocket event fields into raw frame logs', async () => {
+  const transport = new FakeTransport();
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      debug: true,
+      logger: {
+        info(message, meta) {
+          logs.push({ message, meta });
+        },
+        warn(message, meta) {
+          logs.push({ message, meta });
+        },
+        error(message, meta) {
+          logs.push({ message, meta });
+        },
+      },
+    },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  const closeTarget = {};
+  Object.defineProperties(closeTarget, {
+    readyState: { value: 3, enumerable: false },
+    url: { value: 'ws://localhost:8081/ws/agent', enumerable: false },
+  });
+
+  const errorEvent = {};
+  Object.defineProperties(errorEvent, {
+    type: { value: 'error', enumerable: false },
+    message: { value: 'socket failed', enumerable: false },
+    isTrusted: { value: true, enumerable: false },
+    target: { value: closeTarget, enumerable: false },
+  });
+
+  const closeEvent = {};
+  Object.defineProperties(closeEvent, {
+    code: { value: 1006, enumerable: false },
+    reason: { value: 'Failed to connect', enumerable: false },
+    wasClean: { value: false, enumerable: false },
+    isTrusted: { value: true, enumerable: false },
+    target: { value: closeTarget, enumerable: false },
+  });
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitError(errorEvent);
+  transport.emitClose(closeEvent);
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_TRANSPORT_ERROR',
+  );
+
+  const rawErrorLog = logs.find((entry) => entry.message.includes('「onError」'));
+  const rawCloseLog = logs.find((entry) => entry.message.includes('「onClose」'));
+  assert.notEqual(rawErrorLog, undefined);
+  assert.notEqual(rawCloseLog, undefined);
+  assert.equal(rawErrorLog.message.includes('"message":"socket failed"'), true);
+  assert.equal(rawErrorLog.message.includes('"readyState":3'), true);
+  assert.equal(rawCloseLog.message.includes('"code":1006'), true);
+  assert.equal(rawCloseLog.message.includes('"reason":"Failed to connect"'), true);
+  assert.equal(rawCloseLog.message.includes('"wasClean":false'), true);
+});
+
+test('debug mode preserves enumerable transport diagnostics while enriching event fields', async () => {
+  const transport = new FakeTransport();
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+      debug: true,
+      logger: {
+        info(message, meta) {
+          logs.push({ message, meta });
+        },
+        warn(message, meta) {
+          logs.push({ message, meta });
+        },
+        error(message, meta) {
+          logs.push({ message, meta });
+        },
+      },
+    },
+    buildFakeDependencies({ transport }),
+    createFakeSink(),
+  );
+
+  const closeTarget = {};
+  Object.defineProperties(closeTarget, {
+    readyState: { value: 3, enumerable: false },
+    url: { value: 'ws://localhost:8081/ws/agent', enumerable: false },
+  });
+
+  const transportError = Object.assign(new Error('socket failed'), { code: 'ECONNRESET' });
+  const errorEvent = {
+    attemptId: 'attempt-1',
+    detail: { retryInMs: 500 },
+  };
+  Object.defineProperties(errorEvent, {
+    type: { value: 'error', enumerable: false },
+    message: { value: 'socket failed', enumerable: false },
+    error: { value: transportError, enumerable: false },
+    target: { value: closeTarget, enumerable: false },
+  });
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitError(errorEvent);
+  transport.emitClose({ code: 1011, reason: 'upstream reset', wasClean: false });
+
+  await assert.rejects(
+    connecting,
+    (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_TRANSPORT_ERROR',
+  );
+
+  const rawErrorLog = logs.find((entry) => entry.message.includes('「onError」'));
+  assert.notEqual(rawErrorLog, undefined);
+  assert.equal(rawErrorLog.message.includes('"attemptId":"attempt-1"'), true);
+  assert.equal(rawErrorLog.message.includes('"retryInMs":500'), true);
+  assert.equal(rawErrorLog.message.includes('"message":"socket failed"'), true);
+  assert.equal(rawErrorLog.message.includes('"code":"ECONNRESET"'), true);
+});
+
 test('onClose raw frame logging stays debug-gated while structured gateway.close remains enabled', async () => {
   const transport = new FakeTransport();
   const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
