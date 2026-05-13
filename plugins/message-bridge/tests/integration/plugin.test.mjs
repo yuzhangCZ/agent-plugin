@@ -9,21 +9,22 @@ import {
   default as DefaultPlugin,
 } from '../../src/index.ts';
 import * as PluginModule from '../../src/index.ts';
+import { qrcodeAuth as sourceQrCodeAuth } from '../../../../packages/skill-qrcode-auth/src/index.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
-const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PLUGIN_VERSION__;
+const ORIGINAL_PLUGIN_VERSION = globalThis.__MB_PACKAGE_VERSION__;
 const SOURCE_RUNTIME_API = globalThis.__MB_RUNTIME_API__;
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
 function restoreInjectedPluginVersion() {
   if (typeof ORIGINAL_PLUGIN_VERSION === 'undefined') {
-    delete globalThis.__MB_PLUGIN_VERSION__;
+    delete globalThis.__MB_PACKAGE_VERSION__;
     return;
   }
 
-  globalThis.__MB_PLUGIN_VERSION__ = ORIGINAL_PLUGIN_VERSION;
+  globalThis.__MB_PACKAGE_VERSION__ = ORIGINAL_PLUGIN_VERSION;
 }
 
 function createPluginClient(overrides = {}) {
@@ -153,8 +154,40 @@ describe('plugin contract', () => {
     assert.strictEqual(typeof startMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof stopMessageBridgeRuntime, 'function');
     assert.strictEqual(typeof subscribeMessageBridgeStatus, 'function');
+    assert.strictEqual(typeof getRuntimeApi().qrcodeAuth, 'object');
+    assert.strictEqual(typeof getRuntimeApi().qrcodeAuth.run, 'function');
     assert.strictEqual(globalThis.__MB_RUNTIME_API__, SOURCE_RUNTIME_API);
     assert.strictEqual(Object.isFrozen(getRuntimeApi()), true);
+  });
+
+  test('qrcodeAuth remains callable without starting runtime', async () => {
+    const runtimeApi = getRuntimeApi();
+    const originalRun = sourceQrCodeAuth.run;
+    const seenInputs = [];
+
+    try {
+      sourceQrCodeAuth.run = async (input) => {
+        seenInputs.push(input);
+      };
+
+      await runtimeApi.qrcodeAuth.run({
+        channel: 'openx',
+        mac: '',
+        onSnapshot: () => {},
+      });
+    } finally {
+      sourceQrCodeAuth.run = originalRun;
+    }
+
+    assert.strictEqual(runtimeApi.qrcodeAuth, sourceQrCodeAuth);
+    assert.deepStrictEqual(seenInputs, [
+      {
+        channel: 'openx',
+        mac: '',
+        onSnapshot: seenInputs[0].onSnapshot,
+      },
+    ]);
+    assert.strictEqual(typeof seenInputs[0].onSnapshot, 'function');
   });
 
   test('prefers symbol-backed runtime api when __MB_RUNTIME_API__ is polluted before reload', async () => {
@@ -166,6 +199,9 @@ describe('plugin contract', () => {
       subscribeMessageBridgeStatus: () => () => {},
       startMessageBridgeRuntime: async () => {},
       stopMessageBridgeRuntime: () => {},
+      qrcodeAuth: {
+        run: async () => {},
+      },
     });
 
     Object.defineProperty(globalThis, '__MB_RUNTIME_API__', {
@@ -256,7 +292,7 @@ describe('plugin contract', () => {
   });
 
   test('logs plugin version in runtime.start.requested', async () => {
-    globalThis.__MB_PLUGIN_VERSION__ = '1.2.0-test';
+    globalThis.__MB_PACKAGE_VERSION__ = '1.2.0-test';
 
     const logs = [];
     const client = createPluginClient({

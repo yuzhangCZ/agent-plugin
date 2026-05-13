@@ -9,13 +9,29 @@ import { QrCodeAuthAdapter } from "../adapters/QrCodeAuthAdapter.ts";
 import { TerminalCliPresenter } from "../adapters/TerminalCliPresenter.ts";
 import { NodeProcessRunner } from "../infrastructure/ProcessRunner.ts";
 import type { QrCodeAuthRuntime } from "../domain/qrcode-types.ts";
+import type { ProcessCommandTrace, ProcessTraceSink } from "../domain/ports.ts";
 
 export interface CreateInstallCliUseCaseOptions {
   qrcodeAuthRuntime?: QrCodeAuthRuntime;
 }
 
+class InMemoryProcessTraceSink implements ProcessTraceSink {
+  private traces: ProcessCommandTrace[] = [];
+
+  push(trace: ProcessCommandTrace) {
+    this.traces.push(trace);
+  }
+
+  drain() {
+    const current = this.traces;
+    this.traces = [];
+    return current;
+  }
+}
+
 export function createInstallCliUseCase(options: CreateInstallCliUseCaseOptions = {}) {
-  const processRunner = new NodeProcessRunner();
+  const traceSink = new InMemoryProcessTraceSink();
+  const processRunner = new NodeProcessRunner(traceSink);
   const registryConfig = new NpmrcRegistryConfigAdapter();
   const pluginArtifactPort = new NpmPluginArtifactAdapter(processRunner);
   const hostAdapters = {
@@ -34,5 +50,6 @@ export function createInstallCliUseCase(options: CreateInstallCliUseCaseOptions 
     new TerminalCliPresenter(),
     new QrCodeAuthAdapter(options.qrcodeAuthRuntime),
     hostAdapters,
+    traceSink,
   );
 }

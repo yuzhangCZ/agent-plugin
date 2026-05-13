@@ -1,0 +1,122 @@
+name: Release Bridge Runtime SDK
+
+on:
+  push:
+    tags:
+      - 'release/bridge-runtime-sdk/v*'
+
+concurrency:
+  group: release-bridge-runtime-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    env:
+      MB_DEFAULT_GATEWAY_URL: ${{ vars.MB_DEFAULT_GATEWAY_URL }}
+    outputs:
+      dist_tag: ${{ steps.meta.outputs.dist_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        run: node ./scripts/assert-release-version.mjs packages/bridge-runtime-sdk "${{ github.ref_name }}"
+
+      - name: Resolve npm dist-tag
+        id: meta
+        run: echo "dist_tag=$(node ./scripts/npm-dist-tag.mjs packages/bridge-runtime-sdk)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate default gateway url
+        run: |
+          if [ -z "${MB_DEFAULT_GATEWAY_URL}" ]; then
+            echo "MB_DEFAULT_GATEWAY_URL is required" >&2
+            exit 1
+          fi
+          case "${MB_DEFAULT_GATEWAY_URL}" in
+            ws://*|wss://*) ;;
+            *)
+              echo "MB_DEFAULT_GATEWAY_URL must start with ws:// or wss://" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify package core gate
+        run: pnpm --dir packages/bridge-runtime-sdk run verify:core
+
+      - name: Pack release tarball
+        run: npm pack --pack-destination ../../.tmp/release-bridge-runtime-sdk
+        working-directory: packages/bridge-runtime-sdk
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-runtime-sdk-tgz
+          path: .tmp/release-bridge-runtime-sdk/*.tgz
+
+  publish:
+    name: Publish Package
+    needs: prepare
+    runs-on:
+      - self-hosted
+      - integration-smoke
+    permissions:
+      contents: read
+    env:
+      MB_DEFAULT_GATEWAY_URL: ${{ vars.MB_DEFAULT_GATEWAY_URL }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: ${{ vars.NPM_REGISTRY_URL }}
+          scope: '@agent-plugin'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        run: node ./scripts/assert-release-version.mjs packages/bridge-runtime-sdk "${{ github.ref_name }}"
+
+      - name: Verify release gate
+        run: pnpm --dir packages/bridge-runtime-sdk run verify:release
+
+      - name: Download prepared tarball
+        uses: actions/download-artifact@v5
+        with:
+          name: bridge-runtime-sdk-tgz
+          path: .tmp/release-bridge-runtime-sdk
+
+      - name: Publish package
+        run: npm publish .tmp/release-bridge-runtime-sdk/*.tgz --tag "${{ needs.prepare.outputs.dist_tag }}"
+        env:
+          MB_DEFAULT_GATEWAY_URL: ${{ vars.MB_DEFAULT_GATEWAY_URL }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

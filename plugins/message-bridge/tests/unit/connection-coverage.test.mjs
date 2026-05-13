@@ -586,7 +586,7 @@ describe('DefaultGatewayConnection coverage', () => {
     conn.disconnect();
   });
 
-  for (const closeCode of [4403, 4408, 4409]) {
+  for (const closeCode of [4403, 4409]) {
     test(`does not reconnect on gateway rejection close code ${closeCode}`, async () => {
       const { logger, entries } = createLoggerRecorder();
       ScriptedWebSocket.scripts.push({
@@ -619,6 +619,36 @@ describe('DefaultGatewayConnection coverage', () => {
       conn.disconnect();
     });
   }
+
+  test('reconnects on gateway register-timeout close code 4408', async () => {
+    ScriptedWebSocket.scripts.push(
+      {
+        closeAfterOpenMs: 0,
+        closeCode: 4408,
+        closeReason: 'register-timeout',
+        wasClean: true,
+      },
+      { open: true },
+    );
+    const { logger, entries } = createLoggerRecorder();
+    const states = [];
+    const conn = createGatewayClient({
+      url: 'ws://localhost:8081/ws/agent',
+      reconnect: reconnectConfig({ baseMs: 5, maxMs: 5, jitter: 'none' }),
+      registerMessage: registerMessage(),
+      logger,
+    });
+
+    conn.on('stateChange', (state) => states.push(state));
+    await conn.connect();
+    states.length = 0;
+    await waitForState(conn, states, 'DISCONNECTED');
+    await waitForReady(conn, states);
+
+    assert.strictEqual(ScriptedWebSocket.instances.length, 2);
+    assert.strictEqual(entries.some((entry) => entry.message === 'gateway.close.rejected'), false);
+    conn.disconnect();
+  });
 
   test('does not reconnect when aborted after open', async () => {
     const controller = new AbortController();

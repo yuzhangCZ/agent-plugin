@@ -93,6 +93,8 @@ function assertRuntimeApiInstalled() {
   assert.strictEqual(typeof runtimeApi.startMessageBridgeRuntime, 'function');
   assert.strictEqual(typeof runtimeApi.stopMessageBridgeRuntime, 'function');
   assert.strictEqual(typeof runtimeApi.subscribeMessageBridgeStatus, 'function');
+  assert.strictEqual(typeof runtimeApi.qrcodeAuth, 'object');
+  assert.strictEqual(typeof runtimeApi.qrcodeAuth.run, 'function');
 }
 
 describe('plugin distribution artifact', () => {
@@ -117,6 +119,7 @@ describe('plugin distribution artifact', () => {
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+    assert.strictEqual(typeof mod.qrcodeAuth, 'undefined');
     assertNoPrivateRuntimeNamedExports(mod);
     assertRuntimeApiInstalled();
   });
@@ -168,6 +171,7 @@ describe('plugin distribution artifact', () => {
     assert.strictEqual(typeof mod.default, 'function');
     assert.strictEqual(typeof mod.MessageBridgePlugin, 'function');
     assert.strictEqual(mod.default, mod.MessageBridgePlugin);
+    assert.strictEqual(typeof mod.qrcodeAuth, 'undefined');
     assertNoPrivateRuntimeNamedExports(mod);
     assertRuntimeApiInstalled();
   });
@@ -230,7 +234,7 @@ describe('plugin distribution artifact', () => {
         process.execPath,
         [
           '-e',
-          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { const api = globalThis.__MB_RUNTIME_API__; console.log(typeof mod.default, typeof mod.MessageBridgePlugin, Object.hasOwn(mod, 'getMessageBridgeStatus'), Object.hasOwn(mod, 'startMessageBridgeRuntime'), Object.hasOwn(mod, 'stopMessageBridgeRuntime'), Object.hasOwn(mod, 'subscribeMessageBridgeStatus'), typeof api?.getMessageBridgeStatus, typeof api?.startMessageBridgeRuntime, typeof api?.stopMessageBridgeRuntime, typeof api?.subscribeMessageBridgeStatus, Object.isFrozen(api), Object.getOwnPropertyDescriptor(globalThis, '__MB_RUNTIME_API__')?.enumerable, mod.default === mod.MessageBridgePlugin); })`,
+          `import(${JSON.stringify(PACKAGE_NAME)}).then(mod => { const api = globalThis.__MB_RUNTIME_API__; console.log(typeof mod.default, typeof mod.MessageBridgePlugin, Object.hasOwn(mod, 'getMessageBridgeStatus'), Object.hasOwn(mod, 'startMessageBridgeRuntime'), Object.hasOwn(mod, 'stopMessageBridgeRuntime'), Object.hasOwn(mod, 'subscribeMessageBridgeStatus'), Object.hasOwn(mod, 'qrcodeAuth'), typeof api?.getMessageBridgeStatus, typeof api?.startMessageBridgeRuntime, typeof api?.stopMessageBridgeRuntime, typeof api?.subscribeMessageBridgeStatus, typeof api?.qrcodeAuth, typeof api?.qrcodeAuth?.run, Object.isFrozen(api), Object.getOwnPropertyDescriptor(globalThis, '__MB_RUNTIME_API__')?.enumerable, mod.default === mod.MessageBridgePlugin); })`,
         ],
         {
           cwd: tempDir,
@@ -239,7 +243,7 @@ describe('plugin distribution artifact', () => {
         },
       ).toString().trim();
 
-      assert.strictEqual(stdout, 'function function false false false false function function function function true false true');
+      assert.strictEqual(stdout, 'function function false false false false false function function function function object function true false true');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

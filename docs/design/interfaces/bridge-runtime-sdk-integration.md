@@ -31,6 +31,7 @@
 ```ts
 import {
   createBridgeRuntime,
+  qrcodeAuth,
   type BridgeGatewayHostConfig,
   type BridgeGatewayProbeResult,
   type BridgeRuntime,
@@ -54,6 +55,9 @@ import {
   type ProviderRunMessageInput,
   type ProviderRuntimeContext,
   type ProviderTerminalResult,
+  type QrCodeAuth,
+  type QrCodeAuthRunInput,
+  type QrCodeAuthSnapshot,
   type QuestionAskFact,
   type RuntimeOutboundEmitter,
   type ThirdPartyAgentProvider,
@@ -68,6 +72,15 @@ import {
 ```
 
 本文中的对外接口说明都以 [packages/bridge-runtime-sdk/src/index.ts](/Users/zy/Code/agent-plugin/packages/bridge-runtime-sdk/src/index.ts) 为准。上面的代码块用于展示常见 public contract 的导入方式，不要求穷举全部导出。当前根入口同时导出 `ProviderFact` / `OutboundFact`、主要命令输入类型以及全部 fact 成员类型，便于 Provider 实现方为具体 fact 编写 helper、builder 与测试断言。`BridgeGatewayHostConnection`、`connectionFactory` 一类测试缝或内部装配细节，不属于对外集成契约。
+
+除 Runtime / Provider 契约外，根入口还稳定聚合导出二维码授权 facade：
+
+- `qrcodeAuth`
+- `QrCodeAuth`
+- `QrCodeAuthRunInput`
+- `QrCodeAuthSnapshot`
+
+该能力属于根入口聚合导出，不并入 `BridgeRuntimeOptions`、`BridgeRuntime` 生命周期或 `gatewayHost` 配置。
 
 ## 3. 快速开始
 
@@ -184,6 +197,32 @@ await runtime.stop();
 ```
 
 `createBridgeRuntime()` 只负责创建 facade，不会在构造阶段立即建立 gateway 连接；真正的初始化、Provider `initialize()` 调用与连接建立发生在 `runtime.start()` 期间。
+
+### 3.3 使用根入口二维码授权能力
+
+```ts
+import {
+  qrcodeAuth,
+  type QrCodeAuthRunInput,
+  type QrCodeAuthSnapshot,
+} from '@agent-plugin/bridge-runtime-sdk';
+
+const input: QrCodeAuthRunInput = {
+  channel: 'openx',
+  mac: '',
+  onSnapshot(snapshot: QrCodeAuthSnapshot) {
+    console.log(snapshot.type);
+  },
+};
+
+await qrcodeAuth.run(input);
+```
+
+约束说明：
+
+- `qrcodeAuth` 是根入口聚合导出能力，不属于 `createBridgeRuntime()` 的返回对象。
+- 调用方仍需自行提供 `channel`、`mac` 和 `onSnapshot`。
+- 该导出与 `@wecode/skill-qrcode-auth` 的 public contract 保持一致，SDK 不额外注入宿主默认值。
 
 ## 4. Runtime 装配接口
 

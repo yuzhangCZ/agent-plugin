@@ -96,6 +96,10 @@ export const opencodeProviderEventSchema = z.union([
 export type OpencodeProviderEvent = z.output<typeof opencodeProviderEventSchema>;
 export type GatewayToolEventPayload = OpencodeProviderEvent | SkillProviderEvent;
 export type GatewayToolEventProviderKind = 'cloud' | 'opencode';
+type GatewayToolEventEnvelope =
+  | { __providerKind: 'cloud'; value: unknown }
+  | { __providerKind: 'opencode'; value: unknown }
+  | { __providerKind: 'invalid'; value: unknown };
 
 function hasOwnProtocolField(raw: unknown): raw is Record<string, unknown> {
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw) && Object.hasOwn(raw, 'protocol');
@@ -114,35 +118,56 @@ export function selectGatewayToolEventProviderKind(raw: unknown): GatewayToolEve
   return 'opencode';
 }
 
+function wrapGatewayToolEventPayload(raw: unknown): GatewayToolEventEnvelope {
+  const providerKind = selectGatewayToolEventProviderKind(raw);
+  if (providerKind === null) {
+    return {
+      __providerKind: 'invalid',
+      value: raw,
+    };
+  }
+
+  return {
+    __providerKind: providerKind,
+    value: raw,
+  };
+}
+
+const invalidGatewayToolEventEnvelopeSchema = z
+  .object({
+    __providerKind: z.literal('invalid'),
+    value: z.unknown(),
+  })
+  .superRefine((_, ctx) => {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['protocol'],
+      message: 'protocol must be "cloud" or absent',
+    });
+  });
+
 /**
  * 当前态 `tool_event.event` canonical payload union。
  * @remarks `protocol: "cloud"` 表示 cloud/skill provider event；
  * 缺失 `protocol` 表示 opencode provider event。
  */
 export const gatewayToolEventPayloadSchema: z.ZodType<GatewayToolEventPayload> = z
-  .unknown()
-  .transform((raw, ctx) => {
-    const providerKind = selectGatewayToolEventProviderKind(raw);
-    if (providerKind === null) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['protocol'],
-        message: 'protocol must be "cloud" or absent',
-      });
-      return z.NEVER;
-    }
-
-    const schema = providerKind === 'cloud' ? skillProviderEventSchema : opencodeProviderEventSchema;
-    const parsed = schema.safeParse(raw);
-    if (!parsed.success) {
-      for (const issue of parsed.error.issues) {
-        ctx.addIssue({ ...issue });
-      }
-      return z.NEVER;
-    }
-
-    return parsed.data;
-  });
+  .preprocess(
+    wrapGatewayToolEventPayload,
+    z
+      .discriminatedUnion('__providerKind', [
+        z.object({
+          __providerKind: z.literal('cloud'),
+          value: skillProviderEventSchema,
+        }),
+        z.object({
+          __providerKind: z.literal('opencode'),
+          value: opencodeProviderEventSchema,
+        }),
+        invalidGatewayToolEventEnvelopeSchema,
+      ])
+      .transform((envelope) => envelope.value as GatewayToolEventPayload),
+  );
 
 export {
   messageUpdatedEventSchema,

@@ -14,6 +14,11 @@ const localhostDefaultGatewayUrl = "ws://localhost:8081/ws/agent";
 
 async function main() {
   const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || localhostDefaultGatewayUrl;
+  const sourcePackageJson = JSON.parse(await readFile(sourcePackageJsonPath, "utf8"));
+  const packageVersion = typeof sourcePackageJson.version === "string" ? sourcePackageJson.version.trim() : "";
+  if (!packageVersion) {
+    throw new Error(`package.json version is missing: ${sourcePackageJsonPath}`);
+  }
   await rm(bundleDir, { recursive: true, force: true });
   await mkdir(bundleDir, { recursive: true });
 
@@ -27,10 +32,10 @@ async function main() {
     external: ["openclaw", "openclaw/*"],
     define: {
       "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
+      "globalThis.__MB_PACKAGE_VERSION__": JSON.stringify(packageVersion),
     },
   });
 
-  const sourcePackageJson = JSON.parse(await readFile(sourcePackageJsonPath, "utf8"));
   const bundlePackageJson = {
     name: sourcePackageJson.name,
     version: sourcePackageJson.version,

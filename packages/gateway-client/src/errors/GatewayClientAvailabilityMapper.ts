@@ -13,6 +13,12 @@ import type {
 export function mapGatewayClientAvailability(error: GatewayClientErrorShape): GatewayClientAvailability {
   switch (error.code) {
     case 'GATEWAY_TRANSPORT_ERROR':
+      if (
+        error.disposition !== 'diagnostic'
+        && (error.details?.closeCode === 4403 || error.details?.closeCode === 4409)
+      ) {
+        return 'remote_unavailable';
+      }
       return error.disposition === 'startup_failure' || error.disposition === 'runtime_failure'
         ? 'transport_unavailable'
         : null;

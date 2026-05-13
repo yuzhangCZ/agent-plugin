@@ -1,8 +1,8 @@
-import { homedir } from "node:os";
-import { join, normalize, resolve, posix, win32 } from "node:path";
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, normalize, posix, resolve, win32 } from "node:path";
 import type { HostAdapter, PluginArtifactPort, ProcessRunner } from "../domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostMetadata, InstallContext, InstalledPluginArtifact } from "../domain/types.ts";
 import { InstallCliError } from "../domain/errors.ts";
 import { buildNextBridgeConfig, buildNextBridgeConfigWithoutUrl, buildNextOpencodeConfig, readOpencodePluginItems } from "./config-editors.ts";
 import { readOptionalTextFile, writeFileAtomically } from "../infrastructure/fs-utils.ts";
@@ -49,10 +49,19 @@ export class OpencodeHostAdapter implements HostAdapter {
   private async resolvePaths() {
     const configDir = resolveGlobalConfigDir(this.env);
     return {
-      configDir,
+      configDir: resolve(configDir),
       bridgeConfig: await resolvePreferredExistingPath(join(configDir, "message-bridge.jsonc"), join(configDir, "message-bridge.json")),
       opencodeConfig: await resolvePreferredExistingPath(join(configDir, "opencode.jsonc"), join(configDir, "opencode.json")),
       legacyPluginEntry: join(configDir, "plugins", "message-bridge.plugin.js"),
+    };
+  }
+
+  private buildMetadata(primaryConfigPath: string): HostMetadata {
+    return {
+      host: "opencode",
+      hostDisplayName: "opencode",
+      packageName: PLUGIN_NAME,
+      primaryConfigPath,
     };
   }
 
@@ -87,6 +96,12 @@ export class OpencodeHostAdapter implements HostAdapter {
     await writeFileAtomically(paths.opencodeConfig, nextOpencode);
   }
 
+  private async detectExistingPlugin(opencodeConfigPath: string) {
+    const content = await readOptionalTextFile(opencodeConfigPath);
+    const configuredPluginItems = content ? readOpencodePluginItems(content)?.items ?? [] : [];
+    return configuredPluginItems.some((item) => item === PLUGIN_NAME || this.isControlledFallbackPathSpec(item));
+  }
+
   async preflight() {
     const version = await this.processRunner.exec("opencode", ["--version"]);
     if (version.exitCode !== 0) {
@@ -95,14 +110,14 @@ export class OpencodeHostAdapter implements HostAdapter {
 
     const paths = await this.resolvePaths();
     return {
-      hostLabel: "OpenCode",
-      detail: `opencode 可用，配置路径 ${paths.opencodeConfig}`,
+      metadata: this.buildMetadata(paths.opencodeConfig),
+      existingPluginDetected: await this.detectExistingPlugin(paths.opencodeConfig),
     };
   }
 
-  async installPlugin(context: InstallContext, _presenter: { info(message: string): void }): Promise<InstalledPluginArtifact> {
+  async installPlugin(context: InstallContext): Promise<InstalledPluginArtifact> {
     if (context.installStrategy === "host-native") {
-      const result = await this.processRunner.spawn("opencode", ["plugin", "-g", "-f", PLUGIN_NAME], { stdio: "inherit" });
+      const result = await this.processRunner.spawn("opencode", ["plugin", "-g", "-f", PLUGIN_NAME]);
       if (result.exitCode !== 0) {
         throw new InstallCliError("PLUGIN_INSTALL_FAILED", `opencode plugin -g -f ${PLUGIN_NAME} 失败，退出码 ${result.exitCode}`);
       }
@@ -114,6 +129,7 @@ export class OpencodeHostAdapter implements HostAdapter {
       await this.reconcilePluginReference(artifact.pluginSpec);
       return artifact;
     }
+
     const artifact = await this.pluginArtifactPort.fetchArtifact({
       host: this.host,
       installStrategy: context.installStrategy,
@@ -170,7 +186,8 @@ export class OpencodeHostAdapter implements HostAdapter {
     }
     await writeFileAtomically(paths.bridgeConfig, nextBridge);
     return {
-      detail: `已写入 ${paths.bridgeConfig}`,
+      primaryConfigPath: paths.opencodeConfig,
+      additionalConfigPaths: [paths.bridgeConfig],
     };
   }
 
@@ -180,11 +197,11 @@ export class OpencodeHostAdapter implements HostAdapter {
       throw new InstallCliError("HOST_AVAILABILITY_FAILED", "OpenCode 进程探测失败。");
     }
     return {
-      detail: "已完成 OpenCode 可执行性确认。",
-      nextSteps: [
-        "下一步：请手动重启 OpenCode 以确认插件与配置生效。",
-        "可执行命令：opencode",
-      ],
+      nextAction: {
+        kind: "restart_host",
+        manual: true,
+        effect: "plugin_and_config_effective",
+      },
     };
   }
 }

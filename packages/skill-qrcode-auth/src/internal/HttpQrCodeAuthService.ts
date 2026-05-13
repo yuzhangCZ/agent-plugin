@@ -28,6 +28,16 @@ interface AuthResponseBody {
   data?: Record<string, unknown> | null;
 }
 
+type ParsedJsonBodyResult =
+  | {
+      ok: true;
+      body: AuthResponseBody;
+    }
+  | {
+      ok: false;
+      serviceError: QrCodeAuthServiceError;
+    };
+
 export interface NodeRequestInvocation {
   bodyText?: string;
   options: HttpRequestOptions | HttpsRequestOptions;
@@ -113,7 +123,6 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
   }): Promise<QueryQrCodeSessionResult> {
     const response = await this.requestJson({
       url: new URL(
-        // 服务端保证 qrcode 不含 URL 保留字符；这里按原值拼接路径，不做编码。
         `/assistant-api/nologin/we-crew/im-register/qrcode-detail/${input.ref.qrcode}`,
         normalizeBaseUrl(input.baseUrl),
       ),
@@ -215,16 +224,23 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
     let response: Response;
     try {
       response = await this.fetchImpl(input.url, input.init);
-    } catch {
+    } catch (error) {
+      const serviceError = buildNetworkError(error);
       return {
         kind: "failed",
         reasonCode: "network_error",
+        ...(hasServiceError(serviceError) ? { serviceError } : {}),
       };
     }
 
-    const body = await parseJsonBody(response);
-    if (!response.ok || !body) {
-      const serviceError = body ? buildServiceError(response.status, body) : { httpStatus: response.status };
+    const parsedBody = await parseJsonBody(response);
+    if (!response.ok || !parsedBody.ok) {
+      const serviceError = parsedBody.ok
+        ? buildServiceError(response.status, parsedBody.body)
+        : {
+            httpStatus: response.status,
+            ...parsedBody.serviceError,
+          };
       return {
         kind: "failed",
         reasonCode: "auth_service_error",
@@ -234,7 +250,7 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
 
     return {
       status: response.status,
-      body,
+      body: parsedBody.body,
     };
   }
 }
@@ -330,11 +346,17 @@ async function executeNodeRequest(
   });
 }
 
-async function parseJsonBody(response: Response): Promise<AuthResponseBody | null> {
+async function parseJsonBody(response: Response): Promise<ParsedJsonBodyResult> {
   try {
-    return (await response.json()) as AuthResponseBody;
+    return {
+      ok: true,
+      body: (await response.json()) as AuthResponseBody,
+    };
   } catch {
-    return null;
+    return {
+      ok: false,
+      serviceError: { message: "Failed to parse JSON response" },
+    };
   }
 }
 
@@ -375,6 +397,25 @@ function toBodyText(body: BodyInit | null | undefined): string | undefined {
   }
 
   throw new TypeError("QrCodeAuth HTTP transport only supports string request bodies.");
+}
+
+function buildNetworkError(error: unknown): QrCodeAuthServiceError {
+  return buildUnknownError(error);
+}
+
+function buildUnknownError(error: unknown, fallbackMessage?: string): QrCodeAuthServiceError {
+  if (error instanceof Error) {
+    const code = readString((error as Error & { code?: unknown }).code);
+    return {
+      ...(code ? { code } : {}),
+      ...(error.message ? { message: error.message } : {}),
+      ...(!error.message && fallbackMessage ? { message: fallbackMessage } : {}),
+    };
+  }
+  if (typeof error === "string" && error) {
+    return { message: error };
+  }
+  return fallbackMessage ? { message: fallbackMessage } : {};
 }
 
 function readCode(body: AuthResponseBody): string {

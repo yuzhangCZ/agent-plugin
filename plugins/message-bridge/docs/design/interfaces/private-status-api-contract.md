@@ -1,10 +1,10 @@
 # 私有 Runtime API 契约
 
 **Version:** 1.1
-**Date:** 2026-04-22
+**Date:** 2026-05-11
 **Status:** Active
 **Owner:** message-bridge maintainers
-**Related:** `./protocol-contract.md`, `../../product/prd.md`, `../../architecture/overview.md`
+**Related:** `./protocol-contract.md`, `../../product/prd.md`, `../../architecture/overview.md`, `../../../../../docs/design/qrcode-auth-session-solution.md`, `../../../../../docs/design/qrcode-auth-exposure-solution.md`
 
 ## In Scope
 
@@ -31,12 +31,14 @@
 
 ## 概述
 
-私有 Runtime API 面向同进程宿主调用方，用于控制 `message-bridge` runtime 的启动、停止，并读取或订阅 runtime 状态。
+私有 Runtime API 面向同进程宿主调用方，用于控制 `message-bridge` runtime 的启动、停止，并读取或订阅 runtime 状态；同一宿主对象也承载与 bridge 直接相关的其他私有能力入口。
 
 这组接口分成两类：
 
 - 控制接口：启动或停止 runtime
 - 状态接口：读取当前状态或订阅状态变化
+
+本文重点定义 runtime/status 能力的语义边界；对于同一对象上挂载的二维码授权能力，本文同时提供面向业务接入的 API 定义摘要，方便宿主侧按统一入口接入。二维码授权能力的包级类型真源仍以 `packages/skill-qrcode-auth/src/types.ts` 与相关设计文档为准；当本文摘要与能力真源发生冲突时，以能力真源为准。
 
 插件模块的运行时导出面只保留插件入口：
 
@@ -55,6 +57,7 @@ interface MessageBridgeRuntimeApi {
   ): () => void;
   startMessageBridgeRuntime(): Promise<void>;
   stopMessageBridgeRuntime(): void;
+  qrcodeAuth: QrCodeAuth;
 }
 ```
 
@@ -63,6 +66,7 @@ interface MessageBridgeRuntimeApi {
 ```ts
 const runtimeApi = globalThis.__MB_RUNTIME_API__;
 
+await runtimeApi.qrcodeAuth.run(input);
 await runtimeApi.startMessageBridgeRuntime();
 const snapshot = runtimeApi.getMessageBridgeStatus();
 ```
@@ -70,13 +74,16 @@ const snapshot = runtimeApi.getMessageBridgeStatus();
 推荐调用顺序：
 
 1. 先调用 `MessageBridgePlugin(input)` 完成插件加载。
-2. 需要展示当前状态时，调用 `getMessageBridgeStatus()` 或 `subscribeMessageBridgeStatus()`。
-3. 需要显式恢复或重新启动时，调用 `startMessageBridgeRuntime()`。
-4. 需要显式停止时，调用 `stopMessageBridgeRuntime()`。
+2. 再读取 `globalThis.__MB_RUNTIME_API__` 并按需调用其中能力。
+3. 需要展示当前状态时，调用 `getMessageBridgeStatus()` 或 `subscribeMessageBridgeStatus()`。
+4. 需要显式恢复或重新启动时，调用 `startMessageBridgeRuntime()`。
+5. 需要显式停止时，调用 `stopMessageBridgeRuntime()`。
 
 注意事项：
 
 - `startMessageBridgeRuntime()` 只能在插件已加载后调用。
+- `qrcodeAuth` 也只能在插件已加载、宿主对象已注册后读取；插件未加载前不保证 `globalThis.__MB_RUNTIME_API__` 存在。
+- `qrcodeAuth.run()` 不依赖 runtime 已启动；其领域语义以二维码授权设计文档为准。
 - `stopMessageBridgeRuntime()` 可在任意时机幂等调用。
 - 旧的 private API named export 不再是受支持的访问方式，避免宿主 loader 枚举模块导出时误将私有函数当作插件入口执行。
 
@@ -161,6 +168,175 @@ function subscribeMessageBridgeStatus(
 - 订阅只接收语义变化后的快照。
 - 若仅 `updatedAt` 变化、其余语义字段不变，则不重复通知。
 - 监听器抛错不会中断其他监听器。
+
+### `qrcodeAuth.run(input)`
+
+```ts
+interface QrCodeAuth {
+  run(input: QrCodeAuthRunInput): Promise<void>;
+}
+```
+
+用途：
+
+- 通过宿主私有 Runtime API 发起一次独立的二维码授权会话。
+
+入参：
+
+```ts
+interface QrCodeAuthRunInput {
+  environment?: "uat" | "prod";
+  channel: string;
+  mac: string;
+  policy?: {
+    refreshOnExpired?: boolean;
+    maxRefreshCount?: number;
+    pollIntervalMs?: number;
+  };
+  onSnapshot: (snapshot: QrCodeAuthSnapshot) => void;
+}
+```
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `environment` | `"uat" \| "prod"` | 否 | `prod` | 授权环境；未传时默认 `prod` |
+| `channel` | `string` | 是 | 无 | 宿主桥接通道标识；需为非空字符串 |
+| `mac` | `string` | 是 | 无 | 设备 MAC；当前 OpenCode 宿主接入层可自动采集，失败时传 `""` |
+| `policy.refreshOnExpired` | `boolean` | 否 | `true` | 二维码过期后是否自动刷新 |
+| `policy.maxRefreshCount` | `number` | 否 | `3` | 自动刷新最大次数；要求 `>= 0` |
+| `policy.pollIntervalMs` | `number` | 否 | `2000` | 轮询间隔，单位毫秒；要求 `> 0` |
+| `onSnapshot` | `(snapshot: QrCodeAuthSnapshot) => void` | 是 | 无 | 唯一业务事件输出通道 |
+
+出参：
+
+| 项目 | 类型 | 说明 |
+|---|---|---|
+| 返回值 | `Promise<void>` | 只表示本次授权流程结束，不直接返回 `ak/sk` 等业务结果 |
+| 业务结果出口 | `input.onSnapshot` | 授权过程中的二维码展示、扫码、确认、失败等事件均通过回调输出 |
+
+事件模型：
+
+```ts
+type QrCodeAuthSnapshot =
+  | {
+      type: "qrcode_generated";
+      qrcode: string;
+      display: QrCodeDisplayData;
+      expiresAt: string;
+    }
+  | {
+      type: "scanned";
+      qrcode: string;
+    }
+  | {
+      type: "expired";
+      qrcode: string;
+    }
+  | {
+      type: "cancelled";
+      qrcode: string;
+    }
+  | {
+      type: "confirmed";
+      qrcode: string;
+      credentials: {
+        ak: string;
+        sk: string;
+      };
+    }
+  | {
+      type: "failed";
+      qrcode?: string;
+      reasonCode: "timeout" | "network_error" | "auth_service_error";
+      serviceError?: QrCodeAuthServiceError;
+    };
+```
+
+以上代码块与下表用于提供业务接入所需的接口摘要；类型真源仍以 `packages/skill-qrcode-auth/src/types.ts` 为准。
+
+| `type` | 是否终态 | 额外字段 | 说明 |
+|---|---|---|---|
+| `qrcode_generated` | 否 | `qrcode` `display` `expiresAt` | 新二维码已生成，可用于展示扫码入口 |
+| `scanned` | 否 | `qrcode` | 当前二维码已扫码，等待用户确认 |
+| `expired` | 否 | `qrcode` | 当前二维码已过期；若策略允许，运行时可继续刷新下一张二维码 |
+| `cancelled` | 是 | `qrcode` | 用户取消授权，本次会话结束 |
+| `confirmed` | 是 | `qrcode` `credentials` | 用户确认授权成功，`credentials` 内返回 `ak/sk` |
+| `failed` | 是 | `qrcode?` `reasonCode` `serviceError?` | 授权流程失败；失败分类与服务错误信息通过字段输出 |
+
+字段补充说明：
+
+| 字段 | 类型 | 出现场景 | 说明 |
+|---|---|---|---|
+| `qrcode` | `string` | `qrcode_generated` `scanned` `expired` `cancelled` `confirmed`，`failed` 中可选 | 当前二维码实例的事件级关联键；`failed` 发生在二维码创建前时可能缺失 |
+| `display.qrcode` | `string` | `qrcode_generated` | 二维码唯一标识；在 `qrcode_generated` 事件中与顶层 `qrcode` 表示同一二维码，业务侧应统一使用顶层 `qrcode` 作为跨事件关联键 |
+| `display.weUrl` | `string` | `qrcode_generated` | H5 扫码内容，通常作为主展示入口 |
+| `display.pcUrl` | `string` | `qrcode_generated` | PC 端辅助拉起链接 |
+| `expiresAt` | `string` | `qrcode_generated` | 当前二维码过期时间 |
+| `credentials.ak` | `string` | `confirmed` | 授权成功后返回的访问凭据 AK |
+| `credentials.sk` | `string` | `confirmed` | 授权成功后返回的访问凭据 SK |
+| `reasonCode` | `"timeout" \| "network_error" \| "auth_service_error"` | `failed` | 稳定失败分类 |
+| `serviceError` | `QrCodeAuthServiceError` | `failed` | 服务端错误的安全子集，可能为空 |
+
+调用语义：
+
+- 调用前必须已经完成一次 `MessageBridgePlugin(input)` 加载，并从 `globalThis.__MB_RUNTIME_API__` 读取宿主对象。
+- `qrcodeAuth.run()` 不依赖 runtime 已启动；只要插件已加载、宿主对象已注册，即可独立调用。
+- `qrcodeAuth.run()` 返回 `Promise<void>`，只表示本次授权流程结束，不返回业务结果。
+- 授权过程中的业务事件仍只通过 `input.onSnapshot` 输出。
+- `qrcodeAuth.run()` 的输入字段、事件模型、默认值与终态规则，以二维码授权设计文档和能力真源包为准。
+
+宿主接入约束：
+
+- 插件未加载前，不保证 `globalThis.__MB_RUNTIME_API__` 存在，也不保证 `qrcodeAuth` 属性可读取。
+- 当前 OpenCode 宿主接入策略可以在进入 `qrcodeAuth.run()` 前预填 `channel = "openx"`，并自动采集 `mac`；采集失败时传空字符串 `""`。
+- 上述默认值策略属于宿主接入层约束，不属于 `qrcodeAuth.run()` 作为低层 facade 的公共语义。
+
+失败处理：
+
+- 插件未加载导致的宿主对象不存在，属于宿主读取前置条件未满足，不属于 `qrcodeAuth.run()` 的业务失败模型。
+- `qrcodeAuth.run()` 会同步校验输入；例如 `channel` 为空、`mac` 不是字符串、`onSnapshot` 不是函数、或 `policy` 数值非法时，会抛出 `TypeError`。
+- `qrcodeAuth.run()` 进入授权流程后的失败分类、终态事件与服务错误语义，以二维码授权设计文档为准。
+
+接入示例：
+
+```ts
+const runtimeApi = globalThis.__MB_RUNTIME_API__;
+
+await runtimeApi.qrcodeAuth.run({
+  environment: "prod",
+  channel: "openx",
+  mac: resolvedMacAddress,
+  policy: {
+    refreshOnExpired: true,
+    maxRefreshCount: 3,
+    pollIntervalMs: 2000,
+  },
+  onSnapshot(snapshot) {
+    switch (snapshot.type) {
+      case "qrcode_generated":
+        renderQrCode(snapshot.display.weUrl);
+        return;
+      case "scanned":
+        showPendingConfirmation();
+        return;
+      case "expired":
+        showQrCodeExpired(snapshot.qrcode);
+        return;
+      case "cancelled":
+        showAuthCancelled(snapshot.qrcode);
+        return;
+      case "confirmed":
+        saveCredentials(snapshot.credentials.ak, snapshot.credentials.sk);
+        return;
+      case "failed":
+        showAuthFailure(snapshot.reasonCode, snapshot.serviceError);
+        return;
+      default:
+        assertNever(snapshot);
+    }
+  },
+});
+```
 
 ## 状态快照
 
@@ -253,6 +429,7 @@ export interface MessageBridgeStatusSnapshot {
 - [ ] 通过 `globalThis.__MB_RUNTIME_API__` 获取私有 Runtime API。
 - [ ] 不依赖 private API named export。
 - [ ] 在调用 `startMessageBridgeRuntime()` 前，已至少完成一次 `MessageBridgePlugin(input)` 加载。
+- [ ] 在读取 `qrcodeAuth` 前，已至少完成一次 `MessageBridgePlugin(input)` 加载。
 - [ ] 将 `startMessageBridgeRuntime()` 的 reject error 仅用于即时提示。
 - [ ] 使用 `getMessageBridgeStatus()` 或 `subscribeMessageBridgeStatus()` 读取稳定状态。
 - [ ] 使用 `unavailableReason` 做失败分类，使用 `lastError` 做用户可见错误文本。

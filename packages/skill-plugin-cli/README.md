@@ -31,7 +31,7 @@ skill-plugin-cli install --host opencode --install-strategy host-native --enviro
 - `host-native` 失败后不会自动切到 `fallback`
 - `fallback` 失败后不会回退 `host-native`
 - 重复安装会自动重装
-- `fallback` 运行时依赖 `npm`，不要求宿主系统额外提供 `tar`
+- `fallback` 仍要求宿主系统存在 `npm`，不要求额外提供 `tar`
 - OpenCode fallback 会将受控缓存目录下的本地绝对路径写入 plugin spec
 - OpenClaw fallback 会使用本地 `.tgz` 执行 `openclaw plugins install <local-tgz>`
 
