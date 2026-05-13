@@ -2,6 +2,7 @@ import type { ReconnectPolicy } from '../../ports/ReconnectPolicy.ts';
 import type { ReconnectScheduler } from '../../ports/ReconnectScheduler.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapper.ts';
+import { ReconnectContinueSignal } from './ReconnectContinueSignal.ts';
 
 /**
  * 重连编排器，负责策略决策、调度触发与 attempt 级别日志。
@@ -46,6 +47,7 @@ export class ReconnectOrchestrator {
 
     const reconnectDecision = this.policy.scheduleNextAttempt();
     if (!reconnectDecision.ok) {
+      this.state.setReconnecting(false);
       this.context.telemetry.logReconnectExhausted(reconnectDecision.elapsedMs, reconnectDecision.maxElapsedMs);
       return;
     }
@@ -57,7 +59,6 @@ export class ReconnectOrchestrator {
       elapsedMs: reconnectDecision.elapsedMs,
     };
     this.context.logger?.warn?.('gateway.reconnect.scheduled', reconnectLogFields);
-    this.context.logger?.info?.('gateway.reconnect.scheduled', reconnectLogFields);
     this.state.setReconnecting(true);
 
     this.scheduler.schedule(async () => {
@@ -80,6 +81,10 @@ export class ReconnectOrchestrator {
         });
         await this.reconnect();
       } catch (error) {
+        if (error instanceof ReconnectContinueSignal) {
+          this.scheduleReconnect();
+          return;
+        }
         this.state.setReconnecting(false);
         this.context.logger?.warn?.('gateway.reconnect.failed', {
           attempt: reconnectDecision.attempt,

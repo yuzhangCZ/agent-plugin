@@ -61,7 +61,7 @@ export class GatewayClientTelemetry {
   }
 
   // 原始帧日志只在 debug 模式开启，用于排查 transport 问题，不作为业务观测的稳定输入。
-  logRawFrame(eventName: 'onOpen' | 'onMessage' | 'onError', payload: unknown): void {
+  logRawFrame(eventName: 'onOpen' | 'onMessage' | 'onError' | 'onClose', payload: unknown): void {
     if (!this.debug || !this.logger) return;
     this.logger.info?.(`「${eventName}」===>「${formatRawPayload(payload)}」`);
   }

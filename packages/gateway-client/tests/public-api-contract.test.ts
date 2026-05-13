@@ -175,6 +175,16 @@ test('availability mapper is sufficient for upper-layer neutral consumption', ()
     message: 'gateway_websocket_error',
   })), 'network_unavailable');
   assert.equal(consumeAvailability(mapGatewayClientAvailability({
+    code: 'GATEWAY_TRANSPORT_ERROR',
+    disposition: 'runtime_failure',
+    stage: 'ready',
+    retryable: false,
+    message: 'gateway_runtime_transport_closed',
+    details: {
+      closeCode: 4403,
+    },
+  })), 'server_unavailable');
+  assert.equal(consumeAvailability(mapGatewayClientAvailability({
     code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
     disposition: 'diagnostic',
     stage: 'ready',
