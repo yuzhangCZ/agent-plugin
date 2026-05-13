@@ -100,6 +100,17 @@ function logDebug(logger: BridgeLogger, message: string, meta?: Record<string, u
   logger.info(message, meta);
 }
 
+function logDebugOnly(logger: BridgeLogger, enabled: boolean, message: string, meta?: Record<string, unknown>): void {
+  if (!enabled) {
+    return;
+  }
+  if (logger.debug) {
+    logger.debug(message, meta);
+    return;
+  }
+  logger.info(message, meta);
+}
+
 interface DownstreamLogFields {
   messageType?: string;
   action?: string;
@@ -1015,6 +1026,19 @@ export class OpenClawGatewayBridge {
 
     const dispatcher = createMessageBridgeReplyDispatcher({
       onBlock: async (payloadText) => {
+        this.logChatRawEvent({
+          source: "runtime_reply_dispatcher",
+          eventName: "onBlock",
+          toolSessionId: params.record.toolSessionId,
+          sessionKey: params.record.sessionKey,
+          payload: {
+            text: payloadText,
+          },
+          extra: {
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+          },
+        });
         if (this.isSessionTerminated(params.record)) {
           return;
         }
@@ -1057,6 +1081,19 @@ export class OpenClawGatewayBridge {
         );
       },
       onFinal: async (payloadText) => {
+        this.logChatRawEvent({
+          source: "runtime_reply_dispatcher",
+          eventName: "onFinal",
+          toolSessionId: params.record.toolSessionId,
+          sessionKey: params.record.sessionKey,
+          payload: {
+            text: payloadText,
+          },
+          extra: {
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+          },
+        });
         if (this.isSessionTerminated(params.record)) {
           return;
         }
@@ -1072,6 +1109,19 @@ export class OpenClawGatewayBridge {
         }
       },
       onTool: async (output) => {
+        this.logChatRawEvent({
+          source: "runtime_reply_dispatcher",
+          eventName: "onTool",
+          toolSessionId: params.record.toolSessionId,
+          sessionKey: params.record.sessionKey,
+          payload: {
+            output,
+          },
+          extra: {
+            chatRequestId: params.chatRequestId,
+            retryAttempt: params.retryAttempt,
+          },
+        });
         if (this.isSessionTerminated(params.record) || output.length === 0) {
           return;
         }
@@ -1562,6 +1612,24 @@ export class OpenClawGatewayBridge {
       action: "chat",
       toolSessionId,
     };
+  }
+
+  private logChatRawEvent(params: {
+    source: string;
+    eventName: string;
+    toolSessionId?: string;
+    sessionKey?: string;
+    payload: unknown;
+    extra?: Record<string, unknown>;
+  }): void {
+    logDebugOnly(this.options.logger, this.options.account.debug, "bridge.chat.raw_event", {
+      source: params.source,
+      eventName: params.eventName,
+      toolSessionId: params.toolSessionId,
+      sessionKey: params.sessionKey,
+      payload: params.payload,
+      ...(params.extra ?? {}),
+    });
   }
 
   private sendToolEvent(message: ToolEventMessage, context?: UpstreamSendContext): void {
@@ -2121,6 +2189,13 @@ export class OpenClawGatewayBridge {
     }
 
     const context = this.buildChatEventContext(activeSession.toolSessionId);
+    this.logChatRawEvent({
+      source: "runtime_agent_event",
+      eventName: typeof evt.stream === "string" ? evt.stream : "unknown",
+      toolSessionId: activeSession.toolSessionId,
+      sessionKey,
+      payload: evt,
+    });
     if (evt.stream === "assistant") {
       this.emitAssistantRuntimeDelta(activeSession.assistantStream, activeSession.toolSessionId, evt.data, context);
       return;
@@ -2164,7 +2239,7 @@ export class OpenClawGatewayBridge {
 
     toolState.toolName = toolName;
     toolState.title = extractToolResultTitle(evt.data.meta, toolName) ?? toolState.title;
-    const directInput = pickToolPayload(evt.data, ["input"]);
+    const directInput = pickToolPayload(evt.data, ["input", "args"]);
     if (directInput !== undefined) {
       toolState.input = directInput;
     }

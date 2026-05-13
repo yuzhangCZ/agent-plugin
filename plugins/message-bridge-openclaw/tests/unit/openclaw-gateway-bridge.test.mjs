@@ -31,11 +31,12 @@ class FakeGatewayConnection extends EventEmitter {
   }
 }
 
-function createLogger() {
+function createLogger(overrides = {}) {
   return {
     info() {},
     warn() {},
     error() {},
+    ...overrides,
   };
 }
 
@@ -183,11 +184,18 @@ function createRuntimeEventBus() {
   };
 }
 
-function createBridge({ runtime, connection = new FakeGatewayConnection(), setStatus = () => {}, config = {} } = {}) {
+function createBridge({
+  runtime,
+  connection = new FakeGatewayConnection(),
+  setStatus = () => {},
+  config = {},
+  logger = createLogger(),
+  account,
+} = {}) {
   const bridge = new OpenClawGatewayBridge({
-    account: createAccount(),
+    account: account ?? createAccount(),
     config,
-    logger: createLogger(),
+    logger,
     runtime: runtime ?? createFallbackRuntime(),
     setStatus,
     connectionFactory: () => connection,
@@ -682,6 +690,65 @@ test("runtime reply chat emits assistant text events in protocol order", async (
   for (const message of updatedPartEvents) {
     assert.equal(typeof message.event.properties.time, "number");
   }
+});
+
+test("bridge.chat.raw_event logs runtime reply dispatcher payloads when debug is enabled", async () => {
+  const debugLogs = [];
+  const runtime = createRuntimeReplyRuntime(async ({ dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.block({ text: "hello" });
+    await reply.final({ text: "hello" });
+  });
+  const { bridge } = createBridge({
+    runtime,
+    account: {
+      ...createAccount(),
+      debug: true,
+    },
+    logger: createLogger({
+      debug(message, meta) {
+        debugLogs.push({ message, meta });
+      },
+    }),
+  });
+
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_raw_runtime_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_raw_runtime_1",
+      text: "hello",
+    },
+  });
+
+  const rawLogs = debugLogs.filter((entry) => entry.message === "bridge.chat.raw_event");
+  assert.deepEqual(
+    rawLogs.map((entry) => ({
+      source: entry.meta.source,
+      eventName: entry.meta.eventName,
+      toolSessionId: entry.meta.toolSessionId,
+      payload: entry.meta.payload,
+    })),
+    [
+      {
+        source: "runtime_reply_dispatcher",
+        eventName: "onBlock",
+        toolSessionId: "ses_raw_runtime_1",
+        payload: {
+          text: "hello",
+        },
+      },
+      {
+        source: "runtime_reply_dispatcher",
+        eventName: "onFinal",
+        toolSessionId: "ses_raw_runtime_1",
+        payload: {
+          text: "hello",
+        },
+      },
+    ],
+  );
 });
 
 test("single block stream emits one final text update after streaming delta", async () => {
@@ -1334,6 +1401,60 @@ test("runtime tool update preserves structured input before tool completion", as
   );
 });
 
+test("runtime tool start maps args payload into protocol input state", async () => {
+  let bridgeRef;
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    bridgeRef.handleRuntimeAgentEvent({
+      stream: "tool",
+      sessionKey: ctx.SessionKey,
+      data: {
+        phase: "start",
+        toolCallId: "call_args_1",
+        name: "exec",
+        args: {
+          command: "git log --oneline --decorate -n 10",
+          workdir: "/Users/limuyan/.openclaw/workspace-dev",
+          yieldMs: 1000,
+        },
+      },
+    });
+    await reply.block({ text: "done" });
+    await reply.final({ text: "done" });
+  });
+  const created = createBridge({ runtime });
+  bridgeRef = created.bridge;
+
+  await created.bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_tool_args_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_tool_args_1",
+      text: "hello",
+    },
+  });
+
+  const toolEvent = created.connection.sent
+    .map(({ message }) => message)
+    .find((message) => {
+      return message.type === "tool_event"
+        && message.event.type === "message.part.updated"
+        && message.event.properties.part.type === "tool"
+        && message.event.properties.part.callID === "call_args_1";
+    });
+
+  assert.ok(toolEvent);
+  assert.deepEqual(toolEvent.event.properties.part.state, {
+    status: "running",
+    input: {
+      command: "git log --oneline --decorate -n 10",
+      workdir: "/Users/limuyan/.openclaw/workspace-dev",
+      yieldMs: 1000,
+    },
+  });
+});
+
 test("runtime assistant agent events project to assistant text delta before final reply", async () => {
   let bridgeRef;
   const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
@@ -1598,6 +1719,61 @@ test("start subscribes runtime agent events and stop unsubscribes them", async (
   });
 
   assert.equal(connection.sent.length, beforeStopCount);
+});
+
+test("bridge.chat.raw_event logs runtime agent events when debug is enabled", async () => {
+  const debugLogs = [];
+  const runtimeBus = createRuntimeEventBus();
+  const runtime = createRuntimeReplyRuntime(async ({ ctx, dispatcher }) => {
+    runtimeBus.emit({
+      stream: "assistant",
+      sessionKey: ctx.SessionKey,
+      data: {
+        text: "hello",
+        delta: "hello",
+      },
+    });
+    const reply = createRuntimeReplyDispatchHarness(dispatcher);
+    await reply.final({ text: "hello" });
+  });
+  runtime.events = runtimeBus.runtimeEvents;
+  const { bridge } = createBridge({
+    runtime,
+    account: {
+      ...createAccount(),
+      debug: true,
+    },
+    logger: createLogger({
+      debug(message, meta) {
+        debugLogs.push({ message, meta });
+      },
+    }),
+  });
+
+  await bridge.start();
+  await bridge.handleDownstreamMessage({
+    type: "invoke",
+    welinkSessionId: "wl_raw_agent_1",
+    action: "chat",
+    payload: {
+      toolSessionId: "ses_raw_agent_1",
+      text: "hello",
+    },
+  });
+
+  const rawLog = debugLogs.find((entry) => {
+    return entry.message === "bridge.chat.raw_event"
+      && entry.meta.source === "runtime_agent_event"
+      && entry.meta.eventName === "assistant";
+  });
+
+  assert.ok(rawLog);
+  assert.equal(rawLog.meta.toolSessionId, "ses_raw_agent_1");
+  assert.equal(rawLog.meta.payload.stream, "assistant");
+  assert.equal(rawLog.meta.payload.data.text, "hello");
+  assert.equal(rawLog.meta.payload.data.delta, "hello");
+
+  await bridge.stop();
 });
 
 test("bridge ignores downstream messages when connection is unavailable", async () => {
