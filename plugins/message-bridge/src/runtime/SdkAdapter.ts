@@ -6,7 +6,6 @@ export const REQUIRED_SDK_CAPABILITIES = [
   'session.prompt',
   'session.abort',
   'session.delete',
-  'postSessionIdPermissionsPermissionId',
   '_client.get',
   '_client.post',
 ] as const;
@@ -115,24 +114,6 @@ function buildLegacyPromptOptions(parameters: {
   };
 }
 
-function buildLegacyPermissionReplyOptions(parameters: {
-  sessionID: string;
-  permissionID: string;
-  directory?: string;
-  response: 'once' | 'always' | 'reject';
-}): Record<string, unknown> {
-  return {
-    path: {
-      id: parameters.sessionID,
-      permissionID: parameters.permissionID,
-    },
-    body: {
-      response: parameters.response,
-    },
-    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
-  };
-}
-
 function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGlobalHealth {
   const global = isRecord(root?.global) ? root.global : undefined;
   const rawClient = isRecord(root?._client) ? root._client : undefined;
@@ -170,8 +151,6 @@ export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[
         return typeof session?.abort !== 'function';
       case 'session.delete':
         return typeof session?.delete !== 'function';
-      case 'postSessionIdPermissionsPermissionId':
-        return typeof root?.postSessionIdPermissionsPermissionId !== 'function';
       case '_client.get':
         return typeof rawClient?.get !== 'function';
       case '_client.post':
@@ -209,7 +188,6 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
       abort: (options: Record<string, unknown>) => Promise<unknown>;
       delete: (options: Record<string, unknown>) => Promise<unknown>;
     };
-    postSessionIdPermissionsPermissionId: (options: Record<string, unknown>) => Promise<unknown>;
     _client: {
       get: OpencodeClient['_client']['get'];
       post: OpencodeClient['_client']['post'];
@@ -224,8 +202,6 @@ export function createSdkAdapter(client: unknown): OpencodeClient | null {
       abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
       delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),
     },
-    postSessionIdPermissionsPermissionId: (parameters) =>
-      root.postSessionIdPermissionsPermissionId(buildLegacyPermissionReplyOptions(parameters)),
     _client: {
       get: (options) => root._client.get(options),
       post: (options) => root._client.post(options),

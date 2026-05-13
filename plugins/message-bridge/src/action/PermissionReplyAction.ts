@@ -11,7 +11,7 @@ import type { SessionScopedActionGatewayPort } from '../port/SessionScopedAction
 
 /**
  * Concrete implementation of permission_reply action.
- * Target format only: { permissionId, toolSessionId, response: 'once'|'always'|'reject' }
+ * Target format only: { permissionId, response: 'once'|'always'|'reject' }
  */
 export class PermissionReplyAction implements Action<'permission_reply', PermissionReplyPayload, PermissionReplyResultData> {
   name: 'permission_reply' = 'permission_reply';
@@ -25,7 +25,6 @@ export class PermissionReplyAction implements Action<'permission_reply', Permiss
     const startedAt = Date.now();
     context.logger?.info('action.permission_reply.started', {
       permissionId: payload.permissionId,
-      toolSessionId: payload.toolSessionId,
       response: payload.response,
     });
 
@@ -40,7 +39,6 @@ export class PermissionReplyAction implements Action<'permission_reply', Permiss
       }
 
       const gatewayResult = await this.sessionScopedActionGatewayPort.replyPermission({
-        sessionId: payload.toolSessionId,
         permissionId: payload.permissionId,
         response: payload.response,
         ...(context.logger ? { logger: context.logger } : {}),

@@ -63,6 +63,11 @@ function createRuntimeClient(overrides = {}) {
   };
 }
 
+function attachOwnedSession(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
+}
+
 function createResolvedConfig(overrides = {}) {
   return {
     config_version: 1,
@@ -973,23 +978,23 @@ describe('runtime protocol strictness', () => {
 
   test('chat session-not-found failure adds tool_error reason for auto-rebuild', async () => {
     const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
+      client: createRuntimeClient({
+        session: {
+          get: async () => ({
+            error: {
+              name: 'NotFoundError',
+              code: 'session_not_found',
+              data: { message: 'Session not found: ses-stale' },
+            },
+          }),
+        },
+      }),
     });
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     setRuntimeGatewayState(runtime, 'READY');
-    runtime.actionRouter = {
-      route: async () => ({
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'Failed to send message',
-        errorEvidence: {
-          sourceErrorCode: 'session_not_found',
-          sourceOperation: 'session.get',
-        },
-      }),
-    };
+    attachOwnedSession(runtime, 'ses-stale', 'tool-rebuild');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1102,23 +1107,29 @@ describe('runtime protocol strictness', () => {
 
   test('chat prompt evidence does not collapse to session_not_found', async () => {
     const runtime = new BridgeRuntime({
-      client: createRuntimeClient(),
+      client: createRuntimeClient({
+        session: {
+          get: async () => ({
+            data: {
+              id: 'ses-chat-prompt',
+              directory: '/session/default-directory',
+            },
+          }),
+          prompt: async () => ({
+            error: {
+              name: 'PromptFailed',
+              code: 'session_not_found',
+              data: { message: 'prompt failed' },
+            },
+          }),
+        },
+      }),
     });
 
     const sent = [];
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     setRuntimeGatewayState(runtime, 'READY');
-    runtime.actionRouter = {
-      route: async () => ({
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'Failed to send message',
-        errorEvidence: {
-          sourceErrorCode: 'session_not_found',
-          sourceOperation: 'session.prompt',
-        },
-      }),
-    };
+    attachOwnedSession(runtime, 'ses-chat-prompt', 'tool-chat-prompt');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -1133,10 +1144,21 @@ describe('runtime protocol strictness', () => {
   });
 
   test('accepts baseline invoke shape and emits tool_done on chat success', async () => {
+    const creates = [];
     const prompts = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
+          create: async (options) => {
+            creates.push(options);
+            return { data: { id: 'ses-chat-100', directory: '/session/default-directory' } };
+          },
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-chat-100',
+              directory: '/session/default-directory',
+            },
+          }),
           prompt: async (options) => {
             prompts.push(options);
             return { data: { ok: true } };
@@ -1156,9 +1178,10 @@ describe('runtime protocol strictness', () => {
       payload: { toolSessionId: 'tool-100', text: 'hello' },
     });
 
+    assert.strictEqual((creates).length, 1);
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
-      path: { id: 'tool-100' },
+      path: { id: 'ses-chat-100' },
       query: { directory: '/session/default-directory' },
       body: {
         parts: [{ type: 'text', text: 'hello' }],
@@ -1325,7 +1348,6 @@ describe('runtime protocol strictness', () => {
   });
 
   test('accepts question_reply invoke shape and routes answer via question API', async () => {
-    const getCalls = [];
     const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -1333,18 +1355,7 @@ describe('runtime protocol strictness', () => {
           prompt: async () => ({ data: { ok: true } }),
         },
         _client: {
-          get: async (options) => {
-            getCalls.push(options);
-            return {
-              data: [
-                {
-                  id: 'question-request-42',
-                  sessionID: 'tool-42',
-                  tool: { callID: 'call-42' },
-                },
-              ],
-            };
-          },
+          get: async () => ({}),
           post: async (options) => {
             postCalls.push(options);
             return { data: undefined };
@@ -1361,30 +1372,21 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'q-42',
       action: 'question_reply',
-      payload: { toolSessionId: 'tool-42', toolCallId: 'call-42', answer: 'Vite' },
+      payload: { questionId: 'question-request-42', answer: 'Vite' },
     });
 
-    assert.deepStrictEqual(getCalls, [{
-      url: '/question',
-      query: {
-        directory: '/session/default-directory',
-      },
-    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-request-42' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
-        query: {
-          directory: '/session/default-directory',
-        },
       },
     ]);
     assert.strictEqual((sent).length, 0);
   });
 
-  test('accepts question_reply payloads missing toolCallId', async () => {
+  test('accepts question_reply payloads using questionId only', async () => {
     const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -1392,14 +1394,7 @@ describe('runtime protocol strictness', () => {
           prompt: async () => ({ data: { ok: true } }),
         },
         _client: {
-          get: async () => ({
-            data: [
-              {
-                id: 'question-request-43',
-                sessionID: 'tool-43',
-              },
-            ],
-          }),
+          get: async () => ({}),
           post: async (options) => {
             postCalls.push(options);
             return { data: undefined };
@@ -1416,7 +1411,7 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'q-43',
       action: 'question_reply',
-      payload: { toolSessionId: 'tool-43', answer: 'Vite' },
+      payload: { questionId: 'question-request-43', answer: 'Vite' },
     });
 
     assert.strictEqual((postCalls).length, 1);
@@ -1430,9 +1425,12 @@ describe('runtime protocol strictness', () => {
         session: {
           prompt: async () => ({ data: { ok: true } }),
         },
-        postSessionIdPermissionsPermissionId: async (options) => {
-          permissionCalls.push(options);
-          return {};
+        _client: {
+          get: async () => ({}),
+          post: async (options) => {
+            permissionCalls.push(options);
+            return {};
+          },
         },
       }),
     });
@@ -1445,40 +1443,31 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'perm-1',
       action: 'permission_reply',
-      payload: { toolSessionId: 'tool-perm-1', permissionId: 'perm-a', response: 'once' },
+      payload: { permissionId: 'perm-a', response: 'once' },
     });
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        path: {
-          id: 'tool-perm-1',
-          permissionID: 'perm-a',
-        },
-        body: {
-          response: 'once',
-        },
-        query: {
-          directory: '/session/default-directory',
-        },
+        url: '/permission/{requestID}/reply',
+        path: { requestID: 'perm-a' },
+        body: { response: 'once' },
+        headers: { 'Content-Type': 'application/json' },
       },
     ]);
     assert.strictEqual((sent).length, 0);
   });
 
-  test('rejects question_reply when toolCallId is omitted and pending request is not unique', async () => {
+  test('question_reply transport errors surface as tool_error', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
           prompt: async () => ({ data: { ok: true } }),
         },
         _client: {
-          get: async () => ({
-            data: [
-              { id: 'question-request-a', sessionID: 'tool-43' },
-              { id: 'question-request-b', sessionID: 'tool-43' },
-            ],
+          get: async () => ({}),
+          post: async () => ({
+            error: { message: 'question reply failed' },
           }),
-          post: async () => ({ data: undefined }),
         },
       }),
     });
@@ -1491,31 +1480,25 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'q-43b',
       action: 'question_reply',
-      payload: { toolSessionId: 'tool-43', answer: 'Vite' },
+      payload: { questionId: 'question-request-a', answer: 'Vite' },
     });
 
     assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].type, 'tool_error');
-    assert.ok((sent[0].error).includes('unique pending question'));
+    assert.ok((sent[0].error).includes('question reply failed'));
   });
 
-  test('rejects question_reply when no pending request matches', async () => {
+  test('question_reply thrown transport errors keep welinkSessionId on tool_error', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
           prompt: async () => ({ data: { ok: true } }),
         },
         _client: {
-          get: async () => ({
-            data: [
-              {
-                id: 'question-request-99',
-                sessionID: 'tool-other',
-                tool: { callID: 'call-other' },
-              },
-            ],
-          }),
-          post: async () => ({ data: undefined }),
+          get: async () => ({}),
+          post: async () => {
+            throw new Error('question transport unreachable');
+          },
         },
       }),
     });
@@ -1528,7 +1511,7 @@ describe('runtime protocol strictness', () => {
       type: 'invoke',
       welinkSessionId: 'q-46',
       action: 'question_reply',
-      payload: { toolSessionId: 'tool-46', toolCallId: 'call-46', answer: 'Vite' },
+      payload: { questionId: 'question-request-99', answer: 'Vite' },
     });
 
     assert.strictEqual((sent).length, 1);
@@ -1655,6 +1638,7 @@ describe('runtime protocol strictness', () => {
     };
     runtime.eventFilter = new EventFilter(['message.part.updated']);
     setRuntimeGatewayState(runtime, 'READY');
+    runtime.ownershipResolver.attach('tool-1', 'tool-1');
 
     await runtime.handleEvent({
       type: 'message.part.updated',
@@ -1707,11 +1691,12 @@ describe('runtime protocol strictness', () => {
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
     setRuntimeGatewayState(runtime, 'READY');
+    runtime.ownershipResolver.attach('ses-idle-1', 'tool-idle-1');
 
     await runtime.handleEvent({
       type: 'session.idle',
       properties: {
-        sessionID: 'tool-idle-1',
+        sessionID: 'ses-idle-1',
       },
     });
 
@@ -1724,6 +1709,13 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
+          create: async () => ({ data: { id: 'ses-idle-tracked-1', directory: '/session/default-directory' } }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-idle-tracked-1',
+              directory: '/session/default-directory',
+            },
+          }),
           prompt: async () => ({ data: { ok: true } }),
         },
       }),
@@ -1757,7 +1749,7 @@ describe('runtime protocol strictness', () => {
     await runtime.handleEvent({
       type: 'session.idle',
       properties: {
-        sessionID: 'tool-idle-tracked-1',
+        sessionID: 'ses-idle-tracked-1',
       },
     });
 
@@ -1778,6 +1770,7 @@ describe('runtime protocol strictness', () => {
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
     setRuntimeGatewayState(runtime, 'READY');
+    runtime.ownershipResolver.attach('ses_parent_permission_1', 'tool-parent-permission-1');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -1800,7 +1793,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent.length, 1);
     assert.deepStrictEqual(sent[0].message, {
       type: 'tool_event',
-      toolSessionId: 'ses_parent_permission_1',
+      toolSessionId: 'tool-parent-permission-1',
       subagentSessionId: 'ses_child_permission_1',
       subagentName: 'research-agent',
       event: {
@@ -1811,7 +1804,7 @@ describe('runtime protocol strictness', () => {
         },
       },
     });
-    assert.strictEqual(sent[0].context.toolSessionId, 'ses_parent_permission_1');
+    assert.strictEqual(sent[0].context.toolSessionId, 'tool-parent-permission-1');
   });
 
   test('falls back to original session and retries mapping after lazy lookup failures', async () => {
@@ -1851,6 +1844,8 @@ describe('runtime protocol strictness', () => {
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
     setRuntimeGatewayState(runtime, 'READY');
+    runtime.ownershipResolver.attach('ses_child_permission_retry', 'tool-child-permission-retry');
+    runtime.ownershipResolver.attach('ses_parent_permission_retry', 'tool-parent-permission-retry');
 
     const event = {
       type: 'permission.asked',
@@ -1866,14 +1861,14 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent.length, 2);
     assert.deepStrictEqual(sent[0].message, {
       type: 'tool_event',
-      toolSessionId: 'ses_child_permission_retry',
+      toolSessionId: 'tool-child-permission-retry',
       event: {
         ...event,
       },
     });
     assert.deepStrictEqual(sent[1].message, {
       type: 'tool_event',
-      toolSessionId: 'ses_parent_permission_retry',
+      toolSessionId: 'tool-parent-permission-retry',
       subagentSessionId: 'ses_child_permission_retry',
       subagentName: 'retry-agent',
       event: {
@@ -1894,6 +1889,7 @@ describe('runtime protocol strictness', () => {
     };
     runtime.eventFilter = new EventFilter(['session.idle']);
     setRuntimeGatewayState(runtime, 'READY');
+    runtime.ownershipResolver.attach('ses_parent_idle_1', 'tool-parent-idle-1');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -1915,7 +1911,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent.length, 1);
     assert.deepStrictEqual(sent[0].message, {
       type: 'tool_event',
-      toolSessionId: 'ses_parent_idle_1',
+      toolSessionId: 'tool-parent-idle-1',
       subagentSessionId: 'ses_child_idle_1',
       subagentName: 'idle-agent',
       event: {
@@ -1931,6 +1927,13 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
+          create: async () => ({ data: { id: 'ses-idle-2', directory: '/session/default-directory' } }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-idle-2',
+              directory: '/session/default-directory',
+            },
+          }),
           prompt: async () => ({ data: { ok: true } }),
         },
       }),
@@ -1953,7 +1956,7 @@ describe('runtime protocol strictness', () => {
     await runtime.handleEvent({
       type: 'session.idle',
       properties: {
-        sessionID: 'tool-idle-2',
+        sessionID: 'ses-idle-2',
       },
     });
 
@@ -1993,9 +1996,8 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
-    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 5);
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 4);
     assert.strictEqual(sent[4].message.type, 'tool_done');
-    assert.strictEqual(sent[5].message.type, 'tool_event');
   });
 
   test('missing suppressReply keeps the existing chat prompt path', async () => {
@@ -2003,6 +2005,13 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
+          create: async () => ({ data: { id: 'ses-allow-100', directory: '/session/default-directory' } }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-allow-100',
+              directory: '/session/default-directory',
+            },
+          }),
           prompt: async (options) => {
             prompts.push(options);
             return { data: { ok: true } };
@@ -2029,13 +2038,25 @@ describe('runtime protocol strictness', () => {
 
   test('defers session.idle tool_done while chat prompt is still pending', async () => {
     let resolvePrompt;
+    let resolvePromptStarted;
     const promptPromise = new Promise((resolve) => {
       resolvePrompt = resolve;
+    });
+    const promptStarted = new Promise((resolve) => {
+      resolvePromptStarted = resolve;
     });
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
+          create: async () => ({ data: { id: 'ses-idle-3', directory: '/session/default-directory' } }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-idle-3',
+              directory: '/session/default-directory',
+            },
+          }),
           prompt: async () => {
+            resolvePromptStarted();
             await promptPromise;
             return { data: { ok: true } };
           },
@@ -2056,11 +2077,12 @@ describe('runtime protocol strictness', () => {
       action: 'chat',
       payload: { toolSessionId: 'tool-idle-3', text: 'hello' },
     });
+    await promptStarted;
 
     await runtime.handleEvent({
       type: 'session.idle',
       properties: {
-        sessionID: 'tool-idle-3',
+        sessionID: 'ses-idle-3',
       },
     });
 
@@ -2136,6 +2158,7 @@ describe('runtime protocol strictness', () => {
     runtime.effectiveDirectory = '/env/bridge-root';
     runtime.gatewayConnection = { send: () => {} };
     setRuntimeGatewayState(runtime, 'READY');
+    attachOwnedSession(runtime, 'created-dir-1', 'created-dir-1');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -2719,6 +2742,7 @@ describe('runtime protocol strictness', () => {
 
     runtime.gatewayConnection = { send: () => {} };
     setRuntimeGatewayState(runtime, 'READY');
+    attachOwnedSession(runtime, 'tool-42', 'tool-42');
 
     await runtime.handleDownstreamMessage({
       type: 'invoke',
@@ -2733,13 +2757,9 @@ describe('runtime protocol strictness', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const runtimeInvokeReceived = appLogs.find((entry) => entry.message === 'runtime.invoke.received');
-    const routerReceived = appLogs.find((entry) => entry.message === 'router.route.received');
-    const actionStarted = appLogs.find((entry) => entry.message === 'action.chat.started');
     const runtimeInvokeCompleted = appLogs.find((entry) => entry.message === 'runtime.invoke.completed');
 
     assert.strictEqual(runtimeInvokeReceived.extra.traceId, 'gw-msg-1');
-    assert.strictEqual(routerReceived.extra.traceId, 'gw-msg-1');
-    assert.strictEqual(actionStarted.extra.traceId, 'gw-msg-1');
     assert.strictEqual(runtimeInvokeCompleted.extra.traceId, 'gw-msg-1');
 
     assert.strictEqual(runtimeInvokeReceived.extra.gatewayMessageId, 'gw-msg-1');

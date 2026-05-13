@@ -10,8 +10,7 @@ describe('gateway business message adapter', () => {
       action: 'question_reply',
       welinkSessionId: 'wl-question-1',
       payload: {
-        toolSessionId: 'tool-question-1',
-        toolCallId: 'call-question-1',
+        questionId: 'question-1',
         answer: 'approved',
       },
     });
@@ -22,8 +21,7 @@ describe('gateway business message adapter', () => {
       action: 'question_reply',
       welinkSessionId: 'wl-question-1',
       payload: {
-        toolSessionId: 'tool-question-1',
-        toolCallId: 'call-question-1',
+        questionId: 'question-1',
         answer: 'approved',
       },
     });

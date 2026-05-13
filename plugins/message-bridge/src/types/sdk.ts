@@ -34,6 +34,10 @@ export interface OpencodeSessionClient {
   prompt(options: {
     sessionID: string;
     directory?: string;
+    model?: {
+      providerID: string;
+      modelID: string;
+    };
     agent?: string;
     parts?: Array<{ type: 'text'; text: string }>;
   }): Promise<unknown>;
@@ -41,12 +45,6 @@ export interface OpencodeSessionClient {
 
 export interface OpencodeClient {
   session: OpencodeSessionClient;
-  postSessionIdPermissionsPermissionId: (options: {
-    sessionID: string;
-    permissionID: string;
-    directory?: string;
-    response: 'once' | 'always' | 'reject';
-  }) => Promise<unknown>;
   _client: {
     get: (options: Record<string, unknown>) => Promise<unknown>;
     post: (options: Record<string, unknown>) => Promise<unknown>;

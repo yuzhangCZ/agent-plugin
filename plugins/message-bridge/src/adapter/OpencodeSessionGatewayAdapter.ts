@@ -6,6 +6,7 @@ import type {
   PermissionReplyResultData,
   QuestionReplyResultData,
 } from '../contracts/downstream-messages.js';
+import type { SessionModelOverride } from '../port/SlashCommandControlPlanePort.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
 import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
@@ -238,6 +239,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     sessionId: string;
     text: string;
     agent?: string;
+    modelOverride?: SessionModelOverride;
     logger?: BridgeLogger;
   }): Promise<ActionResult<void>> {
     return this.withResolvedDirectory({
@@ -252,6 +254,14 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           promiseFactory: () => client.session.prompt({
             sessionID: parameters.sessionId,
             ...(directory ? { directory } : {}),
+            ...(parameters.modelOverride
+              ? {
+                  model: {
+                    providerID: parameters.modelOverride.providerId,
+                    modelID: parameters.modelOverride.modelId,
+                  },
+                }
+              : {}),
             parts: [{ type: 'text', text: parameters.text }],
             ...(parameters.agent ? { agent: parameters.agent } : {}),
           }),
@@ -309,120 +319,59 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
   }
 
   async replyPermission(parameters: {
-    sessionId: string;
     permissionId: string;
     response: PermissionReplyPayload['response'];
     logger?: BridgeLogger;
   }): Promise<ActionResult<PermissionReplyResultData>> {
-    return this.withResolvedDirectory({
-      sessionId: parameters.sessionId,
+    const client = this.requireClient();
+    return this.executeSdkCall({
       failurePrefix: 'Failed to reply to permission request',
-      logger: parameters.logger,
-      handler: ({ client, directory }) =>
-        this.executeSdkCall({
-          failurePrefix: 'Failed to reply to permission request',
-          sourceOperation: 'permission.reply',
-          promiseFactory: () => client.postSessionIdPermissionsPermissionId({
-            sessionID: parameters.sessionId,
-            permissionID: parameters.permissionId,
-            response: parameters.response,
-            ...(directory ? { directory } : {}),
-          }),
-          onSuccess: () => ({
-            success: true,
-            data: {
-              permissionId: parameters.permissionId,
-              response: parameters.response,
-              applied: true,
-            },
-          }),
-        }),
+      sourceOperation: 'permission.reply',
+      promiseFactory: () => client._client.post({
+        url: '/permission/{requestID}/reply',
+        path: { requestID: parameters.permissionId },
+        body: {
+          response: parameters.response,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
+      onSuccess: () => ({
+        success: true,
+        data: {
+          permissionId: parameters.permissionId,
+          response: parameters.response,
+          applied: true,
+        },
+      }),
     });
   }
 
   async replyQuestion(parameters: {
-    sessionId: string;
-    toolCallId?: string;
+    questionId: string;
     answer: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>> {
-    return this.withResolvedDirectory({
-      sessionId: parameters.sessionId,
+    const client = this.requireClient();
+    return this.executeSdkCall({
       failurePrefix: 'Failed to reply to question',
-      logger: parameters.logger,
-      handler: async ({ client, directory }) => {
-        const listResult = await this.executeSdkCall({
-          failurePrefix: 'Failed to reply to question',
-          sourceOperation: 'question.list',
-          promiseFactory: () => client._client.get({
-            url: '/question',
-            ...(directory ? { query: { directory } } : {}),
-          }),
-          onSuccess: (data) => ({
-            success: true,
-            data: extractResultData<unknown>(data),
-          }),
-        });
-
-        if (!listResult.success) {
-          return listResult;
-        }
-
-        const requests = Array.isArray(listResult.data)
-          ? listResult.data.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-          : [];
-
-        const matchedRequests = requests.filter((request) => {
-          const sessionID = readString(request.sessionID);
-          if (sessionID !== parameters.sessionId) {
-            return false;
-          }
-
-          if (!parameters.toolCallId) {
-            return true;
-          }
-
-          const tool = readRecord(request.tool);
-          return readString(tool?.callID) === parameters.toolCallId;
-        });
-
-        const requestId = parameters.toolCallId
-          ? readString(matchedRequests[0]?.id)
-          : matchedRequests.length === 1
-            ? readString(matchedRequests[0]?.id)
-            : undefined;
-
-        if (!requestId) {
-          return {
-            success: false,
-            errorCode: 'INVALID_PAYLOAD',
-            errorMessage: parameters.toolCallId
-              ? `Unable to resolve pending question request for toolSessionId=${parameters.sessionId}, toolCallId=${parameters.toolCallId}`
-              : `Unable to resolve a unique pending question request for toolSessionId=${parameters.sessionId}`,
-          };
-        }
-
-        return this.executeSdkCall({
-          failurePrefix: 'Failed to reply to question',
-          sourceOperation: 'question.reply',
-          promiseFactory: () => client._client.post({
-            url: '/question/{requestID}/reply',
-            path: { requestID: requestId },
-            body: { answers: [[parameters.answer]] },
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            ...(directory ? { query: { directory } } : {}),
-          }),
-          onSuccess: () => ({
-            success: true,
-            data: {
-              requestId,
-              replied: true,
-            },
-          }),
-        });
-      },
+      sourceOperation: 'question.reply',
+      promiseFactory: () => client._client.post({
+        url: '/question/{requestID}/reply',
+        path: { requestID: parameters.questionId },
+        body: { answers: [[parameters.answer]] },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
+      onSuccess: () => ({
+        success: true,
+        data: {
+          requestId: parameters.questionId,
+          replied: true,
+        },
+      }),
     });
   }
 

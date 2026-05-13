@@ -24,7 +24,6 @@ function createRuntimeClient(overrides = {}) {
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
     },
-    postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
       get: async (options) => {
         if (options?.url === '/global/health') {
@@ -55,27 +54,22 @@ async function loadFixture(fileName) {
   return JSON.parse(raw);
 }
 
+function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
+}
+
 describe('protocol question-roundtrip', () => {
   test('forwards question.asked as tool_event and routes question_reply through raw question API', async () => {
-    const getCalls = [];
     const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         _client: {
           get: async (options) => {
-            getCalls.push(options);
             if (options?.url === '/global/health') {
               return { data: { healthy: true, version: '9.9.9' } };
             }
-            return {
-              data: [
-                {
-                  id: 'question-request-1',
-                  sessionID: 'ses_question_1',
-                  tool: { callID: 'call_question_1' },
-                },
-              ],
-            };
+            return { data: [] };
           },
           post: async (options) => {
             postCalls.push(options);
@@ -93,6 +87,7 @@ describe('protocol question-roundtrip', () => {
     setRuntimeGatewayState(runtime, 'READY');
 
     const questionAskedEvent = await loadFixture('question.asked.json');
+    attach(runtime, 'ses_question_1');
     await runtime.handleEvent(questionAskedEvent);
 
     assert.deepStrictEqual(sent, [
@@ -110,52 +105,32 @@ describe('protocol question-roundtrip', () => {
       welinkSessionId: 'wl-question-1',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'ses_question_1',
-        toolCallId: 'call_question_1',
+        questionId: 'question_fixture_1',
         answer: 'Vite',
       },
     });
 
-    assert.deepStrictEqual(getCalls, [{
-      url: '/question',
-      query: {
-        directory: '/session/default-directory',
-      },
-    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-1' },
+        path: { requestID: 'question_fixture_1' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
-        query: {
-          directory: '/session/default-directory',
-        },
       },
     ]);
     assert.strictEqual(sent.length, 1);
   });
 
-  test('aggregates child question events under parent and routes question_reply to the child session', async () => {
-    const getCalls = [];
+  test('aggregates child question events under parent and routes question_reply by questionId only', async () => {
     const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         _client: {
           get: async (options) => {
-            getCalls.push(options);
             if (options?.url === '/global/health') {
               return { data: { healthy: true, version: '9.9.9' } };
             }
-            return {
-              data: [
-                {
-                  id: 'question-request-child-1',
-                  sessionID: 'ses_child_question_1',
-                  tool: { callID: 'call_child_question_1' },
-                },
-              ],
-            };
+            return { data: [] };
           },
           post: async (options) => {
             postCalls.push(options);
@@ -171,6 +146,7 @@ describe('protocol question-roundtrip', () => {
     };
     runtime.eventFilter = new EventFilter(['question.asked']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'ses_parent_question_1');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -186,7 +162,13 @@ describe('protocol question-roundtrip', () => {
     const questionAskedEvent = {
       type: 'question.asked',
       properties: {
+        id: 'question-child-1',
         sessionID: 'ses_child_question_1',
+        questions: [],
+        tool: {
+          messageID: 'msg_child_question_1',
+          callID: 'call_child_question_1',
+        },
       },
     };
     await runtime.handleEvent(questionAskedEvent);
@@ -198,7 +180,15 @@ describe('protocol question-roundtrip', () => {
         subagentSessionId: 'ses_child_question_1',
         subagentName: 'planner-agent',
         event: {
-          ...questionAskedEvent,
+          type: 'question.asked',
+          properties: {
+            id: 'question-child-1',
+            sessionID: 'ses_child_question_1',
+            tool: {
+              messageID: 'msg_child_question_1',
+              callID: 'call_child_question_1',
+            },
+          },
         },
       },
     ]);
@@ -208,32 +198,22 @@ describe('protocol question-roundtrip', () => {
       welinkSessionId: 'wl-question-child-1',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'ses_child_question_1',
-        toolCallId: 'call_child_question_1',
+        questionId: 'question-child-1',
         answer: 'Vite',
       },
     });
 
-    assert.deepStrictEqual(getCalls, [{
-      url: '/question',
-      query: {
-        directory: '/session/default-directory',
-      },
-    }]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-child-1' },
+        path: { requestID: 'question-child-1' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
-        query: {
-          directory: '/session/default-directory',
-        },
       },
     ]);
   });
 
-  test('returns tool_error when question_reply cannot resolve a unique pending request', async () => {
+  test('returns tool_error when question_reply transport reports a structured failure', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         _client: {
@@ -241,14 +221,13 @@ describe('protocol question-roundtrip', () => {
             if (options?.url === '/global/health') {
               return { data: { healthy: true, version: '9.9.9' } };
             }
-            return {
-              data: [
-                { id: 'question-request-a', sessionID: 'ses_question_1' },
-                { id: 'question-request-b', sessionID: 'ses_question_1' },
-              ],
-            };
+            return { data: [] };
           },
-          post: async () => ({ data: undefined }),
+          post: async () => ({
+            error: {
+              message: 'question reply rejected',
+            },
+          }),
         },
       }),
     });
@@ -264,7 +243,7 @@ describe('protocol question-roundtrip', () => {
       welinkSessionId: 'wl-question-ambiguous',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'ses_question_1',
+        questionId: 'question-direct-1',
         answer: 'Vite',
       },
     });
@@ -273,13 +252,12 @@ describe('protocol question-roundtrip', () => {
       {
         type: 'tool_error',
         welinkSessionId: 'wl-question-ambiguous',
-        toolSessionId: 'ses_question_1',
-        error: 'Unable to resolve a unique pending question request for toolSessionId=ses_question_1',
+        error: 'Failed to reply to question: question reply rejected',
       },
     ]);
   });
 
-  test('returns tool_error when question_reply cannot match any pending request', async () => {
+  test('returns tool_error when question_reply transport throws', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         _client: {
@@ -287,17 +265,11 @@ describe('protocol question-roundtrip', () => {
             if (options?.url === '/global/health') {
               return { data: { healthy: true, version: '9.9.9' } };
             }
-            return {
-              data: [
-                {
-                  id: 'question-request-other',
-                  sessionID: 'ses_other',
-                  tool: { callID: 'call_other' },
-                },
-              ],
-            };
+            return { data: [] };
           },
-          post: async () => ({ data: undefined }),
+          post: async () => {
+            throw new Error('question reply exploded');
+          },
         },
       }),
     });
@@ -313,8 +285,7 @@ describe('protocol question-roundtrip', () => {
       welinkSessionId: 'wl-question-miss',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'ses_question_1',
-        toolCallId: 'call_question_1',
+        questionId: 'question-direct-2',
         answer: 'Vite',
       },
     });
@@ -323,8 +294,7 @@ describe('protocol question-roundtrip', () => {
       {
         type: 'tool_error',
         welinkSessionId: 'wl-question-miss',
-        toolSessionId: 'ses_question_1',
-        error: 'Unable to resolve pending question request for toolSessionId=ses_question_1, toolCallId=call_question_1',
+        error: 'Failed to reply to question: question reply exploded',
       },
     ]);
   });

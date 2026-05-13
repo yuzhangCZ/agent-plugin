@@ -62,30 +62,18 @@ export type AbortSessionPayload = z.output<typeof abortSessionPayloadSchema>;
 
 export const permissionReplyPayloadSchema = z.object({
   permissionId: requiredTrimmedString,
-  toolSessionId: requiredTrimmedString,
   response: z.enum(PERMISSION_REPLY_RESPONSES),
 });
 export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchema>;
 
 export const questionReplyPayloadSchema = z
   .object({
-    toolSessionId: requiredTrimmedString,
+    questionId: requiredTrimmedString,
     answer: requiredTrimmedString,
-    toolCallId: z.preprocess(
-      (value) => {
-        if (value === undefined) {
-          return undefined;
-        }
-
-        return typeof value === 'string' ? value.trim() : undefined;
-      },
-      z.string().min(1).optional(),
-    ),
   })
   .transform((payload) => ({
-    toolSessionId: payload.toolSessionId,
+    questionId: payload.questionId,
     answer: payload.answer,
-    ...(payload.toolCallId ? { toolCallId: payload.toolCallId } : {}),
   }));
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
@@ -159,7 +147,6 @@ export const permissionReplyInvokeSchema = z
     action: PERMISSION_REPLY_ACTION,
     payload: {
       permissionId: message.payload.permissionId,
-      toolSessionId: message.payload.toolSessionId,
       response: message.payload.response,
     },
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),

@@ -53,7 +53,6 @@ describe('createSdkAdapter coverage', () => {
       'session.prompt',
       'session.abort',
       'session.delete',
-      'postSessionIdPermissionsPermissionId',
       '_client.get',
       '_client.post',
     ]);
@@ -65,7 +64,7 @@ describe('createSdkAdapter coverage', () => {
   });
 
   test('creates adapted sdk methods and forwards calls', async () => {
-    const calls = { create: 0, sessionGet: 0, abort: 0, delete: 0, prompt: 0, permission: 0, get: 0, post: 0 };
+    const calls = { create: 0, sessionGet: 0, abort: 0, delete: 0, prompt: 0, get: 0, post: 0 };
     const raw = {
       session: {
         create: async (options) => {
@@ -89,10 +88,6 @@ describe('createSdkAdapter coverage', () => {
           return { data: options };
         },
       },
-      postSessionIdPermissionsPermissionId: async (options) => {
-        calls.permission += 1;
-        return { data: options };
-      },
       _client: {
         get: async (options) => {
           calls.get += 1;
@@ -115,16 +110,10 @@ describe('createSdkAdapter coverage', () => {
       directory: '/tmp/bridge',
       parts: [{ type: 'text', text: 'hi' }],
     });
-    const r6 = await adapted.postSessionIdPermissionsPermissionId({
-      sessionID: 's1',
-      permissionID: 'p1',
-      directory: '/tmp/bridge',
-      response: 'once',
-    });
-    const r7 = await adapted._client.get({ url: '/question' });
-    const r8 = await adapted._client.post({ url: '/question/reply' });
+    const r6 = await adapted._client.get({ url: '/question' });
+    const r7 = await adapted._client.post({ url: '/question/reply' });
 
-    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, abort: 1, delete: 1, prompt: 1, permission: 1, get: 1, post: 1 });
+    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, abort: 1, delete: 1, prompt: 1, get: 1, post: 1 });
     assert.deepStrictEqual(r1.data, {
       body: { title: 'session-1' },
       query: { directory: '/tmp/bridge' },
@@ -146,12 +135,7 @@ describe('createSdkAdapter coverage', () => {
       query: { directory: '/tmp/bridge' },
       body: { parts: [{ type: 'text', text: 'hi' }] },
     });
-    assert.deepStrictEqual(r6.data, {
-      path: { id: 's1', permissionID: 'p1' },
-      query: { directory: '/tmp/bridge' },
-      body: { response: 'once' },
-    });
-    assert.strictEqual(r7.data.url, '/question');
-    assert.strictEqual(r8.data.url, '/question/reply');
+    assert.strictEqual(r6.data.url, '/question');
+    assert.strictEqual(r7.data.url, '/question/reply');
   });
 });

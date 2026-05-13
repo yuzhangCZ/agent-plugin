@@ -23,8 +23,8 @@
 
 - `/new`
 - `/sessions`
-- `/sessions <sessionid>`
-- `/model`
+- `/session <sessionid>`
+- `/models`
 - `/model <providerId/modelId>`
 
 目标是让用户在 bridge 场景中完成：
@@ -48,31 +48,37 @@
 
 ### 4.1 会话标识
 
-需求文档中的 `sessionid` 统一定义为 `toolSessionId`。
+本需求区分两层会话标识：
+
+- `welinkSessionId`
+  - 作为插件与 gateway 服务端之间的外部业务会话标识
+- `sessionId`
+  - 作为 slash command 返回结果与 `/session <sessionId>` 参数中使用的宿主会话选择标识
 
 约束如下：
 
-- 对用户暴露的会话标识是 `toolSessionId`
-- 对 gateway 服务端暴露的会话标识也是 `toolSessionId`
+- 对用户暴露的宿主会话选择标识是 `sessionId`
+- 对 gateway 服务端暴露的业务会话标识是 `welinkSessionId`
 - 宿主原生会话标识，例如 `session.id`、`sessionKey` 等，不属于对外契约
-- 插件负责将 `toolSessionId` 映射到宿主内部实际会话标识
+- 插件负责维护 `welinkSessionId` 与宿主会话之间的绑定关系
+- 插件负责向用户返回可用于 `/session <sessionId>` 的宿主会话选择标识
 
 ### 4.2 稳定性要求
 
-`toolSessionId` 需要支持跨重启恢复。
+`sessionId` 需要在宿主可恢复能力允许的范围内支持跨重启恢复。
 
 即：
 
-- 插件或插件依赖的宿主能力，必须能够在重启后恢复 `toolSessionId` 与宿主实际会话之间的关系
-- 重启后，既有 `toolSessionId` 仍可用于会话列举、会话切换与后续对话续接
+- 插件或插件依赖的宿主能力，必须能够在重启后恢复 `sessionId` 与宿主实际会话之间的关系
+- 重启后，既有 `sessionId` 仍可用于会话列举、会话切换与后续对话续接
 
 ### 4.3 恢复责任归属
 
-`toolSessionId` 的跨重启恢复由宿主侧可持久化能力承载。
+`sessionId` 的跨重启恢复由宿主侧可持久化能力承载。
 
 即：
 
-- 宿主侧能力负责承载 `toolSessionId` 与宿主实际会话之间的可恢复关系
+- 宿主侧能力负责承载 `sessionId` 与宿主实际会话之间的可恢复关系
 - 插件负责使用该宿主能力恢复并维护映射
 - gateway 不作为该映射关系的唯一恢复来源
 
@@ -90,8 +96,8 @@
 - `/new` 的语义是“新建并切换”
 - `/new` 不应被定义为“重置当前会话”
 - 原会话历史应保留，不应被清空
-- `/new` 成功后，应形成新的 `toolSessionId`
-- 后续消息默认进入该新的 `toolSessionId` 会话
+- `/new` 成功后，应形成新的用户可见 `sessionId`
+- 后续消息默认进入该新的 `sessionId` 对应会话
 
 ### 5.2 `/sessions`
 
@@ -101,28 +107,28 @@
 
 列表范围约束：
 
-- 枚举范围以当前 bridge 账号在宿主中可访问的全部会话为基础
-- 最终返回结果仅包含其中已经建立 `toolSessionId` 映射的会话
-- 未建立 `toolSessionId` 映射的宿主历史会话，不要求在本需求中自动出现在列表中
+- `/sessions` 返回当前宿主作用域下可供切换的会话列表
+- 具体列表范围由宿主实现章节定义
+- 宿主实现可以基于自身可见范围、会话绑定范围或其他宿主约束收口，但对外统一表现为“当前可切换会话目录”
 
 用户视角要求：
 
-- 用户可以从返回结果中识别每个会话对应的 `toolSessionId`
+- 用户可以从返回结果中识别每个会话对应的 `sessionId`
 - 用户可以识别当前活跃会话
 
-### 5.3 `/sessions <sessionid>`
+### 5.3 `/session <sessionid>`
 
 功能目标：
 
-- 将当前活跃会话切换到指定 `toolSessionId`
+- 将当前活跃会话切换到指定 `sessionId`
 
 期望结果：
 
-- 当 `toolSessionId` 有效时，后续消息进入该会话
+- 当 `sessionId` 有效时，后续消息进入该会话
 - 当切换失败时，返回统一、可理解的失败提示
 - 切换结果对后续对话立即生效
 
-### 5.4 `/model`
+### 5.4 `/models`
 
 功能目标：
 
@@ -134,12 +140,11 @@
 - 返回结果中的模型标识统一为 `providerId/modelId`
 - 该列表是宿主模型目录视图
 - 本需求不要求列表中的每个模型在切换后都保证可正常可用
-- 返回结果中标识的“当前模型”，以宿主当前对该活跃会话记录或识别到的模型状态为准，而不是以 bridge 最近一次模型切换请求目标为准
+- v1 返回宿主模型目录，不要求显示当前模型
 
 用户视角要求：
 
 - 用户可以从返回结果中识别每个模型的 `providerId/modelId`
-- 用户可以识别当前活跃会话当前使用的模型
 
 ### 5.5 `/model <providerId/modelId>`
 
@@ -166,8 +171,8 @@
 
 - 相同命令表达相同意图
 - 相同命令产生相同类型的用户结果
-- 对外统一使用 `toolSessionId`
-- “当前会话”“当前模型”的含义在 bridge 场景中保持一致
+- 对外统一使用 `sessionId` 作为宿主会话选择标识
+- “当前会话”的含义在 bridge 场景中保持一致
 - 会话列表、会话切换、模型列表、模型切换、失败反馈等行为语义尽量统一
 
 ## 7. 用户视角要求
@@ -198,19 +203,19 @@
 
 满足以下条件可认为需求达成：
 
-1. 在 `message-bridge` 中，`/new`、`/sessions`、`/sessions <toolSessionId>`、`/model`、`/model <providerId/modelId>` 均可被识别并产生预期业务结果。
+1. 在 `message-bridge` 中，`/new`、`/sessions`、`/session <sessionId>`、`/models`、`/model <providerId/modelId>` 均可被识别并产生预期业务结果。
 2. 在 `message-bridge-openclaw` 中，上述五种命令均可被识别并产生预期业务结果。
-3. `/new` 后，系统进入新建会话，形成新的 `toolSessionId`，且原会话历史保留。
-4. `/sessions` 能返回已建立 `toolSessionId` 映射的候选会话列表。
-5. `/sessions <toolSessionId>` 能切换到指定会话，并使后续消息进入该会话。
-6. `/model` 能返回宿主提供的 `providerId/modelId` 列表。
+3. `/new` 后，系统进入新建会话，形成新的 `sessionId`，且原会话历史保留。
+4. `/sessions` 能返回当前宿主作用域下可供切换的会话列表。
+5. `/session <sessionId>` 能切换到指定会话，并使后续消息进入该会话。
+6. `/models` 能返回宿主提供的 `providerId/modelId` 列表。
 7. `/model <providerId/modelId>` 仅影响当前活跃会话的后续对话，不影响其他会话或宿主默认模型。
 8. 命令执行失败时，系统应返回统一、可理解的失败提示。失败提示至少应能够区分新建会话失败、会话列表获取失败、会话切换失败、模型列表获取失败、模型切换失败等命令意图层级。
-9. 重启后，既有 `toolSessionId` 仍可用于列举、切换和续接原有会话。
+9. 重启后，既有 `sessionId` 仍可用于列举、切换和续接原有会话。
 
 ## 10. 假设
 
-- `sessionid` 在需求语义上等同于 `toolSessionId`
+- `sessionid` 在需求语义上等同于 slash command 层对用户暴露的宿主会话选择标识
 - 宿主内部会话标识不属于对外契约
 - 模型列表是宿主目录视图，不承诺切换后一定可运行
 - 插件不要求自带独立持久化；跨重启恢复能力由宿主侧承载

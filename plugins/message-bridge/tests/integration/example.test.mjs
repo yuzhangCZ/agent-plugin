@@ -23,7 +23,7 @@ function createRuntimeClient() {
   return {
     global: {},
     session: {
-      create: async () => ({}),
+      create: async () => ({ data: { id: 'session-bootstrap-1', directory: '/session/default-directory' } }),
       get: async (options) => ({
         data: {
           id: options?.path?.id ?? 'session-default',

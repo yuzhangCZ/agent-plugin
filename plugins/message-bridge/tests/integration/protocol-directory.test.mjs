@@ -22,7 +22,6 @@ function createRuntimeClient(overrides = {}) {
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
     },
-    postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
       get: async (options) => {
         if (options?.url === '/global/health') {
@@ -59,6 +58,11 @@ function createSessionGetResponder(directory) {
 
 function setRuntimeChannel(runtime, channel) {
   runtime.bridgeChannelPort.setChannel(channel);
+}
+
+function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
 }
 
 function createRegisterCaptureWebSocket() {
@@ -258,9 +262,7 @@ describe('protocol directory-context integration', () => {
       const promptCalls = [];
       const abortCalls = [];
       const deleteCalls = [];
-      const permissionCalls = [];
-      const questionListCalls = [];
-      const replyCalls = [];
+      const postCalls = [];
       const runtime = new BridgeRuntime({
         workspacePath: workspace,
         hostDirectory: '/host/fallback-directory',
@@ -288,28 +290,15 @@ describe('protocol directory-context integration', () => {
               return { data: { ok: true } };
             },
           },
-          postSessionIdPermissionsPermissionId: async (options) => {
-            permissionCalls.push(options);
-            return { data: { ok: true } };
-          },
           _client: {
             get: async (options) => {
               if (options?.url === '/global/health') {
                 return { data: { healthy: true, version: '9.9.9' } };
               }
-              questionListCalls.push(options);
-              return {
-                data: [
-                  {
-                    id: 'question-request-openx-1',
-                    sessionID: 'session-openx-1',
-                    tool: { callID: 'call-openx-1' },
-                  },
-                ],
-              };
+              return { data: [] };
             },
             post: async (options) => {
-              replyCalls.push(options);
+              postCalls.push(options);
               return { data: undefined };
             },
           },
@@ -317,6 +306,7 @@ describe('protocol directory-context integration', () => {
       });
       await runtime.start();
       await waitForReady(runtime);
+      attach(runtime, 'session-openx-1');
 
       await runtime.handleDownstreamMessage({
         type: 'invoke',
@@ -348,7 +338,6 @@ describe('protocol directory-context integration', () => {
         welinkSessionId: 'wl-openx-permission',
         action: 'permission_reply',
         payload: {
-          toolSessionId: 'session-openx-1',
           permissionId: 'perm-openx-1',
           response: 'once',
         },
@@ -358,13 +347,16 @@ describe('protocol directory-context integration', () => {
         welinkSessionId: 'wl-openx-question',
         action: 'question_reply',
         payload: {
-          toolSessionId: 'session-openx-1',
-          toolCallId: 'call-openx-1',
+          questionId: 'question-openx-1',
           answer: 'agree',
         },
       });
 
-      assert.deepStrictEqual(sessionGetCalls, []);
+      assert.deepStrictEqual(sessionGetCalls, [
+        {
+          path: { id: 'session-openx-1' },
+        },
+      ]);
       assert.deepStrictEqual(promptCalls, [
         {
           path: { id: 'session-openx-1' },
@@ -381,21 +373,16 @@ describe('protocol directory-context integration', () => {
           path: { id: 'session-openx-1' },
         },
       ]);
-      assert.deepStrictEqual(permissionCalls, [
+      assert.deepStrictEqual(postCalls, [
         {
-          path: { id: 'session-openx-1', permissionID: 'perm-openx-1' },
+          url: '/permission/{requestID}/reply',
+          path: { requestID: 'perm-openx-1' },
           body: { response: 'once' },
+          headers: { 'Content-Type': 'application/json' },
         },
-      ]);
-      assert.deepStrictEqual(questionListCalls, [
-        {
-          url: '/question',
-        },
-      ]);
-      assert.deepStrictEqual(replyCalls, [
         {
           url: '/question/{requestID}/reply',
-          path: { requestID: 'question-request-openx-1' },
+          path: { requestID: 'question-openx-1' },
           body: { answers: [['agree']] },
           headers: { 'Content-Type': 'application/json' },
         },
@@ -413,8 +400,6 @@ describe('protocol directory-context integration', () => {
     const promptCalls = [];
     const abortCalls = [];
     const deleteCalls = [];
-    const permissionCalls = [];
-    const getCalls = [];
     const postCalls = [];
     const runtime = new BridgeRuntime({
       workspacePath: '/workspace/current',
@@ -439,25 +424,12 @@ describe('protocol directory-context integration', () => {
             return { data: { ok: true } };
           },
         },
-        postSessionIdPermissionsPermissionId: async (options) => {
-          permissionCalls.push(options);
-          return { data: { ok: true } };
-        },
         _client: {
           get: async (options) => {
-            getCalls.push(options);
             if (options?.url === '/global/health') {
               return { data: { healthy: true, version: '9.9.9' } };
             }
-            return {
-              data: [
-                {
-                  id: 'question-request-1',
-                  sessionID: 'dir-chain-1',
-                  tool: { callID: 'call-1' },
-                },
-              ],
-            };
+            return { data: [] };
           },
           post: async (options) => {
             postCalls.push(options);
@@ -503,7 +475,6 @@ describe('protocol directory-context integration', () => {
       welinkSessionId: 'wl-chain-permission',
       action: 'permission_reply',
       payload: {
-        toolSessionId: 'dir-chain-1',
         permissionId: 'perm-1',
         response: 'once',
       },
@@ -513,8 +484,7 @@ describe('protocol directory-context integration', () => {
       welinkSessionId: 'wl-chain-question',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'dir-chain-1',
-        toolCallId: 'call-1',
+        questionId: 'question-1',
         answer: 'yes',
       },
     });
@@ -570,35 +540,20 @@ describe('protocol directory-context integration', () => {
         },
       },
     ]);
-    assert.deepStrictEqual(permissionCalls, [
+    assert.deepStrictEqual(postCalls, [
       {
-        path: {
-          id: 'dir-chain-1',
-          permissionID: 'perm-1',
-        },
+        url: '/permission/{requestID}/reply',
+        path: { requestID: 'perm-1' },
         body: {
           response: 'once',
         },
-        query: {
-          directory: '/bridge/directory',
-        },
+        headers: { 'Content-Type': 'application/json' },
       },
-    ]);
-    assert.deepStrictEqual(getCalls, [{
-      url: '/question',
-      query: {
-        directory: '/bridge/directory',
-      },
-    }]);
-    assert.deepStrictEqual(postCalls, [
       {
         url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-1' },
+        path: { requestID: 'question-1' },
         body: { answers: [['yes']] },
         headers: { 'Content-Type': 'application/json' },
-        query: {
-          directory: '/bridge/directory',
-        },
       },
     ]);
   });
@@ -878,8 +833,6 @@ describe('protocol directory-context integration', () => {
       const promptCalls = [];
       const abortCalls = [];
       const deleteCalls = [];
-      const permissionCalls = [];
-      const getCalls = [];
       const postCalls = [];
       const runtime = new BridgeRuntime({
         workspacePath: '/workspace/current',
@@ -904,25 +857,12 @@ describe('protocol directory-context integration', () => {
               return { data: { ok: true } };
             },
           },
-          postSessionIdPermissionsPermissionId: async (options) => {
-            permissionCalls.push(options);
-            return { data: { ok: true } };
-          },
           _client: {
             get: async (options) => {
-              getCalls.push(options);
               if (options?.url === '/global/health') {
                 return { data: { healthy: true, version: '9.9.9' } };
               }
-              return {
-                data: [
-                  {
-                    id: 'question-assiant-request-1',
-                    sessionID: 'dir-assiant-chain-1',
-                    tool: { callID: 'call-assiant-1' },
-                  },
-                ],
-              };
+              return { data: [] };
             },
             post: async (options) => {
               postCalls.push(options);
@@ -971,7 +911,6 @@ describe('protocol directory-context integration', () => {
         welinkSessionId: 'wl-assiant-chain-permission',
         action: 'permission_reply',
         payload: {
-          toolSessionId: 'dir-assiant-chain-1',
           permissionId: 'perm-assiant-1',
           response: 'always',
         },
@@ -981,8 +920,7 @@ describe('protocol directory-context integration', () => {
         welinkSessionId: 'wl-assiant-chain-question',
         action: 'question_reply',
         payload: {
-          toolSessionId: 'dir-assiant-chain-1',
-          toolCallId: 'call-assiant-1',
+          questionId: 'question-assiant-1',
           answer: 'agree',
         },
       });
@@ -1039,35 +977,20 @@ describe('protocol directory-context integration', () => {
           },
         },
       ]);
-      assert.deepStrictEqual(permissionCalls, [
+      assert.deepStrictEqual(postCalls, [
         {
-          path: {
-            id: 'dir-assiant-chain-1',
-            permissionID: 'perm-assiant-1',
-          },
+          url: '/permission/{requestID}/reply',
+          path: { requestID: 'perm-assiant-1' },
           body: {
             response: 'always',
           },
-          query: {
-            directory: '/tenant/persona-1',
-          },
+          headers: { 'Content-Type': 'application/json' },
         },
-      ]);
-      assert.deepStrictEqual(getCalls, [{
-        url: '/question',
-        query: {
-          directory: '/tenant/persona-1',
-        },
-      }]);
-      assert.deepStrictEqual(postCalls, [
         {
           url: '/question/{requestID}/reply',
-          path: { requestID: 'question-assiant-request-1' },
+          path: { requestID: 'question-assiant-1' },
           body: { answers: [['agree']] },
           headers: { 'Content-Type': 'application/json' },
-          query: {
-            directory: '/tenant/persona-1',
-          },
         },
       ]);
     } finally {

@@ -24,14 +24,12 @@ export interface SessionScopedActionGatewayPort {
     logger?: BridgeLogger;
   }): Promise<ActionResult<CloseSessionResultData>>;
   replyPermission(parameters: {
-    sessionId: string;
     permissionId: string;
     response: PermissionReplyPayload['response'];
     logger?: BridgeLogger;
   }): Promise<ActionResult<PermissionReplyResultData>>;
   replyQuestion(parameters: {
-    sessionId: string;
-    toolCallId?: string;
+    questionId: string;
     answer: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>>;

@@ -194,11 +194,11 @@ export class SyntheticAssistantReplySender {
   }
 
   private createSyntheticMessageId(): string {
-    return `msg_${randomUUID().replaceAll('-', '')}`;
+    return `msg_${randomUUID().split('-').join('')}`;
   }
 
   private createSyntheticPartId(): string {
-    return `prt_${randomUUID().replaceAll('-', '')}`;
+    return `prt_${randomUUID().split('-').join('')}`;
   }
 
   private sendToolEvent(
