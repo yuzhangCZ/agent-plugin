@@ -95,7 +95,7 @@ import type {
   HostSessionInfo,
   SessionScope,
 } from '../port/SlashCommandControlPlanePort.js';
-import type { HostClientLike, OpencodeClient } from '../types/index.js';
+import type { BridgeSdkClient, HostClientLike } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { getToolErrorEvidence } from '../utils/error.js';
 import { asRecord, asString, asTrimmedString } from '../utils/type-guards.js';
@@ -173,7 +173,7 @@ export class BridgeRuntime {
   private eventFilter: EventFilter | null = null;
   private started = false;
   private readonly rawClient: HostClientLike;
-  private sdkClient: OpencodeClient | null;
+  private sdkClient: BridgeSdkClient | null;
   private readonly missingSdkCapabilities: ReturnType<typeof getMissingSdkCapabilities>;
   private readonly workspacePath?: string;
   private readonly hostDirectory?: string;
@@ -224,9 +224,7 @@ export class BridgeRuntime {
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
     this.slashCommandCompletionPort = new RuntimeSlashCommandCompletionPort({
       projector: this.gatewayEnvelopeProjector,
-      sender: async (message) => {
-        this.sendControlPlaneMessage(message);
-      },
+      sender: async (message) => this.sendControlPlaneMessage(message),
     });
     this.slashCommandContextResolver = new ResolveSlashCommandContextUseCase({
       bindingStore: this.bindingStore,
@@ -1067,13 +1065,8 @@ export class BridgeRuntime {
   /** 控制面会话列表入口：按 scope 快照请求宿主并收口字段。 */
   private async listControlPlaneSessions(scope: SessionScope): Promise<HostSessionInfo[]> {
     const client = this.requireSdkClient();
-    const result = await client._client.get({
-      url: '/session',
-      query: {
-        ...(scope.projectID ? { projectID: scope.projectID } : {}),
-        ...(scope.workspaceID ? { workspaceID: scope.workspaceID } : {}),
-        ...(scope.directory ? { directory: scope.directory } : {}),
-      },
+    const result = await client.session.list({
+      ...(scope.directory ? { directory: scope.directory } : {}),
     });
     const payload = this.unwrapSdkData(result);
     if (!Array.isArray(payload)) {
@@ -1087,13 +1080,20 @@ export class BridgeRuntime {
       if (!id) {
         continue;
       }
-      sessions.push({
+      const projected = {
         id,
         ...(asTrimmedString(session?.title) ? { title: asTrimmedString(session?.title) } : {}),
         ...(asTrimmedString(session?.projectID) ? { projectID: asTrimmedString(session?.projectID) } : {}),
         ...(asTrimmedString(session?.workspaceID) ? { workspaceID: asTrimmedString(session?.workspaceID) } : {}),
         ...(asTrimmedString(session?.directory) ? { directory: asTrimmedString(session?.directory) } : {}),
-      });
+      };
+      if (scope.projectID && projected.projectID !== scope.projectID) {
+        continue;
+      }
+      if (scope.workspaceID && projected.workspaceID !== scope.workspaceID) {
+        continue;
+      }
+      sessions.push(projected);
     }
     return sessions;
   }
@@ -1101,7 +1101,7 @@ export class BridgeRuntime {
   /** 控制面模型目录入口：兼容不同 SDK 宿主返回 shape。 */
   private async listControlPlaneModels(): Promise<HostModelInfo[]> {
     const client = this.requireSdkClient();
-    const providersResult = await client._client.get({ url: '/config/providers' });
+    const providersResult = await client.config.providers();
     const payload = this.unwrapSdkData(providersResult);
     const providers = Array.isArray(payload)
       ? payload
@@ -1118,7 +1118,8 @@ export class BridgeRuntime {
       if (!providerId) {
         return [];
       }
-      const models = Array.isArray(providerRecord?.models) ? providerRecord.models : [];
+      const modelCatalog = asRecord(providerRecord?.models);
+      const models = modelCatalog ? Object.values(modelCatalog) : [];
       return models.flatMap((model) => {
         const modelRecord = asRecord(model);
         const modelId =
@@ -1158,25 +1159,41 @@ export class BridgeRuntime {
   }
 
   /** 控制面上送只负责投影和发送，不复用普通 chat 的 ToolDoneCompat。 */
-  private sendControlPlaneMessage(message: Record<string, unknown>): void {
+  private sendControlPlaneMessage(message: Record<string, unknown>): boolean {
     const connection = this.getActiveGatewayConnection();
     if (!connection) {
-      return;
+      this.logger.warn('runtime.control_plane_send.skipped_no_connection', {
+        messageType: typeof message?.type === 'string' ? message.type : undefined,
+      });
+      return false;
     }
+    const payload = message as GatewaySendPayload;
+    const toolSessionId =
+      'toolSessionId' in payload && typeof payload.toolSessionId === 'string'
+        ? payload.toolSessionId
+        : undefined;
     const validated = this.validateGatewayUplinkBusinessMessageOrLog(
-      message as GatewaySendPayload,
+      payload,
       {
         traceId: this.logger.getTraceId(),
         runtimeTraceId: this.logger.getTraceId(),
+        toolSessionId,
+        eventType: payload.type === 'tool_event' && typeof payload.event?.type === 'string'
+          ? payload.event.type
+          : undefined,
       },
       this.logger,
     );
     if (!validated) {
-      return;
+      return false;
     }
-    this.sessionSender.sendIfActive(connection, validated, {
+    return this.sessionSender.sendIfActive(connection, validated, {
       traceId: this.logger.getTraceId(),
       runtimeTraceId: this.logger.getTraceId(),
+      toolSessionId,
+      eventType: payload.type === 'tool_event' && typeof payload.event?.type === 'string'
+        ? payload.event.type
+        : undefined,
     });
   }
 
@@ -1249,7 +1266,7 @@ export class BridgeRuntime {
     }
   }
 
-  private requireSdkClient(): OpencodeClient {
+  private requireSdkClient(): BridgeSdkClient {
     if (!this.sdkClient) {
       throw new Error('runtime.sdk_client_unavailable');
     }
@@ -1502,6 +1519,7 @@ export class BridgeRuntime {
       action?: string;
     },
   ): boolean {
+    // todo connection判断
     const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
     if (!connection) {
       this.logger.warn('runtime.tool_done.skipped_no_connection', { toolSessionId, welinkSessionId, source });

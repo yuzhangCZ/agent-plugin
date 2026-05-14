@@ -3,6 +3,8 @@ import type {
   HostPromptExecutionPort,
   HostSessionCreationPort,
   HostSessionQueryPort,
+  SlashCommandSuccessDeliveryFailureStage,
+  SlashCommandSuccessDeliveryResult,
   SessionModelOverrideStore,
   SlashCommand,
   SlashCommandCompletionPort,
@@ -13,6 +15,7 @@ import type {
   ToolSessionBindingStore,
   OpencodeSessionOwnershipResolver,
 } from '../port/SlashCommandControlPlanePort.js';
+import type { BridgeLogger } from '../types/logger.js';
 
 /** 控制面 orchestrator：统一处理 slash 命令、副作用与完成态。 */
 export class DefaultSlashCommandOrchestrator {
@@ -31,14 +34,16 @@ export class DefaultSlashCommandOrchestrator {
   async execute(input: {
     command: SlashCommand;
     context: SlashCommandContext;
+    logger?: BridgeLogger;
   }): Promise<void> {
     try {
       const result = await this.executeCommand(input.command, input.context);
       const text = this.dependencies.replyPresenter.presentSuccess(result);
-      await this.dependencies.completionPort.completeSuccess({
+      const deliveryResult = await this.dependencies.completionPort.completeSuccess({
         anchor: input.context.anchor,
         text,
       });
+      this.logSuccessDeliveryFailure(deliveryResult, input);
     } catch (error) {
       await this.completeFailure({
         command: input.command,
@@ -175,5 +180,38 @@ export class DefaultSlashCommandOrchestrator {
       || code === 'model_not_found'
       || code === 'invalid_command'
       || code === 'sdk_unreachable';
+  }
+
+  private logSuccessDeliveryFailure(
+    deliveryResult: SlashCommandSuccessDeliveryResult,
+    input: {
+      command: SlashCommand;
+      context: SlashCommandContext;
+      logger?: BridgeLogger;
+    },
+  ): void {
+    if (deliveryResult.success) {
+      return;
+    }
+    input.logger?.error('runtime.slash.synthetic_reply_delivery_failed', {
+      anchor: input.context.anchor,
+      toolSessionId: input.context.anchor,
+      command: input.command.kind,
+      failureStage: deliveryResult.failureStage,
+      messageType: this.resolveDeliveryFailureMessageType(deliveryResult.failureStage),
+      completionSource: 'slash_control_plane',
+    });
+  }
+
+  private resolveDeliveryFailureMessageType(
+    failureStage: SlashCommandSuccessDeliveryFailureStage,
+  ): 'message.updated' | 'message.part.updated' | 'tool_done' {
+    if (failureStage === 'message.updated') {
+      return 'message.updated';
+    }
+    if (failureStage === 'tool_done') {
+      return 'tool_done';
+    }
+    return 'message.part.updated';
   }
 }

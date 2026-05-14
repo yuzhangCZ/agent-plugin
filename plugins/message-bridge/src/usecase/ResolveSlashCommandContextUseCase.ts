@@ -10,7 +10,7 @@ import type {
 } from '../port/SlashCommandControlPlanePort.js';
 import type { BridgeLogger } from '../types/logger.js';
 
-/** 解析 slash/chat 共用的 binding 上下文，并在缺 binding 时自动 bootstrap。 */
+/** 解析 slash/chat 共用的 binding 上下文，并在缺 binding 时优先复用宿主最近活跃会话。 */
 export class ResolveSlashCommandContextUseCase implements SlashCommandContextResolver {
   constructor(private readonly dependencies: {
     bindingStore: ToolSessionBindingStore;
@@ -33,7 +33,29 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
       };
     }
 
+    const recentSessions = await this.dependencies.hostSessionQueryPort.listSessions({});
+    const recentSession = recentSessions[0];
+    if (recentSession) {
+      this.detachPreviousOwnership(existing, recentSession.id);
+      this.dependencies.bindingStore.bind(anchor, recentSession.id);
+      this.dependencies.ownershipResolver.attach(recentSession.id, anchor);
+      logger?.info('slash_context.bootstrap_reused_recent_session', {
+        anchor,
+        opencodeSessionId: recentSession.id,
+        recoveredFromInvalid: existing?.status === 'invalid',
+      });
+
+      return {
+        anchor,
+        activeOpencodeSessionId: recentSession.id,
+        scope: this.buildScope(recentSession),
+        modelOverride: this.dependencies.modelOverrideStore.get(recentSession.id),
+        bootstrapSource: 'bootstrap_reused_recent_session',
+      };
+    }
+
     const created = await this.dependencies.hostSessionCreationPort.createSession();
+    this.detachPreviousOwnership(existing, created.id);
     this.dependencies.bindingStore.bind(anchor, created.id);
     this.dependencies.ownershipResolver.attach(created.id, anchor);
     logger?.info('slash_context.bootstrap_created', {
@@ -46,7 +68,7 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
       anchor,
       activeOpencodeSessionId: created.id,
       scope: this.buildScope(created),
-      bootstrapSource: existing?.status === 'invalid' ? 'binding_invalidated' : 'bootstrap_created',
+      bootstrapSource: 'bootstrap_created',
     };
   }
 
@@ -60,5 +82,15 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
       ...(session.workspaceID ? { workspaceID: session.workspaceID } : {}),
       ...(session.directory ? { directory: session.directory } : {}),
     };
+  }
+
+  private detachPreviousOwnership(
+    existing: { activeOpencodeSessionId: string } | undefined,
+    nextSessionId: string,
+  ): void {
+    if (!existing || existing.activeOpencodeSessionId === nextSessionId) {
+      return;
+    }
+    this.dependencies.ownershipResolver.detach(existing.activeOpencodeSessionId);
   }
 }

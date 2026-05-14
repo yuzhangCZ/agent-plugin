@@ -1,27 +1,21 @@
-import { randomUUID } from 'crypto';
 import type { GatewayEnvelopeProjector } from '../port/SlashCommandControlPlanePort.js';
+import { SyntheticAssistantReplySequenceBuilder } from './SyntheticAssistantReplySequenceBuilder.js';
 
-/** 临时态 envelope projector：外层继续投影为 `toolSessionId`。 */
+/** slash completion 侧 envelope projector：复用统一 synthetic assistant reply shape。 */
 export class MemoryGatewayEnvelopeProjector implements GatewayEnvelopeProjector {
-  projectToolEvent(input: { anchor: string; text: string }): Record<string, unknown> {
-    const messageId = `msg_${randomUUID().split('-').join('')}`;
-    const partId = `prt_${randomUUID().split('-').join('')}`;
-    return {
-      type: 'tool_event',
+  private readonly sequenceBuilder = new SyntheticAssistantReplySequenceBuilder();
+
+  projectSyntheticAssistantReply(input: { anchor: string; text: string }): Record<string, unknown>[] {
+    const sequence = this.sequenceBuilder.build({
       toolSessionId: input.anchor,
-      event: {
-        type: 'message.part.updated',
-        properties: {
-          part: {
-            id: partId,
-            sessionID: input.anchor,
-            messageID: messageId,
-            type: 'text',
-            text: input.text,
-          },
-        },
-      },
-    };
+      text: input.text,
+    });
+    return [
+      sequence.messageUpdated,
+      sequence.stepStart,
+      sequence.text,
+      sequence.stepFinish,
+    ];
   }
 
   projectToolDone(input: { anchor: string }): Record<string, unknown> {

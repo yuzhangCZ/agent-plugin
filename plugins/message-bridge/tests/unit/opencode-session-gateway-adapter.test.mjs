@@ -532,8 +532,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
           delete: async () => ({}),
           prompt: async () => ({}),
         },
-        _client: {
-          post: async (options) => {
+        question: {
+          reply: async (options) => {
             postCalls.push(options);
             return { data: undefined };
           },
@@ -553,10 +553,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(postCalls, [
       {
-        url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-openx-1' },
-        body: { answers: [['yes']] },
-        headers: { 'Content-Type': 'application/json' },
+        questionId: 'question-request-openx-1',
+        answer: 'yes',
       },
     ]);
   });
@@ -670,7 +668,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
   });
 
   test('replyPermission forwards permissionId to permission reply endpoint', async () => {
-    const postCalls = [];
+    const permissionCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
       session: {
         create: async () => ({}),
@@ -679,10 +677,9 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      _client: {
-        get: async () => ({}),
-        post: async (options) => {
-          postCalls.push(options);
+      permission: {
+        reply: async (options) => {
+          permissionCalls.push(options);
           return { data: { ok: true } };
         },
       },
@@ -699,12 +696,10 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
       response: 'always',
       applied: true,
     });
-    assert.deepStrictEqual(postCalls, [
+    assert.deepStrictEqual(permissionCalls, [
       {
-        url: '/permission/{requestID}/reply',
-        path: { requestID: 'perm-1' },
-        body: { response: 'always' },
-        headers: { 'Content-Type': 'application/json' },
+        permissionId: 'perm-1',
+        response: 'always',
       },
     ]);
   });
@@ -718,9 +713,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      _client: {
-        get: async () => ({}),
-        post: async () => ({
+      permission: {
+        reply: async () => ({
           error: {
             name: 'PermissionFailed',
             data: { message: 'permission payload failed' },
@@ -743,7 +737,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
   });
 
   test('replyQuestion forwards questionId to question reply endpoint', async () => {
-    const postCalls = [];
+    const questionCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
       session: {
         create: async () => ({}),
@@ -752,10 +746,9 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      _client: {
-        get: async () => ({}),
-        post: async (options) => {
-          postCalls.push(options);
+      question: {
+        reply: async (options) => {
+          questionCalls.push(options);
           return { data: undefined };
         },
       },
@@ -768,12 +761,10 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { requestId: 'question-request-1', replied: true });
-    assert.deepStrictEqual(postCalls, [
+    assert.deepStrictEqual(questionCalls, [
       {
-        url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-1' },
-        body: { answers: [['yes']] },
-        headers: { 'Content-Type': 'application/json' },
+        questionId: 'question-request-1',
+        answer: 'yes',
       },
     ]);
   });
@@ -787,9 +778,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      _client: {
-        get: async () => ({}),
-        post: async () => ({
+      question: {
+        reply: async () => ({
           error: {
             name: 'QuestionReplyFailed',
             data: { message: 'question reply failed' },
@@ -820,9 +810,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      _client: {
-        get: async () => ({}),
-        post: async () => ({
+      question: {
+        reply: async () => ({
           error: {
             name: 'QuestionReplyFailed',
             data: { message: 'question reply failed' },

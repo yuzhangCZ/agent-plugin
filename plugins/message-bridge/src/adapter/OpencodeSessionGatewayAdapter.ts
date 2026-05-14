@@ -10,7 +10,7 @@ import type { SessionModelOverride } from '../port/SlashCommandControlPlanePort.
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
 import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
-import type { OpencodeClient } from '../types/sdk.js';
+import type { BridgeSdkClient } from '../types/sdk.js';
 import { hasError, safeExecute } from '../types/sdk.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type { BridgeLogger } from '../types/logger.js';
@@ -115,7 +115,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
   private readonly getDirectoryPolicyContext: () => SessionDirectoryPolicyContext;
 
   constructor(
-    private readonly getClient: () => OpencodeClient | null,
+    private readonly getClient: () => BridgeSdkClient | null,
     getDirectoryPolicyContext?: () => SessionDirectoryPolicyContext,
   ) {
     this.sessionDirectoryResolver = new SessionDirectoryResolver(getClient);
@@ -134,7 +134,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     failurePrefix: string;
     logger?: BridgeLogger;
     logFields?: Record<string, unknown>;
-    handler: (context: { client: OpencodeClient; directory?: string }) => Promise<ActionResult<TResult>>;
+    handler: (context: { client: BridgeSdkClient; directory?: string }) => Promise<ActionResult<TResult>>;
   }): Promise<ActionResult<TResult>> {
     const client = this.requireClient();
     if (this.shouldSkipDirectoryResolution()) {
@@ -327,15 +327,9 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     return this.executeSdkCall({
       failurePrefix: 'Failed to reply to permission request',
       sourceOperation: 'permission.reply',
-      promiseFactory: () => client._client.post({
-        url: '/permission/{requestID}/reply',
-        path: { requestID: parameters.permissionId },
-        body: {
-          response: parameters.response,
-        },
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      promiseFactory: () => client.permission.reply({
+        permissionId: parameters.permissionId,
+        response: parameters.response,
       }),
       onSuccess: () => ({
         success: true,
@@ -357,13 +351,9 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     return this.executeSdkCall({
       failurePrefix: 'Failed to reply to question',
       sourceOperation: 'question.reply',
-      promiseFactory: () => client._client.post({
-        url: '/question/{requestID}/reply',
-        path: { requestID: parameters.questionId },
-        body: { answers: [[parameters.answer]] },
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      promiseFactory: () => client.question.reply({
+        questionId: parameters.questionId,
+        answer: parameters.answer,
       }),
       onSuccess: () => ({
         success: true,
@@ -375,7 +365,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     });
   }
 
-  private requireClient(): OpencodeClient {
+  private requireClient(): BridgeSdkClient {
     const client = this.getClient();
     if (!client) {
       throw new Error('runtime.sdk_client_unavailable');

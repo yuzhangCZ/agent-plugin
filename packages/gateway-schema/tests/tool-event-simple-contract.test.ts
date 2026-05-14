@@ -141,6 +141,12 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
         event.properties.metadata = {
           source: 'test',
           scope: 'repo',
+          include: undefined,
+          filters: {
+            mode: 'repo',
+            include: undefined,
+          },
+          items: ['a', undefined, { include: undefined, keep: true }],
         };
         event.properties.response = 'allow';
         event.properties.resolved = true;
@@ -157,6 +163,12 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
           metadata: {
             source: 'test',
             scope: 'repo',
+            include: undefined,
+            filters: {
+              mode: 'repo',
+              include: undefined,
+            },
+            items: ['a', undefined, { include: undefined, keep: true }],
           },
           status: 'granted',
           response: 'allow',
@@ -169,6 +181,12 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
         const event = structuredClone(createGatewayWirePermissionAskedEvent());
         event.properties.debug = 'drop-me';
         event.properties.metadata.scope = 'repo';
+        event.properties.metadata.include = undefined;
+        event.properties.metadata.filters = {
+          mode: 'repo',
+          include: undefined,
+        };
+        event.properties.metadata.items = ['a', undefined, { include: undefined, keep: true }];
         return event;
       })(),
       expected: {
@@ -182,6 +200,12 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
           metadata: {
             source: 'test',
             scope: 'repo',
+            include: undefined,
+            filters: {
+              mode: 'repo',
+              include: undefined,
+            },
+            items: ['a', undefined, { include: undefined, keep: true }],
           },
         },
       },

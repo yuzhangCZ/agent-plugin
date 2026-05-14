@@ -311,11 +311,11 @@ binding bootstrap，确保当前 `payload.toolSessionId` 已解析出可用的
 绑定失效后：
 
 - 本次请求直接返回错误，且在请求结束前将 binding 标记为 `invalid`
-- 下一次 `invoke.chat` 重新回到“无 binding 自动创建新会话并建立绑定”的逻辑
+- 下一次 `invoke.chat` 或 slash 重新进入“无有效 binding 的恢复逻辑”：先尝试复用 `session.list` 返回的最近活跃会话；列表为空时才自动创建新会话并建立绑定
 - 只有本次请求已成功完成上下文解析时，`/sessions` 才进入当前 `project/workspace` 范围内的列目录逻辑
 - `（当前）` 只表示当前有效 `active binding`，不表示宿主列表中的最近活跃会话
 - 当 active binding 已失效且本次请求未重新 bootstrap 时，`/sessions` 不标任何 `（当前）`
-- 插件不得从宿主列表中自动挑选一个“最近活跃会话”顶替当前绑定
+- 本轮仍不定义“同一次请求内自动恢复并继续执行”；恢复只发生在下一次重新进入上下文解析时
 
 ### 7.4 `question_reply` / `permission_reply` 不走当前绑定
 

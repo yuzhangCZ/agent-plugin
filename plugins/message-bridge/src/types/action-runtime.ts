@@ -5,12 +5,12 @@ import type {
   ActionPayloadByName,
   ActionResultDataByName,
 } from '../contracts/downstream-messages.js';
-import type { HostClientLike, OpencodeClient } from './sdk.js';
+import type { BridgeSdkClient, HostClientLike } from './sdk.js';
 import type { BridgeLogger } from './logger.js';
 import type { ToolErrorEvidence } from '../utils/error.js';
 
 export interface ActionContext {
-  client: OpencodeClient;
+  client: BridgeSdkClient;
   hostClient: HostClientLike;
   connectionState: GatewayClientState;
   welinkSessionId?: string;

@@ -1,4 +1,4 @@
-import type { OpencodeClient } from '../types/index.js';
+import type { BridgeSdkClient } from '../types/index.js';
 import { hasError } from '../types/sdk.js';
 
 /** child session 到 parent session 的稳定路由映射。 */
@@ -28,7 +28,7 @@ interface SessionCreatedRecord {
   agentName: string;
 }
 
-type SessionLookupClient = Pick<OpencodeClient, 'session'>;
+type SessionLookupClient = Pick<BridgeSdkClient, 'session'>;
 type SessionLookupSource = SessionLookupClient | (() => SessionLookupClient | null) | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

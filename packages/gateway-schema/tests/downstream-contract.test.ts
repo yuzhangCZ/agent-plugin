@@ -102,7 +102,6 @@ test('normalizeDownstream accepts the full downstream contract', () => {
       createPermissionReplyInvokeMessage({
         welinkSessionId: 'wl-permission',
         payload: {
-          toolSessionId: 'tool-permission',
           permissionId: 'perm-1',
           response: 'once',
         },
@@ -112,7 +111,6 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         welinkSessionId: 'wl-permission',
         action: 'permission_reply',
         payload: {
-          toolSessionId: 'tool-permission',
           permissionId: 'perm-1',
           response: 'once',
         },
@@ -123,9 +121,8 @@ test('normalizeDownstream accepts the full downstream contract', () => {
       createQuestionReplyInvokeMessage({
         welinkSessionId: 'wl-question',
         payload: {
-          toolSessionId: 'tool-question',
+          questionId: 'question-1',
           answer: 'ok',
-          toolCallId: 'call-1',
         },
       }),
       {
@@ -133,9 +130,8 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         welinkSessionId: 'wl-question',
         action: 'question_reply',
         payload: {
-          toolSessionId: 'tool-question',
+          questionId: 'question-1',
           answer: 'ok',
-          toolCallId: 'call-1',
         },
       },
     ],
@@ -344,7 +340,7 @@ test('normalizeDownstream accepts question_reply without welinkSessionId through
     type: 'invoke',
     action: 'question_reply',
     payload: {
-      toolSessionId: 'tool-question',
+      questionId: 'question-1',
       answer: 'ok',
     },
   });
@@ -354,7 +350,7 @@ test('normalizeDownstream accepts question_reply without welinkSessionId through
     type: 'invoke',
     action: 'question_reply',
     payload: {
-      toolSessionId: 'tool-question',
+      questionId: 'question-1',
       answer: 'ok',
     },
   });

@@ -5,6 +5,28 @@ import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
+function assertSyntheticAssistantReply(sent, index, toolSessionId, expectedText) {
+  assert.strictEqual(sent[index].type, 'tool_event');
+  assert.strictEqual(sent[index].toolSessionId, toolSessionId);
+  assert.strictEqual(sent[index].event.type, 'message.updated');
+  assert.strictEqual(sent[index].event.properties.info.role, 'assistant');
+
+  const messageId = sent[index].event.properties.info.id;
+  assert.match(messageId, /^msg_[a-f0-9]{32}$/);
+
+  const stepStart = sent[index + 1];
+  const text = sent[index + 2];
+  const stepFinish = sent[index + 3];
+
+  assert.strictEqual(stepStart.event.properties.part.type, 'step-start');
+  assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
+  assert.strictEqual(text.event.properties.part.type, 'text');
+  assert.strictEqual(text.event.properties.part.messageID, messageId);
+  assert.strictEqual(text.event.properties.part.text, expectedText);
+  assert.strictEqual(stepFinish.event.properties.part.type, 'step-finish');
+  assert.strictEqual(stepFinish.event.properties.part.messageID, messageId);
+}
+
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
@@ -16,29 +38,57 @@ function createRuntimeClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
     },
-    postSessionIdPermissionsPermissionId: async () => ({}),
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
+    },
+    postSessionIdPermissionsPermissionId: async () => ({ data: true }),
     _client: {
       get: async () => ({ data: [] }),
       post: async () => ({ data: undefined }),
     },
   };
 
-  return {
+  const merged = {
     ...base,
     ...overrides,
     session: {
       ...base.session,
       ...(overrides.session ?? {}),
     },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
+    },
     _client: {
       ...base._client,
       ...(overrides._client ?? {}),
     },
   };
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.session ?? {}, 'list')) {
+    merged.session.list = async (options) => merged._client.get({
+      url: '/session',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.config ?? {}, 'providers')) {
+    merged.config.providers = async (options) => merged._client.get({
+      url: '/config/providers',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(overrides, 'postSessionIdPermissionsPermissionId')) {
+    merged.postSessionIdPermissionsPermissionId = async (options) => merged._client.post(options);
+  }
+
+  return merged;
 }
 
 describe('runtime slash control-plane', () => {
@@ -222,19 +272,18 @@ describe('runtime slash control-plane', () => {
       {
         url: '/session',
         query: {
-          projectID: 'proj-1',
-          workspaceID: 'ws-1',
           directory: '/tmp/proj-1',
         },
       },
     ]);
-    assert.strictEqual(sent.length, 2);
-    assert.strictEqual(sent[0].type, 'tool_event');
-    assert.strictEqual(
-      sent[0].event.properties.part.text,
+    assert.strictEqual(sent.length, 5);
+    assertSyntheticAssistantReply(
+      sent,
+      0,
+      'tool-sessions',
       '可切换会话列表\n\n- `ses-scope-1` 当前会话（当前）\n- `ses-scope-2` 第二个会话',
     );
-    assert.deepStrictEqual(sent[1], { type: 'tool_done', toolSessionId: 'tool-sessions' });
+    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-sessions' });
   });
 
   test('slash session out of scope returns fixed failure text without changing binding', async () => {
@@ -374,7 +423,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-session-ok', text: 'after switch' },
     });
 
-    assert.strictEqual(sent[0].event.properties.part.text, '已切换会话 `ses-switch-2` 切换后会话');
+    assertSyntheticAssistantReply(sent, 0, 'tool-session-ok', '已切换会话 `ses-switch-2` 切换后会话');
     assert.deepStrictEqual(runtime.bindingStore.get('tool-session-ok'), {
       anchor: 'tool-session-ok',
       activeOpencodeSessionId: 'ses-switch-2',
@@ -393,7 +442,116 @@ describe('runtime slash control-plane', () => {
     ]);
   });
 
+  test('slash session delivery failure stays local and does not emit tool_error while keeping committed binding', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'ses-switch-local-1',
+              title: '切换前会话',
+              directory: '/tmp/proj-switch-local',
+              projectID: 'proj-switch-local',
+              workspaceID: 'ws-switch-local',
+            },
+          }),
+          get: async (options) => {
+            if (options?.path?.id === 'ses-switch-local-2') {
+              return {
+                data: {
+                  id: 'ses-switch-local-2',
+                  title: '切换后会话',
+                  directory: '/tmp/proj-switch-local',
+                  projectID: 'proj-switch-local',
+                  workspaceID: 'ws-switch-local',
+                },
+              };
+            }
+            return {
+              data: {
+                id: options?.path?.id ?? 'ses-switch-local-1',
+                title: '切换前会话',
+                directory: '/tmp/proj-switch-local',
+                projectID: 'proj-switch-local',
+                workspaceID: 'ws-switch-local',
+              },
+            };
+          },
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/session') {
+              return {
+                data: [
+                  { id: 'ses-switch-local-1', title: '切换前会话', directory: '/tmp/proj-switch-local', projectID: 'proj-switch-local', workspaceID: 'ws-switch-local' },
+                  { id: 'ses-switch-local-2', title: '切换后会话', directory: '/tmp/proj-switch-local', projectID: 'proj-switch-local', workspaceID: 'ws-switch-local' },
+                ],
+              };
+            }
+            return { data: [] };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const originalSessionSender = runtime.sessionSender;
+    runtime.sessionSender = {
+      sendIfActive: () => false,
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-session-local-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-session-local', text: '/session ses-switch-local-2' },
+    });
+
+    runtime.sessionSender = originalSessionSender;
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-session-local-2',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-session-local', text: 'after switch' },
+    });
+
+    assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
+    assert.deepStrictEqual(runtime.bindingStore.get('tool-session-local'), {
+      anchor: 'tool-session-local',
+      activeOpencodeSessionId: 'ses-switch-local-2',
+      status: 'active',
+    });
+    assert.strictEqual(runtime.ownershipResolver.resolveAttachedAnchor('ses-switch-local-1'), undefined);
+    assert.strictEqual(runtime.ownershipResolver.resolveAttachedAnchor('ses-switch-local-2'), 'tool-session-local');
+    assert.deepStrictEqual(prompts, [
+      {
+        path: { id: 'ses-switch-local-2' },
+        query: { directory: '/tmp/proj-switch-local' },
+        body: {
+          parts: [{ type: 'text', text: 'after switch' }],
+        },
+      },
+    ]);
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_done',
+        toolSessionId: 'tool-session-local',
+        welinkSessionId: 'wl-session-local-2',
+      },
+    ]);
+  });
+
   test('slash models bootstraps first and returns provider/model markdown list', async () => {
+    const getCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
@@ -402,6 +560,8 @@ describe('runtime slash control-plane', () => {
               id: 'ses-models-1',
               title: '模型目录会话',
               directory: '/tmp/models-1',
+              projectID: 'proj-models-1',
+              workspaceID: 'ws-models-1',
             },
           }),
           get: async (options) => ({
@@ -409,23 +569,33 @@ describe('runtime slash control-plane', () => {
               id: options?.path?.id ?? 'ses-models-1',
               title: '模型目录会话',
               directory: '/tmp/models-1',
+              projectID: 'proj-models-1',
+              workspaceID: 'ws-models-1',
             },
           }),
         },
         _client: {
           get: async (options) => {
+            getCalls.push(options);
             if (options?.url === '/config/providers') {
               return {
-                data: [
-                  {
-                    id: 'openai',
-                    models: [{ id: 'gpt-5.4' }, { id: 'gpt-5.5' }],
-                  },
-                  {
-                    id: 'anthropic',
-                    models: [{ id: 'claude-sonnet-4.5' }],
-                  },
-                ],
+                data: {
+                  providers: [
+                    {
+                      id: 'openai',
+                      models: {
+                        'gpt-5.4': { id: 'gpt-5.4' },
+                        'gpt-5.5': { id: 'gpt-5.5' },
+                      },
+                    },
+                    {
+                      id: 'anthropic',
+                      models: {
+                        'claude-sonnet-4.5': { id: 'claude-sonnet-4.5' },
+                      },
+                    },
+                  ],
+                },
               };
             }
             return { data: [] };
@@ -445,12 +615,19 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-models', text: '/models' },
     });
 
-    assert.strictEqual(sent.length, 2);
-    assert.strictEqual(
-      sent[0].event.properties.part.text,
+    assert.strictEqual(sent.length, 5);
+    assertSyntheticAssistantReply(
+      sent,
+      0,
+      'tool-models',
       '可用模型列表\n\n- `openai/gpt-5.4`\n- `openai/gpt-5.5`\n- `anthropic/claude-sonnet-4.5`',
     );
-    assert.deepStrictEqual(sent[1], { type: 'tool_done', toolSessionId: 'tool-models' });
+    assert.deepStrictEqual(getCalls, [
+      {
+        url: '/config/providers',
+      },
+    ]);
+    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-models' });
     assert.deepStrictEqual(runtime.bindingStore.get('tool-models'), {
       anchor: 'tool-models',
       activeOpencodeSessionId: 'ses-models-1',
@@ -556,12 +733,16 @@ describe('runtime slash control-plane', () => {
           get: async (options) => {
             if (options?.url === '/config/providers') {
               return {
-                data: [
-                  {
-                    id: 'openai',
-                    models: [{ id: 'gpt-5.4' }],
-                  },
-                ],
+                data: {
+                  providers: [
+                    {
+                      id: 'openai',
+                      models: {
+                        'gpt-5.4': { id: 'gpt-5.4' },
+                      },
+                    },
+                  ],
+                },
               };
             }
             if (options?.url === '/session') {
@@ -607,8 +788,8 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-model-1', text: 'hello model 2' },
     });
 
-    assert.strictEqual(sent[0].event.properties.part.text, '后续请求将使用该模型 openai/gpt-5.4');
-    assert.strictEqual(sent[3].event.properties.part.text, '已切换会话 `ses-model-2` 模型会话二');
+    assertSyntheticAssistantReply(sent, 0, 'tool-model-1', '后续请求将使用该模型 openai/gpt-5.4');
+    assertSyntheticAssistantReply(sent, 6, 'tool-model-1', '已切换会话 `ses-model-2` 模型会话二');
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-model-1' },
@@ -883,10 +1064,9 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 3);
-    assert.strictEqual(sent[1].type, 'tool_event');
-    assert.strictEqual(sent[1].event.properties.part.text, '当前范围内没有可切换的会话');
-    assert.deepStrictEqual(sent[2], { type: 'tool_done', toolSessionId: 'tool-slash-invalid' });
+    assert.strictEqual(sent.length, 6);
+    assertSyntheticAssistantReply(sent, 1, 'tool-slash-invalid', '当前范围内没有可切换的会话');
+    assert.deepStrictEqual(sent[5], { type: 'tool_done', toolSessionId: 'tool-slash-invalid' });
   });
 
   test('permission_reply keeps targeting the original host session after slash creates a new active session', async () => {
@@ -967,8 +1147,8 @@ describe('runtime slash control-plane', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        url: '/permission/{requestID}/reply',
-        path: { requestID: 'perm-1' },
+        url: '/session/{id}/permissions/{permissionID}',
+        path: { id: '__bridge_permission_compat__', permissionID: 'perm-1' },
         body: { response: 'once' },
         headers: { 'Content-Type': 'application/json' },
       },

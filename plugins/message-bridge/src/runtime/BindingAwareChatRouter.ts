@@ -38,6 +38,7 @@ export class BindingAwareChatRouter {
         await this.dependencies.slashCommandOrchestrator.execute({
           command,
           context,
+          ...(input.logger ? { logger: input.logger } : {}),
         });
       } catch (error) {
         await this.dependencies.slashCommandOrchestrator.completeFailure({

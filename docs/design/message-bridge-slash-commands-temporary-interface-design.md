@@ -251,8 +251,8 @@ interface SlashCommandContext {
   modelOverride?: SessionModelOverride;
   bootstrapSource:
     | 'existing_binding'
-    | 'bootstrap_created'
-    | 'binding_invalidated';
+    | 'bootstrap_reused_recent_session'
+    | 'bootstrap_created';
 }
 ```
 
@@ -261,7 +261,7 @@ interface SlashCommandContext {
 - 当前默认命中的宿主会话是谁
 - 当前控制面范围是什么
 - 当前会话是否已有模型覆盖
-- 本次上下文是复用旧 binding，还是刚 bootstrap，还是从 invalid 状态恢复而来
+- 本次上下文是复用旧 binding、复用宿主最近活跃会话，还是刚 bootstrap 新会话
 
 ## 7. 内部服务接口设计
 

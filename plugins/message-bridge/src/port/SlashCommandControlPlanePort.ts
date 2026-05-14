@@ -36,7 +36,8 @@ export interface SlashCommandContext {
   activeOpencodeSessionId?: string;
   scope?: SessionScope;
   modelOverride?: SessionModelOverride;
-  bootstrapSource: 'existing_binding' | 'bootstrap_created' | 'binding_invalidated';
+  /** 最终上下文来源；“最近活跃会话”定义为 `listSessions()` 返回的第一个结果。 */
+  bootstrapSource: 'existing_binding' | 'bootstrap_reused_recent_session' | 'bootstrap_created';
 }
 
 /** 宿主会话最小视图。 */
@@ -157,15 +158,28 @@ export interface SlashCommandReplyPresenter {
   presentFailure(command: SlashCommand, error: SlashCommandFailure): string;
 }
 
+/** slash 成功回包的送达阶段。 */
+export type SlashCommandSuccessDeliveryFailureStage =
+  | 'message.updated'
+  | 'message.part.updated.step-start'
+  | 'message.part.updated.text'
+  | 'message.part.updated.step-finish'
+  | 'tool_done';
+
+/** slash 成功回包的投递结果。 */
+export type SlashCommandSuccessDeliveryResult =
+  | { success: true }
+  | { success: false; failureStage: SlashCommandSuccessDeliveryFailureStage };
+
 /** slash 完成态发送端口。 */
 export interface SlashCommandCompletionPort {
-  completeSuccess(input: { anchor: ExternalConversationAnchor; text: string }): Promise<void>;
+  completeSuccess(input: { anchor: ExternalConversationAnchor; text: string }): Promise<SlashCommandSuccessDeliveryResult>;
   completeFailure(input: { anchor: ExternalConversationAnchor; text: string }): Promise<void>;
 }
 
 /** 外层 gateway envelope 投影 seam。 */
 export interface GatewayEnvelopeProjector {
-  projectToolEvent(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>;
+  projectSyntheticAssistantReply(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>[];
   projectToolDone(input: { anchor: ExternalConversationAnchor }): Record<string, unknown>;
   projectToolError(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>;
 }

@@ -28,11 +28,15 @@ function createRuntimeClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
     },
-    postSessionIdPermissionsPermissionId: async () => ({}),
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
+    },
+    postSessionIdPermissionsPermissionId: async () => ({ data: true }),
     _client: {
       get: async (options) => {
         if (options?.url === '/global/health') {
@@ -46,13 +50,17 @@ function createRuntimeClient(overrides = {}) {
 
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
 
-  return {
+  const merged = {
     ...base,
     ...overrides,
     app: hasOwn('app') ? (overrides.app ? { ...overrides.app } : overrides.app) : undefined,
     session: {
       ...base.session,
       ...(overrides.session ?? {}),
+    },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
     },
     _client: hasOwn('_client')
       ? (overrides._client ? { ...base._client, ...overrides._client } : overrides._client)
@@ -61,6 +69,26 @@ function createRuntimeClient(overrides = {}) {
       ? (overrides.global ? { ...base.global, ...overrides.global } : overrides.global)
       : base.global,
   };
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.session ?? {}, 'list')) {
+    merged.session.list = async (options) => merged._client.get({
+      url: '/session',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.config ?? {}, 'providers')) {
+    merged.config.providers = async (options) => merged._client.get({
+      url: '/config/providers',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!hasOwn('postSessionIdPermissionsPermissionId')) {
+    merged.postSessionIdPermissionsPermissionId = async (options) => merged._client.post(options);
+  }
+
+  return merged;
 }
 
 function attachOwnedSession(runtime, opencodeSessionId, anchor = opencodeSessionId) {
@@ -1448,8 +1476,8 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        url: '/permission/{requestID}/reply',
-        path: { requestID: 'perm-a' },
+        url: '/session/{id}/permissions/{permissionID}',
+        path: { id: '__bridge_permission_compat__', permissionID: 'perm-a' },
         body: { response: 'once' },
         headers: { 'Content-Type': 'application/json' },
       },
