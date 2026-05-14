@@ -197,7 +197,7 @@ export function toHostClientLike(client: unknown): HostClientLike {
  * 业务代码只需要提供 permissionId/response，不应感知 sessionID 占位值。
  * 等官方稳定的 requestID 级 permission reply façade 可用后，应优先删除这条兼容路径。
  */
-const LEGACY_PERMISSION_REPLY_SESSION_ID = '__bridge_permission_compat__';
+const LEGACY_PERMISSION_REPLY_SESSION_ID = 'ses_bridge_permission_compat';
 
 export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
   if (getMissingSdkCapabilities(client).length > 0) {

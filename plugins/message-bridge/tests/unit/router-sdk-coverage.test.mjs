@@ -157,7 +157,7 @@ describe('createSdkAdapter coverage', () => {
     });
     assert.deepStrictEqual(r7.data, {
       url: '/session/{id}/permissions/{permissionID}',
-      path: { id: '__bridge_permission_compat__', permissionID: 'perm-1' },
+      path: { id: 'ses_bridge_permission_compat', permissionID: 'perm-1' },
       body: { response: 'always' },
       headers: { 'Content-Type': 'application/json' },
     });
@@ -197,7 +197,7 @@ describe('createSdkAdapter coverage', () => {
     assert.deepStrictEqual(permissionCalls, [
       {
         url: '/session/{id}/permissions/{permissionID}',
-        path: { id: '__bridge_permission_compat__', permissionID: 'perm-contract-1' },
+        path: { id: 'ses_bridge_permission_compat', permissionID: 'perm-contract-1' },
         body: { response: 'reject' },
         headers: { 'Content-Type': 'application/json' },
       },

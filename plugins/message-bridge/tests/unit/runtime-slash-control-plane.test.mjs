@@ -1435,7 +1435,7 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(permissionCalls, [
       {
         url: '/session/{id}/permissions/{permissionID}',
-        path: { id: '__bridge_permission_compat__', permissionID: 'perm-1' },
+        path: { id: 'ses_bridge_permission_compat', permissionID: 'perm-1' },
         body: { response: 'once' },
         headers: { 'Content-Type': 'application/json' },
       },

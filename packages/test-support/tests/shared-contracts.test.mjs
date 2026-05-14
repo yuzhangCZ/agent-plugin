@@ -88,7 +88,6 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
         action: 'permission_reply',
         welinkSessionId: 'wl-permission',
         payload: {
-          toolSessionId: 'tool-permission',
           permissionId: 'perm-1',
           response: 'once',
         },
@@ -102,7 +101,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
         action: 'question_reply',
         welinkSessionId: 'wl-question',
         payload: {
-          toolSessionId: 'tool-question',
+          questionId: 'question-1',
           answer: 'ok',
         },
       },
