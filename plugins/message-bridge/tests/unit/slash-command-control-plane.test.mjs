@@ -95,23 +95,148 @@ function createCompletionPortSenderStub(projected, options = {}) {
 }
 
 describe('SimpleSlashCommandParser', () => {
-  test('parses supported commands and ignores non-slash text', () => {
+  test('parses supported commands, invalid known commands, and group mention prefix cases', () => {
     const parser = new SimpleSlashCommandParser();
 
-    assert.strictEqual(parser.tryParse('hello world'), undefined);
-    assert.deepStrictEqual(parser.tryParse('/new'), { kind: 'new' });
-    assert.deepStrictEqual(parser.tryParse('/sessions'), { kind: 'sessions' });
-    assert.deepStrictEqual(parser.tryParse('/session ses-2'), { kind: 'session', sessionId: 'ses-2' });
-    assert.deepStrictEqual(parser.tryParse('/models'), { kind: 'models' });
-    assert.deepStrictEqual(parser.tryParse('/model openai/gpt-5.4'), {
-      kind: 'model',
-      providerId: 'openai',
-      modelId: 'gpt-5.4',
+    assert.deepStrictEqual(parser.tryParse({ text: 'hello', isGroupChat: false }), { kind: 'none' });
+    assert.deepStrictEqual(parser.tryParse({ text: '/sessions', isGroupChat: false }), {
+      kind: 'matched',
+      command: { kind: 'sessions' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/sessions fdsfs', isGroupChat: false }), {
+      kind: 'invalid',
+      command: { kind: 'sessions' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/new foo', isGroupChat: false }), {
+      kind: 'invalid',
+      command: { kind: 'new' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/session', isGroupChat: false }), {
+      kind: 'invalid',
+      command: { kind: 'session' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/session ses-2', isGroupChat: false }), {
+      kind: 'matched',
+      command: { kind: 'session', sessionId: 'ses-2' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/model openai', isGroupChat: false }), {
+      kind: 'invalid',
+      command: { kind: 'model' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/model openai/gpt-5.4', isGroupChat: false }), {
+      kind: 'matched',
+      command: {
+        kind: 'model',
+        providerId: 'openai',
+        modelId: 'gpt-5.4',
+      },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '/abc', isGroupChat: false }), { kind: 'none' });
+    assert.deepStrictEqual(parser.tryParse({ text: '@bot /sessions', isGroupChat: true }), {
+      kind: 'matched',
+      command: { kind: 'sessions' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '@bot /sessions fdsfs', isGroupChat: true }), {
+      kind: 'invalid',
+      command: { kind: 'sessions' },
+    });
+    assert.deepStrictEqual(parser.tryParse({ text: '@bot /sessions', isGroupChat: false }), {
+      kind: 'none',
     });
   });
 });
 
 describe('RuntimeSlashCommandCompletionPort', () => {
+  test('completeFailure sends synthetic assistant failure reply only', async () => {
+    const projected = [];
+    const completionPort = new RuntimeSlashCommandCompletionPort({
+      projector: new MemoryGatewayEnvelopeProjector(),
+      sender: createCompletionPortSenderStub(projected),
+    });
+
+    const result = await completionPort.completeFailure({
+      anchor: 'tool-failure-only',
+      text: '查询会话列表失败, 当前宿主不可用',
+    });
+
+    assert.deepStrictEqual(result, { success: true });
+    assert.strictEqual(projected.length, 4);
+    assertSyntheticAssistantReply(projected, 0, 'tool-failure-only', '查询会话列表失败, 当前宿主不可用');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('completeFailure returns delivery failure when sender returns false', async () => {
+    const projected = [];
+    const completionPort = new RuntimeSlashCommandCompletionPort({
+      projector: new MemoryGatewayEnvelopeProjector(),
+      sender: createCompletionPortSenderStub(projected, { failAtCall: 1 }),
+    });
+
+    const result = await completionPort.completeFailure({
+      anchor: 'tool-failure-false',
+      text: '失败回包半路终止',
+    });
+
+    assert.deepStrictEqual(result, {
+      success: false,
+      failureStage: 'message.updated',
+    });
+    assert.strictEqual(projected.length, 1);
+    assert.strictEqual(projected[0].event.type, 'message.updated');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('completeFailure returns delivery failure when sender throws', async () => {
+    const projected = [];
+    const completionPort = new RuntimeSlashCommandCompletionPort({
+      projector: new MemoryGatewayEnvelopeProjector(),
+      sender: async (message) => {
+        projected.push(message);
+        throw new Error('send exploded');
+      },
+    });
+
+    const result = await completionPort.completeFailure({
+      anchor: 'tool-failure-throw',
+      text: '失败回包抛异常',
+    });
+
+    assert.deepStrictEqual(result, {
+      success: false,
+      failureStage: 'message.updated',
+    });
+    assert.strictEqual(projected.length, 1);
+    assert.strictEqual(projected[0].event.type, 'message.updated');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('completeFailure returns matching stage when mid-sequence delivery fails', async () => {
+    const projected = [];
+    const completionPort = new RuntimeSlashCommandCompletionPort({
+      projector: new MemoryGatewayEnvelopeProjector(),
+      sender: createCompletionPortSenderStub(projected, { failAtCall: 3 }),
+    });
+
+    const result = await completionPort.completeFailure({
+      anchor: 'tool-failure-mid',
+      text: '第三段失败',
+    });
+
+    assert.deepStrictEqual(result, {
+      success: false,
+      failureStage: 'message.part.updated.text',
+    });
+    assert.strictEqual(projected.length, 3);
+    assert.strictEqual(projected[0].event.type, 'message.updated');
+    assert.strictEqual(projected[1].event.properties.part.type, 'step-start');
+    assert.strictEqual(projected[2].event.properties.part.type, 'text');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+  });
+
   test('completeSuccess returns delivery failure when a synthetic reply event cannot be sent', async () => {
     const projected = [];
     const completionPort = new RuntimeSlashCommandCompletionPort({
@@ -240,6 +365,127 @@ describe('control-plane memory stores', () => {
 });
 
 describe('BindingAwareChatRouter', () => {
+  test('invalid known slash command completes with failure reply and does not prompt host', async () => {
+    const prompts = [];
+    const projected = [];
+    const bindingStore = new InMemoryToolSessionBindingStore();
+    const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+    const modelStore = new InMemorySessionModelOverrideStore();
+    const hostSessionCreationPort = {
+      async createSession() {
+        throw new Error('createSession should not be called');
+      },
+    };
+    const hostSessionQueryPort = {
+      async getSession() {
+        throw new Error('getSession should not be called');
+      },
+      async listSessions() {
+        throw new Error('listSessions should not be called');
+      },
+    };
+    const router = new BindingAwareChatRouter({
+      contextResolver: new ResolveSlashCommandContextUseCase({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+      }),
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCommandOrchestrator: new DefaultSlashCommandOrchestrator({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+        hostPromptExecutionPort: {
+          async prompt(input) {
+            prompts.push(input);
+          },
+        },
+        hostModelCatalogPort: { async listModels() { return []; } },
+        replyPresenter: new DefaultSlashCommandReplyPresenter(),
+        completionPort: new RuntimeSlashCommandCompletionPort({
+          projector: new MemoryGatewayEnvelopeProjector(),
+          sender: createCompletionPortSenderStub(projected),
+        }),
+      }),
+      hostPromptExecutionPort: {
+        async prompt(input) {
+          prompts.push(input);
+        },
+      },
+    });
+
+    const result = await router.route({ anchor: 'tool-invalid-slash', text: '/sessions fdsfs', logger: createLoggerStub() });
+
+    assert.deepStrictEqual(result, { kind: 'slash_completed' });
+    assert.deepStrictEqual(prompts, []);
+    assertSyntheticAssistantReply(projected, 0, 'tool-invalid-slash', '查询会话列表失败, 命令不受支持');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+  });
+
+  test('invalid known slash command remains handled when failure reply sender throws', async () => {
+    const prompts = [];
+    const { logger, errors } = createRecordingLogger();
+    const bindingStore = new InMemoryToolSessionBindingStore();
+    const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+    const modelStore = new InMemorySessionModelOverrideStore();
+    const router = new BindingAwareChatRouter({
+      contextResolver: new ResolveSlashCommandContextUseCase({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort: { async createSession() { throw new Error('should not create'); } },
+        hostSessionQueryPort: {
+          async getSession() { throw new Error('should not get'); },
+          async listSessions() { throw new Error('should not list'); },
+        },
+      }),
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCommandOrchestrator: new DefaultSlashCommandOrchestrator({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort: { async createSession() { throw new Error('should not create'); } },
+        hostSessionQueryPort: {
+          async getSession() { throw new Error('should not get'); },
+          async listSessions() { throw new Error('should not list'); },
+        },
+        hostPromptExecutionPort: { async prompt(input) { prompts.push(input); } },
+        hostModelCatalogPort: { async listModels() { return []; } },
+        replyPresenter: new DefaultSlashCommandReplyPresenter(),
+        completionPort: new RuntimeSlashCommandCompletionPort({
+          projector: new MemoryGatewayEnvelopeProjector(),
+          sender: async () => {
+            throw new Error('send exploded');
+          },
+        }),
+      }),
+      hostPromptExecutionPort: { async prompt(input) { prompts.push(input); } },
+    });
+
+    const result = await router.route({ anchor: 'tool-invalid-send-throw', text: '/sessions fdsfs', logger });
+
+    assert.deepStrictEqual(result, { kind: 'slash_completed' });
+    assert.deepStrictEqual(prompts, []);
+    assert.deepStrictEqual(errors, [
+      {
+        event: 'runtime.slash.synthetic_reply_delivery_failed',
+        fields: {
+          anchor: 'tool-invalid-send-throw',
+          toolSessionId: 'tool-invalid-send-throw',
+          command: 'sessions',
+          failureStage: 'message.updated',
+          messageType: 'message.updated',
+          completionSource: 'slash_control_plane',
+          completionKind: 'failure',
+        },
+      },
+    ]);
+  });
+
   test('bootstraps first chat by reusing the most recent session and prompts active session', async () => {
     const prompts = [];
     let createCalls = 0;
@@ -536,8 +782,7 @@ describe('BindingAwareChatRouter', () => {
     const result = await router.route({ anchor: 'tool-new-fail', text: '/new', logger: createLoggerStub() });
 
     assert.deepStrictEqual(result, { kind: 'slash_completed' });
-    assert.strictEqual(projected[0].type, 'tool_error');
-    assert.strictEqual(projected[0].error, '新建会话失败 当前宿主不可用');
+    assertSyntheticAssistantReply(projected, 0, 'tool-new-fail', '新建会话失败 当前宿主不可用');
   });
 
   test('slash sessions lists scoped sessions and marks current session in presenter output', async () => {
@@ -770,8 +1015,7 @@ describe('BindingAwareChatRouter', () => {
     const result = await router.route({ anchor: 'tool-switch', text: '/session ses-2', logger: createLoggerStub() });
 
     assert.deepStrictEqual(result, { kind: 'slash_completed' });
-    assert.strictEqual(projected[0].type, 'tool_error');
-    assert.strictEqual(projected[0].error, '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内');
+    assertSyntheticAssistantReply(projected, 0, 'tool-switch', '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内');
     assert.deepStrictEqual(bindingStore.get('tool-switch'), {
       anchor: 'tool-switch',
       activeOpencodeSessionId: 'ses-bootstrap',
@@ -883,6 +1127,7 @@ describe('BindingAwareChatRouter', () => {
           failureStage: 'tool_done',
           messageType: 'tool_done',
           completionSource: 'slash_control_plane',
+          completionKind: 'success',
         },
       },
     ]);
@@ -972,8 +1217,7 @@ describe('BindingAwareChatRouter', () => {
     const result = await router.route({ anchor: 'tool-sessions-fail', text: '/sessions', logger: createLoggerStub() });
 
     assert.deepStrictEqual(result, { kind: 'slash_completed' });
-    assert.strictEqual(projected[0].type, 'tool_error');
-    assert.strictEqual(projected[0].error, '查询会话列表失败, 当前宿主不可用');
+    assertSyntheticAssistantReply(projected, 0, 'tool-sessions-fail', '查询会话列表失败, 当前宿主不可用');
   });
 
   test('slash context resolution failure still uses unified failure template', async () => {
@@ -1038,8 +1282,83 @@ describe('BindingAwareChatRouter', () => {
       /slash_command\.failure_handled/u,
     );
 
-    assert.strictEqual(projected[0].type, 'tool_error');
-    assert.strictEqual(projected[0].error, '查询会话列表失败, 当前没有可用会话');
+    assert.strictEqual(projected.length, 4);
+    assertSyntheticAssistantReply(projected, 0, 'tool-context-fail', '查询会话列表失败, 当前没有可用会话');
+  });
+
+  test('matched slash context failure still throws handled error when failure reply sender throws', async () => {
+    const { logger, errors } = createRecordingLogger();
+    const hostSessionCreationPort = {
+      async createSession() {
+        return {
+          id: 'ses-bootstrap',
+          title: 'bootstrap',
+          directory: '/tmp/bootstrap',
+        };
+      },
+    };
+    const hostSessionQueryPort = {
+      async getSession(sessionId) {
+        if (sessionId === 'ses-bootstrap') {
+          throw new Error('session missing');
+        }
+        return { id: sessionId, title: sessionId, directory: `/tmp/${sessionId}` };
+      },
+      async listSessions() {
+        return [];
+      },
+    };
+    const modelStore = new InMemorySessionModelOverrideStore();
+    const bindingStore = new InMemoryToolSessionBindingStore();
+    const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+    const router = new BindingAwareChatRouter({
+      contextResolver: new ResolveSlashCommandContextUseCase({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+      }),
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCommandOrchestrator: new DefaultSlashCommandOrchestrator({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+        hostPromptExecutionPort: { async prompt() {} },
+        hostModelCatalogPort: { async listModels() { return []; } },
+        replyPresenter: new DefaultSlashCommandReplyPresenter(),
+        completionPort: new RuntimeSlashCommandCompletionPort({
+          projector: new MemoryGatewayEnvelopeProjector(),
+          sender: async () => {
+            throw new Error('send exploded');
+          },
+        }),
+      }),
+      hostPromptExecutionPort: { async prompt() {} },
+    });
+
+    await router.route({ anchor: 'tool-context-send-throw', text: 'hello', logger });
+
+    await assert.rejects(
+      router.route({ anchor: 'tool-context-send-throw', text: '/sessions', logger }),
+      /slash_command\.failure_handled/u,
+    );
+    assert.deepStrictEqual(errors, [
+      {
+        event: 'runtime.slash.synthetic_reply_delivery_failed',
+        fields: {
+          anchor: 'tool-context-send-throw',
+          toolSessionId: 'tool-context-send-throw',
+          command: 'sessions',
+          failureStage: 'message.updated',
+          messageType: 'message.updated',
+          completionSource: 'slash_control_plane',
+          completionKind: 'failure',
+        },
+      },
+    ]);
   });
 
   test('reuses the most recent session when resolving an invalid binding on the next request', async () => {
@@ -1289,6 +1608,6 @@ describe('BindingAwareChatRouter', () => {
       'tool-models',
       '可用模型列表\n\n- `openai/gpt-5.4`\n- `anthropic/claude-sonnet-4`',
     );
-    assert.strictEqual(projected[5].error, '设置模型失败,目标模型不存在或当前宿主不可用');
+    assertSyntheticAssistantReply(projected, 5, 'tool-models', '设置模型失败,目标模型不存在或当前宿主不可用');
   });
 });

@@ -3,10 +3,13 @@ import type {
   HostPromptExecutionPort,
   HostSessionCreationPort,
   HostSessionQueryPort,
+  SlashCommandFailureDeliveryFailureStage,
+  SlashCommandFailureDeliveryResult,
   SlashCommandSuccessDeliveryFailureStage,
   SlashCommandSuccessDeliveryResult,
   SessionModelOverrideStore,
   SlashCommand,
+  SlashCommandDescriptor,
   SlashCommandCompletionPort,
   SlashCommandContext,
   SlashCommandFailure,
@@ -43,26 +46,41 @@ export class DefaultSlashCommandOrchestrator {
         anchor: input.context.anchor,
         text,
       });
-      this.logSuccessDeliveryFailure(deliveryResult, input);
+      this.logSyntheticReplyDeliveryFailure({
+        anchor: input.context.anchor,
+        commandKind: input.command.kind,
+        deliveryResult,
+        completionKind: 'success',
+        logger: input.logger,
+      });
     } catch (error) {
       await this.completeFailure({
         command: input.command,
         anchor: input.context.anchor,
         error,
+        ...(input.logger ? { logger: input.logger } : {}),
       });
     }
   }
 
   async completeFailure(input: {
-    command: SlashCommand;
+    command: SlashCommandDescriptor;
     anchor: string;
     error: unknown;
+    logger?: BridgeLogger;
   }): Promise<void> {
     const failure = this.normalizeFailure(input.error);
     const text = this.dependencies.replyPresenter.presentFailure(input.command, failure);
-    await this.dependencies.completionPort.completeFailure({
+    const deliveryResult = await this.dependencies.completionPort.completeFailure({
       anchor: input.anchor,
       text,
+    });
+    this.logSyntheticReplyDeliveryFailure({
+      anchor: input.anchor,
+      commandKind: input.command.kind,
+      deliveryResult,
+      completionKind: 'failure',
+      logger: input.logger,
     });
   }
 
@@ -182,29 +200,30 @@ export class DefaultSlashCommandOrchestrator {
       || code === 'sdk_unreachable';
   }
 
-  private logSuccessDeliveryFailure(
-    deliveryResult: SlashCommandSuccessDeliveryResult,
-    input: {
-      command: SlashCommand;
-      context: SlashCommandContext;
-      logger?: BridgeLogger;
-    },
-  ): void {
+  private logSyntheticReplyDeliveryFailure(input: {
+    anchor: string;
+    commandKind: SlashCommand['kind'];
+    deliveryResult: SlashCommandSuccessDeliveryResult | SlashCommandFailureDeliveryResult;
+    completionKind: 'success' | 'failure';
+    logger?: BridgeLogger;
+  }): void {
+    const { deliveryResult } = input;
     if (deliveryResult.success) {
       return;
     }
     input.logger?.error('runtime.slash.synthetic_reply_delivery_failed', {
-      anchor: input.context.anchor,
-      toolSessionId: input.context.anchor,
-      command: input.command.kind,
+      anchor: input.anchor,
+      toolSessionId: input.anchor,
+      command: input.commandKind,
       failureStage: deliveryResult.failureStage,
       messageType: this.resolveDeliveryFailureMessageType(deliveryResult.failureStage),
       completionSource: 'slash_control_plane',
+      completionKind: input.completionKind,
     });
   }
 
   private resolveDeliveryFailureMessageType(
-    failureStage: SlashCommandSuccessDeliveryFailureStage,
+    failureStage: SlashCommandSuccessDeliveryFailureStage | SlashCommandFailureDeliveryFailureStage,
   ): 'message.updated' | 'message.part.updated' | 'tool_done' {
     if (failureStage === 'message.updated') {
       return 'message.updated';

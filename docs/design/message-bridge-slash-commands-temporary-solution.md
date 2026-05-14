@@ -1,7 +1,7 @@
 # Message Bridge Slash Commands 临时方案设计
 
-**Version:** 1.0  
-**Date:** 2026-05-12  
+**Version:** 1.1  
+**Date:** 2026-05-14  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
 **Related:** `./message-bridge-slash-commands-solution.md`, `./toolsessionid-dependency-analysis.md`, `../superpowers/specs/2026-05-08-message-bridge-slash-commands-requirements.md`
@@ -785,8 +785,10 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 即：
 
 - 成功场景仍先发送 `tool_event`，再发送 `tool_done`
-- 失败场景仍发送 `tool_error`
+- 失败场景发送 synthetic assistant failure reply，不发送 `tool_error`
 - `/new`、`/sessions`、`/session`、`/models`、`/model` 的返回文本模板保持与正式方案一致
+- 当前版本的群聊判定信号唯一取 `invoke.chat.payload.imGroupId`；只有该信号存在时才允许剥离 `@xxx ` 前缀后再做 slash 三态判定
+- 未知 slash 文本如 `/abc` 继续走普通 chat / LLM，不进入 slash 失败分支
 
 实现约束补充：
 
@@ -826,7 +828,7 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 8. `/sessions` 仅返回当前 `project/workspace` 范围内会话，并正确标记当前项
 9. `/model` 设置后，模型覆盖写入当前 active session 对应的模型覆盖存储，后续普通 `chat` 立即使用该覆盖
 10. 当当前 active binding 在 `session.get` / `session_not_found` 判定中失效时，本次请求返回错误并将 binding 标记为 `invalid`，下一次请求重新 bootstrap
-11. slash command 成功和失败均继续复用 `tool_event` / `tool_done` / `tool_error`
+11. slash command 成功继续复用 synthetic assistant reply + `tool_done`；失败继续复用 synthetic assistant reply，且不发送 `tool_error`
 12. `question_reply` 使用 `questionId`、`permission_reply` 使用 `permissionId`，并明确该语义会带来后续代码与 schema 改造
 13. 后续从临时态迁移到正式态时，用户可见命令文案和交互模板无需变化
 

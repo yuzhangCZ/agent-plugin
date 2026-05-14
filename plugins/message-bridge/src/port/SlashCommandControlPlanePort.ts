@@ -64,6 +64,23 @@ export type SlashCommand =
   | { kind: 'models' }
   | { kind: 'model'; providerId: string; modelId: string };
 
+/** slash 命令意图；用于非法参数等未形成完整语法树的失败回包。 */
+export interface SlashCommandDescriptor {
+  kind: SlashCommand['kind'];
+}
+
+/** slash parser 输入：文本与群聊上下文必须显式传入。 */
+export interface SlashCommandParseInput {
+  text: string;
+  isGroupChat: boolean;
+}
+
+/** slash parser 三态结果：命中、已知命令但参数非法、非 slash。 */
+export type SlashCommandParseResult =
+  | { kind: 'matched'; command: SlashCommand }
+  | { kind: 'invalid'; command: SlashCommandDescriptor }
+  | { kind: 'none' };
+
 /** slash 失败码：只表达控制面错误事实，不承载用户文案。 */
 export type SlashCommandFailureCode =
   | 'session_not_found'
@@ -149,13 +166,13 @@ export interface HostModelCatalogPort {
 
 /** slash 语法解析器。 */
 export interface SlashCommandParser {
-  tryParse(text: string): SlashCommand | undefined;
+  tryParse(input: SlashCommandParseInput): SlashCommandParseResult;
 }
 
 /** slash 回包 presenter。 */
 export interface SlashCommandReplyPresenter {
   presentSuccess(result: SlashCommandResult): string;
-  presentFailure(command: SlashCommand, error: SlashCommandFailure): string;
+  presentFailure(command: SlashCommandDescriptor, error: SlashCommandFailure): string;
 }
 
 /** slash 成功回包的送达阶段。 */
@@ -171,15 +188,22 @@ export type SlashCommandSuccessDeliveryResult =
   | { success: true }
   | { success: false; failureStage: SlashCommandSuccessDeliveryFailureStage };
 
+/** slash 失败回包的送达阶段；不包含 tool_done。 */
+export type SlashCommandFailureDeliveryFailureStage = Exclude<SlashCommandSuccessDeliveryFailureStage, 'tool_done'>;
+
+/** slash 失败回包的投递结果。 */
+export type SlashCommandFailureDeliveryResult =
+  | { success: true }
+  | { success: false; failureStage: SlashCommandFailureDeliveryFailureStage };
+
 /** slash 完成态发送端口。 */
 export interface SlashCommandCompletionPort {
   completeSuccess(input: { anchor: ExternalConversationAnchor; text: string }): Promise<SlashCommandSuccessDeliveryResult>;
-  completeFailure(input: { anchor: ExternalConversationAnchor; text: string }): Promise<void>;
+  completeFailure(input: { anchor: ExternalConversationAnchor; text: string }): Promise<SlashCommandFailureDeliveryResult>;
 }
 
 /** 外层 gateway envelope 投影 seam。 */
 export interface GatewayEnvelopeProjector {
   projectSyntheticAssistantReply(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>[];
   projectToolDone(input: { anchor: ExternalConversationAnchor }): Record<string, unknown>;
-  projectToolError(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>;
 }

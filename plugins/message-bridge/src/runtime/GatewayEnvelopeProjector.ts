@@ -24,12 +24,4 @@ export class MemoryGatewayEnvelopeProjector implements GatewayEnvelopeProjector 
       toolSessionId: input.anchor,
     };
   }
-
-  projectToolError(input: { anchor: string; text: string }): Record<string, unknown> {
-    return {
-      type: 'tool_error',
-      toolSessionId: input.anchor,
-      error: input.text,
-    };
-  }
 }

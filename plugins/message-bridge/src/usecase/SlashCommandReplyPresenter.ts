@@ -1,5 +1,5 @@
 import type {
-  SlashCommand,
+  SlashCommandDescriptor,
   SlashCommandFailure,
   SlashCommandReplyPresenter,
   SlashCommandResult,
@@ -46,7 +46,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
     }
   }
 
-  presentFailure(command: SlashCommand, error: SlashCommandFailure): string {
+  presentFailure(command: SlashCommandDescriptor, error: SlashCommandFailure): string {
     const reason = this.presentFailureReason(error);
 
     switch (command.kind) {
@@ -61,7 +61,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
       case 'model':
         return `设置模型失败,${reason}`;
       default:
-        return this.assertNever(command);
+        throw new Error(`Unhandled slash command descriptor: ${JSON.stringify(command)}`);
     }
   }
 

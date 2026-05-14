@@ -4,6 +4,8 @@ import type {
   SessionModelOverride,
   SessionModelOverrideStore,
   SlashCommand,
+  SlashCommandParseInput,
+  SlashCommandParseResult,
   SlashCommandParser,
   ToolSessionBinding,
   ToolSessionBindingStore,
@@ -101,35 +103,89 @@ export class InMemorySessionModelOverrideStore implements SessionModelOverrideSt
 
 /** 最小 slash 语法解析器，只识别控制面命令，不做业务校验。 */
 export class SimpleSlashCommandParser implements SlashCommandParser {
-  tryParse(text: string): SlashCommand | undefined {
-    const normalized = text.trim();
+  tryParse(input: SlashCommandParseInput): SlashCommandParseResult {
+    const normalized = this.normalizeInput(input);
     if (!normalized.startsWith('/')) {
-      return undefined;
+      return { kind: 'none' };
     }
-    if (normalized === '/new') {
-      return { kind: 'new' };
+    return this.parseKnownCommand(normalized);
+  }
+
+  /** 群聊下仅剥离首段 `@xxx ` mention；单聊严格按原文判断。 */
+  private normalizeInput(input: SlashCommandParseInput): string {
+    const normalized = input.text.trim();
+    if (!input.isGroupChat) {
+      return normalized;
     }
-    if (normalized === '/sessions') {
-      return { kind: 'sessions' };
-    }
-    if (normalized === '/models') {
-      return { kind: 'models' };
+    return normalized.replace(/^@\S+\s+/, '').trim();
+  }
+
+  private parseKnownCommand(normalized: string): SlashCommandParseResult {
+    const standaloneCommandResult = this.parseStandaloneCommand(normalized);
+    if (standaloneCommandResult) {
+      return standaloneCommandResult;
     }
 
-    const sessionMatch = normalized.match(/^\/session\s+(\S+)$/);
-    if (sessionMatch) {
-      return { kind: 'session', sessionId: sessionMatch[1] };
+    const parameterizedCommandResult = this.parseParameterizedCommand(normalized);
+    if (parameterizedCommandResult) {
+      return parameterizedCommandResult;
     }
 
-    const modelMatch = normalized.match(/^\/model\s+([^/\s]+)\/(\S+)$/);
-    if (modelMatch) {
-      return {
-        kind: 'model',
-        providerId: modelMatch[1],
-        modelId: modelMatch[2],
-      };
+    return { kind: 'none' };
+  }
+
+  private parseStandaloneCommand(normalized: string): SlashCommandParseResult | undefined {
+    const standaloneCommands: Array<'new' | 'sessions' | 'models'> = ['new', 'sessions', 'models'];
+
+    for (const commandKind of standaloneCommands) {
+      const exactCommand = `/${commandKind}`;
+      if (normalized === exactCommand) {
+        return { kind: 'matched', command: { kind: commandKind } };
+      }
+      if (this.matchesKnownCommand(normalized, commandKind)) {
+        return { kind: 'invalid', command: { kind: commandKind } };
+      }
     }
 
     return undefined;
+  }
+
+  private parseParameterizedCommand(normalized: string): SlashCommandParseResult | undefined {
+    return this.parseSessionCommand(normalized) ?? this.parseModelCommand(normalized);
+  }
+
+  private parseSessionCommand(normalized: string): SlashCommandParseResult | undefined {
+    const sessionCommandPattern = /^\/session\s+(\S+)$/u;
+    const sessionMatch = normalized.match(sessionCommandPattern);
+    if (sessionMatch) {
+      return { kind: 'matched', command: { kind: 'session', sessionId: sessionMatch[1] } };
+    }
+    if (this.matchesKnownCommand(normalized, 'session')) {
+      return { kind: 'invalid', command: { kind: 'session' } };
+    }
+    return undefined;
+  }
+
+  private parseModelCommand(normalized: string): SlashCommandParseResult | undefined {
+    const modelCommandPattern = /^\/model\s+([^/\s]+)\/(\S+)$/u;
+    const modelMatch = normalized.match(modelCommandPattern);
+    if (modelMatch) {
+      return {
+        kind: 'matched',
+        command: {
+          kind: 'model',
+          providerId: modelMatch[1],
+          modelId: modelMatch[2],
+        },
+      };
+    }
+    if (this.matchesKnownCommand(normalized, 'model')) {
+      return { kind: 'invalid', command: { kind: 'model' } };
+    }
+    return undefined;
+  }
+
+  private matchesKnownCommand(normalized: string, command: SlashCommand['kind']): boolean {
+    return new RegExp(`^/${command}(?:\\s|$)`, 'u').test(normalized);
   }
 }

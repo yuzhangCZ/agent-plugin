@@ -1,4 +1,6 @@
 import type {
+  SlashCommandFailureDeliveryFailureStage,
+  SlashCommandFailureDeliveryResult,
   GatewayEnvelopeProjector,
   SlashCommandCompletionPort,
   SlashCommandSuccessDeliveryFailureStage,
@@ -33,8 +35,21 @@ export class RuntimeSlashCommandCompletionPort implements SlashCommandCompletion
     return { success: true };
   }
 
-  async completeFailure(input: { anchor: string; text: string }): Promise<void> {
-    await this.dependencies.sender(this.dependencies.projector.projectToolError(input));
+  async completeFailure(input: { anchor: string; text: string }): Promise<SlashCommandFailureDeliveryResult> {
+    const messages = this.dependencies.projector.projectSyntheticAssistantReply(input);
+    const stages: SlashCommandFailureDeliveryFailureStage[] = [
+      'message.updated',
+      'message.part.updated.step-start',
+      'message.part.updated.text',
+      'message.part.updated.step-finish',
+    ];
+    for (const [index, message] of messages.entries()) {
+      const sent = await this.trySend(message);
+      if (sent === false) {
+        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text' };
+      }
+    }
+    return { success: true };
   }
 
   private async trySend(message: Record<string, unknown>): Promise<boolean> {

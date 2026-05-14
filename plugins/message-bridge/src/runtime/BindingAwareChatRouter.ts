@@ -25,29 +25,44 @@ export class BindingAwareChatRouter {
   async route(input: {
     anchor: string;
     text: string;
+    isGroupChat?: boolean;
     assistantId?: string;
     logger?: BridgeLogger;
   }): Promise<
     | { kind: 'chat_forwarded'; sessionId: string }
     | { kind: 'slash_completed' }
   > {
-    const command = this.dependencies.slashCommandParser.tryParse(input.text);
-    if (command) {
+    const parseResult = this.dependencies.slashCommandParser.tryParse({
+      text: input.text,
+      isGroupChat: input.isGroupChat === true,
+    });
+    if (parseResult.kind === 'matched') {
       try {
         const context = await this.dependencies.contextResolver.resolve(input.anchor, input.logger);
         await this.dependencies.slashCommandOrchestrator.execute({
-          command,
+          command: parseResult.command,
           context,
           ...(input.logger ? { logger: input.logger } : {}),
         });
       } catch (error) {
         await this.dependencies.slashCommandOrchestrator.completeFailure({
-          command,
+          command: parseResult.command,
           anchor: input.anchor,
           error,
+          ...(input.logger ? { logger: input.logger } : {}),
         });
         throw new HandledSlashCommandFailure(error);
       }
+      return { kind: 'slash_completed' };
+    }
+
+    if (parseResult.kind === 'invalid') {
+      await this.dependencies.slashCommandOrchestrator.completeFailure({
+        command: parseResult.command,
+        anchor: input.anchor,
+        error: { code: 'invalid_command' },
+        ...(input.logger ? { logger: input.logger } : {}),
+      });
       return { kind: 'slash_completed' };
     }
 

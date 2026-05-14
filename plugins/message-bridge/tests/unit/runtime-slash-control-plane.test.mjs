@@ -92,6 +92,295 @@ function createRuntimeClient(overrides = {}) {
 }
 
 describe('runtime slash control-plane', () => {
+  test('invalid slash command returns failure reply without tool_error or tool_done', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-invalid-slash',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-invalid-slash', text: '/sessions fdsfs' },
+    });
+
+    assert.strictEqual(sent.length, 4);
+    assertSyntheticAssistantReply(sent, 0, 'tool-invalid-slash', '查询会话列表失败, 命令不受支持');
+    assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('invalid slash command does not fall back to tool_error when failure reply delivery returns false', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.sessionSender = {
+      sendIfActive: () => false,
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-invalid-slash-false',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-invalid-slash-false', text: '/sessions fdsfs' },
+    });
+
+    assert.deepStrictEqual(sent, []);
+  });
+
+  test('group chat slash strips leading mention before routing slash command', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'ses-group-1',
+              title: '群聊会话一',
+              directory: '/tmp/group-1',
+              projectID: 'proj-group-1',
+              workspaceID: 'ws-group-1',
+            },
+          }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-group-1',
+              title: '群聊会话一',
+              directory: '/tmp/group-1',
+              projectID: 'proj-group-1',
+              workspaceID: 'ws-group-1',
+            },
+          }),
+        },
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/session') {
+              return {
+                data: [
+                  { id: 'ses-group-1', title: '群聊会话一', directory: '/tmp/group-1', projectID: 'proj-group-1', workspaceID: 'ws-group-1' },
+                ],
+              };
+            }
+            return { data: [] };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-group-1', text: '@bot /sessions', imGroupId: 'group-a' },
+    });
+
+    assert.strictEqual(sent.length, 5);
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-1', '可切换会话列表\n\n- `ses-group-1` 群聊会话一（当前）');
+    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-group-1' });
+  });
+
+  test('group chat invalid slash strips mention and still returns failure reply only', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-invalid',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-group-invalid', text: '@bot /sessions fdsfs', imGroupId: 'group-a' },
+    });
+
+    assert.strictEqual(sent.length, 4);
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-invalid', '查询会话列表失败, 命令不受支持');
+    assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('matched slash failure does not fall back to tool_error when failure reply delivery throws', async () => {
+    let createCount = 0;
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => {
+            createCount += 1;
+            return {
+              data: {
+                id: createCount === 1 ? 'ses-slash-send-throw-1' : 'ses-slash-send-throw-2',
+                title: 'slash failure delivery throw',
+                directory: '/tmp/slash-send-throw',
+              },
+            };
+          },
+          get: async (options) => {
+            if (options?.path?.id === 'ses-slash-send-throw-1') {
+              const error = new Error('session missing');
+              error.code = 'session_not_found';
+              throw error;
+            }
+            return {
+              data: {
+                id: options?.path?.id ?? 'ses-slash-send-throw-2',
+                directory: '/tmp/slash-send-throw',
+              },
+            };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    runtime.sessionSender = {
+      sendIfActive: () => {
+        throw new Error('send exploded');
+      },
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+    runtime.bindingStore.bind('tool-slash-send-throw', 'ses-slash-send-throw-1');
+    runtime.ownershipResolver.attach('ses-slash-send-throw-1', 'tool-slash-send-throw');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-slash-send-throw',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-slash-send-throw', text: '/sessions' },
+    });
+
+    assert.deepStrictEqual(sent, []);
+    assert.deepStrictEqual(runtime.bindingStore.get('tool-slash-send-throw'), {
+      anchor: 'tool-slash-send-throw',
+      activeOpencodeSessionId: 'ses-slash-send-throw-1',
+      status: 'invalid',
+    });
+    assert.strictEqual(runtime.ownershipResolver.resolveAttachedAnchor('ses-slash-send-throw-1'), undefined);
+  });
+
+  test('mention-like prefix without group signal stays on normal chat path', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'ses-mention-1',
+              title: 'mention 会话',
+              directory: '/tmp/mention-1',
+            },
+          }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-mention-1',
+              directory: '/tmp/mention-1',
+            },
+          }),
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-mention-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-mention-1', text: '@bot /sessions fdsfs' },
+    });
+
+    assert.deepStrictEqual(prompts, [
+      {
+        path: { id: 'ses-mention-1' },
+        query: { directory: '/tmp/mention-1' },
+        body: {
+          parts: [{ type: 'text', text: '@bot /sessions fdsfs' }],
+        },
+      },
+    ]);
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_done',
+        toolSessionId: 'tool-mention-1',
+        welinkSessionId: 'wl-mention-1',
+      },
+    ]);
+  });
+
+  test('unknown slash text still falls through to normal chat path', async () => {
+    const prompts = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async () => ({
+            data: {
+              id: 'ses-unknown-1',
+              title: 'unknown 会话',
+              directory: '/tmp/unknown-1',
+            },
+          }),
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-unknown-1',
+              directory: '/tmp/unknown-1',
+            },
+          }),
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-unknown-1',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-unknown-1', text: '/abc' },
+    });
+
+    assert.deepStrictEqual(prompts, [
+      {
+        path: { id: 'ses-unknown-1' },
+        query: { directory: '/tmp/unknown-1' },
+        body: {
+          parts: [{ type: 'text', text: '/abc' }],
+        },
+      },
+    ]);
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_done',
+        toolSessionId: 'tool-unknown-1',
+        welinkSessionId: 'wl-unknown-1',
+      },
+    ]);
+  });
+
   test('chat bootstraps host session before prompt and keeps tool_done envelope anchored to toolSessionId', async () => {
     const creates = [];
     const prompts = [];
@@ -271,6 +560,9 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(getCalls, [
       {
         url: '/session',
+      },
+      {
+        url: '/session',
         query: {
           directory: '/tmp/proj-1',
         },
@@ -336,12 +628,8 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-session-fail', text: '/session ses-scope-2' },
     });
 
-    assert.strictEqual(sent.length, 1);
-    assert.deepStrictEqual(sent[0], {
-      type: 'tool_error',
-      toolSessionId: 'tool-session-fail',
-      error: '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内',
-    });
+    assert.strictEqual(sent.length, 4);
+    assertSyntheticAssistantReply(sent, 0, 'tool-session-fail', '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内');
     assert.deepStrictEqual(runtime.bindingStore.get('tool-session-fail'), {
       anchor: 'tool-session-fail',
       activeOpencodeSessionId: 'ses-scope-1',
@@ -624,6 +912,9 @@ describe('runtime slash control-plane', () => {
     );
     assert.deepStrictEqual(getCalls, [
       {
+        url: '/session',
+      },
+      {
         url: '/config/providers',
       },
     ]);
@@ -680,12 +971,8 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-fail-1', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 1);
-    assert.deepStrictEqual(sent[0], {
-      type: 'tool_error',
-      toolSessionId: 'tool-fail-1',
-      error: '查询会话列表失败, 当前宿主不可用',
-    });
+    assert.strictEqual(sent.length, 4);
+    assertSyntheticAssistantReply(sent, 0, 'tool-fail-1', '查询会话列表失败, 当前宿主不可用');
   });
 
   test('slash model sets override for current session and later chat carries model until session switch', async () => {
@@ -902,7 +1189,11 @@ describe('runtime slash control-plane', () => {
       },
     });
 
-    assert.deepStrictEqual(questionListCalls, []);
+    assert.deepStrictEqual(questionListCalls, [
+      {
+        url: '/session',
+      },
+    ]);
     assert.deepStrictEqual(questionReplyCalls, [
       {
         url: '/question/{requestID}/reply',
@@ -1044,12 +1335,8 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 1);
-    assert.deepStrictEqual(sent[0], {
-      type: 'tool_error',
-      toolSessionId: 'tool-slash-invalid',
-      error: '查询会话列表失败, 当前没有可用会话',
-    });
+    assert.strictEqual(sent.length, 4);
+    assertSyntheticAssistantReply(sent, 0, 'tool-slash-invalid', '查询会话列表失败, 当前没有可用会话');
     assert.deepStrictEqual(runtime.bindingStore.get('tool-slash-invalid'), {
       anchor: 'tool-slash-invalid',
       activeOpencodeSessionId: 'ses-slash-invalid-1',
@@ -1064,9 +1351,9 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 6);
-    assertSyntheticAssistantReply(sent, 1, 'tool-slash-invalid', '当前范围内没有可切换的会话');
-    assert.deepStrictEqual(sent[5], { type: 'tool_done', toolSessionId: 'tool-slash-invalid' });
+    assert.strictEqual(sent.length, 9);
+    assertSyntheticAssistantReply(sent, 4, 'tool-slash-invalid', '当前范围内没有可切换的会话');
+    assert.deepStrictEqual(sent[8], { type: 'tool_done', toolSessionId: 'tool-slash-invalid' });
   });
 
   test('permission_reply keeps targeting the original host session after slash creates a new active session', async () => {

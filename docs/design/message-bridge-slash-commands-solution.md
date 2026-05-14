@@ -1,7 +1,7 @@
 # Message Bridge Slash Commands 方案设计
 
-**Version:** 2.1  
-**Date:** 2026-05-09  
+**Version:** 2.2  
+**Date:** 2026-05-14  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
 **Related:** `../specs/2026-05-08-message-bridge-slash-commands-requirements.md`, `integration/opencode/docs/architecture/07-command.md`, `integration/openclaw/docs/learn/slash-commands-tui-perspective.md`
@@ -110,16 +110,49 @@
 v1 中所有 slash command 必须复用现有 `invoke.chat` 下行入口：
 
 1. 上游仍发送 `invoke.chat`
-2. 插件在进入宿主对话 runtime 之前识别 slash command
+2. 插件在进入宿主对话 runtime 之前识别 slash command，并显式拿到“是否群聊”上下文
 3. 命中控制命令后，不再把原始文本送给宿主 LLM
 4. 插件直接执行控制逻辑
-5. 插件通过现有 `tool_event` / `tool_done` / `tool_error` 返回结果
+5. 插件通过现有 assistant synthetic reply 事件序列与 `tool_done` 返回成功结果；失败结果只走 assistant synthetic reply 文本
 
 采用该约束的原因：
 
 - 不需要第一阶段扩展新的 gateway action
 - slash command 的对外体验保持统一
 - 服务端无须理解宿主内部控制语义
+
+### 7.1.1 Slash 识别与群聊前缀规则
+
+当前版本的 slash parser 必须输出三态结果：
+
+- `matched`
+  - 已成功解析成控制面命令
+- `invalid`
+  - 已识别为已知 slash 命令，但参数形态不合法
+- `none`
+  - 不是 slash 控制面命令，继续走普通 chat / LLM
+
+v1 当前收口的已知命令仅包括：
+
+- `/new`
+- `/sessions`
+- `/session <sessionId>`
+- `/models`
+- `/model <providerId/modelId>`
+
+判定规则如下：
+
+- `/sessions fdsfs`、`/new foo`、`/session`、`/model`、`/model openai` 统一返回 `invalid`
+- 未知 slash 文本如 `/abc` 返回 `none`，继续交给普通 chat 路径
+- 群聊中的 `@bot /sessions`、`@bot /sessions fdsfs` 仅在明确群聊时才允许先剥离 mention 再做 slash 判定
+
+群聊信号必须显式进入 parser 输入，不能靠隐式字段猜测。当前 `message-bridge` 已稳定拿到的唯一群聊信号是 `invoke.chat.payload.imGroupId`；因此 v1 方案将“`imGroupId` 为非空字符串”定义为唯一群聊判定条件。若后续上游引入 `sessionType=group` 等更正式信号，必须先改造路由入口，再调整本节规则。
+
+mention 剥离规则保持最小化：
+
+- 先对原文做 trim
+- 仅当 `isGroupChat=true` 时，若文本以 `@<非空白内容><空白>` 开头，则剥离这一个前缀
+- 再基于剩余文本做 slash 三态判定
 
 ### 7.2 服务端职责收缩
 
@@ -157,21 +190,23 @@ skill-server / miniapp 只需要继续做：
 
 ### 7.3 Slash Command 上行回复约束
 
-v1 不新增 gateway action，统一复用现有 `chat` 下行入口以及 `tool_event` / `tool_done` / `tool_error` 上行消息。slash command 的回复必须兼容 `origin/main` 现有“回复助手消息”展示链路，不引入 slash command 专属渲染分支。
+v1 不新增 gateway action，统一复用现有 `chat` 下行入口。slash command 的回复必须兼容 `origin/main` 现有“回复助手消息”展示链路，不引入 slash command 专属渲染分支。
 
 - 成功场景
-  - 插件必须先发送 `tool_event`
-  - `tool_event` 的文本内容即 slash command 返回给用户的正文
+  - 插件必须发送一组 assistant synthetic reply `tool_event`
+  - 该序列的文本 part 即 slash command 返回给用户的正文
   - 插件随后发送 `tool_done`，表示本次控制命令完成
 - 失败场景
-  - 插件必须发送 `tool_error`
-  - `tool_error` 的文本内容即返回给用户的失败文案
+  - 插件必须发送一组 assistant synthetic reply `tool_event`
+  - 该序列的文本 part 即返回给用户的失败文案
+  - 插件不得发送 `tool_error`
+  - 插件不得补发额外 `tool_done`
 - 服务端行为
   - 服务端继续复用现有助手消息展示逻辑
   - 服务端不对 slash command 增加新的消息类型判断或专属回复动作
 
 ### 7.4 Slash Command 返回文本格式
-v1 中所有 slash command 继续通过 `tool_event` / `tool_done` / `tool_error` 返回文本结果。返回体采用简单 Markdown 约定组织，用于承载段落、换行、无序列表和行内代码样式，但不引入 Markdown 表格、HTML、复杂嵌套结构或额外结构化协议字段。为降低服务端渲染复杂度并保证 OpenCode / OpenClaw 行为一致，返回文本必须遵循以下统一格式约束：
+v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回结果；成功场景额外发送 `tool_done`，失败场景不发送 `tool_error`。返回体采用简单 Markdown 约定组织，用于承载段落、换行、无序列表和行内代码样式，但不引入 Markdown 表格、HTML、复杂嵌套结构或额外结构化协议字段。为降低服务端渲染复杂度并保证 OpenCode / OpenClaw 行为一致，返回文本必须遵循以下统一格式约束：
 
 1. 返回文本使用 `\n` 作为换行分隔符；服务端与前端必须保留这些换行边界，末尾是否带额外 `\n` 不作为协议要求。
 2. 第一行必须是结果摘要，直接说明命令结果。
@@ -578,14 +613,17 @@ sequenceDiagram
   participant MB as bridge plugin
   participant OC as OpenCode API
 
-  U->>SS: 输入 /sessions
-  SS->>GW: invoke.chat(text="/sessions", welinkSessionId=wl_1)
+  U->>SS: 输入 @bot /sessions
+  SS->>GW: invoke.chat(text="@bot /sessions", welinkSessionId=wl_1, imGroupId=group_1)
   GW->>MB: downstream chat
-  MB->>MB: 识别 slash=/sessions
+  MB->>MB: 判定 isGroupChat=true (来自 imGroupId)
+  MB->>MB: 剥离 @bot 前缀
+  MB->>MB: slash parser => matched(/sessions)
   MB->>OC: session.list(current project/workspace)
   OC-->>MB: visible sessions
   MB->>MB: 标记当前显式可切换目标
-  MB-->>GW: tool_event/tool_done(会话列表)
+  MB-->>GW: synthetic assistant reply(tool_event x4)
+  MB-->>GW: tool_done
   GW-->>SS: 上行结果
   SS-->>U: 展示会话列表
 ```
@@ -619,9 +657,48 @@ sequenceDiagram
   OC-->>MB: visible sessions
   MB->>MB: 校验 ses_2 在可见范围内
   MB->>MB: bind wl_1 -> ses_2
-  MB-->>GW: tool_event/tool_done(已切换到 ses_2)
+  MB-->>GW: synthetic assistant reply(tool_event x4)
+  MB-->>GW: tool_done
   GW-->>SS: 上行结果
   SS-->>U: 已切换到 ses_2
+```
+
+### 8.9.1 已知 Slash 失败路径
+
+已知 slash 命令只要失败，统一视为控制面失败，不回落 LLM，也不发送 `tool_error`。这包括：
+
+- parser 返回 `invalid`
+- slash 上下文解析失败
+- 宿主查询或执行失败
+- 已匹配 slash 的宿主返回受控错误
+
+`HandledSlashCommandFailure` 只用于告诉 runtime“失败回包已完成”；runtime 捕获后直接返回，不再补发 `tool_error`。
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant SS as skill-server
+  participant GW as ai-gateway
+  participant MB as bridge plugin
+  participant OC as OpenCode API
+  participant RT as runtime
+
+  U->>SS: 输入 @bot /sessions fdsfs 或 /sessions(宿主失败)
+  SS->>GW: invoke.chat(...)
+  GW->>MB: downstream chat
+  MB->>MB: 判定群聊信号后再决定是否剥离 mention
+  alt parser => invalid
+    MB->>MB: 进入 slashCommandOrchestrator.completeFailure(invalid_command)
+  else parser => matched, 但上下文/宿主失败
+    MB->>OC: resolve / execute slash command
+    OC-->>MB: controlled failure
+    MB->>MB: completeFailure(...)
+    MB-->>RT: throw HandledSlashCommandFailure
+    RT->>RT: 吞掉异常，不再补发 tool_error
+  end
+  MB-->>GW: synthetic assistant failure reply(tool_event x4)
+  GW-->>SS: 上行结果
+  SS-->>U: 展示失败文案
 ```
 
 ### 8.10 普通 chat
