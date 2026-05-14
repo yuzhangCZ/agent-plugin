@@ -814,6 +814,47 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 - 临时稿需要把用户可见交互面尽量做成正式态前置形态
 - 后续迁移主要替换内部路由主键，而不是重新定义命令体验
 
+### 13.1 后续正式方案落地变体
+
+本节描述的是后续正式方案落地时，服务端可能采用的一种过渡实现变体。
+它不是当前实现前提，也不是本文前文“当前阶段”约束的一部分。
+正式方案的最终协议形态仍以 `message-bridge-slash-commands-solution.md` 为准，
+本节只补充一条可能的落地路径，不替代正式方案文档本身。
+
+该变体的触发条件是：
+
+- 历史版本插件已经下线
+- 服务端不再需要兼容旧插件对 `toolSessionId` 的旧语义依赖
+
+在该前提下，服务端可以采用以下实现方式：
+
+- 下行 `invoke.chat` / slash command 相关入口继续沿用 `payload.toolSessionId` 字段名
+- 但该字段取值改为 `welinkSessionId`
+- 服务端暂不要求同时补齐 chat/slash 顶层 `welinkSessionId` 字段
+
+该变体的目标是：
+
+- 在字段名尚未完成收口前，先实现正式方案要求的“插件侧单锚点会话绑定”运行语义
+- 让插件与服务端之间的实际业务锚点提前收敛到 `welinkSessionId`
+
+需要明确：
+
+- 这属于正式方案落地路径上的过渡实现，不等于正式方案文档中定义的最终协议形态
+- 它不能反向改写本文前文对“当前临时态前提”的定义
+- 它也不意味着“桥接消息字段级协议已经完成收口”
+
+对当前 `message-bridge` 实现的兼容性判断是：
+
+- 若服务端采用该变体，当前实现仍可继续把 `payload.toolSessionId` 当作稳定外部锚点使用
+- 因而从插件行为上看，普通 `chat` 与 slash command 仍可正常建立或复用 binding
+- 但这仍然属于“旧字段承载新语义”，不是正式方案最终意义上的字段收口完成
+
+最小对比如下：
+
+- 当前临时态：`payload.toolSessionId=<临时锚点>`
+- 后续落地变体：`payload.toolSessionId=<welinkSessionId>`
+- 正式方案终态：桥接协议字段与业务语义都收口到 `welinkSessionId`
+
 ## 14. 测试与验收场景
 
 临时态文档验收至少覆盖以下场景：
@@ -831,6 +872,7 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 11. slash command 成功继续复用 synthetic assistant reply + `tool_done`；失败继续复用 synthetic assistant reply，且不发送 `tool_error`
 12. `question_reply` 使用 `questionId`、`permission_reply` 使用 `permissionId`，并明确该语义会带来后续代码与 schema 改造
 13. 后续从临时态迁移到正式态时，用户可见命令文案和交互模板无需变化
+14. 当历史版本插件已下线且服务端采用“`payload.toolSessionId` 继续保留字段名、但取值改为 `welinkSessionId`”的落地变体时，当前插件行为仍可兼容，但文档仍明确这不等于字段级协议收口完成
 
 ## 15. 假设与限制
 
