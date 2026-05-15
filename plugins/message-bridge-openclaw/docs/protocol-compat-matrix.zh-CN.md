@@ -7,7 +7,7 @@
 | message/action | message-bridge 实现 | openclaw 实现 | 依赖 OpenClaw 接口 | 触发时机 | 语义是否一致 | 差异说明 |
 |---|---|---|---|---|---|---|
 | `status_query` | 路由到 `status_query` action，读取宿主健康状态 | 直接返回桥接链路状态 `running && connection.isConnected()` | 无额外 runtime 子接口 | 收到 `type=status_query` 下行消息后立即响应 | 是 | 宿主探活来源不同，但 `status_response.opencodeOnline` 语义都表示“当前可用性” |
-| `invoke.chat` | 调 SDK `session.prompt`，再转发上游事件，兼容 `tool_done` 去重 | 走 `channel.reply/routing` 主路径，缺失时走 `subagent` 回退，插件内发送 `tool_event/tool_done` | `runtime.channel.routing.resolveAgentRoute`、`runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher`、`runtime.subagent.run/waitForRun/getSessionMessages` | 收到 `invoke.chat` 后立即进入执行 | 是 | 事件来源机制不同（转发 vs 合成/分发），但网关可观察语义一致 |
+| `invoke.chat` | 调 SDK `session.prompt`，再转发上游事件，兼容 `tool_done` 去重 | 走 `channel.reply/routing` 主路径，缺失时走 `subagent` 回退，插件内发送 `tool_event/tool_done` | `runtime.channel.routing.resolveAgentRoute`、`runtime.channel.reply.dispatchReplyFromConfig`、`runtime.subagent.run/waitForRun/getSessionMessages` | 收到 `invoke.chat` 后立即进入执行 | 是 | 事件来源机制不同（转发 vs 合成/分发），但网关可观察语义一致 |
 | `invoke.create_session` | 调宿主创建会话接口后返回 `session_created` | 桥接层分配 `toolSessionId`（payload 优先，否则 UUID），建立映射后返回 `session_created` | 无 | 收到 `invoke.create_session` 后立即响应 | 是 | 即时宿主创建 vs 首次 chat 懒创建，协议语义一致 |
 | `invoke.close_session` | 关闭/删除会话，不发 `tool_done` | 调 `subagent.deleteSession({sessionKey})`，不发 `tool_done` | `runtime.subagent.deleteSession` | 收到 `invoke.close_session` 且会话存在时执行 | 是 | OpenClaw 仅使用公开删除能力 |
 | `invoke.abort_session` | 中止会话后回 `tool_done` | 软中止（终止标记+抑制晚到输出+清理活跃 run），不删除会话，回 `tool_done` | 无必需删除接口；利用内部终止状态 | 收到 `invoke.abort_session` 且会话存在时执行 | 是 | OpenClaw 侧 `abort` 明确为“中止不删除” |

@@ -12,6 +12,7 @@ function Require-File {
 }
 
 Require-File (Join-Path $BundleDir "index.js")
+Require-File (Join-Path $BundleDir "setup-entry.js")
 Require-File (Join-Path $BundleDir "package.json")
 Require-File (Join-Path $BundleDir "openclaw.plugin.json")
 
@@ -22,7 +23,7 @@ if ((Test-Path -LiteralPath (Join-Path $TargetDir "dist")) -or (Test-Path -Liter
 
 New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 
-$FilesToRemove = @("index.js", "package.json", "openclaw.plugin.json", "README.md", "package-lock.json", "tsconfig.json")
+$FilesToRemove = @("index.js", "setup-entry.js", "package.json", "openclaw.plugin.json", "README.md", "package-lock.json", "tsconfig.json")
 foreach ($File in $FilesToRemove) {
   $Path = Join-Path $TargetDir $File
   if (Test-Path -LiteralPath $Path) {
@@ -39,6 +40,7 @@ foreach ($Dir in $DirsToRemove) {
 }
 
 Copy-Item (Join-Path $BundleDir "index.js") (Join-Path $TargetDir "index.js") -Force
+Copy-Item (Join-Path $BundleDir "setup-entry.js") (Join-Path $TargetDir "setup-entry.js") -Force
 Copy-Item (Join-Path $BundleDir "package.json") (Join-Path $TargetDir "package.json") -Force
 Copy-Item (Join-Path $BundleDir "openclaw.plugin.json") (Join-Path $TargetDir "openclaw.plugin.json") -Force
 

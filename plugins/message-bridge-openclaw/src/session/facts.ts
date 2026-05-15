@@ -7,6 +7,8 @@ import type {
   ProviderError,
   QuestionAskFact,
   SessionErrorFact,
+  ThinkingDeltaFact,
+  ThinkingDoneFact,
   TextDeltaFact,
   TextDoneFact,
   ToolUpdateFact,
@@ -20,8 +22,9 @@ export interface ToolUpdateFactInput {
   toolName: string;
   status: ToolUpdateFact["status"];
   title?: string;
+  input?: unknown;
   output?: unknown;
-  error?: string;
+  error?: unknown;
   raw?: unknown;
 }
 
@@ -97,6 +100,40 @@ export function buildTextDoneFact(input: {
   };
 }
 
+export function buildThinkingDeltaFact(input: {
+  toolSessionId: string;
+  messageId: string;
+  partId: string;
+  content: string;
+  raw?: unknown;
+}): ThinkingDeltaFact {
+  return {
+    type: "thinking.delta",
+    toolSessionId: input.toolSessionId,
+    messageId: input.messageId,
+    partId: input.partId,
+    content: input.content,
+    ...(input.raw !== undefined ? { raw: input.raw } : {}),
+  };
+}
+
+export function buildThinkingDoneFact(input: {
+  toolSessionId: string;
+  messageId: string;
+  partId: string;
+  content: string;
+  raw?: unknown;
+}): ThinkingDoneFact {
+  return {
+    type: "thinking.done",
+    toolSessionId: input.toolSessionId,
+    messageId: input.messageId,
+    partId: input.partId,
+    content: input.content,
+    ...(input.raw !== undefined ? { raw: input.raw } : {}),
+  };
+}
+
 export function buildMessageDoneFact(input: {
   toolSessionId: string;
   messageId: string;
@@ -122,6 +159,7 @@ export function buildToolUpdateFact(input: ToolUpdateFactInput): ToolUpdateFact 
     toolName: input.toolName,
     status: input.status,
     ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.input !== undefined ? { input: input.input } : {}),
     ...(input.output !== undefined ? { output: input.output } : {}),
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),

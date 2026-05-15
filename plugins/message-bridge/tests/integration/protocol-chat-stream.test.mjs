@@ -91,6 +91,127 @@ describe('protocol chat-stream', () => {
     });
   });
 
+  test('forwards empty message.part.delta as tool_event without dropping the event', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['message.part.delta']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const emptyDeltaEvent = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_fixture_delta_empty',
+        messageID: 'msg_fixture_delta_empty',
+        partID: 'prt_fixture_delta_empty',
+        field: 'text',
+        delta: '',
+      },
+    };
+
+    await runtime.handleEvent(emptyDeltaEvent);
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_fixture_delta_empty',
+        event: emptyDeltaEvent,
+      },
+    ]);
+  });
+
+  test('preserves seeded text updated plus delta plus final text update order for the same part', async () => {
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient(),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = {
+      send: (message) => sent.push(message),
+    };
+    runtime.eventFilter = new EventFilter(['message.part.updated', 'message.part.delta']);
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const seededUpdatedEvent = {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_seeded_text',
+        delta: '',
+        part: {
+          sessionID: 'ses_seeded_text',
+          messageID: 'msg_seeded_text',
+          id: 'prt_seeded_text',
+          type: 'text',
+          text: '',
+        },
+      },
+    };
+    const placeholderDeltaEvent = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_seeded_text',
+        messageID: 'msg_seeded_text',
+        partID: 'prt_seeded_text',
+        field: 'text',
+        delta: '',
+      },
+    };
+    const finalUpdatedEvent = {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_seeded_text',
+        part: {
+          sessionID: 'ses_seeded_text',
+          messageID: 'msg_seeded_text',
+          id: 'prt_seeded_text',
+          type: 'text',
+          text: 'hello final',
+        },
+      },
+    };
+
+    await runtime.handleEvent(seededUpdatedEvent);
+    await runtime.handleEvent(placeholderDeltaEvent);
+    await runtime.handleEvent(finalUpdatedEvent);
+
+    const projectedSeededUpdatedEvent = {
+      ...seededUpdatedEvent,
+      properties: {
+        delta: '',
+        part: seededUpdatedEvent.properties.part,
+      },
+    };
+    const projectedFinalUpdatedEvent = {
+      ...finalUpdatedEvent,
+      properties: {
+        part: finalUpdatedEvent.properties.part,
+      },
+    };
+
+    assert.deepStrictEqual(sent, [
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_seeded_text',
+        event: projectedSeededUpdatedEvent,
+      },
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_seeded_text',
+        event: placeholderDeltaEvent,
+      },
+      {
+        type: 'tool_event',
+        toolSessionId: 'ses_seeded_text',
+        event: projectedFinalUpdatedEvent,
+      },
+    ]);
+  });
+
   test('session.idle stays upstream as tool_event and does not duplicate tool_done after chat success', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),

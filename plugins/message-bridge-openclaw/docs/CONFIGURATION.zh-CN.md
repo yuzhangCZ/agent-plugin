@@ -29,7 +29,9 @@
 
 1. 命令行非交互配置：
    `openclaw channels add --channel message-bridge [--url <gateway-url>] --token <ak> --password <sk> [--name <name>]`
-2. onboarding 交互流程（`openclaw onboard` 或 `openclaw channels add` 的向导路径）
+2. guided setup / onboarding 交互流程（依赖插件包内的 `setupEntry` + `setupWizard`）：
+   - `openclaw onboard`
+   - `openclaw channels add` 的向导路径
 3. 手工编辑 OpenClaw 配置文件：
    - 默认 profile：`~/.openclaw/openclaw.json`
    - dev profile（`--dev`）：`~/.openclaw-dev/openclaw.json`
@@ -44,8 +46,9 @@
 
 补充说明：
 
-- `channels add` / onboarding 只会写规范字段，不会写 `GatewayUrl` 别名。
+- `channels add` / guided setup / onboarding 只会写规范字段，不会写 `GatewayUrl` 别名。
 - 未传 `--url` 时，优先复用当前 `channels.message-bridge.gateway.url`；若缺失则回退到插件 bundle 默认值链。
+- guided setup 当前只写 `name`、`gateway.url`、`auth.ak`、`auth.sk`。
 - 本插件没有单独的 `MESSAGE_BRIDGE_*` 环境变量优先级层。
 - 如果需要环境变量驱动，可在 `openclaw.json` 里使用 `${VAR_NAME}` 替换。
   详见 OpenClaw 环境变量文档：

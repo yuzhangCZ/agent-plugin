@@ -13,5 +13,6 @@ test("source package exports runtime entry without installer bin", async () => {
   assert.equal("bin" in manifest, false);
   assert.deepEqual(manifest.files, ["bundle", "README.md", "openclaw.plugin.json"]);
   assert.equal(manifest.peerDependencies.openclaw, ">=2026.3.24");
+  assert.equal(manifest.openclaw.setupEntry, "./bundle/setup-entry.js");
   assert.equal(manifest.openclaw.install.minHostVersion, ">=2026.3.24");
 });

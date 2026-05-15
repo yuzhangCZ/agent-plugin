@@ -266,7 +266,7 @@ export interface ToolUpdateFact {
   title?: string;
   input?: unknown;
   output?: unknown;
-  error?: string;
+  error?: unknown;
   raw?: unknown;
 }
 
