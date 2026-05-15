@@ -123,6 +123,10 @@ describe('SimpleSlashCommandParser', () => {
       kind: 'invalid',
       command: { kind: 'model' },
     });
+    assert.deepStrictEqual(parser.tryParse({ text: '/model a/b/c', isGroupChat: false }), {
+      kind: 'invalid',
+      command: { kind: 'model' },
+    });
     assert.deepStrictEqual(parser.tryParse({ text: '/model openai/gpt-5.4', isGroupChat: false }), {
       kind: 'matched',
       command: {
@@ -422,7 +426,7 @@ describe('BindingAwareChatRouter', () => {
 
     assert.deepStrictEqual(result, { kind: 'slash_completed' });
     assert.deepStrictEqual(prompts, []);
-    assertSyntheticAssistantReply(projected, 0, 'tool-invalid-slash', '查询会话列表失败, 命令不受支持');
+    assertSyntheticAssistantReply(projected, 0, 'tool-invalid-slash', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
   });
 
@@ -484,6 +488,69 @@ describe('BindingAwareChatRouter', () => {
         },
       },
     ]);
+  });
+
+  test('invalid slash commands return command-specific usage hints', async () => {
+    const projected = [];
+    const bindingStore = new InMemoryToolSessionBindingStore();
+    const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+    const modelStore = new InMemorySessionModelOverrideStore();
+    const hostSessionCreationPort = {
+      async createSession() {
+        return { id: 'ses-1', title: '会话一', directory: '/tmp/proj-1' };
+      },
+    };
+    const hostSessionQueryPort = {
+      async getSession(sessionId) {
+        return { id: sessionId, title: '会话一', directory: '/tmp/proj-1' };
+      },
+      async listSessions() {
+        return [];
+      },
+    };
+    const router = new BindingAwareChatRouter({
+      contextResolver: new ResolveSlashCommandContextUseCase({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+      }),
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCommandOrchestrator: new DefaultSlashCommandOrchestrator({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort,
+        hostSessionQueryPort,
+        hostPromptExecutionPort: { async prompt() {} },
+        hostModelCatalogPort: { async listModels() { return []; } },
+        replyPresenter: new DefaultSlashCommandReplyPresenter(),
+        completionPort: new RuntimeSlashCommandCompletionPort({
+          projector: new MemoryGatewayEnvelopeProjector(),
+          sender: createCompletionPortSenderStub(projected),
+        }),
+      }),
+      hostPromptExecutionPort: { async prompt() {} },
+    });
+
+    await router.route({ anchor: 'tool-invalid-new', text: '/new foo', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-session', text: '/session', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-session-extra', text: '/session ses_1 extra', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-models', text: '/models foo', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-model', text: '/model', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-model-provider', text: '/model openai', logger: createLoggerStub() });
+    await router.route({ anchor: 'tool-invalid-model-extra', text: '/model a/b/c', logger: createLoggerStub() });
+
+    assertSyntheticAssistantReply(projected, 0, 'tool-invalid-new', '新建会话失败 请直接使用 /new');
+    assertSyntheticAssistantReply(projected, 4, 'tool-invalid-session', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 8, 'tool-invalid-session-extra', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 12, 'tool-invalid-models', '查询模型列表失败, 请直接使用 /models');
+    assertSyntheticAssistantReply(projected, 16, 'tool-invalid-model', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 20, 'tool-invalid-model-provider', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 24, 'tool-invalid-model-extra', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
   });
 
   test('bootstraps first chat by reusing the most recent session and prompts active session', async () => {

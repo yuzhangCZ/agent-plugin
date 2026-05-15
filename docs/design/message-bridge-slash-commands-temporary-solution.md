@@ -787,6 +787,8 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 - 成功场景仍先发送 `tool_event`，再发送 `tool_done`
 - 失败场景发送 synthetic assistant failure reply，不发送 `tool_error`
 - `/new`、`/sessions`、`/session`、`/models`、`/model` 的返回文本模板保持与正式方案一致
+- 已知命令但参数非法时，失败文案返回命令专属用法提示，而不是泛化成“命令不受支持”
+- 已知命令但参数非法的示例与正式方案保持一致，包括 `/sessions fdsfs`、`/new foo`、`/session`、`/model`、`/model openai`、`/model a/b/c`
 - 当前版本的群聊判定信号唯一取 `invoke.chat.payload.imGroupId`；只有该信号存在时才允许剥离 `@xxx ` 前缀后再做 slash 三态判定
 - 未知 slash 文本如 `/abc` 继续走普通 chat / LLM，不进入 slash 失败分支
 

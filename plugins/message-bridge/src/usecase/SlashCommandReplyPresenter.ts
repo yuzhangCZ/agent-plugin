@@ -47,7 +47,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
   }
 
   presentFailure(command: SlashCommandDescriptor, error: SlashCommandFailure): string {
-    const reason = this.presentFailureReason(error);
+    const reason = this.presentFailureReason(command, error);
 
     switch (command.kind) {
       case 'new':
@@ -66,7 +66,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
   }
 
   /** 统一失败策略：只允许白名单原因进入用户可见文案。 */
-  private presentFailureReason(error: SlashCommandFailure): string {
+  private presentFailureReason(command: SlashCommandDescriptor, error: SlashCommandFailure): string {
     switch (error.reasonKey ?? error.code) {
       case 'target_session_out_of_scope':
       case 'session_out_of_scope':
@@ -79,11 +79,28 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
         return '当前没有可用会话';
       case 'unsupported_command':
       case 'invalid_command':
-        return '命令不受支持';
+        return this.presentInvalidCommandReason(command);
       case 'host_unavailable':
       case 'sdk_unreachable':
       default:
         return '当前宿主不可用';
+    }
+  }
+
+  private presentInvalidCommandReason(command: SlashCommandDescriptor): string {
+    switch (command.kind) {
+      case 'new':
+        return '请直接使用 /new';
+      case 'sessions':
+        return '请直接使用 /sessions';
+      case 'session':
+        return '请使用 /session <sessionId>，例如 /session ses_123';
+      case 'models':
+        return '请直接使用 /models';
+      case 'model':
+        return '请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4';
+      default:
+        throw new Error(`Unhandled invalid slash command descriptor: ${JSON.stringify(command)}`);
     }
   }
 

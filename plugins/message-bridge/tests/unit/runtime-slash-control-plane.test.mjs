@@ -109,7 +109,7 @@ describe('runtime slash control-plane', () => {
     });
 
     assert.strictEqual(sent.length, 4);
-    assertSyntheticAssistantReply(sent, 0, 'tool-invalid-slash', '查询会话列表失败, 命令不受支持');
+    assertSyntheticAssistantReply(sent, 0, 'tool-invalid-slash', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
   });
@@ -207,7 +207,7 @@ describe('runtime slash control-plane', () => {
     });
 
     assert.strictEqual(sent.length, 4);
-    assertSyntheticAssistantReply(sent, 0, 'tool-group-invalid', '查询会话列表失败, 命令不受支持');
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-invalid', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
   });

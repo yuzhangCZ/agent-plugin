@@ -142,9 +142,11 @@ v1 当前收口的已知命令仅包括：
 
 判定规则如下：
 
-- `/sessions fdsfs`、`/new foo`、`/session`、`/model`、`/model openai` 统一返回 `invalid`
+- `/sessions fdsfs`、`/new foo`、`/session`、`/model`、`/model openai`、`/model a/b/c` 统一返回 `invalid`
 - 未知 slash 文本如 `/abc` 返回 `none`，继续交给普通 chat 路径
 - 群聊中的 `@bot /sessions`、`@bot /sessions fdsfs` 仅在明确群聊时才允许先剥离 mention 再做 slash 判定
+
+对已识别但参数非法的已知命令，v1 用户可见失败文案必须返回命令专属用法提示，而不是泛化成“命令不受支持”。
 
 群聊信号必须显式进入 parser 输入，不能靠隐式字段猜测。当前 `message-bridge` 已稳定拿到的唯一群聊信号是 `invoke.chat.payload.imGroupId`；因此 v1 方案将“`imGroupId` 为非空字符串”定义为唯一群聊判定条件。若后续上游引入 `sessionType=group` 等更正式信号，必须先改造路由入口，再调整本节规则。
 
@@ -232,6 +234,12 @@ v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回�
 新建会话失败 <reason>
 ```
 
+当命令参数非法时，建议使用：
+
+```text
+新建会话失败 请直接使用 /new
+```
+
 **`/sessions`**
 
 成功：
@@ -255,6 +263,12 @@ v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回�
 查询会话列表失败, <reason>
 ```
 
+当命令参数非法时，建议使用：
+
+```text
+查询会话列表失败, 请直接使用 /sessions
+```
+
 **`/session <sessionId>`**
 
 成功：
@@ -273,6 +287,12 @@ v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回�
 
 ```text
 切换会话失败, 目标会话不在当前 project/workspace 可切换范围内
+```
+
+当命令参数非法时，建议使用：
+
+```text
+切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123
 ```
 
 **`/models`**
@@ -298,6 +318,12 @@ v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回�
 查询模型列表失败, <reason>
 ```
 
+当命令参数非法时，建议使用：
+
+```text
+查询模型列表失败, 请直接使用 /models
+```
+
 **`/model <providerId/modelId>`**
 
 成功：
@@ -316,6 +342,12 @@ v1 中所有 slash command 继续通过 synthetic assistant reply 文本返回�
 
 ```text
 设置模型失败,目标模型不存在或当前宿主不可用
+```
+
+当命令参数非法时，建议使用：
+
+```text
+设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4
 ```
 
 以上格式是 v1 设计约束，不代表最终 UI 呈现。前端若支持 Markdown，应至少正确支持换行、无序列表和行内代码样式；若不支持 Markdown renderer，最低要求是按原始换行拆段展示，不得压平为单行。后续若服务端需要 richer rendering，应在保持上述文本兼容的前提下再扩展结构化字段。

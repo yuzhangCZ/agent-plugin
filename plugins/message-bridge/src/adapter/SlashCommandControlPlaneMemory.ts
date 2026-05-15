@@ -167,7 +167,7 @@ export class SimpleSlashCommandParser implements SlashCommandParser {
   }
 
   private parseModelCommand(normalized: string): SlashCommandParseResult | undefined {
-    const modelCommandPattern = /^\/model\s+([^/\s]+)\/(\S+)$/u;
+    const modelCommandPattern = /^\/model\s+([^/\s]+)\/([^/\s]+)$/u;
     const modelMatch = normalized.match(modelCommandPattern);
     if (modelMatch) {
       return {
