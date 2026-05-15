@@ -1,4 +1,4 @@
-import type { HostClientLike, OpencodeHealthResult, OpencodeClient } from '../types/index.js';
+import type { BridgeSdkClient, HostClientLike, OpencodeHealthResult } from '../types/index.js';
 import { getErrorMessage } from '../utils/error.js';
 import type { SdkClientCapability } from './SdkAdapter.js';
 
@@ -27,7 +27,7 @@ export type BridgeStartupError =
     };
 
 export interface StartupValidationResult {
-  sdkClient: OpencodeClient;
+  sdkClient: BridgeSdkClient;
   health: OpencodeHealthResult & { version: string };
 }
 
@@ -48,7 +48,7 @@ function describeResponseShape(response: unknown): string | undefined {
 
 export async function validateBridgeStartup(
   rawClient: HostClientLike,
-  sdkClient: OpencodeClient | null,
+  sdkClient: BridgeSdkClient | null,
   missingCapabilities: SdkClientCapability[],
 ): Promise<StartupValidationResult> {
   if (!sdkClient) {

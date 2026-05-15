@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { ResolveCreateSessionDirectoryUseCase } from '../../src/usecase/ResolveCreateSessionDirectoryUseCase.ts';
 import { CreateSessionUseCase } from '../../src/usecase/CreateSessionUseCase.ts';
+import { CreateSessionRequestNormalizer } from '../../src/usecase/CreateSessionRequestNormalizer.ts';
 import { ChatUseCase } from '../../src/usecase/ChatUseCase.ts';
 
 function createLoggerRecorder() {
@@ -20,6 +21,59 @@ function createLoggerRecorder() {
 }
 
 describe('assiant use cases', () => {
+  test('normalizes create_session payload into create request', () => {
+    const normalizer = new CreateSessionRequestNormalizer();
+
+    assert.deepStrictEqual(
+      normalizer.fromCreateSessionPayload({
+        title: 'im-group-123',
+        assistantId: 'tenant-a',
+      }),
+      {
+        title: 'im-group-123',
+        assistantId: 'tenant-a',
+        isGroupChat: true,
+      },
+    );
+    assert.deepStrictEqual(
+      normalizer.fromCreateSessionPayload({
+        title: undefined,
+        assistantId: 'tenant-b',
+      }),
+      {
+        title: undefined,
+        assistantId: 'tenant-b',
+        isGroupChat: false,
+      },
+    );
+  });
+
+  test('normalizes chat context into create request', () => {
+    const normalizer = new CreateSessionRequestNormalizer();
+
+    assert.deepStrictEqual(
+      normalizer.fromChatContext({
+        assistantId: 'tenant-a',
+        imGroupId: 'group-a',
+      }),
+      {
+        title: undefined,
+        assistantId: 'tenant-a',
+        isGroupChat: true,
+      },
+    );
+    assert.deepStrictEqual(
+      normalizer.fromChatContext({
+        assistantId: 'tenant-b',
+      }),
+      {
+        title: undefined,
+        assistantId: 'tenant-b',
+        isGroupChat: false,
+      },
+    );
+  });
+
   test('resolves mapped directory when channel is uniassistant', async () => {
     const mappingCalls = [];
     const { calls, logger } = createLoggerRecorder();
@@ -40,7 +94,7 @@ describe('assiant use cases', () => {
     const result = await useCase.execute({
       assistantId: 'tenant-a',
       effectiveDirectory: '/fallback',
-      mappingConfigured: true,
+      directoryMappingEnabled: true,
     });
 
     assert.deepStrictEqual(mappingCalls, ['tenant-a']);
@@ -71,7 +125,7 @@ describe('assiant use cases', () => {
     const result = await useCase.execute({
       assistantId: 'tenant-b',
       effectiveDirectory: '/fallback',
-      mappingConfigured: true,
+      directoryMappingEnabled: true,
     });
 
     assert.strictEqual(mappingCalled, false);
@@ -100,7 +154,7 @@ describe('assiant use cases', () => {
     const result = await useCase.execute({
       assistantId: 'tenant-unconfigured',
       effectiveDirectory: '/fallback',
-      mappingConfigured: false,
+      directoryMappingEnabled: false,
     });
 
     assert.deepStrictEqual(result, {
@@ -114,7 +168,7 @@ describe('assiant use cases', () => {
           reason: 'mapping_file_unconfigured',
           channel: 'uniassistant',
           assistantId: 'tenant-unconfigured',
-          mappingConfigured: false,
+          directoryMappingEnabled: false,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
         },
@@ -139,7 +193,7 @@ describe('assiant use cases', () => {
 
     const result = await useCase.execute({
       effectiveDirectory: '/fallback',
-      mappingConfigured: true,
+      directoryMappingEnabled: true,
     });
 
     assert.deepStrictEqual(result, {
@@ -153,7 +207,7 @@ describe('assiant use cases', () => {
           reason: 'missing_assiant_id',
           channel: 'uniassistant',
           assistantId: undefined,
-          mappingConfigured: true,
+          directoryMappingEnabled: true,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
         },
@@ -177,7 +231,7 @@ describe('assiant use cases', () => {
     const result = await useCase.execute({
       assistantId: 'tenant-miss',
       effectiveDirectory: '/fallback',
-      mappingConfigured: true,
+      directoryMappingEnabled: true,
     });
 
     assert.deepStrictEqual(result, {
@@ -191,7 +245,7 @@ describe('assiant use cases', () => {
           reason: 'directory_unresolved',
           channel: 'uniassistant',
           assistantId: 'tenant-miss',
-          mappingConfigured: true,
+          directoryMappingEnabled: true,
           hasEffectiveDirectory: true,
           fallbackSource: 'effective',
         },
@@ -223,18 +277,18 @@ describe('assiant use cases', () => {
     );
 
     const preparedCreateSession = await createSessionUseCase.resolveCreateSession({
-      payload: {
-        title: 'tenant session',
-        assistantId: 'tenant-c',
-      },
+      title: 'tenant session',
+      assistantId: 'tenant-c',
+      isGroupChat: false,
       effectiveDirectory: '/fallback',
+      directoryMappingEnabled: true,
     });
     const result = await createSessionUseCase.execute({
-      payload: {
-        title: 'tenant session',
-        assistantId: 'tenant-c',
-      },
+      title: 'tenant session',
+      assistantId: 'tenant-c',
+      isGroupChat: false,
       effectiveDirectory: '/fallback',
+      directoryMappingEnabled: true,
     }, preparedCreateSession);
 
     assert.strictEqual(result.success, true);
@@ -276,11 +330,11 @@ describe('assiant use cases', () => {
     );
 
     const result = await createSessionUseCase.execute({
-      payload: {
-        title: 'im-group-123',
-        assistantId: 'tenant-group',
-      },
+      title: 'im-group-123',
+      assistantId: 'tenant-group',
+      isGroupChat: true,
       effectiveDirectory: '/fallback',
+      directoryMappingEnabled: true,
     });
 
     assert.strictEqual(result.success, true);
@@ -330,11 +384,11 @@ describe('assiant use cases', () => {
     );
 
     const result = await createSessionUseCase.execute({
-      payload: {
-        title: 'tenant session',
-        assistantId: 'tenant-d',
-      },
+      title: 'tenant session',
+      assistantId: 'tenant-d',
+      isGroupChat: false,
       effectiveDirectory: '/fallback',
+      directoryMappingEnabled: true,
     });
 
     assert.strictEqual(result.success, true);

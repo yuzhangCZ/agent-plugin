@@ -123,6 +123,11 @@ async function createConnectedHarness({ maxPayload } = {}) {
   };
 }
 
+function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
+}
+
 const cleanupTasks = [];
 
 after(async () => {
@@ -141,6 +146,7 @@ describe('protocol message.updated large payload regression', () => {
     });
 
     const event = createLargeMessageUpdatedEvent();
+    attach(harness.runtime, event.properties.info.sessionID);
     await harness.runtime.handleEvent(event);
 
     await waitFor(() =>
@@ -188,7 +194,9 @@ describe('protocol message.updated large payload regression', () => {
       await harness.gateway.close();
     });
 
-    await harness.runtime.handleEvent(createLargeMessageUpdatedEvent());
+    const event = createLargeMessageUpdatedEvent();
+    attach(harness.runtime, event.properties.info.sessionID);
+    await harness.runtime.handleEvent(event);
 
     await waitFor(() =>
       harness.gateway.receivedMessages.some((message) => message.type === 'tool_event'),

@@ -21,8 +21,7 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
   ): Promise<ActionResult<QuestionReplyResultData>> {
     const startedAt = Date.now();
     context.logger?.info('action.question_reply.started', {
-      toolSessionId: payload.toolSessionId,
-      toolCallId: payload.toolCallId,
+      questionId: payload.questionId,
       answerLength: payload.answer.length,
     });
 
@@ -37,8 +36,7 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
 
     try {
       const gatewayResult = await this.sessionScopedActionGatewayPort.replyQuestion({
-        sessionId: payload.toolSessionId,
-        toolCallId: payload.toolCallId,
+        questionId: payload.questionId,
         answer: payload.answer,
         ...(context.logger ? { logger: context.logger } : {}),
       });
@@ -48,8 +46,7 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
       }
 
       context.logger?.error('action.question_reply.failed', {
-        toolSessionId: payload.toolSessionId,
-        toolCallId: payload.toolCallId,
+        questionId: payload.questionId,
         error: gatewayResult.errorMessage,
         errorCode: gatewayResult.errorCode,
         latencyMs: Date.now() - startedAt,
@@ -59,8 +56,7 @@ export class QuestionReplyAction implements Action<'question_reply', QuestionRep
       const errorCode = this.errorMapper(error);
       const errorMessage = getErrorMessage(error);
       context.logger?.error('action.question_reply.exception', {
-        toolSessionId: payload.toolSessionId,
-        toolCallId: payload.toolCallId,
+        questionId: payload.questionId,
         error: errorMessage,
         errorCode,
         ...getErrorDetailsForLog(error),

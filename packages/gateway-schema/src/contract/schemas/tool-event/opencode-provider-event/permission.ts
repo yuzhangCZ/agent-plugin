@@ -1,10 +1,30 @@
 import { z } from 'zod';
-import { jsonValueSchema } from './json.ts';
 import {
   optionalLooseTrimmedString,
   optionalLooseTrimmedStringPreservingEmpty,
   requiredTrimmedString,
 } from '../../shared.ts';
+
+type PermissionJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | PermissionJsonValue[]
+  | { [key: string]: PermissionJsonValue };
+
+const permissionJsonValueSchema: z.ZodType<PermissionJsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.undefined(),
+    z.array(permissionJsonValueSchema),
+    z.record(z.string(), permissionJsonValueSchema),
+  ]),
+);
 
 const permissionMetadataSchema = z
   .preprocess(
@@ -15,7 +35,7 @@ const permissionMetadataSchema = z
 
       return value;
     },
-    z.record(z.string(), jsonValueSchema).optional(),
+    z.record(z.string(), permissionJsonValueSchema).optional(),
   )
   .optional()
   .transform((metadata) => (metadata && Object.keys(metadata).length > 0 ? metadata : undefined));

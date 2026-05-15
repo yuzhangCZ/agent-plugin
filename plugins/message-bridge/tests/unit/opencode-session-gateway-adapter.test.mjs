@@ -521,37 +521,19 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     });
   });
 
-  test('openx without bridgeDirectory omits directory in question list and reply', async () => {
-    const sessionGetCalls = [];
-    const getCalls = [];
+  test('openx without bridgeDirectory omits directory in direct question reply', async () => {
     const postCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(
       () => ({
         session: {
           create: async () => ({}),
-          get: async (options) => {
-            sessionGetCalls.push(options);
-            return { data: { id: 'ses-openx-question', directory: '/tmp/should-not-use' } };
-          },
+          get: async () => ({ data: { id: 'ses-openx-question', directory: '/tmp/should-not-use' } }),
           abort: async () => ({}),
           delete: async () => ({}),
           prompt: async () => ({}),
         },
-        postSessionIdPermissionsPermissionId: async () => ({}),
-        _client: {
-          get: async (options) => {
-            getCalls.push(options);
-            return {
-              data: [
-                {
-                  id: 'question-request-openx-1',
-                  sessionID: 'ses-openx-question',
-                  tool: { callID: 'call-openx-1' },
-                },
-              ],
-            };
-          },
-          post: async (options) => {
+        question: {
+          reply: async (options) => {
             postCalls.push(options);
             return { data: undefined };
           },
@@ -564,24 +546,15 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     );
 
     const result = await adapter.replyQuestion({
-      sessionId: 'ses-openx-question',
-      toolCallId: 'call-openx-1',
+      questionId: 'question-request-openx-1',
       answer: 'yes',
     });
 
     assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(sessionGetCalls, []);
-    assert.deepStrictEqual(getCalls, [
-      {
-        url: '/question',
-      },
-    ]);
     assert.deepStrictEqual(postCalls, [
       {
-        url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-openx-1' },
-        body: { answers: [['yes']] },
-        headers: { 'Content-Type': 'application/json' },
+        questionId: 'question-request-openx-1',
+        answer: 'yes',
       },
     ]);
   });
@@ -694,8 +667,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     assert.strictEqual(result.errorEvidence?.sourceOperation, 'session.delete');
   });
 
-  test('replyPermission resolves directory and forwards it to permission endpoint', async () => {
-    const calls = [];
+  test('replyPermission forwards permissionId to permission reply endpoint', async () => {
+    const permissionCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
       session: {
         create: async () => ({}),
@@ -704,15 +677,15 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async (options) => {
-        calls.push(options);
-        return { data: { ok: true } };
+      permission: {
+        reply: async (options) => {
+          permissionCalls.push(options);
+          return { data: { ok: true } };
+        },
       },
-      _client: { get: async () => ({}), post: async () => ({}) },
     }));
 
     const result = await adapter.replyPermission({
-      sessionId: 'ses-perm',
       permissionId: 'perm-1',
       response: 'always',
     });
@@ -723,12 +696,10 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
       response: 'always',
       applied: true,
     });
-    assert.deepStrictEqual(calls, [
+    assert.deepStrictEqual(permissionCalls, [
       {
-        sessionID: 'ses-perm',
-        permissionID: 'perm-1',
+        permissionId: 'perm-1',
         response: 'always',
-        directory: '/tmp/perm-dir',
       },
     ]);
   });
@@ -742,17 +713,17 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async () => ({
-        error: {
-          name: 'PermissionFailed',
-          data: { message: 'permission payload failed' },
-        },
-      }),
-      _client: { get: async () => ({}), post: async () => ({}) },
+      permission: {
+        reply: async () => ({
+          error: {
+            name: 'PermissionFailed',
+            data: { message: 'permission payload failed' },
+          },
+        }),
+      },
     }));
 
     const result = await adapter.replyPermission({
-      sessionId: 'ses-perm-payload-fail',
       permissionId: 'perm-1',
       response: 'always',
     });
@@ -765,9 +736,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     assert.strictEqual(result.errorEvidence?.sourceOperation, 'permission.reply');
   });
 
-  test('replyQuestion resolves directory and forwards it to question list and reply', async () => {
-    const getCalls = [];
-    const postCalls = [];
+  test('replyQuestion forwards questionId to question reply endpoint', async () => {
+    const questionCalls = [];
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
       session: {
         create: async () => ({}),
@@ -776,53 +746,30 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-      _client: {
-        get: async (options) => {
-          getCalls.push(options);
-          return {
-            data: [
-              {
-                id: 'question-request-1',
-                sessionID: 'ses-question',
-                tool: { callID: 'call-1' },
-              },
-            ],
-          };
-        },
-        post: async (options) => {
-          postCalls.push(options);
+      question: {
+        reply: async (options) => {
+          questionCalls.push(options);
           return { data: undefined };
         },
       },
     }));
 
     const result = await adapter.replyQuestion({
-      sessionId: 'ses-question',
-      toolCallId: 'call-1',
+      questionId: 'question-request-1',
       answer: 'yes',
     });
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { requestId: 'question-request-1', replied: true });
-    assert.deepStrictEqual(getCalls, [
+    assert.deepStrictEqual(questionCalls, [
       {
-        url: '/question',
-        query: { directory: '/tmp/question-dir' },
-      },
-    ]);
-    assert.deepStrictEqual(postCalls, [
-      {
-        url: '/question/{requestID}/reply',
-        path: { requestID: 'question-request-1' },
-        body: { answers: [['yes']] },
-        headers: { 'Content-Type': 'application/json' },
-        query: { directory: '/tmp/question-dir' },
+        questionId: 'question-request-1',
+        answer: 'yes',
       },
     ]);
   });
 
-  test('replyQuestion returns payload failure with question.list sourceOperation', async () => {
+  test('replyQuestion returns payload failure with question.reply sourceOperation', async () => {
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
       session: {
         create: async () => ({}),
@@ -831,67 +778,27 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-      _client: {
-        get: async () => ({
+      question: {
+        reply: async () => ({
           error: {
-            name: 'QuestionListFailed',
-            data: { message: 'question list failed' },
+            name: 'QuestionReplyFailed',
+            data: { message: 'question reply failed' },
           },
         }),
-        post: async () => ({ data: true }),
       },
     }));
 
     const result = await adapter.replyQuestion({
-      sessionId: 'ses-question-list-fail',
-      toolCallId: 'call-1',
+      questionId: 'question-request-1',
       answer: 'yes',
     });
 
     assert.strictEqual(result.success, false);
     assert.strictEqual(
       result.errorMessage,
-      'Failed to reply to question: {"name":"QuestionListFailed","data":{"message":"question list failed"}}',
+      'Failed to reply to question: {"name":"QuestionReplyFailed","data":{"message":"question reply failed"}}',
     );
-    assert.strictEqual(result.errorEvidence?.sourceOperation, 'question.list');
-  });
-
-  test('replyQuestion keeps INVALID_PAYLOAD message when requestId cannot be resolved', async () => {
-    const adapter = new OpencodeSessionGatewayAdapter(() => ({
-      session: {
-        create: async () => ({}),
-        get: async () => ({ data: { id: 'ses-question-no-match', directory: '/tmp/question-dir' } }),
-        abort: async () => ({}),
-        delete: async () => ({}),
-        prompt: async () => ({}),
-      },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-      _client: {
-        get: async () => ({
-          data: [
-            {
-              id: 'question-request-1',
-              sessionID: 'ses-question-no-match',
-              tool: { callID: 'call-other' },
-            },
-          ],
-        }),
-        post: async () => ({ data: true }),
-      },
-    }));
-
-    const result = await adapter.replyQuestion({
-      sessionId: 'ses-question-no-match',
-      toolCallId: 'call-1',
-      answer: 'yes',
-    });
-
-    assert.deepStrictEqual(result, {
-      success: false,
-      errorCode: 'INVALID_PAYLOAD',
-      errorMessage: 'Unable to resolve pending question request for toolSessionId=ses-question-no-match, toolCallId=call-1',
-    });
+    assert.strictEqual(result.errorEvidence?.sourceOperation, 'question.reply');
   });
 
   test('replyQuestion returns payload failure with question.reply sourceOperation', async () => {
@@ -903,18 +810,8 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         delete: async () => ({}),
         prompt: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async () => ({}),
-      _client: {
-        get: async () => ({
-          data: [
-            {
-              id: 'question-request-1',
-              sessionID: 'ses-question-reply-fail',
-              tool: { callID: 'call-1' },
-            },
-          ],
-        }),
-        post: async () => ({
+      question: {
+        reply: async () => ({
           error: {
             name: 'QuestionReplyFailed',
             data: { message: 'question reply failed' },
@@ -924,8 +821,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     }));
 
     const result = await adapter.replyQuestion({
-      sessionId: 'ses-question-reply-fail',
-      toolCallId: 'call-1',
+      questionId: 'question-request-1',
       answer: 'yes',
     });
 

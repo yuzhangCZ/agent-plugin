@@ -1,5 +1,3 @@
-import { randomUUID } from 'crypto';
-
 import type {
   GatewayClient,
   GatewaySendContext as GatewaySendLogContext,
@@ -7,18 +5,14 @@ import type {
 } from '@agent-plugin/gateway-client';
 
 import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
-import { UPSTREAM_MESSAGE_TYPE } from '../gateway-wire/transport.js';
 import type { BridgeLogger } from './AppLogger.js';
 import type { GatewaySessionSenderPort } from './GatewaySessionSender.js';
+import {
+  SyntheticAssistantReplySequenceBuilder,
+  type SyntheticAssistantReplySequence,
+} from './SyntheticAssistantReplySequenceBuilder.js';
 
 type ToolEventPayload = Extract<GatewaySendPayload, { type: 'tool_event' }>;
-
-interface SyntheticAssistantReplySequence {
-  messageUpdated: ToolEventPayload;
-  stepStart: ToolEventPayload;
-  text: ToolEventPayload;
-  stepFinish: ToolEventPayload;
-}
 
 /**
  * synthetic assistant reply 执行结果。
@@ -34,6 +28,8 @@ export interface SyntheticAssistantReplyResult {
  * @remarks 负责构造 canonical synthetic reply、统一校验发送、并返回显式阶段结果。
  */
 export class SyntheticAssistantReplySender {
+  private readonly sequenceBuilder = new SyntheticAssistantReplySequenceBuilder();
+
   constructor(
     private readonly sessionSender: GatewaySessionSenderPort,
     private readonly validateGatewayUplinkBusinessMessageOrLog: (
@@ -64,7 +60,10 @@ export class SyntheticAssistantReplySender {
       },
     ) => boolean,
   }): SyntheticAssistantReplyResult {
-    const sequence = this.buildSyntheticEventSequence(input.toolSessionId, input.text);
+    const sequence = this.sequenceBuilder.build({
+      toolSessionId: input.toolSessionId,
+      text: input.text,
+    });
     const commonLogOptions = {
       connection: input.connection,
       logger: input.logger,
@@ -113,92 +112,6 @@ export class SyntheticAssistantReplySender {
     }
 
     return { success: true };
-  }
-
-  private buildSyntheticEventSequence(
-    toolSessionId: string,
-    text: string,
-  ): SyntheticAssistantReplySequence {
-    const createdAt = Date.now();
-    const messageId = this.createSyntheticMessageId();
-    const stepStartPartId = this.createSyntheticPartId();
-    const textPartId = this.createSyntheticPartId();
-    const stepFinishPartId = this.createSyntheticPartId();
-
-    return {
-      messageUpdated: {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId,
-        event: {
-          type: TOOL_EVENT_TYPE.MESSAGE_UPDATED,
-          properties: {
-            info: {
-              id: messageId,
-              sessionID: toolSessionId,
-              role: 'assistant',
-              time: {
-                created: createdAt,
-              },
-            },
-          },
-        },
-      },
-      stepStart: {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId,
-        event: {
-          type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
-          properties: {
-            part: {
-              id: stepStartPartId,
-              sessionID: toolSessionId,
-              messageID: messageId,
-              type: 'step-start',
-            },
-          },
-        },
-      },
-      text: {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId,
-        event: {
-          type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
-          properties: {
-            part: {
-              id: textPartId,
-              sessionID: toolSessionId,
-              messageID: messageId,
-              type: 'text',
-              text,
-            },
-          },
-        },
-      },
-      stepFinish: {
-        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
-        toolSessionId,
-        event: {
-          type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
-          properties: {
-            part: {
-              id: stepFinishPartId,
-              sessionID: toolSessionId,
-              messageID: messageId,
-              type: 'step-finish',
-              reason: 'stop',
-            },
-          },
-        },
-      },
-    };
-  }
-
-  private createSyntheticMessageId(): string {
-    return `msg_${randomUUID().replaceAll('-', '')}`;
-  }
-
-  private createSyntheticPartId(): string {
-    return `prt_${randomUUID().replaceAll('-', '')}`;
   }
 
   private sendToolEvent(

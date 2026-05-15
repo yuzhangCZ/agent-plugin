@@ -16,6 +16,7 @@ const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
+    app: {},
     session: {
       create: async () => ({}),
       get: async (options) => ({
@@ -24,9 +25,13 @@ function createRuntimeClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
@@ -40,23 +45,56 @@ function createRuntimeClient(overrides = {}) {
     },
   };
 
-  return {
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
+
+  const merged = {
     ...base,
     ...overrides,
+    app: hasOwn('app') ? { ...base.app, ...(overrides.app ?? {}) } : base.app,
+    global: hasOwn('global') ? { ...base.global, ...(overrides.global ?? {}) } : base.global,
     session: {
       ...base.session,
       ...(overrides.session ?? {}),
+    },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
     },
     _client: {
       ...base._client,
       ...(overrides._client ?? {}),
     },
   };
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.session ?? {}, 'list')) {
+    merged.session.list = async (options) => merged._client.get({
+      url: '/session',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.config ?? {}, 'providers')) {
+    merged.config.providers = async (options) => merged._client.get({
+      url: '/config/providers',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!hasOwn('postSessionIdPermissionsPermissionId')) {
+    merged.postSessionIdPermissionsPermissionId = async (options) => merged._client.post(options);
+  }
+
+  return merged;
 }
 
 async function loadFixture(fileName) {
   const raw = await readFile(join(FIXTURE_DIR, fileName), 'utf8');
   return JSON.parse(raw);
+}
+
+function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
 }
 
 describe('protocol permission-roundtrip', () => {
@@ -73,6 +111,7 @@ describe('protocol permission-roundtrip', () => {
     setRuntimeGatewayState(runtime, 'READY');
 
     const permissionRepliedEvent = await loadFixture('permission.replied.json');
+    attach(runtime, 'ses_permission_1');
     await runtime.handleEvent(permissionRepliedEvent);
 
     assert.deepStrictEqual(sent, [
@@ -86,13 +125,21 @@ describe('protocol permission-roundtrip', () => {
     ]);
   });
 
-  test('forwards permission.asked as tool_event and routes permission_reply to SDK', async () => {
-    const permissionCalls = [];
+  test('forwards permission.asked as tool_event and routes permission_reply to raw permission API', async () => {
+    const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
-        postSessionIdPermissionsPermissionId: async (options) => {
-          permissionCalls.push(options);
-          return {};
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              return { data: { healthy: true, version: '9.9.9' } };
+            }
+            return { data: [] };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
         },
       }),
     });
@@ -105,6 +152,7 @@ describe('protocol permission-roundtrip', () => {
     setRuntimeGatewayState(runtime, 'READY');
 
     const permissionAskedEvent = await loadFixture('permission.asked.json');
+    attach(runtime, 'ses_permission_1');
     await runtime.handleEvent(permissionAskedEvent);
 
     assert.deepStrictEqual(sent, [
@@ -132,36 +180,39 @@ describe('protocol permission-roundtrip', () => {
       welinkSessionId: 'wl-perm-1',
       action: 'permission_reply',
       payload: {
-        toolSessionId: 'ses_permission_1',
         permissionId: 'perm_fixture_1',
         response: 'always',
       },
     });
 
-    assert.deepStrictEqual(permissionCalls, [
+    assert.deepStrictEqual(postCalls, [
       {
-        path: {
-          id: 'ses_permission_1',
-          permissionID: 'perm_fixture_1',
-        },
+        url: '/session/{id}/permissions/{permissionID}',
+        path: { id: 'ses_bridge_permission_compat', permissionID: 'perm_fixture_1' },
         body: {
           response: 'always',
         },
-        query: {
-          directory: '/session/default-directory',
-        },
+        headers: { 'Content-Type': 'application/json' },
       },
     ]);
     assert.strictEqual(sent.length, 1);
   });
 
-  test('aggregates child permission events under parent and routes permission_reply to the child session', async () => {
-    const permissionCalls = [];
+  test('aggregates child permission events under parent and routes permission_reply by permissionId only', async () => {
+    const postCalls = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
-        postSessionIdPermissionsPermissionId: async (options) => {
-          permissionCalls.push(options);
-          return {};
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              return { data: { healthy: true, version: '9.9.9' } };
+            }
+            return { data: [] };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
         },
       }),
     });
@@ -172,6 +223,7 @@ describe('protocol permission-roundtrip', () => {
     };
     runtime.eventFilter = new EventFilter(['permission.asked']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'ses_parent_permission_2');
 
     await runtime.handleEvent({
       type: 'session.created',
@@ -210,24 +262,19 @@ describe('protocol permission-roundtrip', () => {
       welinkSessionId: 'wl-perm-child-2',
       action: 'permission_reply',
       payload: {
-        toolSessionId: 'ses_child_permission_2',
         permissionId: 'perm_child_2',
         response: 'always',
       },
     });
 
-    assert.deepStrictEqual(permissionCalls, [
+    assert.deepStrictEqual(postCalls, [
       {
-        path: {
-          id: 'ses_child_permission_2',
-          permissionID: 'perm_child_2',
-        },
+        url: '/session/{id}/permissions/{permissionID}',
+        path: { id: 'ses_bridge_permission_compat', permissionID: 'perm_child_2' },
         body: {
           response: 'always',
         },
-        query: {
-          directory: '/session/default-directory',
-        },
+        headers: { 'Content-Type': 'application/json' },
       },
     ]);
   });

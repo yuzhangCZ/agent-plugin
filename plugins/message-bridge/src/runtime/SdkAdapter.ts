@@ -1,13 +1,14 @@
-import type { HostClientLike, OpencodeClient, OpencodeHealthResult } from '../types/index.js';
+import type { BridgeSdkClient, HostClientLike, HostSdkClient, OpencodeHealthResult } from '../types/index.js';
 
 export const REQUIRED_SDK_CAPABILITIES = [
   'session.create',
   'session.get',
+  'session.list',
   'session.prompt',
   'session.abort',
   'session.delete',
+  'config.providers',
   'postSessionIdPermissionsPermissionId',
-  '_client.get',
   '_client.post',
 ] as const;
 
@@ -79,6 +80,12 @@ function buildLegacySessionTarget(parameters: { sessionID: string; directory?: s
   };
 }
 
+function buildLegacyScopedQuery(parameters?: { directory?: string }): Record<string, unknown> {
+  return {
+    ...(parameters?.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
 function buildLegacyPromptOptions(parameters: {
   sessionID: string;
   directory?: string;
@@ -115,24 +122,6 @@ function buildLegacyPromptOptions(parameters: {
   };
 }
 
-function buildLegacyPermissionReplyOptions(parameters: {
-  sessionID: string;
-  permissionID: string;
-  directory?: string;
-  response: 'once' | 'always' | 'reject';
-}): Record<string, unknown> {
-  return {
-    path: {
-      id: parameters.sessionID,
-      permissionID: parameters.permissionID,
-    },
-    body: {
-      response: parameters.response,
-    },
-    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
-  };
-}
-
 function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGlobalHealth {
   const global = isRecord(root?.global) ? root.global : undefined;
   const rawClient = isRecord(root?._client) ? root._client : undefined;
@@ -156,6 +145,7 @@ function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGl
 export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[] {
   const root = isRecord(client) ? client : undefined;
   const session = isRecord(root?.session) ? root.session : undefined;
+  const config = isRecord(root?.config) ? root.config : undefined;
   const rawClient = isRecord(root?._client) ? root._client : undefined;
 
   return REQUIRED_SDK_CAPABILITIES.filter((capability) => {
@@ -164,16 +154,18 @@ export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[
         return typeof session?.create !== 'function';
       case 'session.get':
         return typeof session?.get !== 'function';
+      case 'session.list':
+        return typeof session?.list !== 'function';
       case 'session.prompt':
         return typeof session?.prompt !== 'function';
       case 'session.abort':
         return typeof session?.abort !== 'function';
       case 'session.delete':
         return typeof session?.delete !== 'function';
+      case 'config.providers':
+        return typeof config?.providers !== 'function';
       case 'postSessionIdPermissionsPermissionId':
         return typeof root?.postSessionIdPermissionsPermissionId !== 'function';
-      case '_client.get':
-        return typeof rawClient?.get !== 'function';
       case '_client.post':
         return typeof rawClient?.post !== 'function';
       default:
@@ -196,39 +188,63 @@ export function toHostClientLike(client: unknown): HostClientLike {
   };
 }
 
-export function createSdkAdapter(client: unknown): OpencodeClient | null {
+/**
+ * 当前 OpenCode deprecated permission route 在服务端仅消费 permissionID/requestID。
+ * adapter 在内部补一个稳定占位 sessionID，避免把兼容细节暴露给业务层。
+ *
+ * @remarks
+ * 这里依赖的是当前 OpenCode 服务端的兼容行为，而不是桥接层对外契约：
+ * 业务代码只需要提供 permissionId/response，不应感知 sessionID 占位值。
+ * 等官方稳定的 requestID 级 permission reply façade 可用后，应优先删除这条兼容路径。
+ */
+const LEGACY_PERMISSION_REPLY_SESSION_ID = 'ses_bridge_permission_compat';
+
+export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
   if (getMissingSdkCapabilities(client).length > 0) {
     return null;
   }
 
-  const root = client as {
-    session: {
-      create: (options?: Record<string, unknown>) => Promise<unknown>;
-      get: (options: Record<string, unknown>) => Promise<unknown>;
-      prompt: (options: Record<string, unknown>) => Promise<unknown>;
-      abort: (options: Record<string, unknown>) => Promise<unknown>;
-      delete: (options: Record<string, unknown>) => Promise<unknown>;
-    };
-    postSessionIdPermissionsPermissionId: (options: Record<string, unknown>) => Promise<unknown>;
-    _client: {
-      get: OpencodeClient['_client']['get'];
-      post: OpencodeClient['_client']['post'];
-    };
-  };
+  const root = client as HostSdkClient;
 
   return {
     session: {
       create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
       get: (parameters) => root.session.get(buildLegacySessionTarget(parameters)),
+      list: (parameters) => root.session.list(buildLegacyScopedQuery(parameters)),
       prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
       abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
       delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),
     },
-    postSessionIdPermissionsPermissionId: (parameters) =>
-      root.postSessionIdPermissionsPermissionId(buildLegacyPermissionReplyOptions(parameters)),
-    _client: {
-      get: (options) => root._client.get(options),
-      post: (options) => root._client.post(options),
+    config: {
+      providers: (parameters) => root.config.providers(buildLegacyScopedQuery(parameters)),
+    },
+    permission: {
+      // 兼容 deprecated route 的细节只允许停留在 adapter 内部，业务层不暴露 sessionID。
+      reply: (parameters) => root.postSessionIdPermissionsPermissionId({
+        url: '/session/{id}/permissions/{permissionID}',
+        path: {
+          id: LEGACY_PERMISSION_REPLY_SESSION_ID,
+          permissionID: parameters.permissionId,
+        },
+        ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+        body: {
+          response: parameters.response,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
+    },
+    question: {
+      // 当前正式 SDK 仍缺少 question reply 高层方法，暂时仅在 adapter 内部保留 raw fallback。
+      reply: (parameters) => root._client.post({
+        url: '/question/{requestID}/reply',
+        path: { requestID: parameters.questionId },
+        body: { answers: [[parameters.answer]] },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
     },
   };
 }

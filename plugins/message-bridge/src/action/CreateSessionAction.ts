@@ -12,6 +12,7 @@ import {
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { attachDirectory } from './directory.js';
 import type { CreateSessionUseCase, PreparedCreateSession } from '../usecase/CreateSessionUseCase.js';
+import { CreateSessionRequestNormalizer } from '../usecase/CreateSessionRequestNormalizer.js';
 
 /**
  * Concrete implementation of create_session action for creating OpenCode sessions
@@ -19,7 +20,10 @@ import type { CreateSessionUseCase, PreparedCreateSession } from '../usecase/Cre
 export class CreateSessionAction implements Action<'create_session', CreateSessionPayload, CreateSessionResultData> {
   name: 'create_session' = 'create_session';
 
-  constructor(private readonly createSessionUseCase?: CreateSessionUseCase) {}
+  constructor(
+    private readonly createSessionUseCase?: CreateSessionUseCase,
+    private readonly createSessionRequestNormalizer: CreateSessionRequestNormalizer = new CreateSessionRequestNormalizer(),
+  ) {}
 
   /**
    * Execute create session action
@@ -41,19 +45,20 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       }
 
       if (this.createSessionUseCase) {
+        const normalizedRequest = this.normalizePayload(payload);
         const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession({
-          payload,
+          ...normalizedRequest,
           effectiveDirectory: context.effectiveDirectory,
-          mappingConfigured: context.assiantDirectoryMappingConfigured,
+          directoryMappingEnabled: Boolean(context.directoryMappingEnabled),
         });
         resolvedDirectory = preparedCreateSession.resolvedDirectory;
         resolvedDirectorySource = preparedCreateSession.resolvedDirectorySource;
         this.logCreateSessionStarted(context, payloadKeys, preparedCreateSession);
 
         const useCaseResult = await this.createSessionUseCase.execute({
-          payload,
+          ...normalizedRequest,
           effectiveDirectory: context.effectiveDirectory,
-          mappingConfigured: context.assiantDirectoryMappingConfigured,
+          directoryMappingEnabled: Boolean(context.directoryMappingEnabled),
         }, preparedCreateSession);
 
         if (useCaseResult.success) {
@@ -199,5 +204,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
       resolvedDirectory: effectiveDirectory,
       resolvedDirectorySource: effectiveDirectory ? 'effective' : 'none',
     };
+  }
+
+  private normalizePayload(payload: CreateSessionPayload) {
+    return this.createSessionRequestNormalizer.fromCreateSessionPayload(payload);
   }
 }
