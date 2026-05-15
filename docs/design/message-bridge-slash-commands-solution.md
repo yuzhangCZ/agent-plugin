@@ -110,10 +110,17 @@
 v1 中所有 slash command 必须复用现有 `invoke.chat` 下行入口：
 
 1. 上游仍发送 `invoke.chat`
-2. 插件在进入宿主对话 runtime 之前识别 slash command，并显式拿到“是否群聊”上下文
-3. 命中控制命令后，不再把原始文本送给宿主 LLM
-4. 插件直接执行控制逻辑
-5. 插件通过现有 assistant synthetic reply 事件序列与 `tool_done` 返回成功结果；失败结果只走 assistant synthetic reply 文本
+2. runtime 先判定 `invoke.chat.suppressReply`；当 `suppressReply === true` 时，必须直接短路为统一群聊拒答分支，本次请求不得进入 slash parser、slash control-plane 或宿主 LLM
+3. 仅当 `suppressReply` 缺失或为 `false` 时，插件才在进入宿主对话 runtime 之前识别 slash command，并显式拿到“是否群聊”上下文
+4. 命中控制命令后，不再把原始文本送给宿主 LLM
+5. 插件直接执行控制逻辑
+6. 插件通过现有 assistant synthetic reply 事件序列与 `tool_done` 返回成功结果；失败结果只走 assistant synthetic reply 文本
+
+这里需要明确优先级关系：
+
+- `suppressReply` 是服务端下发的一手回复许可，优先级高于 slash command 识别与执行
+- slash command 复用 `invoke.chat` 入口，但不享有绕过禁回的特权
+- 当 `suppressReply === true` 且文本形态看起来像 `/sessions` 或 `@bot /sessions` 时，返回的仍是统一群聊拒答文案，而不是 slash command 成功/失败文案
 
 采用该约束的原因：
 
@@ -148,7 +155,11 @@ v1 当前收口的已知命令仅包括：
 
 对已识别但参数非法的已知命令，v1 用户可见失败文案必须返回命令专属用法提示，而不是泛化成“命令不受支持”。
 
+本节的群聊 slash 规则只在“请求已获准继续处理”前提下成立。若上游在同一条 `invoke.chat` 上显式下发 `suppressReply=true`，runtime 必须先走群聊拒答短路，既不做 mention 剥离，也不做 slash 三态判定。
+
 群聊信号必须显式进入 parser 输入，不能靠隐式字段猜测。当前 `message-bridge` 已稳定拿到的唯一群聊信号是 `invoke.chat.payload.imGroupId`；因此 v1 方案将“`imGroupId` 为非空字符串”定义为唯一群聊判定条件。若后续上游引入 `sessionType=group` 等更正式信号，必须先改造路由入口，再调整本节规则。
+
+需要强调的是，`imGroupId` 只用于“允许继续处理时”的群聊 slash 识别与 mention 剥离，不是回复许可信号，也不能覆盖或绕过服务端下发的 `suppressReply`。
 
 mention 剥离规则保持最小化：
 
@@ -193,6 +204,8 @@ skill-server / miniapp 只需要继续做：
 ### 7.3 Slash Command 上行回复约束
 
 v1 不新增 gateway action，统一复用现有 `chat` 下行入口。slash command 的回复必须兼容 `origin/main` 现有“回复助手消息”展示链路，不引入 slash command 专属渲染分支。
+
+当 `invoke.chat.suppressReply === true` 时，本节 slash command 回包约束不生效；runtime 必须直接返回群聊拒答分支定义的统一 synthetic assistant reply 与单次 `tool_done`。即使原始文本命中了 slash command 文法，也不得返回 slash command 自身的成功文案、失败文案或用法提示。
 
 - 成功场景
   - 插件必须发送一组 assistant synthetic reply `tool_event`
@@ -718,7 +731,13 @@ sequenceDiagram
   U->>SS: 输入 @bot /sessions fdsfs 或 /sessions(宿主失败)
   SS->>GW: invoke.chat(...)
   GW->>MB: downstream chat
-  MB->>MB: 判定群聊信号后再决定是否剥离 mention
+  alt suppressReply === true
+    MB->>MB: 直接命中群聊拒答短路，不进入 slash parser
+    MB-->>GW: deny synthetic reply(tool_event x4) + tool_done
+    GW-->>SS: 上行结果
+    SS-->>U: 展示统一群聊拒答文案
+  else suppressReply !== true
+    MB->>MB: 判定群聊信号后再决定是否剥离 mention
   alt parser => invalid
     MB->>MB: 进入 slashCommandOrchestrator.completeFailure(invalid_command)
   else parser => matched, 但上下文/宿主失败
@@ -731,6 +750,7 @@ sequenceDiagram
   MB-->>GW: synthetic assistant failure reply(tool_event x4)
   GW-->>SS: 上行结果
   SS-->>U: 展示失败文案
+  end
 ```
 
 ### 8.10 普通 chat

@@ -789,7 +789,8 @@ slash command 的以下约束完全继承正式方案 `message-bridge-slash-comm
 - `/new`、`/sessions`、`/session`、`/models`、`/model` 的返回文本模板保持与正式方案一致
 - 已知命令但参数非法时，失败文案返回命令专属用法提示，而不是泛化成“命令不受支持”
 - 已知命令但参数非法的示例与正式方案保持一致，包括 `/sessions fdsfs`、`/new foo`、`/session`、`/model`、`/model openai`、`/model a/b/c`
-- 当前版本的群聊判定信号唯一取 `invoke.chat.payload.imGroupId`；只有该信号存在时才允许剥离 `@xxx ` 前缀后再做 slash 三态判定
+- 当上游显式下发 `invoke.chat.suppressReply=true` 时，runtime 必须先走统一群聊拒答短路，不进入 mention 剥离或 slash 三态判定
+- 当前版本的群聊判定信号唯一取 `invoke.chat.payload.imGroupId`；仅在 `suppressReply` 缺失或为 `false`、且请求允许继续处理时，才允许基于该信号剥离 `@xxx ` 前缀后再做 slash 三态判定
 - 未知 slash 文本如 `/abc` 继续走普通 chat / LLM，不进入 slash 失败分支
 
 实现约束补充：
