@@ -1,5 +1,6 @@
 import type {
   HostSessionCreationPort,
+  HostSessionCreateContext,
   HostSessionQueryPort,
   SessionModelOverrideStore,
   SlashCommandContext,
@@ -20,7 +21,11 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
     hostSessionQueryPort: HostSessionQueryPort;
   }) {}
 
-  async resolve(anchor: ExternalConversationAnchor, logger?: BridgeLogger): Promise<SlashCommandContext> {
+  async resolve(
+    anchor: ExternalConversationAnchor,
+    createContext?: HostSessionCreateContext,
+    logger?: BridgeLogger,
+  ): Promise<SlashCommandContext> {
     const existing = this.dependencies.bindingStore.get(anchor);
     if (existing && existing.status === 'active') {
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
@@ -54,7 +59,7 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
       };
     }
 
-    const created = await this.dependencies.hostSessionCreationPort.createSession();
+    const created = await this.dependencies.hostSessionCreationPort.createSession(createContext);
     this.detachPreviousOwnership(existing, created.id);
     this.dependencies.bindingStore.bind(anchor, created.id);
     this.dependencies.ownershipResolver.attach(created.id, anchor);

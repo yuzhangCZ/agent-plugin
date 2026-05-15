@@ -5,7 +5,7 @@ import type { BridgeLogger } from '../types/logger.js';
 export interface ResolveCreateSessionDirectoryInput {
   assistantId?: string;
   effectiveDirectory?: string;
-  mappingConfigured?: boolean;
+  directoryMappingEnabled: boolean;
 }
 
 export interface ResolvedCreateSessionDirectory {
@@ -27,7 +27,7 @@ export class ResolveCreateSessionDirectoryUseCase {
 
   async execute(input: ResolveCreateSessionDirectoryInput): Promise<ResolvedCreateSessionDirectory> {
     if (this.bridgeChannelPort.isAssiantChannel()) {
-      if (!input.mappingConfigured) {
+      if (!input.directoryMappingEnabled) {
         this.warnUnresolved('mapping_file_unconfigured', input);
         return this.resolveFallback(input);
       }
@@ -70,7 +70,7 @@ export class ResolveCreateSessionDirectoryUseCase {
       reason,
       channel: this.bridgeChannelPort.getChannel(),
       assistantId: input.assistantId,
-      mappingConfigured: Boolean(input.mappingConfigured),
+      directoryMappingEnabled: input.directoryMappingEnabled,
       hasEffectiveDirectory: Boolean(input.effectiveDirectory),
       fallbackSource: fallback.source,
     });

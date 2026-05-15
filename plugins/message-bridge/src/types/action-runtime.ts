@@ -16,7 +16,7 @@ export interface ActionContext {
   welinkSessionId?: string;
   // 兼容字段：仅 create_session 的目录决策链路消费，其他 action 不应透传。
   effectiveDirectory?: string;
-  assiantDirectoryMappingConfigured?: boolean;
+  directoryMappingEnabled?: boolean;
   logger?: BridgeLogger;
 }
 

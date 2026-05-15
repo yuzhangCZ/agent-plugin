@@ -25,23 +25,28 @@ export class BindingAwareChatRouter {
   async route(input: {
     anchor: string;
     text: string;
-    isGroupChat?: boolean;
     assistantId?: string;
+    imGroupId?: string;
     logger?: BridgeLogger;
   }): Promise<
     | { kind: 'chat_forwarded'; sessionId: string }
     | { kind: 'slash_completed' }
   > {
+    const createContext = {
+      assistantId: input.assistantId,
+      imGroupId: input.imGroupId,
+    };
     const parseResult = this.dependencies.slashCommandParser.tryParse({
       text: input.text,
-      isGroupChat: input.isGroupChat === true,
+      isGroupChat: Boolean(input.imGroupId?.trim()),
     });
     if (parseResult.kind === 'matched') {
       try {
-        const context = await this.dependencies.contextResolver.resolve(input.anchor, input.logger);
+        const context = await this.dependencies.contextResolver.resolve(input.anchor, createContext, input.logger);
         await this.dependencies.slashCommandOrchestrator.execute({
           command: parseResult.command,
           context,
+          createContext,
           ...(input.logger ? { logger: input.logger } : {}),
         });
       } catch (error) {
@@ -66,7 +71,11 @@ export class BindingAwareChatRouter {
       return { kind: 'slash_completed' };
     }
 
-    const context = await this.dependencies.contextResolver.resolve(input.anchor, input.logger);
+    const context = await this.dependencies.contextResolver.resolve(
+      input.anchor,
+      createContext,
+      input.logger,
+    );
 
     if (!context.activeOpencodeSessionId) {
       throw new Error(`active session missing for anchor=${input.anchor}`);

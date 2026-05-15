@@ -56,6 +56,12 @@ export interface HostModelInfo {
   label?: string;
 }
 
+/** chat 触发的建会话原始上下文。 */
+export interface HostSessionCreateContext {
+  assistantId?: string;
+  imGroupId?: string;
+}
+
 /** slash 命令语法树。 */
 export type SlashCommand =
   | { kind: 'new' }
@@ -134,7 +140,11 @@ export interface SessionModelOverrideStore {
 
 /** 负责 bootstrap binding，并解析当前控制面上下文。 */
 export interface SlashCommandContextResolver {
-  resolve(anchor: ExternalConversationAnchor, logger?: BridgeLogger): Promise<SlashCommandContext>;
+  resolve(
+    anchor: ExternalConversationAnchor,
+    createContext?: HostSessionCreateContext,
+    logger?: BridgeLogger,
+  ): Promise<SlashCommandContext>;
 }
 
 /** 宿主会话查询接口。 */
@@ -145,7 +155,7 @@ export interface HostSessionQueryPort {
 
 /** 宿主会话创建接口。 */
 export interface HostSessionCreationPort {
-  createSession(input?: { title?: string; directory?: string }): Promise<HostSessionInfo>;
+  createSession(input?: HostSessionCreateContext): Promise<HostSessionInfo>;
 }
 
 /** 普通 chat 的宿主 prompt 执行接口。 */

@@ -646,8 +646,10 @@ describe('BindingAwareChatRouter', () => {
   test('creates a new session only when no recent session is available', async () => {
     const prompts = [];
     let createCalls = 0;
+    const createInputs = [];
     const hostSessionCreationPort = {
-      async createSession() {
+      async createSession(input) {
+        createInputs.push(input);
         createCalls += 1;
         return {
           id: 'ses-bootstrap',
@@ -702,11 +704,19 @@ describe('BindingAwareChatRouter', () => {
     const result = await router.route({
       anchor: 'tool-bootstrap-empty',
       text: 'hello',
+      assistantId: 'persona-bootstrap',
+      imGroupId: 'group-bootstrap',
       logger: createLoggerStub(),
     });
 
     assert.deepStrictEqual(result, { kind: 'chat_forwarded', sessionId: 'ses-bootstrap' });
     assert.strictEqual(createCalls, 1);
+    assert.deepStrictEqual(createInputs, [
+      {
+        assistantId: 'persona-bootstrap',
+        imGroupId: 'group-bootstrap',
+      },
+    ]);
     assert.strictEqual(prompts.length, 1);
     assert.strictEqual(prompts[0].sessionId, 'ses-bootstrap');
     assert.deepStrictEqual(bindingStore.get('tool-bootstrap-empty'), {
@@ -719,8 +729,10 @@ describe('BindingAwareChatRouter', () => {
   test('slash new rotates ownership and emits canonical synthetic assistant reply plus tool_done', async () => {
     const created = [];
     const prompts = [];
+    const createInputs = [];
     const hostSessionCreationPort = {
-      async createSession() {
+      async createSession(input) {
+        createInputs.push(input);
         const id = created.length === 0 ? 'ses-bootstrap' : 'ses-new';
         created.push(id);
         return { id, title: id, directory: `/tmp/${id}` };
@@ -775,11 +787,33 @@ describe('BindingAwareChatRouter', () => {
       hostPromptExecutionPort,
     });
 
-    await router.route({ anchor: 'tool-1', text: 'hello', logger: createLoggerStub() });
-    const result = await router.route({ anchor: 'tool-1', text: '/new', logger: createLoggerStub() });
+    await router.route({
+      anchor: 'tool-1',
+      text: 'hello',
+      assistantId: 'persona-new',
+      imGroupId: 'group-new',
+      logger: createLoggerStub(),
+    });
+    const result = await router.route({
+      anchor: 'tool-1',
+      text: '/new',
+      assistantId: 'persona-new',
+      imGroupId: 'group-new',
+      logger: createLoggerStub(),
+    });
 
     assert.deepStrictEqual(result, { kind: 'slash_completed' });
     assert.strictEqual(prompts.length, 1);
+    assert.deepStrictEqual(createInputs, [
+      {
+        assistantId: 'persona-new',
+        imGroupId: 'group-new',
+      },
+      {
+        assistantId: 'persona-new',
+        imGroupId: 'group-new',
+      },
+    ]);
     assert.deepStrictEqual(bindingStore.get('tool-1'), {
       anchor: 'tool-1',
       activeOpencodeSessionId: 'ses-new',

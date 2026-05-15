@@ -2,6 +2,7 @@ import type {
   HostModelCatalogPort,
   HostPromptExecutionPort,
   HostSessionCreationPort,
+  HostSessionCreateContext,
   HostSessionQueryPort,
   SlashCommandFailureDeliveryFailureStage,
   SlashCommandFailureDeliveryResult,
@@ -37,10 +38,11 @@ export class DefaultSlashCommandOrchestrator {
   async execute(input: {
     command: SlashCommand;
     context: SlashCommandContext;
+    createContext?: HostSessionCreateContext;
     logger?: BridgeLogger;
   }): Promise<void> {
     try {
-      const result = await this.executeCommand(input.command, input.context);
+      const result = await this.executeCommand(input.command, input.context, input.createContext);
       const text = this.dependencies.replyPresenter.presentSuccess(result);
       const deliveryResult = await this.dependencies.completionPort.completeSuccess({
         anchor: input.context.anchor,
@@ -84,11 +86,15 @@ export class DefaultSlashCommandOrchestrator {
     });
   }
 
-  private async executeCommand(command: SlashCommand, context: SlashCommandContext) {
+  private async executeCommand(
+    command: SlashCommand,
+    context: SlashCommandContext,
+    createContext?: HostSessionCreateContext,
+  ) {
     switch (command.kind) {
       case 'new': {
         const previousSessionId = context.activeOpencodeSessionId;
-        const session = await this.dependencies.hostSessionCreationPort.createSession();
+        const session = await this.dependencies.hostSessionCreationPort.createSession(createContext);
         this.rebind(context.anchor, previousSessionId, session.id);
         return { kind: 'new' as const, session, previousSessionId };
       }

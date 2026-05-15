@@ -61,7 +61,12 @@ import {
   type DownstreamNormalizationError,
   InvalidInvokeToolErrorResponder,
 } from '../protocol/downstream/index.js';
-import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
+import {
+  ChatUseCase,
+  CreateSessionRequestNormalizer,
+  CreateSessionUseCase,
+  ResolveCreateSessionDirectoryUseCase,
+} from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
@@ -158,6 +163,7 @@ export class BridgeRuntime {
   private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
+  private readonly createSessionRequestNormalizer: CreateSessionRequestNormalizer;
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
   private readonly bindingStore = new InMemoryToolSessionBindingStore();
@@ -217,6 +223,7 @@ export class BridgeRuntime {
       this.assiantDirectoryMappingPort,
       this.logger,
     );
+    this.createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
     this.createSessionUseCase = new CreateSessionUseCase(
       this.resolveCreateSessionDirectoryUseCase,
       this.opencodeSessionGatewayAdapter,
@@ -597,7 +604,7 @@ export class BridgeRuntime {
   private registerActions(): void {
     const actions = [
       new ChatAction(this.chatUseCase),
-      new CreateSessionAction(this.createSessionUseCase),
+      new CreateSessionAction(this.createSessionUseCase, this.createSessionRequestNormalizer),
       new CloseSessionAction(this.opencodeSessionGatewayAdapter),
       new PermissionReplyAction(this.opencodeSessionGatewayAdapter),
       new StatusQueryAction(),
@@ -831,8 +838,8 @@ export class BridgeRuntime {
         const routeResult = await this.bindingAwareChatRouter.route({
           anchor: toolSessionId,
           text: invokeMessage.payload.text,
-          isGroupChat: typeof invokeMessage.payload.imGroupId === 'string' && invokeMessage.payload.imGroupId.length > 0,
           assistantId: invokeMessage.payload.assistantId,
+          imGroupId: invokeMessage.payload.imGroupId,
           logger: invokeLogger,
         });
         if (routeResult.kind === 'slash_completed') {
@@ -1004,7 +1011,7 @@ export class BridgeRuntime {
       connectionState: connection.getState(),
       welinkSessionId,
       effectiveDirectory: this.effectiveDirectory,
-      assiantDirectoryMappingConfigured: this.assiantDirectoryMappingPort.isConfigured(),
+      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
       logger: logger.child({
         component: 'action',
         welinkSessionId,
@@ -1013,8 +1020,18 @@ export class BridgeRuntime {
   }
 
   /** 控制面会话创建入口：把 SDK 结果收口为稳定宿主会话视图。 */
-  private async createControlPlaneSession(input?: { title?: string; directory?: string }): Promise<HostSessionInfo> {
-    const result = await this.opencodeSessionGatewayAdapter.createSession(input ?? {});
+  private async createControlPlaneSession(input?: { assistantId?: string; imGroupId?: string }): Promise<HostSessionInfo> {
+    const normalizedRequest = this.createSessionRequestNormalizer.fromChatContext({
+      assistantId: input?.assistantId,
+      imGroupId: input?.imGroupId,
+    });
+    const createSessionInput = {
+      ...normalizedRequest,
+      effectiveDirectory: this.effectiveDirectory,
+      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
+    };
+    const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession(createSessionInput);
+    const result = await this.createSessionUseCase.execute(createSessionInput, preparedCreateSession);
     if (!result.success) {
       throw this.toControlPlaneError(result);
     }

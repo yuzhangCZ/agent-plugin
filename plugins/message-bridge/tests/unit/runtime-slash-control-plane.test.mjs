@@ -212,6 +212,58 @@ describe('runtime slash control-plane', () => {
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
   });
 
+  test('group chat slash new creates sessions without technical title and with deny permissions', async () => {
+    const createCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          create: async (options) => {
+            createCalls.push(options);
+            return {
+              data: {
+                id: createCalls.length === 1 ? 'ses-group-bootstrap' : 'ses-group-new',
+                title: options?.body?.title,
+                directory: '/tmp/group-new',
+              },
+            };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-new',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-group-new', text: '@bot /new', assistantId: 'persona-group', imGroupId: 'group-a' },
+    });
+
+    assert.strictEqual(createCalls.length, 2);
+    for (const call of createCalls) {
+      assert.strictEqual(call.body.title, undefined);
+      assert.deepStrictEqual(call.body.permission, [
+        { permission: 'bash', pattern: '*', action: 'deny' },
+        { permission: 'read', pattern: '*', action: 'deny' },
+        { permission: 'glob', pattern: '*', action: 'deny' },
+        { permission: 'grep', pattern: '*', action: 'deny' },
+        { permission: 'edit', pattern: '*', action: 'deny' },
+        { permission: 'write', pattern: '*', action: 'deny' },
+        { permission: 'task', pattern: '*', action: 'deny' },
+        { permission: 'webfetch', pattern: '*', action: 'deny' },
+        { permission: 'myAgentWebFetch', pattern: '*', action: 'deny' },
+        { permission: 'meeting*', pattern: '*', action: 'deny' },
+        { permission: 'knowledge*', pattern: '*', action: 'deny' },
+        { permission: 'playwright*', pattern: '*', action: 'deny' },
+      ]);
+    }
+    assert.strictEqual(sent[0].toolSessionId, 'tool-group-new');
+    assert.deepStrictEqual(sent.at(-1), { type: 'tool_done', toolSessionId: 'tool-group-new' });
+  });
+
   test('matched slash failure does not fall back to tool_error when failure reply delivery throws', async () => {
     let createCount = 0;
     const runtime = new BridgeRuntime({
