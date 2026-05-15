@@ -20,9 +20,13 @@ function createRuntimeClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
@@ -42,6 +46,10 @@ function createRuntimeClient(overrides = {}) {
     session: {
       ...base.session,
       ...(overrides.session ?? {}),
+    },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
     },
     _client: {
       ...base._client,

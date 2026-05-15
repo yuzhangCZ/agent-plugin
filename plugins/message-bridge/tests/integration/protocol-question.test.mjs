@@ -12,6 +12,7 @@ const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
+    app: {},
     session: {
       create: async () => ({}),
       get: async (options) => ({
@@ -20,10 +21,15 @@ function createRuntimeClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
     },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
+    },
+    postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
       get: async (options) => {
         if (options?.url === '/global/health') {
@@ -35,18 +41,46 @@ function createRuntimeClient(overrides = {}) {
     },
   };
 
-  return {
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
+
+  const merged = {
     ...base,
     ...overrides,
+    app: hasOwn('app') ? { ...base.app, ...(overrides.app ?? {}) } : base.app,
+    global: hasOwn('global') ? { ...base.global, ...(overrides.global ?? {}) } : base.global,
     session: {
       ...base.session,
       ...(overrides.session ?? {}),
+    },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
     },
     _client: {
       ...base._client,
       ...(overrides._client ?? {}),
     },
   };
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.session ?? {}, 'list')) {
+    merged.session.list = async (options) => merged._client.get({
+      url: '/session',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(overrides.config ?? {}, 'providers')) {
+    merged.config.providers = async (options) => merged._client.get({
+      url: '/config/providers',
+      ...(options?.query?.directory ? { query: { directory: options.query.directory } } : {}),
+    });
+  }
+
+  if (!hasOwn('postSessionIdPermissionsPermissionId')) {
+    merged.postSessionIdPermissionsPermissionId = async (options) => merged._client.post(options);
+  }
+
+  return merged;
 }
 
 async function loadFixture(fileName) {

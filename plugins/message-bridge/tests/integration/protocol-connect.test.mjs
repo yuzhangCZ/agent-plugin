@@ -15,9 +15,13 @@ function createRuntimeClient() {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
