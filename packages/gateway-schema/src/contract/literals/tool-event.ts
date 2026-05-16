@@ -45,6 +45,7 @@ export const SKILL_PROVIDER_EVENT_TYPES = [
   'step.start',
   'step.done',
   'session.status',
+  'session.title',
   'session.error',
 ] as const;
 
@@ -60,6 +61,7 @@ export const SUPPORTED_TOOL_EVENT_TYPES = [
   'permission.reply',
   'step.start',
   'step.done',
+  'session.title',
 ] as const;
 
 export type OpencodeToolEventType = (typeof OPENCODE_TOOL_EVENT_TYPES)[number];

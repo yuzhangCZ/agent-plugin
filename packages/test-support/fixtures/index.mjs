@@ -363,7 +363,7 @@ export function createGatewayWireToolUpdateEvent(overrides = {}) {
       toolCallId: 'call-skill-wire',
       status: 'completed',
       title: 'Search results',
-      output: { total: 3 },
+      output: '3 results',
     },
   }, overrides);
 }
@@ -373,10 +373,15 @@ export function createGatewayWireQuestionEvent(overrides = {}) {
     type: 'question',
     properties: {
       messageId: 'msg-skill-wire',
-      partId: 'call-skill-wire',
+      partId: 'part-skill-question',
       toolCallId: 'call-skill-wire',
-      question: 'Proceed?',
-      options: ['Yes', 'No'],
+      questions: [
+        {
+          question: 'Proceed?',
+          header: 'Confirm',
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        },
+      ],
     },
   }, overrides);
 }
@@ -422,7 +427,20 @@ export function createGatewayWireStepDoneEvent(overrides = {}) {
     type: 'step.done',
     properties: {
       messageId: 'msg-skill-wire',
+      tokens: {
+        input: 10,
+        output: 20,
+      },
       reason: 'stop',
+    },
+  }, overrides);
+}
+
+export function createGatewayWireSessionTitleEvent(overrides = {}) {
+  return createSkillEvent({
+    type: 'session.title',
+    properties: {
+      title: 'gateway session title',
     },
   }, overrides);
 }
@@ -450,6 +468,7 @@ export const GATEWAY_WIRE_TOOL_EVENT_FIXTURES = [
   { type: 'permission.reply', build: createGatewayWirePermissionReplyEvent },
   { type: 'step.start', build: createGatewayWireStepStartEvent },
   { type: 'step.done', build: createGatewayWireStepDoneEvent },
+  { type: 'session.title', build: createGatewayWireSessionTitleEvent },
 ];
 
 export const GATEWAY_WIRE_SIMPLE_TOOL_EVENT_FIXTURES = [
