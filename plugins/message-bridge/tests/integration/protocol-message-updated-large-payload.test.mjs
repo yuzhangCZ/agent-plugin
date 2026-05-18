@@ -105,6 +105,7 @@ async function createConnectedHarness({ maxPayload } = {}) {
       os: 'darwin',
       toolType: 'opencode',
       toolVersion: '1.2.24',
+      pluginVersion: '0.1.0',
     },
     logger,
   });

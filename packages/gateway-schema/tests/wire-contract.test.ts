@@ -214,6 +214,7 @@ test('validateGatewayWireProtocolMessage accepts current-state downstream + upli
       os: 'linux',
       toolType: 'opencode',
       toolVersion: '1.0.0',
+      pluginVersion: '0.2.0',
     },
     {
       type: 'tool_done',

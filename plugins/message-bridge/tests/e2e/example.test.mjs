@@ -59,6 +59,7 @@ describe('gateway connection contract', () => {
         os: 'darwin',
         toolType: 'channel',
         toolVersion: '1.0.0',
+        pluginVersion: '0.1.0',
       },
     });
 
@@ -72,6 +73,7 @@ describe('gateway connection contract', () => {
       os: 'darwin',
       toolType: 'channel',
       toolVersion: '1.0.0',
+      pluginVersion: '0.1.0',
     });
 
     conn.disconnect();
@@ -88,6 +90,7 @@ describe('gateway connection contract', () => {
         os: 'darwin',
         toolType: 'channel',
         toolVersion: '1.0.0',
+        pluginVersion: '0.1.0',
       },
     });
 
@@ -122,6 +125,7 @@ describe('gateway connection contract', () => {
         os: 'darwin',
         toolType: 'channel',
         toolVersion: '1.0.0',
+        pluginVersion: '0.1.0',
       },
     });
 

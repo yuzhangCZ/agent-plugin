@@ -80,6 +80,7 @@ test('createBridgeRuntime assembles a host runtime facade', async () => {
       register: {
         toolType: 'openx',
         toolVersion: '0.0.0',
+        pluginVersion: '0.1.0',
       },
     },
     connectionFactory: () => new AssemblyGatewayClient(),
@@ -137,6 +138,7 @@ test('createBridgeRuntime does not create gateway connection during construction
       register: {
         toolType: 'openx',
         toolVersion: '0.0.0',
+        pluginVersion: '0.1.0',
       },
     },
     connectionFactory: () => {

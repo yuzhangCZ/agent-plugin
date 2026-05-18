@@ -32,7 +32,7 @@ async function main() {
     external: ["openclaw", "openclaw/*"],
     define: {
       "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
-      "globalThis.__MB_PACKAGE_VERSION__": JSON.stringify(packageVersion),
+      "globalThis.__MB_PLUGIN_PACKAGE_VERSION__": JSON.stringify(packageVersion),
     },
   });
 

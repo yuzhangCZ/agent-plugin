@@ -3,15 +3,15 @@ import test, { afterEach } from "node:test";
 import { resolveRegisterMetadata } from "../../src/runtime/RegisterMetadata.ts";
 import { resolvePackageVersion } from "../../src/runtime/packageVersion.ts";
 
-const ORIGINAL_PACKAGE_VERSION = globalThis.__MB_PACKAGE_VERSION__;
+const ORIGINAL_PACKAGE_VERSION = globalThis.__MB_PLUGIN_PACKAGE_VERSION__;
 
 function restoreInjectedPackageVersion() {
   if (typeof ORIGINAL_PACKAGE_VERSION === "undefined") {
-    delete globalThis.__MB_PACKAGE_VERSION__;
+    delete globalThis.__MB_PLUGIN_PACKAGE_VERSION__;
     return;
   }
 
-  globalThis.__MB_PACKAGE_VERSION__ = ORIGINAL_PACKAGE_VERSION;
+  globalThis.__MB_PLUGIN_PACKAGE_VERSION__ = ORIGINAL_PACKAGE_VERSION;
 }
 
 afterEach(() => {
@@ -19,24 +19,44 @@ afterEach(() => {
 });
 
 test("returns injected package version when available", () => {
-  globalThis.__MB_PACKAGE_VERSION__ = "0.1.0-test";
+  globalThis.__MB_PLUGIN_PACKAGE_VERSION__ = "0.1.0-test";
   assert.equal(resolvePackageVersion(), "0.1.0-test");
 });
 
 test("falls back to unknown when package version is not injected", () => {
-  delete globalThis.__MB_PACKAGE_VERSION__;
+  delete globalThis.__MB_PLUGIN_PACKAGE_VERSION__;
   assert.equal(resolvePackageVersion(), "unknown");
 });
 
 test("register metadata does not treat package version as toolVersion", () => {
-  globalThis.__MB_PACKAGE_VERSION__ = "package-version-should-not-be-used";
+  globalThis.__MB_PLUGIN_PACKAGE_VERSION__ = "package-version-should-not-be-used";
   const metadata = resolveRegisterMetadata(
     {
       info() {},
       warn() {},
       error() {},
     },
+    {
+      resolveHostToolVersion: () => "openclaw 2026.4.10",
+    },
   );
 
+  assert.equal(metadata.toolVersion, "openclaw 2026.4.10");
   assert.notEqual(metadata.toolVersion, "package-version-should-not-be-used");
+  assert.equal(metadata.pluginVersion, "package-version-should-not-be-used");
+});
+
+test("register metadata falls back to unknown when host version resolver returns blank", () => {
+  const metadata = resolveRegisterMetadata(
+    {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    {
+      resolveHostToolVersion: () => "",
+    },
+  );
+
+  assert.equal(metadata.toolVersion, "unknown");
 });

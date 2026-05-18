@@ -18,6 +18,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
   const bundleManifestPath = resolve("bundle/package.json");
   const bundleReadmePath = resolve("bundle/README.md");
   const sourceManifestPath = resolve("package.json");
+  const sdkManifestPath = resolve("../../packages/bridge-runtime-sdk/package.json");
 
   await access(bundleRoot, constants.R_OK);
   await access(bundleEntry, constants.R_OK);
@@ -27,6 +28,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
 
   const manifest = JSON.parse(await readFile(bundleManifestPath, "utf8"));
   const sourceManifest = JSON.parse(await readFile(sourceManifestPath, "utf8"));
+  const sdkManifest = JSON.parse(await readFile(sdkManifestPath, "utf8"));
   const bundleContent = await readFile(bundleEntry, "utf8");
   const setupEntryContent = await readFile(bundleSetupEntry, "utf8");
   assert.equal(manifest.main, "index.js");
@@ -40,6 +42,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
   assert.equal(manifest.openclaw.install.minHostVersion, sourceManifest.openclaw.install.minHostVersion);
   assert.match(bundleContent, /ws:\/\/localhost:8081\/ws\/agent/);
   assert.match(bundleContent, new RegExp(sourceManifest.version.replaceAll(".", "\\.")));
+  assert.doesNotMatch(bundleContent, new RegExp(sdkManifest.version.replaceAll(".", "\\.")));
   assert.match(setupEntryContent, /definePluginEntry/);
   assert.match(bundleContent, /openclaw\/plugin-sdk/);
 });

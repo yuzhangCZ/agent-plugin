@@ -36,6 +36,7 @@ export function createRegisterMessage(overrides = {}) {
     os: overrides.os || 'darwin',
     toolType: 'channel',
     toolVersion: overrides.toolVersion || '1.0.0',
+    pluginVersion: overrides.pluginVersion || '0.1.0',
     timestamp: Date.now(),
     ...overrides
   };

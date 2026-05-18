@@ -51,6 +51,7 @@ test('internal factory accepts overrides without leaking them through stable ent
         os: 'darwin',
         toolType: 'opencode',
         toolVersion: '1.0.0',
+        pluginVersion: '0.2.0',
       },
     },
     {
@@ -71,6 +72,7 @@ test('internal factory accepts overrides without leaking them through stable ent
     os: 'darwin',
     toolType: 'opencode',
     toolVersion: '1.0.0',
+    pluginVersion: '0.2.0',
   });
   client.disconnect();
 });

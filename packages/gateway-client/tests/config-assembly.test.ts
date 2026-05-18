@@ -12,6 +12,7 @@ test('buildGatewayRegisterMessage returns register payload and omits blank macAd
     os: 'darwin',
     toolType: 'openx',
     toolVersion: '1.2.3',
+    pluginVersion: '0.2.0',
     macAddress: '   ',
   });
 
@@ -21,6 +22,7 @@ test('buildGatewayRegisterMessage returns register payload and omits blank macAd
     os: 'darwin',
     toolType: 'openx',
     toolVersion: '1.2.3',
+    pluginVersion: '0.2.0',
   });
 });
 
@@ -30,6 +32,7 @@ test('buildGatewayRegisterMessage preserves explicit macAddress and does not der
     os: 'linux',
     toolType: 'channel',
     toolVersion: '9.9.9',
+    sdkVersion: '2.3.4',
     macAddress: ' aa:bb:cc:dd:ee:ff ',
   });
 
@@ -39,6 +42,7 @@ test('buildGatewayRegisterMessage preserves explicit macAddress and does not der
     os: 'linux',
     toolType: 'channel',
     toolVersion: '9.9.9',
+    sdkVersion: '2.3.4',
     macAddress: ' aa:bb:cc:dd:ee:ff ',
   });
 });
@@ -48,6 +52,7 @@ test('buildGatewayHostRegisterMessage derives device identity and macAddress', (
     {
       toolType: 'openx',
       toolVersion: '1.2.3',
+      pluginVersion: '0.2.0',
     },
     {
       hostname: () => 'dev-box',
@@ -65,6 +70,7 @@ test('buildGatewayHostRegisterMessage derives device identity and macAddress', (
     os: 'darwin',
     toolType: 'openx',
     toolVersion: '1.2.3',
+    pluginVersion: '0.2.0',
     macAddress: 'aa:bb:cc:dd:ee:ff',
   });
 });
@@ -74,6 +80,7 @@ test('buildGatewayHostRegisterMessage omits unusable macAddress and falls back d
     {
       toolType: 'opencode',
       toolVersion: '1.2.3',
+      sdkVersion: '0.2.0',
     },
     {
       hostname: () => '   ',
@@ -90,5 +97,6 @@ test('buildGatewayHostRegisterMessage omits unusable macAddress and falls back d
     os: 'linux',
     toolType: 'opencode',
     toolVersion: '1.2.3',
+    sdkVersion: '0.2.0',
   });
 });
