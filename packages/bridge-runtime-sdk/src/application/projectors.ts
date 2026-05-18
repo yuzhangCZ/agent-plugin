@@ -85,7 +85,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
               ...(fact.title ? { title: fact.title } : {}),
               ...(fact.input !== undefined ? { input: fact.input } : {}),
               ...(fact.output !== undefined ? { output: fact.output } : {}),
-              ...(fact.error !== undefined ? { error: fact.error } : {}),
+              ...(fact.error ? { error: fact.error } : {}),
             },
           },
         ];

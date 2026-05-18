@@ -51,7 +51,7 @@ const skillToolUpdateEventBaseSchema = z.object({
     title: requiredTrimmedString.optional(),
     input: z.unknown().optional(),
     output: z.unknown().optional(),
-    error: z.unknown().optional(),
+    error: requiredTrimmedString.optional(),
   }),
 });
 
