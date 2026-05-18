@@ -1,64 +1,68 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { KNOWN_TOOL_TYPES, isKnownToolType } from "../contracts/transport.js";
+import { resolvePackageVersion } from "./packageVersion.js";
 import type { BridgeLogger } from "../types.js";
 
-export const MESSAGE_BRIDGE_TOOL_TYPE = "openx";
+export const MESSAGE_BRIDGE_TOOL_TYPE = "openclaw";
 
 export interface RegisterMetadata {
   toolType: string;
   toolVersion: string;
+  pluginVersion: string;
 }
 
 export interface RegisterMetadataDeps {
   toolVersion?: string;
+  resolveHostToolVersion?: (logger: BridgeLogger) => string;
+  resolveClientVersion?: () => string;
 }
 
 const UNKNOWN_TOOL_VERSION = "unknown";
+let cachedHostToolVersion: string | null = null;
 
 /**
  * 解析注册元数据中的 toolVersion。
- * @remarks 这里表达的是宿主 agent 版本，不是插件包版本；因此不读取构建期注入的 package version。
+ * @remarks 这里表达的是宿主 OpenClaw 版本，不是插件包版本；因此优先取 `openclaw --version`。
  */
 function resolveHostToolVersion(logger: BridgeLogger): string {
-  const moduleFile = fileURLToPath(import.meta.url);
-  let currentDir = path.dirname(moduleFile);
-
-  for (let depth = 0; depth < 6; depth += 1) {
-    const packageJsonPath = path.join(currentDir, "package.json");
-    if (existsSync(packageJsonPath)) {
-      try {
-        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
-        if (typeof packageJson.version === "string" && packageJson.version.trim()) {
-          return packageJson.version.trim();
-        }
-      } catch (error) {
-        logger.warn("runtime.tool_version.read_failed", {
-          packageJsonPath,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      break;
-    }
-    currentDir = parentDir;
+  if (cachedHostToolVersion !== null) {
+    return cachedHostToolVersion;
   }
 
-  logger.warn("runtime.tool_version.unavailable");
-  return UNKNOWN_TOOL_VERSION;
+  const result = spawnSync("openclaw --version", {
+    shell: true,
+    encoding: "utf8",
+  });
+  const stdout = String(result.stdout ?? "").trim();
+  const stderr = String(result.stderr ?? "").trim();
+  const combinedOutput = [stdout, stderr].filter(Boolean).join("\n").trim();
+
+  if (!result.error && result.status === 0 && combinedOutput) {
+    cachedHostToolVersion = combinedOutput;
+    return cachedHostToolVersion;
+  }
+
+  logger.warn("runtime.tool_version.unavailable", {
+    exitCode: result.status,
+    error: result.error instanceof Error ? result.error.message : undefined,
+    stderr: stderr || undefined,
+  });
+  cachedHostToolVersion = UNKNOWN_TOOL_VERSION;
+  return cachedHostToolVersion;
 }
 
 export function resolveRegisterMetadata(
   logger: BridgeLogger,
   deps: RegisterMetadataDeps = {},
 ): RegisterMetadata {
+  const resolvedHostToolVersion = deps.toolVersion?.trim()
+    || (deps.resolveHostToolVersion ?? resolveHostToolVersion)(logger).trim()
+    || UNKNOWN_TOOL_VERSION;
+
   return {
     toolType: MESSAGE_BRIDGE_TOOL_TYPE,
-    toolVersion: deps.toolVersion?.trim() || resolveHostToolVersion(logger),
+    toolVersion: resolvedHostToolVersion,
+    pluginVersion: (deps.resolveClientVersion ?? resolvePackageVersion)(),
   };
 }
 

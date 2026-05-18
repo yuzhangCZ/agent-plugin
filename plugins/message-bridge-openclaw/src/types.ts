@@ -37,6 +37,9 @@ export interface MessageBridgeSessionRecord {
   toolSessionId: string;
   sessionKey: string;
   welinkSessionId?: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MessageBridgeStatusSnapshot {
@@ -44,6 +47,15 @@ export interface MessageBridgeStatusSnapshot {
   running: boolean;
   connected: boolean;
   runtimePhase?: MessageBridgeRuntimePhase;
+  routeResolverAvailable?: boolean;
+  replyRuntimeAvailable?: boolean;
+  streamingPathHealthy?: boolean;
+  streamingPathReason?:
+    | "runtime_reply_available"
+    | "runtime_reply_final_only"
+    | "plugin_streaming_disabled_runtime_reply"
+    | "missing_route_resolver"
+    | "missing_reply_runtime";
   lastStartAt: number | null;
   lastStopAt: number | null;
   lastError: string | null;

@@ -1,10 +1,12 @@
 export * from '../gateway-wire/transport.js';
 
+export const TOOL_TYPE_OPENCODE = 'opencode';
 export const TOOL_TYPE_OPENX = 'openx';
 export const TOOL_TYPE_UNIASSISTANT = 'uniassistant';
 export const TOOL_TYPE_CODEAGENT = 'codeagent';
 
 export const KNOWN_TOOL_TYPES = [
+  TOOL_TYPE_OPENCODE,
   TOOL_TYPE_OPENX,
   TOOL_TYPE_UNIASSISTANT,
   TOOL_TYPE_CODEAGENT,

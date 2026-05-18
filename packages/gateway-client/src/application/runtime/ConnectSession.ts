@@ -195,6 +195,8 @@ class ConnectAttempt {
       this.context.logger?.info?.('gateway.register.sent', {
         toolType: this.context.options.registerMessage.toolType,
         toolVersion: this.context.options.registerMessage.toolVersion,
+        sdkVersion: this.context.options.registerMessage.sdkVersion,
+        pluginVersion: this.context.options.registerMessage.pluginVersion,
       });
       this.phase = 'register-sent';
       this.armHandshakeTimeout();

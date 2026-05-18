@@ -408,6 +408,7 @@ export class BridgeRuntime {
         os: os.platform(),
         toolType: config.gateway.channel,
         toolVersion: registerMetadata.toolVersion,
+        pluginVersion,
         macAddress: registerMetadata.macAddress,
       }),
       logger: this.logger.child({ component: 'gateway' }),

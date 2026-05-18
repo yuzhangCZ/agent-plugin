@@ -6,7 +6,10 @@ import { createAkSkAuthProvider } from '../auth/AkSkAuthProvider.ts';
 import { buildGatewayRegisterMessage } from './buildGatewayRegisterMessage.ts';
 import { createGatewayClient } from './createGatewayClient.ts';
 
-export type GatewayClientHostToolType = 'openx' | 'openclaw' | 'opencode';
+/**
+ * host-level `toolType` 作为接入端标识透传给网关，不在 gateway-client 层限制具体取值。
+ */
+export type GatewayClientHostToolType = string;
 const LOCALHOST_DEFAULT_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
 
 function readInjectedDefaultGatewayUrl(): string | null {
@@ -24,6 +27,8 @@ export const DEFAULT_GATEWAY_URL = readInjectedDefaultGatewayUrl() ?? LOCALHOST_
 /**
  * 宿主创建 gateway 连接所需的稳定高层配置。
  * @remarks deviceName、os、macAddress 属于本机环境身份，由 gateway-client 统一探测并装配。
+ * `sdkVersion` / `pluginVersion` 的最终协议约束不在此层重复定义；SDK 或插件负责提供
+ * 各自拥有的版本字段，最终 register 合法性由 gateway-schema 统一校验。
  */
 export interface GatewayClientHostConfig {
   url?: string;
@@ -34,6 +39,8 @@ export interface GatewayClientHostConfig {
   register: {
     toolType: GatewayClientHostToolType;
     toolVersion: string;
+    sdkVersion?: string;
+    pluginVersion?: string;
   };
 }
 
@@ -102,6 +109,8 @@ export function buildGatewayHostRegisterMessage(
     os: environment.platform(),
     toolType: register.toolType,
     toolVersion: register.toolVersion,
+    ...(register.sdkVersion ? { sdkVersion: register.sdkVersion } : {}),
+    ...(register.pluginVersion ? { pluginVersion: register.pluginVersion } : {}),
     ...(macAddress ? { macAddress } : {}),
   });
 }

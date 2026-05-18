@@ -19,6 +19,7 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
         os: 'darwin',
         toolType: 'opencode',
         toolVersion: '1.0.0',
+        pluginVersion: '0.2.0',
       },
     },
     telemetry: {

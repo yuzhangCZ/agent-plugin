@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk/core";
 import { messageBridgePlugin } from "./channel.js";
+import { messageBridgeSetupPlugin } from "./channel.setup.js";
 import { setPluginRuntime } from "./runtime/store.js";
 
 const plugin: {
@@ -22,6 +23,7 @@ const plugin: {
 
 export default plugin;
 export { messageBridgePlugin };
+export { messageBridgeSetupPlugin };
 export * from "./OpenClawGatewayBridge.js";
 export * from "./gateway-wire/index.js";
 export * from "./config.js";

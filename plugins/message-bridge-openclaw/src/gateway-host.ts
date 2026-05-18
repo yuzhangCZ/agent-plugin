@@ -18,6 +18,7 @@ export function buildBridgeGatewayHostConfig(
     register: {
       toolType: registerMetadata.toolType,
       toolVersion: registerMetadata.toolVersion,
+      pluginVersion: registerMetadata.pluginVersion,
     },
   };
 }
