@@ -1741,7 +1741,7 @@ describe('runtime protocol strictness', () => {
     });
 
     const receivedLog = await waitForAppLog(appLogs, 'event.received');
-    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
+    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding.detail');
 
     assert.strictEqual(receivedLog.extra.deltaBytes, 0);
     assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
@@ -1798,7 +1798,7 @@ describe('runtime protocol strictness', () => {
     });
 
     const receivedLog = await waitForAppLog(appLogs, 'event.received');
-    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
+    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding.detail');
 
     assert.strictEqual(receivedLog.extra.deltaBytes, 0);
     assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
