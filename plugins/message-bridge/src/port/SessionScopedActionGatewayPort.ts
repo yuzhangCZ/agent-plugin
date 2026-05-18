@@ -32,6 +32,11 @@ export interface SessionScopedActionGatewayPort {
   replyQuestion(parameters: {
     sessionId: string;
     toolCallId?: string;
+    /**
+     * 可选 opencode question request id。非空走快路径 POST /question/{requestID}/reply；
+     * 缺失/空白则按 toolCallId fallback（GET /question + filter + POST）。
+     */
+    requestId?: string;
     answer: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>>;

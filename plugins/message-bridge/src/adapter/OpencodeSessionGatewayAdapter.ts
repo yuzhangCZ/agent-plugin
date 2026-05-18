@@ -343,6 +343,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
   async replyQuestion(parameters: {
     sessionId: string;
     toolCallId?: string;
+    requestId?: string;
     answer: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>> {
@@ -351,6 +352,38 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       failurePrefix: 'Failed to reply to question',
       logger: parameters.logger,
       handler: async ({ client, directory }) => {
+        // 快路径（D7 capability token）：requestId 非空时直接 POST，跳过 GET /question 反查。
+        // SS 已鉴权 session 归属；requestId 是 UUID 不可猜测；不在 plugin 侧二次校验 requestId 与
+        // toolSessionId / toolCallId 的关联。伪造/陈旧 requestId → SDK 层返错，由 executeSdkCall 透传。
+        if (parameters.requestId) {
+          const fastRequestId = parameters.requestId;
+          parameters.logger?.debug('adapter.replyQuestion.fast_path', {
+            sessionId: parameters.sessionId,
+            requestId: fastRequestId,
+          });
+          return this.executeSdkCall({
+            failurePrefix: 'Failed to reply to question',
+            sourceOperation: 'question.reply',
+            promiseFactory: () => client._client.post({
+              url: '/question/{requestID}/reply',
+              path: { requestID: fastRequestId },
+              body: { answers: [[parameters.answer]] },
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              ...(directory ? { query: { directory } } : {}),
+            }),
+            onSuccess: () => ({
+              success: true,
+              data: {
+                requestId: fastRequestId,
+                replied: true,
+              },
+            }),
+          });
+        }
+
+        // Fallback：GET /question 列出 pending → toolCallId 过滤 → POST /question/{id}/reply
         const listResult = await this.executeSdkCall({
           failurePrefix: 'Failed to reply to question',
           sourceOperation: 'question.list',

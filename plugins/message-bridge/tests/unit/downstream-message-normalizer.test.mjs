@@ -443,4 +443,67 @@ describe('downstream message normalizer', () => {
       welinkSessionId: undefined,
     });
   });
+
+  test('question_reply: passes requestId through when non-empty (personal scope fast-path)', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          toolSessionId: 'tool-42',
+          toolCallId: 'call-7',
+          answer: 'yes',
+          requestId: 'req-uuid-abc',
+        },
+      },
+      logger,
+    );
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value.payload, {
+      toolSessionId: 'tool-42',
+      toolCallId: 'call-7',
+      answer: 'yes',
+      requestId: 'req-uuid-abc',
+    });
+  });
+
+  test('question_reply: drops blank requestId (D8 — treated as missing)', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          toolSessionId: 'tool-42',
+          toolCallId: 'call-7',
+          answer: 'yes',
+          requestId: '   ',
+        },
+      },
+      logger,
+    );
+    assert.strictEqual(result.ok, true);
+    // 空白 requestId 不进 payload
+    assert.strictEqual(result.value.payload.requestId, undefined);
+    assert.strictEqual(result.value.payload.answer, 'yes');
+  });
+
+  test('question_reply: omits requestId when absent (legacy miniapp shape unchanged)', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          toolSessionId: 'tool-42',
+          toolCallId: 'call-7',
+          answer: 'yes',
+        },
+      },
+      logger,
+    );
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual('requestId' in result.value.payload, false);
+  });
 });

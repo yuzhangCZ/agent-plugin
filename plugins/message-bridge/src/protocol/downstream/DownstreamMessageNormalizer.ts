@@ -304,6 +304,11 @@ export function normalizeQuestionReplyPayload(payload: unknown, welinkSessionId?
   );
   if (!answer.ok) return answer;
 
+  const result: QuestionReplyPayload = {
+    toolSessionId: toolSessionId.value,
+    answer: answer.value,
+  };
+
   if (payload.toolCallId !== undefined) {
     const toolCallId = requireNonEmptyString(
       payload.toolCallId,
@@ -314,17 +319,30 @@ export function normalizeQuestionReplyPayload(payload: unknown, welinkSessionId?
       welinkSessionId,
     );
     if (!toolCallId.ok) return toolCallId;
-    return ok({
-      toolSessionId: toolSessionId.value,
-      answer: answer.value,
-      toolCallId: toolCallId.value,
-    });
+    result.toolCallId = toolCallId.value;
   }
 
-  return ok({
-    toolSessionId: toolSessionId.value,
-    answer: answer.value,
-  });
+  // D8：requestId 缺失/空白视为未提供 → 不进 payload，adapter 走 fallback
+  // 用 typeof 防御 null/undefined；空白字符串走 requireNonEmptyString 报错由 caller 透传上来。
+  // 这里的策略是：未定义 / null / 空白 → 一律跳过；非空才校验+写入
+  if (payload.requestId !== undefined && payload.requestId !== null) {
+    if (typeof payload.requestId === 'string' && payload.requestId.trim().length === 0) {
+      // 空白字符串：视为未提供（D8），不报错也不塞入
+    } else {
+      const requestId = requireNonEmptyString(
+        payload.requestId,
+        'payload',
+        'payload.requestId',
+        'invoke',
+        'question_reply',
+        welinkSessionId,
+      );
+      if (!requestId.ok) return requestId;
+      result.requestId = requestId.value;
+    }
+  }
+
+  return ok(result);
 }
 
 function normalizeInvokePayload(

@@ -927,4 +927,129 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     );
     assert.strictEqual(result.errorEvidence?.sourceOperation, 'question.reply');
   });
+
+  test('replyQuestion with requestId skips GET /question and posts directly (fast-path)', async () => {
+    const getCalls = [];
+    const postCalls = [];
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        get: async () => ({ data: { id: 'ses-fast', directory: '/tmp/fast' } }),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async (options) => {
+          getCalls.push(options);
+          return { data: [] };
+        },
+        post: async (options) => {
+          postCalls.push(options);
+          return { data: undefined };
+        },
+      },
+    }));
+
+    const result = await adapter.replyQuestion({
+      sessionId: 'ses-fast',
+      toolCallId: 'call-X',
+      requestId: 'req-uuid-fast',
+      answer: 'yes',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data, { requestId: 'req-uuid-fast', replied: true });
+    // 关键断言：快路径不调 GET /question
+    assert.deepStrictEqual(getCalls, []);
+    assert.strictEqual(postCalls.length, 1);
+    assert.strictEqual(postCalls[0].url, '/question/{requestID}/reply');
+    assert.deepStrictEqual(postCalls[0].path, { requestID: 'req-uuid-fast' });
+    assert.deepStrictEqual(postCalls[0].body, { answers: [['yes']] });
+    assert.deepStrictEqual(postCalls[0].query, { directory: '/tmp/fast' });
+  });
+
+  test('replyQuestion without requestId falls back to /question lookup', async () => {
+    const getCalls = [];
+    const postCalls = [];
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        get: async () => ({ data: { id: 'ses-fb', directory: '/tmp/fb' } }),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async (options) => {
+          getCalls.push(options);
+          return {
+            data: [{ id: 'qr-1', sessionID: 'ses-fb', tool: { callID: 'call-1' } }],
+          };
+        },
+        post: async (options) => {
+          postCalls.push(options);
+          return { data: undefined };
+        },
+      },
+    }));
+
+    const result = await adapter.replyQuestion({
+      sessionId: 'ses-fb',
+      toolCallId: 'call-1',
+      answer: 'yes',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(getCalls.length, 1);
+    assert.strictEqual(postCalls.length, 1);
+    assert.deepStrictEqual(postCalls[0].path, { requestID: 'qr-1' });
+  });
+
+  test('replyQuestion fast-path surfaces SDK error for invalid requestId (D7 capability token)', async () => {
+    // 伪造/不存在的 requestId 走快路径 → opencode SDK 返错 → adapter 透传错误，不静默吞
+    const getCalls = [];
+    const postCalls = [];
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        get: async () => ({ data: { id: 'ses-bad', directory: '/tmp/bad' } }),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        prompt: async () => ({}),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async (options) => {
+          getCalls.push(options);
+          return { data: [] };
+        },
+        post: async (options) => {
+          postCalls.push(options);
+          return {
+            error: {
+              name: 'QuestionRequestNotFound',
+              data: { message: 'request not found' },
+            },
+          };
+        },
+      },
+    }));
+
+    const result = await adapter.replyQuestion({
+      sessionId: 'ses-bad',
+      requestId: 'req-forged',
+      answer: 'yes',
+    });
+
+    assert.strictEqual(result.success, false);
+    // 关键：快路径错误透传，无静默吞
+    assert.strictEqual(result.errorEvidence?.sourceOperation, 'question.reply');
+    assert.match(result.errorMessage, /QuestionRequestNotFound|request not found/);
+    // 没有触发 GET /question
+    assert.deepStrictEqual(getCalls, []);
+    assert.strictEqual(postCalls.length, 1);
+  });
 });

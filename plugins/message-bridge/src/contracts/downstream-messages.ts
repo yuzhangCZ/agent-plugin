@@ -48,6 +48,12 @@ export interface QuestionReplyPayload {
   toolSessionId: string;
   answer: string;
   toolCallId?: string;
+  /**
+   * opencode question request id（personal scope 快路径）。
+   * 非空时 adapter 直接 POST /question/{requestID}/reply，跳过 GET /question 反查。
+   * 缺失/空白则按 toolCallId fallback。
+   */
+  requestId?: string;
 }
 
 export interface InvokePayloadByAction {
