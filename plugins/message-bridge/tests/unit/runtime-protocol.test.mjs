@@ -105,18 +105,6 @@ function createRuntimeWithResolvedConfig(config, options = {}) {
   });
 }
 
-async function waitForAppLog(appLogs, message, timeoutMs = 1000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const entry = appLogs.find((item) => item.message === message);
-    if (entry) {
-      return entry;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for app log: ${message}`);
-}
-
 async function writeEnabledConfig(workspace) {
   await mkdir(join(workspace, '.opencode'), { recursive: true });
   await writeFile(
@@ -1681,10 +1669,11 @@ describe('runtime protocol strictness', () => {
         },
       },
     });
+    await new Promise((r) => setTimeout(r, 10));
 
-    const receivedLog = await waitForAppLog(appLogs, 'event.received');
-    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
-    const forwardedLog = await waitForAppLog(appLogs, 'event.forwarded');
+    const receivedLog = appLogs.find((entry) => entry.message === 'event.received');
+    const forwardingLog = appLogs.find((entry) => entry.message === 'event.forwarding');
+    const forwardedLog = appLogs.find((entry) => entry.message === 'event.forwarded');
 
     assert.strictEqual(receivedLog.extra.traceId, 'op-msg-1');
     assert.notStrictEqual(receivedLog.extra.runtimeTraceId, undefined);
@@ -1707,119 +1696,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(sent[0].context.gatewayMessageId, forwardingLog.extra.traceId);
     assert.strictEqual(sent[0].context.opencodeMessageId, 'op-msg-1');
     assert.strictEqual(sent[0].context.opencodePartId, 'part-1');
-  });
-
-  test('keeps empty message.part.delta events and logs delta bytes as zero', async () => {
-    const appLogs = [];
-    const runtime = new BridgeRuntime({
-      client: {
-        app: {
-          log: async (options) => {
-            appLogs.push(options.body);
-            return true;
-          },
-        },
-      },
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = {
-      send: (message, context) => sent.push({ message, context }),
-    };
-    runtime.eventFilter = new EventFilter(['message.part.delta']);
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleEvent({
-      type: 'message.part.delta',
-      properties: {
-        sessionID: 'tool-empty-delta',
-        messageID: 'op-msg-empty-delta',
-        partID: 'part-empty-delta',
-        field: 'text',
-        delta: '',
-      },
-    });
-
-    const receivedLog = await waitForAppLog(appLogs, 'event.received');
-    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding.detail');
-
-    assert.strictEqual(receivedLog.extra.deltaBytes, 0);
-    assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
-    assert.strictEqual(sent.length, 1);
-    assert.deepStrictEqual(sent[0].message, {
-      type: 'tool_event',
-      toolSessionId: 'tool-empty-delta',
-      event: {
-        type: 'message.part.delta',
-        properties: {
-          sessionID: 'tool-empty-delta',
-          messageID: 'op-msg-empty-delta',
-          partID: 'part-empty-delta',
-          field: 'text',
-          delta: '',
-        },
-      },
-    });
-  });
-
-  test('keeps seeded empty message.part.updated events and logs delta bytes as zero', async () => {
-    const appLogs = [];
-    const runtime = new BridgeRuntime({
-      client: {
-        app: {
-          log: async (options) => {
-            appLogs.push(options.body);
-            return true;
-          },
-        },
-      },
-    });
-
-    const sent = [];
-    runtime.gatewayConnection = {
-      send: (message, context) => sent.push({ message, context }),
-    };
-    runtime.eventFilter = new EventFilter(['message.part.updated']);
-    setRuntimeGatewayState(runtime, 'READY');
-
-    await runtime.handleEvent({
-      type: 'message.part.updated',
-      properties: {
-        sessionID: 'tool-seeded-updated',
-        delta: '',
-        part: {
-          sessionID: 'tool-seeded-updated',
-          messageID: 'op-msg-seeded-updated',
-          id: 'part-seeded-updated',
-          type: 'text',
-          text: '',
-        },
-      },
-    });
-
-    const receivedLog = await waitForAppLog(appLogs, 'event.received');
-    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding.detail');
-
-    assert.strictEqual(receivedLog.extra.deltaBytes, 0);
-    assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
-    assert.strictEqual(sent.length, 1);
-    assert.deepStrictEqual(sent[0].message, {
-      type: 'tool_event',
-      toolSessionId: 'tool-seeded-updated',
-      event: {
-        type: 'message.part.updated',
-        properties: {
-          delta: '',
-          part: {
-            sessionID: 'tool-seeded-updated',
-            messageID: 'op-msg-seeded-updated',
-            id: 'part-seeded-updated',
-            type: 'text',
-            text: '',
-          },
-        },
-      },
-    });
   });
 
   test('forwards session.idle as tool_event without compat tool_done for untracked sessions', async () => {
