@@ -127,7 +127,7 @@ createBridgeRuntime()
 2. host runtime 状态与底层 gateway-client 状态分离，不直接复用同一枚举。
 3. invalid invoke 可在 runtime 边界构造成统一 `tool_error` 进行 fail-closed。
 4. `gatewayHost.register.toolType` 在 SDK 层只要求为字符串，不对具体产品字面量做枚举限制。
-5. `gatewayHost.register.toolVersion` 表示宿主 agent 版本，`pluginVersion` 表示上层插件版本；`sdkVersion` 由 SDK 内部自动注入，不作为外部输入暴露。
+5. `gatewayHost.register.toolVersion` 表示宿主 agent 版本，`pluginVersion` 表示上层插件版本；`sdkVersion` 由 SDK 在可解析自身分发版本时自动注入，不作为外部输入暴露。
 
 ## 6. 关键约束
 
@@ -135,7 +135,7 @@ createBridgeRuntime()
 2. provider adapter 可以有宿主差异，但 runtime command、projector、registry 语义必须保持宿主无关。
 3. `BridgeRuntime` 作为 facade，只暴露 `start/stop/probe/getStatus/getDiagnostics` 等稳定能力。
 4. SDK 不应拥有共享协议字段真源，也不应绕开 `gateway-schema`。
-5. SDK 组装的新 register 协议固定自动带上 `sdkVersion`，并在有插件封装层时透传 `pluginVersion`；不负责对旧网关做握手降级兼容。
+5. SDK 组装的新 register 协议会在可解析自身分发版本时带上 `sdkVersion`，并在有插件封装层时透传 `pluginVersion`；若当前交付形态无法让 SDK 自证版本，则直接省略 `sdkVersion`，不由上层插件代填。
 
 ## 7. 失败处理与 fail-closed 边界
 

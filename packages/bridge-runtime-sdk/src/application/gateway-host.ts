@@ -143,12 +143,13 @@ export function normalizeBridgeGatewayHostConfig(
   } = {},
 ): InternalBridgeGatewayHostConfig {
   const resolvedGatewayHost = resolveGatewayClientHostConfig(gatewayHost as GatewayClientHostConfig);
+  const sdkVersion = resolvePackageVersion();
 
   return {
     ...resolvedGatewayHost,
     register: {
       ...resolvedGatewayHost.register,
-      sdkVersion: resolvePackageVersion(),
+      ...(sdkVersion ? { sdkVersion } : {}),
     },
     connectionKey: buildBridgeGatewayConnectionKey(resolvedGatewayHost),
     debug: options.debug,

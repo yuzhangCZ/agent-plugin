@@ -292,5 +292,5 @@ export interface BridgeRuntimeOptions {
 }
 
 export declare const qrcodeAuth: QrCodeAuth;
-export declare function resolvePackageVersion(): string;
+export declare function resolvePackageVersion(): string | undefined;
 export declare function createBridgeRuntime(options: BridgeRuntimeOptions): Promise<BridgeRuntime>;

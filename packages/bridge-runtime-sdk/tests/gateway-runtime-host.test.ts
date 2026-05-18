@@ -79,6 +79,23 @@ test('normalizeBridgeGatewayHostConfig auto injects sdkVersion while preserving 
   assert.equal(normalized.register.pluginVersion, '0.1.0');
 });
 
+test('normalizeBridgeGatewayHostConfig omits sdkVersion when sdk package version is unavailable', () => {
+  const originalPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
+  delete globalThis.__MB_SDK_PACKAGE_VERSION__;
+
+  try {
+    const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
+    assert.equal('sdkVersion' in normalized.register, false);
+    assert.equal(normalized.register.pluginVersion, '0.1.0');
+  } finally {
+    if (typeof originalPackageVersion === 'undefined') {
+      delete globalThis.__MB_SDK_PACKAGE_VERSION__;
+    } else {
+      globalThis.__MB_SDK_PACKAGE_VERSION__ = originalPackageVersion;
+    }
+  }
+});
+
 test('host runtime records gateway diagnostics and processes downstream messages', async () => {
   const connection = new HostGatewayClient();
   const runtime = await createBridgeRuntime({

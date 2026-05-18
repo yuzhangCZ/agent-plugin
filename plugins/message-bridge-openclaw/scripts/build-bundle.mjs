@@ -8,7 +8,6 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const bundleDir = path.join(rootDir, "bundle");
 const sourcePackageJsonPath = path.join(rootDir, "package.json");
-const sdkPackageJsonPath = path.resolve(rootDir, "..", "..", "packages", "bridge-runtime-sdk", "package.json");
 const sourcePluginManifestPath = path.join(rootDir, "openclaw.plugin.json");
 const sourceReadmePath = path.join(rootDir, "README.bundle.md");
 const localhostDefaultGatewayUrl = "ws://localhost:8081/ws/agent";
@@ -17,13 +16,8 @@ async function main() {
   const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || localhostDefaultGatewayUrl;
   const sourcePackageJson = JSON.parse(await readFile(sourcePackageJsonPath, "utf8"));
   const packageVersion = typeof sourcePackageJson.version === "string" ? sourcePackageJson.version.trim() : "";
-  const sdkPackageJson = JSON.parse(await readFile(sdkPackageJsonPath, "utf8"));
-  const sdkPackageVersion = typeof sdkPackageJson.version === "string" ? sdkPackageJson.version.trim() : "";
   if (!packageVersion) {
     throw new Error(`package.json version is missing: ${sourcePackageJsonPath}`);
-  }
-  if (!sdkPackageVersion) {
-    throw new Error(`package.json version is missing: ${sdkPackageJsonPath}`);
   }
   await rm(bundleDir, { recursive: true, force: true });
   await mkdir(bundleDir, { recursive: true });
@@ -39,7 +33,6 @@ async function main() {
     define: {
       "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
       "globalThis.__MB_PLUGIN_PACKAGE_VERSION__": JSON.stringify(packageVersion),
-      "globalThis.__MB_SDK_PACKAGE_VERSION__": JSON.stringify(sdkPackageVersion),
     },
   });
 

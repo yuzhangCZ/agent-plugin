@@ -23,7 +23,7 @@ test('returns injected package version when available', () => {
   assert.equal(resolvePackageVersion(), '0.0.0-test');
 });
 
-test('falls back to unknown when package version is not injected', () => {
+test('returns undefined when package version is not injected', () => {
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
-  assert.equal(resolvePackageVersion(), 'unknown');
+  assert.equal(resolvePackageVersion(), undefined);
 });

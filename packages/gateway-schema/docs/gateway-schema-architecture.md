@@ -116,7 +116,7 @@ uplink business message
 
 1. `toolType` 表示当前接入端类型，由调用方定义并透传。
 2. `toolVersion` 表示宿主 agent 版本，不等于插件或 SDK 自身版本。
-3. `sdkVersion` 表示 `bridge-runtime-sdk` 版本；只要链路经过 SDK，就由 SDK 自动注入。
+3. `sdkVersion` 表示 `bridge-runtime-sdk` 版本；仅当 SDK 当前交付形态能够自证自身版本时才注入该字段。
 4. `pluginVersion` 表示上层插件版本；存在插件封装层时由插件显式提供。
 5. `register` 至少需要 `sdkVersion` 或 `pluginVersion` 之一，本次协议升级不提供旧 register 结构的 schema 兼容入口。
 
