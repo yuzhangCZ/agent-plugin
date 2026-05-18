@@ -111,7 +111,10 @@ function normalizeErrorMessage(error: unknown): string {
 }
 
 function classifyRequestFailureKind(error: unknown): 'command_execution_failure' | 'outbound_validation_failure' {
-  if (error instanceof RuntimeContractError && error.code === 'fact_sequence_invalid') {
+  if (
+    error instanceof RuntimeContractError
+    && (error.code === 'fact_sequence_invalid' || error.code === 'pending_interaction_conflict')
+  ) {
     return 'outbound_validation_failure';
   }
   return 'command_execution_failure';

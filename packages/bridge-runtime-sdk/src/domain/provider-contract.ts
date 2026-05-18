@@ -11,6 +11,7 @@ export interface RuntimeAppliedResult {
 export interface ProviderError {
   code:
     | 'not_found'
+    | 'session_not_found'
     | 'invalid_input'
     | 'not_supported'
     | 'timeout'
@@ -106,16 +107,23 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  context?: {
+    assistantAccount?: string;
+    sendUserAccount?: string;
+    imGroupId?: string;
+    suppressReply?: boolean;
+  };
 }
 
 /**
  * 回复问题输入。
  */
+export type QuestionAnswer = string[];
+
 export interface ProviderQuestionReplyInput {
   traceId: string;
-  toolSessionId: string;
-  toolCallId: string;
-  answer: string;
+  questionId: string;
+  answers: QuestionAnswer[];
 }
 
 /**
@@ -123,9 +131,8 @@ export interface ProviderQuestionReplyInput {
  */
 export interface ProviderPermissionReplyInput {
   traceId: string;
-  toolSessionId: string;
   permissionId: string;
-  response: 'once' | 'always' | 'reject';
+  reply: 'once' | 'always' | 'reject';
 }
 
 /**
@@ -186,7 +193,9 @@ export type ProviderFact =
   | ToolUpdateFact
   | QuestionAskFact
   | PermissionAskFact
+  | PermissionReplyFact
   | MessageDoneFact
+  | SessionTitleFact
   | SessionErrorFact;
 
 /**
@@ -264,8 +273,8 @@ export interface ToolUpdateFact {
   toolName: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
-  input?: unknown;
-  output?: unknown;
+  input?: string;
+  output?: string;
   error?: string;
   raw?: unknown;
 }
@@ -273,11 +282,38 @@ export interface ToolUpdateFact {
 /**
  * 问题挂起事实。
  */
+export interface QuestionOption {
+  label: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header?: string;
+  options?: QuestionOption[];
+  multiSelect?: boolean;
+}
+
 export interface QuestionAskFact {
   type: 'question.ask';
   toolSessionId: string;
   messageId: string;
-  toolCallId: string;
+  /**
+   * 消息组成部分 ID；仅用于展示与 part 关联，不承担 direct reply target 语义。
+   */
+  partId: string;
+  /**
+   * 全局唯一的 question reply target。
+   * runtime 与 provider 都只依赖它定位问题回复，不需要 `toolSessionId` 二次定位。
+   */
+  questionId: string;
+  questions: QuestionItem[];
+  /**
+   * 可选 tool call 关联字段。
+   * 未传时 cloud projector 会回填 `toolCallId = questionId` 以兼容旧下游回复目标读取口径。
+   */
+  toolCallId?: string;
+  status?: string;
+  extParam?: unknown;
   header?: string;
   question: string;
   options?: string[];
@@ -292,10 +328,29 @@ export interface PermissionAskFact {
   type: 'permission.ask';
   toolSessionId: string;
   messageId: string;
+  partId: string;
+  /**
+   * 全局唯一的 permission reply target。
+   * runtime 与 provider 都只依赖它定位权限回复，不需要 `toolSessionId` 二次定位。
+   */
   permissionId: string;
-  toolCallId?: string;
   permissionType?: string;
+  title?: string;
   metadata?: Record<string, unknown>;
+  raw?: unknown;
+}
+
+/**
+ * 权限回复事实。
+ */
+export interface PermissionReplyFact {
+  type: 'permission.reply';
+  toolSessionId: string;
+  permissionId: string;
+  response: 'once' | 'always' | 'reject';
+  messageId?: string;
+  partId?: string;
+  permissionType?: string;
   raw?: unknown;
 }
 
@@ -309,6 +364,16 @@ export interface MessageDoneFact {
   reason?: string;
   tokens?: unknown;
   cost?: number;
+  raw?: unknown;
+}
+
+/**
+ * 会话标题更新事实。
+ */
+export interface SessionTitleFact {
+  type: 'session.title';
+  toolSessionId: string;
+  title: string;
   raw?: unknown;
 }
 

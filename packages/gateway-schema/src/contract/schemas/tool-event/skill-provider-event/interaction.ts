@@ -20,6 +20,7 @@ const skillQuestionEventPropertiesSchema = z
   .object({
     messageId: requiredTrimmedString,
     partId: requiredTrimmedString,
+    questionId: requiredTrimmedString,
     toolCallId: requiredTrimmedString.optional(),
     status: requiredTrimmedString.optional(),
     extParam: z.unknown().optional(),
@@ -37,9 +38,10 @@ const skillQuestionEventPropertiesSchema = z
       }
     }
   })
-  .transform(({ messageId, partId, toolCallId, status, extParam, questions }) => ({
+  .transform(({ messageId, partId, questionId, toolCallId, status, extParam, questions }) => ({
     messageId,
     partId,
+    questionId,
     ...(toolCallId === undefined ? {} : { toolCallId }),
     ...(status === undefined ? {} : { status }),
     ...(extParam === undefined ? {} : { extParam }),

@@ -266,6 +266,762 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   });
 });
 
+test('start_request_run passes typed invoke.chat context to provider runMessage', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedInput: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          capturedInput = input as unknown as Record<string, unknown>;
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    suppressReply: true,
+    payload: {
+      toolSessionId: 'tool-1',
+      text: 'hi',
+      assistantId: 'assistant-1',
+      assistantAccount: 'assistant-account',
+      sendUserAccount: 'user-account',
+      imGroupId: 'group-1',
+    },
+  });
+  await flushEvents();
+
+  assert.equal(typeof capturedInput?.runId, 'string');
+  assert.deepEqual(capturedInput, {
+    traceId: 'trace-fixed',
+    runId: capturedInput?.runId,
+    toolSessionId: 'tool-1',
+    text: 'hi',
+    assistantId: 'assistant-1',
+    context: {
+      assistantAccount: 'assistant-account',
+      sendUserAccount: 'user-account',
+      imGroupId: 'group-1',
+      suppressReply: true,
+    },
+  });
+});
+
+test('runtime consumes question replies by questionId and forwards structured answers', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedQuestionReply: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                question: 'Pick one',
+                header: 'Header',
+                options: ['A', 'B'],
+                status: 'running',
+                extParam: { scene: 'confirm' },
+                questions: [
+                  {
+                    question: 'Pick one',
+                    header: 'Header',
+                    options: [{ label: 'A' }, { label: 'B' }],
+                  },
+                ],
+              },
+              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion(input) {
+          capturedQuestionReply = input as unknown as Record<string, unknown>;
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-1', answer: 'A' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(capturedQuestionReply, {
+    traceId: 'trace-fixed',
+    questionId: 'question-1',
+    answers: [['A']],
+  });
+});
+
+test('runtime consumes permission replies by permissionId and forwards reply contract', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedPermissionReply: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'permission.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-permission-1',
+                permissionId: 'permission-1',
+              },
+              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission(input) {
+          capturedPermissionReply = input as unknown as Record<string, unknown>;
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    payload: { permissionId: 'permission-1', response: 'always' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(capturedPermissionReply, {
+    traceId: 'trace-fixed',
+    permissionId: 'permission-1',
+    reply: 'always',
+  });
+});
+
+test('question.ask projects cloud questions payload and omits legacy flat fields', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                toolCallId: 'call-question-1',
+                question: 'Pick one',
+                status: 'running',
+                extParam: { scene: 'confirm' },
+                questions: [
+                  {
+                    question: 'Pick one',
+                    header: 'Header',
+                    options: [{ label: 'A' }, { label: 'B' }],
+                    multiSelect: true,
+                  },
+                ],
+              },
+              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const questionEvent = connection.sent.find((message) =>
+    typeof message === 'object'
+    && message !== null
+    && 'type' in message
+    && message.type === 'tool_event'
+    && 'event' in message
+    && typeof message.event === 'object'
+    && message.event !== null
+    && 'type' in message.event
+    && message.event.type === 'question',
+  );
+  assert.deepEqual(questionEvent, {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'question',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-question-1',
+        questionId: 'question-1',
+        toolCallId: 'call-question-1',
+        status: 'running',
+        extParam: { scene: 'confirm' },
+        questions: [
+          {
+            question: 'Pick one',
+            header: 'Header',
+            options: [{ label: 'A' }, { label: 'B' }],
+            multiSelect: true,
+          },
+        ],
+      },
+    },
+  });
+});
+
+test('permission.reply and session.title facts project to gateway tool_event uplinks', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.reply',
+                toolSessionId: 'tool-1',
+                permissionId: 'permission-1',
+                response: 'once',
+                messageId: 'msg-1',
+                partId: 'part-1',
+              },
+              {
+                type: 'session.title',
+                toolSessionId: 'tool-1',
+                title: 'Updated Title',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(
+    connection.sent.some((message) => JSON.stringify(message) === JSON.stringify({
+      type: 'tool_event',
+      toolSessionId: 'tool-1',
+      event: {
+        protocol: 'cloud',
+        type: 'permission.reply',
+        properties: {
+          permissionId: 'permission-1',
+          response: 'once',
+          messageId: 'msg-1',
+          partId: 'part-1',
+        },
+      },
+    })),
+    true,
+  );
+  assert.equal(
+    connection.sent.some((message) => JSON.stringify(message) === JSON.stringify({
+      type: 'tool_event',
+      toolSessionId: 'tool-1',
+      event: {
+        protocol: 'cloud',
+        type: 'session.title',
+        properties: {
+          title: 'Updated Title',
+        },
+      },
+    })),
+    true,
+  );
+});
+
+test('question.ask duplicate registration in the same session is idempotent', async () => {
+  const connection = new FakeGatewayClient();
+  let replyCount = 0;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                question: 'Pick one',
+                questions: [{ question: 'Pick one' }],
+              },
+              {
+                type: 'question.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                question: 'Pick one',
+                questions: [{ question: 'Pick one' }],
+              },
+              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          replyCount += 1;
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-1', answer: 'A' },
+  });
+  await flushEvents();
+
+  assert.equal(replyCount, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
+  assert.notDeepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'question interaction reply target must be globally unique',
+    code: 'pending_interaction_conflict',
+  });
+});
+
+test('permission.ask projects independent partId and toolCallId derived from permissionId', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'permission.ask',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-permission-1',
+                permissionId: 'permission-1',
+                permissionType: 'file_write',
+                title: 'Allow file write',
+              },
+              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(
+    connection.sent.some((message) => JSON.stringify(message) === JSON.stringify({
+      type: 'tool_event',
+      toolSessionId: 'tool-1',
+      event: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-permission-1',
+          toolCallId: 'permission-1',
+          permissionId: 'permission-1',
+          permType: 'file_write',
+          title: 'Allow file write',
+        },
+      },
+    })),
+    true,
+  );
+});
+
+test('question.ask rejects globally duplicated questionId across sessions and clears current session pending interactions', async () => {
+  const connection = new FakeGatewayClient();
+  let replyCount = 0;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          if (input.toolSessionId === 'tool-1') {
+            return createFakeRun(
+              [
+                { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                {
+                  type: 'question.ask',
+                  toolSessionId: 'tool-1',
+                  messageId: 'msg-1',
+                  partId: 'part-question-1',
+                  questionId: 'question-dup',
+                  question: 'First question',
+                  questions: [{ question: 'First question' }],
+                },
+                { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              ],
+              { outcome: 'completed' },
+            );
+          }
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              {
+                type: 'question.ask',
+                toolSessionId: 'tool-2',
+                messageId: 'msg-2',
+                partId: 'part-question-2',
+                questionId: 'question-dup',
+                question: 'Second question',
+                questions: [{ question: 'Second question' }],
+              },
+              { type: 'message.done', toolSessionId: 'tool-2', messageId: 'msg-2' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          replyCount += 1;
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-2',
+    payload: { toolSessionId: 'tool-2', text: 'second' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-dup', answer: 'A' },
+  });
+  await flushEvents();
+
+  assert.equal(replyCount, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'question interaction reply target must be globally unique',
+    code: 'pending_interaction_conflict',
+  });
+});
+
+test('permission.ask rejects globally duplicated permissionId across sessions and clears current session pending interactions', async () => {
+  const connection = new FakeGatewayClient();
+  let replyCount = 0;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          if (input.toolSessionId === 'tool-1') {
+            return createFakeRun(
+              [
+                { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                {
+                  type: 'permission.ask',
+                  toolSessionId: 'tool-1',
+                  messageId: 'msg-1',
+                  partId: 'part-permission-1',
+                  permissionId: 'permission-dup',
+                },
+                { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              ],
+              { outcome: 'completed' },
+            );
+          }
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              {
+                type: 'permission.ask',
+                toolSessionId: 'tool-2',
+                messageId: 'msg-2',
+                partId: 'part-permission-2',
+                permissionId: 'permission-dup',
+              },
+              { type: 'message.done', toolSessionId: 'tool-2', messageId: 'msg-2' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          replyCount += 1;
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-2',
+    payload: { toolSessionId: 'tool-2', text: 'second' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    payload: { permissionId: 'permission-dup', response: 'once' },
+  });
+  await flushEvents();
+
+  assert.equal(replyCount, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'permission interaction reply target must be globally unique',
+    code: 'pending_interaction_conflict',
+  });
+});
+
 test('runtime start trusts gateway-client connect READY contract', async () => {
   const connection = new FakeGatewayClient();
   connection.connect = async function connect(): Promise<void> {
@@ -638,6 +1394,61 @@ test('request run projects session.error exactly once before terminal tool_error
   });
 });
 
+test('terminal tool_error carries session_not_found reason when provider returns structured stale-session error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], {
+            outcome: 'failed',
+            error: {
+              code: 'session_not_found',
+              message: 'session missing',
+            },
+          });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: 'session missing',
+    reason: 'session_not_found',
+  });
+});
+
 test('invalid outbound messages stay ready and record outbound_validation_failure', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
@@ -689,6 +1500,70 @@ test('invalid outbound messages stay ready and record outbound_validation_failur
     code: 'fact_sequence_invalid',
   });
   assert.equal(runtime.getStatus().failureReason, null);
+});
+
+test('tool.update with non-string output fails closed before uplink projection', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              {
+                type: 'tool.update',
+                toolSessionId: 'tool-1',
+                messageId: 'msg-1',
+                partId: 'part-tool-1',
+                toolCallId: 'tool-call-1',
+                toolName: 'bash',
+                status: 'completed',
+                output: { nested: true } as unknown as string,
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'tool.update output must be a string',
+    code: 'fact_sequence_invalid',
+  });
 });
 
 test('runtime marks non-retryable gateway errors as failed', async () => {

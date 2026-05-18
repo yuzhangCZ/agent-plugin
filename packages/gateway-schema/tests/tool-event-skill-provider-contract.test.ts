@@ -28,6 +28,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         messageId: 'msg-1',
         partId: 'part-4',
+        questionId: 'question-1',
         toolCallId: 'call-q-1',
         status: 'running',
         extParam: { scene: 'confirm' },
@@ -46,6 +47,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         messageId: 'msg-1',
         partId: 'part-5',
+        toolCallId: 'perm-1',
         permissionId: 'perm-1',
         permType: 'file_write',
         title: '允许写文件',
@@ -99,20 +101,11 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
 test('validateToolEvent accepts cloud events with deprecated fields that are now stripped from the contract', () => {
   const cases = [
     {
-      type: 'permission.ask',
-      properties: {
-        messageId: 'msg-1',
-        partId: 'part-5',
-        permissionId: 'perm-1',
-        toolName: 'write',
-      },
-    },
-    {
       type: 'question',
       properties: {
         messageId: 'msg-1',
         partId: 'part-4',
-        toolName: 'question',
+        questionId: 'question-1',
         questions: [
           {
             question: '继续执行吗？',
@@ -235,6 +228,53 @@ test('validateToolEvent fail-closes malformed skill events', () => {
         properties: {
           messageId: 'msg-1',
           partId: 'part-4',
+          questionId: 'question-1',
+          toolCallId: 'question-1',
+        },
+      },
+    },
+    {
+      name: 'question missing questionId',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          toolCallId: 'question-1',
+          questions: [
+            {
+              question: '继续执行吗？',
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing toolCallId',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          permissionId: 'perm-1',
+        },
+      },
+    },
+    {
+      name: 'permission.ask toolCallId must equal permissionId',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          toolCallId: 'perm-2',
+          permissionId: 'perm-1',
         },
       },
     },
@@ -247,6 +287,8 @@ test('validateToolEvent fail-closes malformed skill events', () => {
         properties: {
           messageId: 'msg-1',
           partId: 'part-4',
+          questionId: 'question-1',
+          toolCallId: 'question-1',
           question: '继续执行吗？',
           options: [{ label: '是' }],
         },

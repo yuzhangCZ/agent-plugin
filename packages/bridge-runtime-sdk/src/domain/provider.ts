@@ -63,17 +63,37 @@ export interface ToolUpdateFact {
   toolName: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
-  input?: unknown;
-  output?: unknown;
+  input?: string;
+  output?: string;
   error?: string;
   raw?: unknown;
+}
+
+export interface QuestionOption {
+  label: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header?: string;
+  options?: QuestionOption[];
+  multiSelect?: boolean;
 }
 
 export interface QuestionAskFact {
   type: 'question.ask';
   toolSessionId: string;
   messageId: string;
-  toolCallId: string;
+  // partId 只表示消息组成部分 ID，不承担 direct reply target 语义。
+  partId: string;
+  // questionId 是全局唯一的 question reply target，不依赖 toolSessionId 二次定位。
+  questionId: string;
+  questions: QuestionItem[];
+  // 可选 toolCallId 仅用于关联原始 tool call；未传时 projector 会回填为 questionId 兼容旧下游。
+  toolCallId?: string;
+  status?: string;
+  // 这里保留 unknown：extParam 是 cloud event 透传上下文，不属于稳定业务字段。
+  extParam?: unknown;
   header?: string;
   question: string;
   options?: string[];
@@ -86,11 +106,24 @@ export interface PermissionAskFact {
   type: 'permission.ask';
   toolSessionId: string;
   messageId: string;
+  partId: string;
+  // permissionId 是全局唯一的 permission reply target，不依赖 toolSessionId 二次定位。
   permissionId: string;
-  toolCallId?: string;
   permissionType?: string;
+  title?: string;
   // 这里保留 unknown：metadata 是 provider 私有补充信息，仅用于透传和诊断。
   metadata?: Record<string, unknown>;
+  raw?: unknown;
+}
+
+export interface PermissionReplyFact {
+  type: 'permission.reply';
+  toolSessionId: string;
+  permissionId: string;
+  response: 'once' | 'always' | 'reject';
+  messageId?: string;
+  partId?: string;
+  permissionType?: string;
   raw?: unknown;
 }
 
@@ -101,6 +134,13 @@ export interface MessageDoneFact {
   reason?: string;
   tokens?: unknown;
   cost?: number;
+  raw?: unknown;
+}
+
+export interface SessionTitleFact {
+  type: 'session.title';
+  toolSessionId: string;
+  title: string;
   raw?: unknown;
 }
 
@@ -123,7 +163,9 @@ export type ProviderFact =
   | ToolUpdateFact
   | QuestionAskFact
   | PermissionAskFact
+  | PermissionReplyFact
   | MessageDoneFact
+  | SessionTitleFact
   | SessionErrorFact;
 
 /**
@@ -165,20 +207,26 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  context?: {
+    assistantAccount?: string;
+    sendUserAccount?: string;
+    imGroupId?: string;
+    suppressReply?: boolean;
+  };
 }
+
+export type QuestionAnswer = string[];
 
 export interface ProviderQuestionReplyInput {
   traceId: string;
-  toolSessionId: string;
-  toolCallId: string;
-  answer: string;
+  questionId: string;
+  answers: QuestionAnswer[];
 }
 
 export interface ProviderPermissionReplyInput {
   traceId: string;
-  toolSessionId: string;
   permissionId: string;
-  response: 'once' | 'always' | 'reject';
+  reply: 'once' | 'always' | 'reject';
 }
 
 export interface ProviderCloseSessionInput {

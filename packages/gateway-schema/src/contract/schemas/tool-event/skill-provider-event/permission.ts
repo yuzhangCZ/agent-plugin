@@ -8,10 +8,19 @@ const skillPermissionAskEventBaseSchema = z.object({
   properties: z.object({
     messageId: requiredTrimmedString,
     partId: requiredTrimmedString,
+    toolCallId: requiredTrimmedString,
     permissionId: requiredTrimmedString,
     permType: requiredTrimmedString.optional(),
     title: requiredTrimmedString.optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+  }).superRefine((value, ctx) => {
+    if (value.toolCallId !== value.permissionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['toolCallId'],
+        message: 'toolCallId must equal permissionId in cloud permission.ask properties',
+      });
+    }
   }),
 });
 
