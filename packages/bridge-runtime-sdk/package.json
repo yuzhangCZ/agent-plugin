@@ -15,24 +15,23 @@
     "dist"
   ],
   "scripts": {
-    "build": "node ./scripts/build-package.mjs",
-    "build:dev": "BRIDGE_RUNTIME_SDK_MINIFY=0 node ./scripts/build-package.mjs",
+    "build": "node ./scripts/build.mjs",
+    "build:dev": "BRIDGE_RUNTIME_SDK_BUILD_MODE=dev BRIDGE_RUNTIME_SDK_MINIFY=0 node ./scripts/build.mjs",
     "typecheck": "pnpm exec tsc -p ./tsconfig.json",
     "pack:check": "node ./scripts/check-pack.mjs",
-    "pretest": "pnpm --dir ../skill-qrcode-auth run build",
     "prepack": "node ./scripts/prepare-publish-manifest.mjs",
     "prepublishOnly": "pnpm run verify:release",
     "postpack": "node ./scripts/restore-publish-manifest.mjs",
-    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
-    "verify:core": "pnpm run build && pnpm run typecheck && pnpm test && pnpm run pack:check",
+    "test": "node ./scripts/test.mjs",
+    "verify:core": "pnpm run build && pnpm run typecheck && pnpm test && pnpm run pack:check -- --skip-build",
     "verify:release": "pnpm run verify:core"
   },
   "devDependencies": {
     "@agent-plugin/gateway-client": "workspace:*",
     "@agent-plugin/gateway-schema": "workspace:*",
     "@wecode/skill-qrcode-auth": "workspace:*",
-    "@types/node": "^22.10.2",
-    "dts-bundle-generator": "^9.5.1",
+    "@types/node": "22.19.17",
+    "dts-bundle-generator": "9.5.0",
     "esbuild": "^0.27.4",
     "typescript": "^5.9.3"
   }

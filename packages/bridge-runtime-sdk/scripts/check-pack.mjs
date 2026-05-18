@@ -12,6 +12,10 @@ function parsePackJson(output) {
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
+function shouldSkipBuild() {
+  return process.argv.slice(2).includes('--skip-build');
+}
+
 async function main() {
   const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'bridge-runtime-sdk-pack-'));
@@ -22,11 +26,13 @@ async function main() {
   try {
     const sourcePackageJson = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
 
-    execFileSync('node', ['./scripts/build-package.mjs'], {
-      cwd: packageDir,
-      stdio: 'inherit',
-      env: buildEnv,
-    });
+    if (!shouldSkipBuild()) {
+      execFileSync('node', ['./scripts/build.mjs'], {
+        cwd: packageDir,
+        stdio: 'inherit',
+        env: buildEnv,
+      });
+    }
 
     const declarations = await readFile(path.join(distDir, 'index.d.ts'), 'utf8');
     assert.equal(declarations.includes('@agent-plugin/gateway-client'), false);
