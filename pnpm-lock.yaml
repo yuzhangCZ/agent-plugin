@@ -17,7 +17,7 @@ importers:
         specifier: workspace:*
         version: link:../gateway-schema
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
       '@wecode/skill-qrcode-auth':
         specifier: workspace:*
@@ -39,7 +39,7 @@ importers:
         version: link:../gateway-schema
     devDependencies:
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
 
   packages/gateway-schema:
@@ -49,7 +49,7 @@ importers:
         version: 4.1.8
     devDependencies:
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
 
   packages/skill-plugin-cli:
@@ -65,7 +65,7 @@ importers:
         version: 7.5.13
     devDependencies:
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
       esbuild:
         specifier: ^0.27.4
@@ -77,7 +77,7 @@ importers:
   packages/skill-qrcode-auth:
     devDependencies:
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
       esbuild:
         specifier: ^0.27.4
@@ -110,7 +110,7 @@ importers:
         specifier: 1.2.15
         version: 1.2.15
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
       '@types/ws':
         specifier: ^8.5.13
@@ -150,7 +150,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/test-support
       '@types/node':
-        specifier: ^22.19.17
+        specifier: 22.19.17
         version: 22.19.17
       esbuild:
         specifier: ^0.27.4
