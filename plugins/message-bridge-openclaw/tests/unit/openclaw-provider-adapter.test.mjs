@@ -257,7 +257,7 @@ test("provider adapter question facts keep stable fields on toolSessionId", asyn
   assert.equal(questionFact.context.sessionKey, "agent:acct:ses_tool_1");
 });
 
-test("provider adapter preserves structured tool input and output from runtime events", async () => {
+test("provider adapter serializes tool input and output from runtime events", async () => {
   const listeners = [];
   let finishRun;
   const provider = createAdapter({
@@ -336,21 +336,13 @@ test("provider adapter preserves structured tool input and output from runtime e
     [
       {
         status: "running",
-        input: {
-          query: "OpenAI API latest docs",
-          limit: 5,
-        },
+        input: '{"query":"OpenAI API latest docs","limit":5}',
         output: undefined,
       },
       {
         status: "completed",
-        input: {
-          query: "OpenAI API latest docs",
-          limit: 5,
-        },
-        output: {
-          items: [{ title: "Docs", url: "https://platform.openai.com/docs" }],
-        },
+        input: '{"query":"OpenAI API latest docs","limit":5}',
+        output: '{"items":[{"title":"Docs","url":"https://platform.openai.com/docs"}]}',
       },
     ],
   );

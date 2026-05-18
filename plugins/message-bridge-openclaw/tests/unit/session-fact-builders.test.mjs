@@ -95,7 +95,5 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     assert.equal("sessionKey" in fact, false);
   }
 
-  assert.deepEqual(toolUpdate.input, {
-    query: "docs",
-  });
+  assert.equal(toolUpdate.input, '{"query":"docs"}');
 });

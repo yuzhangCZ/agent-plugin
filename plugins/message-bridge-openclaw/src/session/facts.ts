@@ -49,6 +49,19 @@ export interface PermissionAskFactInput {
   raw?: unknown;
 }
 
+function stringifyToolPayload(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized !== undefined ? serialized : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export function createToolSessionId(): string {
   return `ses_${randomUUID()}`;
 }
@@ -159,8 +172,8 @@ export function buildToolUpdateFact(input: ToolUpdateFactInput): ToolUpdateFact 
     toolName: input.toolName,
     status: input.status,
     ...(input.title !== undefined ? { title: input.title } : {}),
-    ...(input.input !== undefined ? { input: input.input } : {}),
-    ...(input.output !== undefined ? { output: input.output } : {}),
+    ...(input.input !== undefined ? { input: stringifyToolPayload(input.input) } : {}),
+    ...(input.output !== undefined ? { output: stringifyToolPayload(input.output) } : {}),
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };
