@@ -65,6 +65,7 @@
 | 模型选定 | `bridge.chat.model_selected` | info | `provider`,`model`,`thinkLevel` | runtime_reply 路径模型选择 |
 | 首块输出 | `bridge.chat.first_chunk` | info | `deltaText`,`chunkLength`,`latencyMs`,`retryAttempt` | 第一段文本产出 |
 | 分块输出 | `bridge.chat.chunk` | info | `deltaText`,`chunkIndex`,`chunkLength`,`sinceStartMs` | 后续文本分块 |
+| 调试原始事件 | `bridge.chat.raw_event` | debug/info* | `source`,`eventName`,`toolSessionId`,`sessionKey`,`payload` | 仅 `channels.message-bridge.debug=true` 时打印 runtime -> 插件内部原始事件或 dispatcher 输入 |
 | 调用完成 | `bridge.chat.completed` | info | `finalText`,`responseLength`,`chunkCount`,`firstChunkLatencyMs`,`totalLatencyMs` | chat 成功结束 |
 | 调用失败 | `bridge.chat.failed` | warn | `error`,`failureStage`,`errorCategory`,`timedOut`,`chunkCount` | chat 失败归因 |
 

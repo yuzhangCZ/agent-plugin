@@ -11,6 +11,8 @@ import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } f
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./gateway-host.js";
+import { resolveEffectiveReplyConfig } from "./resolveEffectiveReplyConfig.js";
+import { resolveStreamingExecutionPlan } from "./resolveStreamingExecutionPlan.js";
 import { OpenClawProviderAdapter } from "./sdk/OpenClawProviderAdapter.js";
 
 export interface OpenClawGatewayBridgeOptions {
@@ -46,6 +48,10 @@ export class OpenClawGatewayBridge {
   private lastLoggedGatewayState: string | null = null;
   private pendingStatusRefresh = false;
   private runtimePhaseOverride: MessageBridgeStatusSnapshot["runtimePhase"] | null = null;
+  private streamingOutcomeStatus: Pick<
+    MessageBridgeStatusSnapshot,
+    "streamingPathHealthy" | "streamingPathReason"
+  > | null = null;
   private running = false;
   private status: MessageBridgeStatusSnapshot;
 
@@ -65,6 +71,9 @@ export class OpenClawGatewayBridge {
         sessionRegistry,
         getSubagentRuntime: () => this.getSubagentRuntime(),
         isOnline: () => this.running && this.bridgeRuntimeFacade?.getStatus().state === "ready",
+        onStreamingOutcome: (outcome) => {
+          this.updateStreamingOutcomeStatus(outcome);
+        },
       }),
       gatewayHost: buildBridgeGatewayHostConfig(options.account, registerMetadata),
       logger: options.logger,
@@ -83,6 +92,10 @@ export class OpenClawGatewayBridge {
       running: false,
       connected: false,
       runtimePhase: "idle",
+      routeResolverAvailable: false,
+      replyRuntimeAvailable: false,
+      streamingPathHealthy: false,
+      streamingPathReason: "missing_route_resolver",
       lastStartAt: null,
       lastStopAt: null,
       lastError: null,
@@ -102,6 +115,7 @@ export class OpenClawGatewayBridge {
 
     const runtimeStatus = this.bridgeRuntimeFacade.getStatus();
     const diagnostics = this.bridgeRuntimeFacade.getDiagnostics();
+    const streamingStatus = this.resolveStreamingStatus();
     const nextRuntimePhase =
       this.runtimePhaseOverride ??
       (runtimeStatus.state === "ready"
@@ -128,11 +142,73 @@ export class OpenClawGatewayBridge {
 
     this.status.connected = nextRuntimePhase === "ready";
     this.status.runtimePhase = nextRuntimePhase;
+    this.status.routeResolverAvailable = streamingStatus.routeResolverAvailable;
+    this.status.replyRuntimeAvailable = streamingStatus.replyRuntimeAvailable;
+    this.status.streamingPathHealthy =
+      this.streamingOutcomeStatus?.streamingPathHealthy ?? streamingStatus.streamingPathHealthy;
+    this.status.streamingPathReason =
+      this.streamingOutcomeStatus?.streamingPathReason ?? streamingStatus.streamingPathReason;
     this.status.lastError = runtimeStatus.failureReason;
     this.status.lastReadyAt = diagnostics.lastReadyAt;
     this.status.lastInboundAt = diagnostics.lastInboundAt;
     this.status.lastOutboundAt = diagnostics.lastOutboundAt;
     this.status.lastHeartbeatAt = diagnostics.lastHeartbeatAt;
+  }
+
+  private resolveStreamingStatus(): Pick<
+    MessageBridgeStatusSnapshot,
+    "routeResolverAvailable" | "replyRuntimeAvailable" | "streamingPathHealthy" | "streamingPathReason"
+  > {
+    const hasRouteResolver = typeof this.runtime.channel?.routing?.resolveAgentRoute === "function";
+    const reply = this.runtime.channel?.reply as {
+      resolveEnvelopeFormatOptions?: unknown;
+      formatAgentEnvelope?: unknown;
+      finalizeInboundContext?: unknown;
+      dispatchReplyWithBufferedBlockDispatcher?: unknown;
+    } | undefined;
+    const hasReplyRuntime = !!(
+      reply &&
+      typeof reply.resolveEnvelopeFormatOptions === "function" &&
+      typeof reply.formatAgentEnvelope === "function" &&
+      typeof reply.finalizeInboundContext === "function" &&
+      typeof reply.dispatchReplyWithBufferedBlockDispatcher === "function"
+    );
+    const { streamingEnabled } = resolveEffectiveReplyConfig(this.options.config);
+    const pathSelection = resolveStreamingExecutionPlan({
+      streamingEnabled: this.options.account.streaming !== false && streamingEnabled,
+      hasRouteResolver,
+      hasReplyRuntime,
+    });
+
+    return {
+      routeResolverAvailable: hasRouteResolver,
+      replyRuntimeAvailable: hasReplyRuntime,
+      streamingPathHealthy: pathSelection.executionPath === "runtime_reply",
+      streamingPathReason: pathSelection.reason,
+    };
+  }
+
+  private updateStreamingOutcomeStatus(outcome: {
+    executionPath: "runtime_reply" | "subagent_fallback";
+    streamingEnabled: boolean;
+    observedRealChunk: boolean;
+  }): void {
+    if (outcome.executionPath !== "runtime_reply") {
+      return;
+    }
+
+    if (!outcome.streamingEnabled) {
+      this.streamingOutcomeStatus = {
+        streamingPathHealthy: true,
+        streamingPathReason: "plugin_streaming_disabled_runtime_reply",
+      };
+    } else {
+      this.streamingOutcomeStatus = {
+        streamingPathHealthy: outcome.observedRealChunk,
+        streamingPathReason: outcome.observedRealChunk ? "runtime_reply_available" : "runtime_reply_final_only",
+      };
+    }
+    this.requestImmediateStatusRefresh();
   }
 
   private requestImmediateStatusRefresh(): void {

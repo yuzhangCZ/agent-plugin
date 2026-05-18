@@ -1,0 +1,10 @@
+{
+  "name": "openclaw",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./plugin-sdk": "./plugin-sdk/index.js",
+    "./plugin-sdk/channel-runtime": "./plugin-sdk/channel-runtime.js",
+    "./plugin-sdk/reply-payload": "./plugin-sdk/reply-payload.js"
+  }
+}

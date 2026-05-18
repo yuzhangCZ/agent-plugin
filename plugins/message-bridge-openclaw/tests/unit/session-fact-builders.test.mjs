@@ -7,6 +7,8 @@ import {
   buildPermissionAskFact,
   buildQuestionAskFact,
   buildSessionErrorFact,
+  buildThinkingDeltaFact,
+  buildThinkingDoneFact,
   buildTextDeltaFact,
   buildTextDoneFact,
   buildToolUpdateFact,
@@ -34,6 +36,18 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     partId: "part_1",
     content: "hello",
   });
+  const thinkingDelta = buildThinkingDeltaFact({
+    toolSessionId,
+    messageId: "msg_1",
+    partId: "think_1",
+    content: "thinking",
+  });
+  const thinkingDone = buildThinkingDoneFact({
+    toolSessionId,
+    messageId: "msg_1",
+    partId: "think_1",
+    content: "thinking",
+  });
   const toolUpdate = buildToolUpdateFact({
     toolSessionId,
     messageId: "msg_1",
@@ -41,6 +55,9 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     toolCallId: "call_1",
     toolName: "search",
     status: "running",
+    input: {
+      query: "docs",
+    },
   });
   const questionAsk = buildQuestionAskFact({
     toolSessionId,
@@ -66,6 +83,8 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     messageStart,
     textDelta,
     textDone,
+    thinkingDelta,
+    thinkingDone,
     toolUpdate,
     questionAsk,
     permissionAsk,
@@ -75,4 +94,6 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     assert.equal(fact.toolSessionId, toolSessionId);
     assert.equal("sessionKey" in fact, false);
   }
+
+  assert.equal(toolUpdate.input, '{"query":"docs"}');
 });

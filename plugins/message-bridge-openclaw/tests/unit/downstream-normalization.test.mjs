@@ -232,7 +232,7 @@ async function loadOpenClawGatewayBridgeModule() {
   return bridgeModulePromise;
 }
 
-async function createOpenClawGatewayBridgeForTest() {
+async function createOpenClawGatewayBridgeForTest(overrides = {}) {
   const { OpenClawGatewayBridge } = await loadOpenClawGatewayBridgeModule();
   const connection = new FakeGatewayClient();
   const logs = { debug: [], info: [], warn: [], error: [] };
@@ -266,9 +266,9 @@ async function createOpenClawGatewayBridgeForTest() {
       agentIdPrefix: "tool",
       runTimeoutMs: 1000,
     },
-    config: {},
+    config: overrides.config ?? {},
     logger,
-    runtime: {},
+    runtime: overrides.runtime ?? {},
     setStatus(status) {
       statuses.push({ ...status });
     },
@@ -462,6 +462,40 @@ test("openclaw bridge preserves shared runtime failed state in published status"
   assert.equal(latestStatus.runtimePhase, "failed");
   assert.equal(latestStatus.connected, false);
   assert.equal(latestStatus.lastError, "rejected");
+});
+
+test("openclaw bridge publishes runtime reply streaming capability status", async () => {
+  const { bridge, statuses } = await createOpenClawGatewayBridgeForTest({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { accountId: "acct", agentId: "agent" };
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher() {},
+        },
+      },
+    },
+  });
+
+  await bridge.start();
+
+  const latestStatus = statuses.at(-1);
+  assert.equal(latestStatus.routeResolverAvailable, true);
+  assert.equal(latestStatus.replyRuntimeAvailable, true);
+  assert.equal(latestStatus.streamingPathHealthy, true);
+  assert.equal(latestStatus.streamingPathReason, "runtime_reply_available");
 });
 
 test("openclaw bridge publishes stopping before settling to idle", async () => {
