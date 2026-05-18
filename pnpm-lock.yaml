@@ -16,15 +16,15 @@ importers:
       '@agent-plugin/gateway-schema':
         specifier: workspace:*
         version: link:../gateway-schema
+      '@types/node':
+        specifier: ^22.19.17
+        version: 22.19.17
       '@wecode/skill-qrcode-auth':
         specifier: workspace:*
         version: link:../skill-qrcode-auth
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
       dts-bundle-generator:
-        specifier: ^9.5.1
-        version: 9.5.1
+        specifier: 9.5.0
+        version: 9.5.0
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
@@ -39,8 +39,8 @@ importers:
         version: link:../gateway-schema
     devDependencies:
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
 
   packages/gateway-schema:
     dependencies:
@@ -49,8 +49,8 @@ importers:
         version: 4.1.8
     devDependencies:
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
 
   packages/skill-plugin-cli:
     dependencies:
@@ -65,8 +65,8 @@ importers:
         version: 7.5.13
     devDependencies:
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
@@ -77,8 +77,8 @@ importers:
   packages/skill-qrcode-auth:
     devDependencies:
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
@@ -110,8 +110,8 @@ importers:
         specifier: 1.2.15
         version: 1.2.15
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
@@ -150,8 +150,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/test-support
       '@types/node':
-        specifier: ^22.10.2
-        version: 22.19.15
+        specifier: ^22.19.17
+        version: 22.19.17
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
@@ -512,8 +512,8 @@ packages:
   '@types/istanbul-lib-coverage@2.0.6':
     resolution: {integrity: sha512-2QF/t/auWm0lsy8XtKVPG19v3sSOQlJe/YHZgfjb/KBBHOGSV+J2q/S671rcq9uTBrLAXmZpqJiaQbMT+zNU1w==}
 
-  '@types/node@22.19.15':
-    resolution: {integrity: sha512-F0R/h2+dsy5wJAUe3tAU6oqa2qbWY5TpNfL/RGmo1y38hiyO1w3x2jPtt76wmuaJI4DQnOBu21cNXQ2STIUUWg==}
+  '@types/node@22.19.17':
+    resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -580,8 +580,8 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
-  dts-bundle-generator@9.5.1:
-    resolution: {integrity: sha512-DxpJOb2FNnEyOzMkG11sxO2dmxPjthoVWxfKqWYJ/bI/rT1rvTMktF5EKjAYrRZu6Z6t3NhOUZ0sZ5ZXevOfbA==}
+  dts-bundle-generator@9.5.0:
+    resolution: {integrity: sha512-i+FofnRXVyn0q46DC2TaXSrmt7/FdDEf1UKnj7DkF90WmTiyF2zPU53tt9SSWb7Y0KegFDTI5l2DlgGK91bpKg==}
     engines: {node: '>=14.0.0'}
     hasBin: true
 
@@ -1036,13 +1036,13 @@ snapshots:
 
   '@types/istanbul-lib-coverage@2.0.6': {}
 
-  '@types/node@22.19.15':
+  '@types/node@22.19.17':
     dependencies:
       undici-types: 6.21.0
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.19.15
+      '@types/node': 22.19.17
 
   ansi-regex@5.0.1: {}
 
@@ -1102,7 +1102,7 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
-  dts-bundle-generator@9.5.1:
+  dts-bundle-generator@9.5.0:
     dependencies:
       typescript: 5.9.3
       yargs: 17.7.2

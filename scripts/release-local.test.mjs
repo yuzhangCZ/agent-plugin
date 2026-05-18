@@ -2068,6 +2068,14 @@ test("executeRelease publishes bridge-runtime-sdk tarball with gateway injection
     execDouble.calls.some(
       (entry) =>
         entry.command === "pnpm"
+        && entry.args.join(" ") === "--dir packages/skill-qrcode-auth run build",
+    ),
+    false,
+  );
+  assert.equal(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm"
         && entry.args.join(" ") === "--dir packages/bridge-runtime-sdk run verify:release"
         && entry.env?.MB_DEFAULT_GATEWAY_URL === gatewayUrl,
     ),
