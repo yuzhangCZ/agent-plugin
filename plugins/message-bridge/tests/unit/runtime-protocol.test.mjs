@@ -105,6 +105,18 @@ function createRuntimeWithResolvedConfig(config, options = {}) {
   });
 }
 
+async function waitForAppLog(appLogs, message, timeoutMs = 1000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const entry = appLogs.find((item) => item.message === message);
+    if (entry) {
+      return entry;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`Timed out waiting for app log: ${message}`);
+}
+
 async function writeEnabledConfig(workspace) {
   await mkdir(join(workspace, '.opencode'), { recursive: true });
   await writeFile(
@@ -1669,11 +1681,10 @@ describe('runtime protocol strictness', () => {
         },
       },
     });
-    await new Promise((r) => setTimeout(r, 10));
 
-    const receivedLog = appLogs.find((entry) => entry.message === 'event.received');
-    const forwardingLog = appLogs.find((entry) => entry.message === 'event.forwarding');
-    const forwardedLog = appLogs.find((entry) => entry.message === 'event.forwarded');
+    const receivedLog = await waitForAppLog(appLogs, 'event.received');
+    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
+    const forwardedLog = await waitForAppLog(appLogs, 'event.forwarded');
 
     assert.strictEqual(receivedLog.extra.traceId, 'op-msg-1');
     assert.notStrictEqual(receivedLog.extra.runtimeTraceId, undefined);
@@ -1728,10 +1739,9 @@ describe('runtime protocol strictness', () => {
         delta: '',
       },
     });
-    await new Promise((r) => setTimeout(r, 10));
 
-    const receivedLog = appLogs.find((entry) => entry.message === 'event.received');
-    const forwardingLog = appLogs.find((entry) => entry.message === 'event.forwarding');
+    const receivedLog = await waitForAppLog(appLogs, 'event.received');
+    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
 
     assert.strictEqual(receivedLog.extra.deltaBytes, 0);
     assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
@@ -1786,10 +1796,9 @@ describe('runtime protocol strictness', () => {
         },
       },
     });
-    await new Promise((r) => setTimeout(r, 10));
 
-    const receivedLog = appLogs.find((entry) => entry.message === 'event.received');
-    const forwardingLog = appLogs.find((entry) => entry.message === 'event.forwarding');
+    const receivedLog = await waitForAppLog(appLogs, 'event.received');
+    const forwardingLog = await waitForAppLog(appLogs, 'event.forwarding');
 
     assert.strictEqual(receivedLog.extra.deltaBytes, 0);
     assert.strictEqual(forwardingLog.extra.deltaBytes, 0);
