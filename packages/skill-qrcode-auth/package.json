@@ -17,7 +17,8 @@
   ],
   "scripts": {
     "build": "node ./scripts/build.mjs",
-    "build:dev": "node ./scripts/build-package.mjs --mode=dev && tsc --emitDeclarationOnly --project ./tsconfig.json && node ./scripts/rewrite-dts-imports.mjs",
+    "build:dts": "tsc --emitDeclarationOnly --project ./tsconfig.json && node ./scripts/rewrite-dts-imports.mjs",
+    "build:dev": "node ./scripts/build-package.mjs --mode=dev && pnpm run build:dts",
     "typecheck": "tsc --noEmit --project ./tsconfig.json",
     "test": "node --experimental-strip-types --test tests/**/*.test.ts",
     "pack:check": "pnpm run build && pnpm pack --pack-destination .tmp/pack-check && node ./scripts/check-pack.mjs",
