@@ -1,7 +1,7 @@
 const UNKNOWN_PACKAGE_VERSION = 'unknown';
 
 function readInjectedPackageVersion(): string | null {
-  const candidate = (globalThis as typeof globalThis & { __MB_PACKAGE_VERSION__?: unknown }).__MB_PACKAGE_VERSION__;
+  const candidate = (globalThis as typeof globalThis & { __MB_SDK_PACKAGE_VERSION__?: unknown }).__MB_SDK_PACKAGE_VERSION__;
   if (typeof candidate !== 'string') {
     return null;
   }

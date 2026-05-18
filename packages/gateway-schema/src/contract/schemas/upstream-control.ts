@@ -14,6 +14,12 @@ export const registerMessageSchema = z
     os: requiredTrimmedString,
     toolType: requiredTrimmedString,
     toolVersion: requiredTrimmedString,
+    sdkVersion: requiredTrimmedString.optional(),
+    pluginVersion: requiredTrimmedString.optional(),
+  })
+  .refine((message) => !!message.sdkVersion || !!message.pluginVersion, {
+    message: 'register message requires sdkVersion or pluginVersion',
+    path: ['sdkVersion'],
   })
   .transform((message) => {
     const macAddress = message.macAddress?.trim();
@@ -23,6 +29,8 @@ export const registerMessageSchema = z
       os: message.os,
       toolType: message.toolType,
       toolVersion: message.toolVersion,
+      ...(message.sdkVersion ? { sdkVersion: message.sdkVersion } : {}),
+      ...(message.pluginVersion ? { pluginVersion: message.pluginVersion } : {}),
       ...(macAddress ? { macAddress } : {}),
     };
   });

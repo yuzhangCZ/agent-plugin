@@ -70,7 +70,7 @@ function createResolvedConfig(overrides = {}) {
     debug: false,
     gateway: {
       url: 'ws://localhost:8081/ws/agent',
-      channel: 'openx',
+      channel: 'opencode',
       heartbeatIntervalMs: 30000,
       reconnect: {
         baseMs: 1000,
@@ -2192,11 +2192,11 @@ describe('runtime protocol strictness', () => {
       JSON.stringify({
         config_version: 1,
         enabled: true,
-        gateway: {
-          url: 'ws://localhost:8081/ws/agent',
-          deviceName: 'dev',
-          macAddress: '11:22:33:44:55:66',
-          channel: 'openx',
+      gateway: {
+        url: 'ws://localhost:8081/ws/agent',
+        deviceName: 'dev',
+        macAddress: '11:22:33:44:55:66',
+          channel: 'opencode',
           toolVersion: '1.2.3',
           heartbeatIntervalMs: 30000,
         reconnect: {
@@ -2275,8 +2275,9 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(ws.sent[0].deviceName, hostname());
       assert.strictEqual(ws.sent[0].macAddress, '11:22:33:44:55:66');
       assert.strictEqual(typeof ws.sent[0].os, 'string');
-      assert.strictEqual(ws.sent[0].toolType, 'openx');
+      assert.strictEqual(ws.sent[0].toolType, 'opencode');
       assert.strictEqual(ws.sent[0].toolVersion, '9.9.9');
+      assert.strictEqual(ws.sent[0].pluginVersion, 'unknown');
 
       runtime.stop();
     } finally {
@@ -2318,7 +2319,7 @@ describe('runtime protocol strictness', () => {
       const unknownLog = logs.find((entry) => entry?.body?.message === 'runtime.register.tool_type.unknown');
       assert.ok(unknownLog);
       assert.strictEqual(unknownLog.body.extra.toolType, 'legacy-tool-type');
-      assert.deepStrictEqual(unknownLog.body.extra.knownToolTypes, ['openx', 'uniassistant', 'codeagent']);
+      assert.deepStrictEqual(unknownLog.body.extra.knownToolTypes, ['opencode', 'openx', 'uniassistant', 'codeagent']);
 
       runtime.stop();
     } finally {
@@ -2783,7 +2784,7 @@ describe('runtime protocol strictness', () => {
 
       assert.strictEqual(resolveCount, 2);
       assert.strictEqual(RegisterCaptureWebSocket.instances.length, 2);
-      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].toolType, 'openx');
+      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].toolType, 'opencode');
       assert.strictEqual(RegisterCaptureWebSocket.instances[1].sent[0].toolType, 'uniassistant');
 
       runtime.stop();

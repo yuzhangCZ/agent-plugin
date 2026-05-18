@@ -1,7 +1,7 @@
 export * from "../gateway-wire/transport.js";
 
 export const KNOWN_TOOL_TYPES = [
-  "openx",
+  "openclaw",
 ] as const;
 
 export type KnownToolType = (typeof KNOWN_TOOL_TYPES)[number];

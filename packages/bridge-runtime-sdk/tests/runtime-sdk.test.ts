@@ -113,6 +113,7 @@ function createRuntimeOptions(
       register: {
         toolType: 'openx',
         toolVersion: '0.0.0',
+        pluginVersion: '0.1.0',
       },
     } satisfies BridgeGatewayHostConfig,
     connectionFactory: () => connection,
@@ -758,6 +759,7 @@ test('probe passes the same public gatewayHost contract to connectionFactory as 
     register: {
       toolType: 'openx',
       toolVersion: '0.0.0',
+      pluginVersion: '0.1.0',
     },
   };
   const runtime = await createBridgeRuntime({
@@ -851,6 +853,7 @@ test('runtime probe short-circuits when same gateway url and ak runtime is ready
     register: {
       toolType: 'openx',
       toolVersion: '0.0.0',
+      pluginVersion: '0.1.0',
     },
   } satisfies BridgeGatewayHostConfig;
   const runtime = await createBridgeRuntime({
@@ -946,6 +949,7 @@ test('different runtimes with the same gateway url and ak own separate connectio
         register: {
           toolType: 'openx',
           toolVersion: '0.0.0',
+          pluginVersion: '0.1.0',
         },
       },
       connectionFactory: () => firstConnection,
@@ -962,6 +966,7 @@ test('different runtimes with the same gateway url and ak own separate connectio
         register: {
           toolType: 'openx',
           toolVersion: '0.0.0',
+          pluginVersion: '0.1.0',
         },
       },
       connectionFactory: () => secondConnection,

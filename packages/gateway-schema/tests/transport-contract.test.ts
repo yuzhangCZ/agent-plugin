@@ -21,6 +21,7 @@ test('validateGatewayUpstreamTransportMessage accepts the upstream transport env
       os: 'linux',
       toolType: 'opencode',
       toolVersion: '1.0.0',
+      pluginVersion: '0.2.0',
     },
     {
       type: 'register',
@@ -28,6 +29,7 @@ test('validateGatewayUpstreamTransportMessage accepts the upstream transport env
       os: 'linux',
       toolType: 'opencode',
       toolVersion: '1.0.0',
+      pluginVersion: '0.2.0',
     },
     {
       type: 'heartbeat',
@@ -131,6 +133,7 @@ test('validateGatewayUpstreamTransportMessage accepts control messages through t
       os: 'linux',
       toolType: 'opencode',
       toolVersion: '1.0.0',
+      pluginVersion: '0.2.0',
     },
     {
       type: 'register_ok',
@@ -163,6 +166,7 @@ test('validateGatewayUpstreamTransportMessage omits blank register macAddress', 
     os: 'linux',
     toolType: 'opencode',
     toolVersion: '1.0.0',
+    pluginVersion: '0.2.0',
   });
 
   assert.equal(result.ok, true);
@@ -172,6 +176,7 @@ test('validateGatewayUpstreamTransportMessage omits blank register macAddress', 
     os: 'linux',
     toolType: 'opencode',
     toolVersion: '1.0.0',
+    pluginVersion: '0.2.0',
   });
 });
 
@@ -183,6 +188,7 @@ test('validateGatewayUpstreamTransportMessage rejects non-string register macAdd
     os: 'linux',
     toolType: 'opencode',
     toolVersion: '1.0.0',
+    pluginVersion: '0.2.0',
   });
 
   assert.equal(result.ok, false);

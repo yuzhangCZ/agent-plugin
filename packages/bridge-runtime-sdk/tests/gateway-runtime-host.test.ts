@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 
 import { createBridgeRuntime } from '../src/index.ts';
 import type { BridgeGatewayHostConfig } from '../src/index.ts';
-import type { BridgeGatewayHostConnection, BridgeGatewayHostState } from '../src/application/gateway-host.ts';
+import {
+  normalizeBridgeGatewayHostConfig,
+  type BridgeGatewayHostConnection,
+  type BridgeGatewayHostState,
+} from '../src/application/gateway-host.ts';
+import { resolvePackageVersion } from '../src/packageVersion.ts';
 
 class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
@@ -62,9 +67,17 @@ function createGatewayConfig(): BridgeGatewayHostConfig {
     register: {
       toolType: 'openx',
       toolVersion: '0.0.0',
+      pluginVersion: '0.1.0',
     },
   };
 }
+
+test('normalizeBridgeGatewayHostConfig auto injects sdkVersion while preserving pluginVersion', () => {
+  const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
+
+  assert.equal(normalized.register.sdkVersion, resolvePackageVersion());
+  assert.equal(normalized.register.pluginVersion, '0.1.0');
+});
 
 test('host runtime records gateway diagnostics and processes downstream messages', async () => {
   const connection = new HostGatewayClient();

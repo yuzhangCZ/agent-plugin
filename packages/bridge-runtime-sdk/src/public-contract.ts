@@ -156,7 +156,10 @@ export interface QrCodeAuth {
   run(input: QrCodeAuthRunInput): Promise<void>;
 }
 
-export type BridgeGatewayToolType = 'openx' | 'openclaw' | 'opencode';
+/**
+ * `toolType` 由接入方定义，SDK 不对具体字面量做产品级限制。
+ */
+export type BridgeGatewayToolType = string;
 
 /**
  * Bridge runtime 使用的最小日志端口。
@@ -182,6 +185,7 @@ export interface BridgeGatewayHostConfig {
   register: {
     toolType: BridgeGatewayToolType;
     toolVersion: string;
+    pluginVersion?: string;
   };
 }
 

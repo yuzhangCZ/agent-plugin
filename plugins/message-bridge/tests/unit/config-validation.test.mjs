@@ -1749,7 +1749,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       const warnLog = calls.find((entry) => entry.body.message === 'config.gateway.channel.unknown');
       assert.ok(warnLog);
       assert.strictEqual(warnLog.body.extra.toolType, 'legacy-tool-type');
-      assert.deepStrictEqual(warnLog.body.extra.knownToolTypes, ['openx', 'uniassistant', 'codeagent']);
+      assert.deepStrictEqual(warnLog.body.extra.knownToolTypes, ['opencode', 'openx', 'uniassistant', 'codeagent']);
       assert.strictEqual(warnLog.body.extra.source, 'env');
     } finally {
       if (originalChannel === undefined) {

@@ -74,6 +74,7 @@ function registerMessage() {
     os: 'darwin',
     toolType: 'opencode',
     toolVersion: '1.0.0',
+    pluginVersion: '0.2.0',
   } as const;
 }
 
@@ -322,11 +323,17 @@ test('connect sends register and enters READY only after register_ok', async () 
   const inbound: unknown[] = [];
   const outbound: unknown[] = [];
   const messages: unknown[] = [];
+  const infoLogs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
 
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
     registerMessage: registerMessage(),
     heartbeatIntervalMs: 60_000,
+    logger: {
+      info(message, meta) {
+        infoLogs.push({ message, meta });
+      },
+    },
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
   });
 
@@ -343,6 +350,15 @@ test('connect sends register and enters READY only after register_ok', async () 
   assert.equal(client.getState(), 'CONNECTED');
   assert.deepEqual(ws.sent[0], registerMessage());
   assert.deepEqual(outbound[0], registerMessage());
+  assert.deepEqual(
+    infoLogs.find((entry) => entry.message === 'gateway.register.sent')?.meta,
+    {
+      toolType: 'opencode',
+      toolVersion: '1.0.0',
+      sdkVersion: undefined,
+      pluginVersion: '0.2.0',
+    },
+  );
 
   ws.emitMessage({ type: 'status_query' });
   await flushAsyncHandlers();
