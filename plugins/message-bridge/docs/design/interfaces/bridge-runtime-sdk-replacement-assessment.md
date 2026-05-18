@@ -30,13 +30,9 @@
 
 本文只回答一个问题：当前 `message-bridge` 与 `ai-gateway` 的协议交互，能否直接切到 `bridge-runtime-sdk`。
 
-结论：**当前不能直接替换**。阻塞原因不是 SDK 不能解析 OpenCode raw event，也不是 SDK 必须复刻 OpenCode `tool_event.event` 历史外形，而是 SDK 仍缺少若干稳定语义入口：
+结论：**按本文最初假设，当前不能直接替换；但基于当前仓内实现复核，原先列出的多数 SDK 缺口已补齐**。阻塞原因不再是 SDK 无法承接 `invoke.chat.context`、`permission_reply`、`question_reply`、`question.asked`、`permission.replied` 或 `session.title` 这些稳定语义，而主要收敛为一个待决策点：
 
-1. `invoke.chat.context`：`ProviderRunMessageInput` 缺少 `{ assistantAccount?, sendUserAccount?, imGroupId?, suppressReply? }` typed context。
-2. `permission_reply`：SDK 仍是 `toolSessionId + permissionId + response`，未对齐 `permissionId + reply`。
-3. `question_reply`：SDK 已收敛为 `questionId + answers: string[][]`，不再依赖 `toolSessionId + toolCallId + answer`。
-4. `question.asked`：SDK `QuestionAskFact` 已承接 `questionId`、独立 `partId` 与完整 `questions[]`；`question/header/options` 仅保留兼容快捷字段。
-5. `permission.replied`：SDK 需要补充 `PermissionReplyFact`，用于通知 gateway 权限卡片已处理。
+1. `permission_reply` 成功后，是否应由 SDK 在命令成功路径上自动统一产出 `PermissionReplyFact`，还是继续要求 provider 在权限真正 resolved 时主动发出该 fact。
 
 非阻塞项如下：
 
@@ -73,7 +69,7 @@
 | 结论 | 判定标准 | 典型证据 |
 |---|---|---|
 | `SDK 已满足` | 该行评估项的全部必要稳定语义都能映射到现有 SDK command / fact / terminal 字段 | 可直接映射到 `ProviderRunMessageInput.*`、`TextDeltaFact.*`、`SessionErrorFact.*` 等 |
-| `SDK 需补充` | 该行评估项需要通知 gateway / skill-server / miniapp，或是跨 provider 稳定语义 / runtime 行为，但当前 SDK 缺少明确 contract、fact、policy 或 terminal 字段；不补会丢失行为或交互能力 | direct reply id、结构化 `answers`、多问题 `questions[]`、权限 request id、权限状态变化 fact、`session.title`、`ProviderError.code=session_not_found` |
+| `SDK 需补充` | 该行评估项需要通知 gateway / skill-server / miniapp，或是跨 provider 稳定语义 / runtime 行为，但当前 SDK 缺少明确 contract、fact、policy 或 terminal 字段；不补会丢失行为或交互能力 | 例如新的 direct reply target、尚未建模的权限 resolved 统一策略、未收敛的终态错误语义等 |
 | `插件闭环` | 该行评估项只在进入 SDK 前、调用 provider API 前或插件内部策略中完成；不产生 SDK fact，不产生 gateway 上行事件 | `directory`、`suppressReply` provider run 短路、插件基于 context 的 permission 管控、OpenCode raw event 字段路径读取、OpenCode direct reply 参数转换、`message.part.delta` part type 判定 |
 | `待确认` | 字段可能是 SDK 稳定语义，也可能可由插件闭环；必须写明缺少的证据和改判方向 | 尚未确认下游消费或 provider 行为语义的字段 |
 | `不纳入` | 字段既不是 SDK 稳定语义，也没有已证实的 gateway 输出兼容要求；纳入 SDK 会扩大稳定 contract | 无外部兼容证据的 OpenCode 内部生命周期字段 |
@@ -99,9 +95,9 @@
 | `invoke.create_session` | `permission` 注入结果 | 群聊上下文派生 deny 列表 | SDK 不建模 permission 管控策略 | `插件闭环` | 闭环位置：adapter/action。permission 管控由插件基于 `invoke.chat.context`、群聊上下文和 OpenCode provider 能力自行完成，不进入 SDK create-session contract；服务端/前端不消费该 deny 列表作为独立协议字段 |
 | `invoke.create_session` | `directory` | OpenCode 会话目录 | SDK 不建模 directory | `插件闭环` | 闭环位置：adapter/action。目录解析、复用和 OpenCode API 参数注入由插件完成；当前证据只要求 OpenCode provider 调用正确，不要求服务端或前端感知 directory 字段 |
 | `invoke.chat` | 基础聊天字段 | `toolSessionId`、`text`、`assistantId` | SDK 已有 `toolSessionId/text/assistantId` | `SDK 已满足` | `assistantId` 保留顶层，作为 provider agent selector |
-| `invoke.chat` | 业务上下文 | `assistantAccount`、`sendUserAccount`、`imGroupId`、`suppressReply` | SDK 当前无 typed context | `SDK 需补充` | 目标是 `context: { assistantAccount?, sendUserAccount?, imGroupId?, suppressReply? }`，其中 `suppressReply` 只透传给插件 |
+| `invoke.chat` | 业务上下文 | `assistantAccount`、`sendUserAccount`、`imGroupId`、`suppressReply` | SDK 已有 typed `context` 并透传到 provider SPI | `SDK 已满足` | `context: { assistantAccount?, sendUserAccount?, imGroupId?, suppressReply? }` 已进入 `ProviderRunMessageInput`；其中 `suppressReply` 仍只透传给插件 |
 | `invoke.chat` | 回复抑制策略 | `suppressReply` | SDK 不内建 provider run 短路策略 | `插件闭环` | 闭环位置：adapter/action。SDK 透传字段，插件基于该字段自行决定是否调用真实 provider `runMessage`，不要求 SDK runtime 建模 pre-run policy |
-| `invoke.permission_reply` | direct reply target | 当前 bridge `permissionId + response` | SDK 当前要求 `toolSessionId + permissionId + response` | `SDK 需补充` | 目标是 `permissionId + reply`；OpenCode provider 内部把 `permissionId` 映射到 `requestID` |
+| `invoke.permission_reply` | direct reply target | 当前 bridge `permissionId + response` | SDK 已使用 `permissionId + reply` | `SDK 已满足` | runtime intake 继续消费 gateway `response`，进入 provider SPI 前归一为 `reply`；OpenCode provider 内部把 `permissionId` 映射到 `requestID` |
 | `invoke.question_reply` | direct reply target | 当前 bridge `questionId + answer` | SDK 当前使用 `questionId + answers: string[][]` | `SDK 已满足` | gateway 下行单字符串答案在 runtime intake 归一为 `answers: [[answer]]` |
 | `invoke.close_session` | 关闭会话 | `toolSessionId` | `ProviderCloseSessionInput.toolSessionId` | `SDK 已满足` | 无额外 SDK contract 缺口 |
 | `invoke.abort_session` | 终止会话 | `toolSessionId`、runtime 派生 `runId` | `ProviderAbortSessionInput.toolSessionId/runId?` | `SDK 已满足` | `runId` 由 SDK runtime 管理 |
@@ -184,16 +180,16 @@ OpenCode `Question.Answer = string[]`，`Question.Reply = { answers: QuestionAns
 | `message.part.removed` | `properties.sessionID/messageID/partID` | 无对应 SDK fact 字段 | `不纳入` | 当前无 SDK stable fact 语义、无服务端/前端消费场景、无继续输出兼容需求；SDK provider adapter 可以忽略该 OpenCode raw event，不定义 remove fact |
 | `session.status` | `properties.sessionID/status.type` | 无对应 SDK fact 字段 | `不纳入` | OpenCode 状态机展示信号，不是 provider fact 必需字段 |
 | `session.idle` | `properties.sessionID` | 无对应 SDK fact 字段 | `不纳入` | 仅用于旧 `tool_event(session.idle)` 输出时不纳入；`tool_done` 完成态由 SDK terminal result 承接。若后续确认 miniapp 需要 session idle 状态，应补正式 `SessionStatusFact` |
-| `session.updated` | `properties.sessionID/info.id/info.title` | `SessionTitleFact.toolSessionId/title` | `SDK 需补充` | `opencode-cui` 已证明 `session.updated.info.title -> session.title -> miniapp updateSessionTitle` 是有效下游消费链路；目标 fact 为 `{ type: 'session.title', toolSessionId, title }` |
+| `session.updated` | `properties.sessionID/info.id/info.title` | `SessionTitleFact.toolSessionId/title` | `SDK 已满足` | `opencode-cui` 已证明 `session.updated.info.title -> session.title -> miniapp updateSessionTitle` 是有效下游消费链路；当前 SDK 已有 `{ type: 'session.title', toolSessionId, title }` fact 与 projector |
 | `session.error` | `properties.sessionID` | `SessionErrorFact.toolSessionId` | `SDK 已满足` | 错误归属字段已可承载 |
 | `session.error` | `properties.error` | `SessionErrorFact.error` | `SDK 已满足` | 错误内容已可承载 |
-| terminal `tool_error` | `session_not_found` 分类与 `tool_error.reason` | `ProviderError.code='session_not_found'` -> `ToolErrorMessage.reason='session_not_found'` | `SDK 需补充` | `gateway-schema` 已定义 `tool_error.reason?: 'session_not_found'`，`skill-server` 会基于该字段触发会话重建；插件负责识别 stale session 并构造 `ProviderError.code`，SDK 作为统一上行出口负责输出 `reason` |
+| terminal `tool_error` | `session_not_found` 分类与 `tool_error.reason` | `ProviderError.code='session_not_found'` -> `ToolErrorMessage.reason='session_not_found'` | `SDK 已满足` | `gateway-schema` 已定义 `tool_error.reason?: 'session_not_found'`，`skill-server` 会基于该字段触发会话重建；插件负责识别 stale session 并构造 `ProviderError.code`，SDK 已在统一 terminal projector 输出 `reason` |
 | `permission.updated` | `properties.sessionID/id/messageID/type/title/metadata/status/response/resolved` | 无对应 SDK fact 字段 | `不纳入` | 收紧原则：OpenCode raw `permission.updated/status` 不作为 SDK 权限 resolved 来源；权限 resolved 统一由 `PermissionReplyFact` 表达 |
 | `permission.asked` | gateway-schema 字段见第 4.4 节 | 见第 4.4 节逐字段承载关系 | `SDK 已满足` | 当前 SDK 已有 `PermissionAskFact`；本节只评估 gateway-schema 字段到现有 fact 的承载关系 |
-| `permission.replied` | `properties.sessionID` | `PermissionReplyFact.toolSessionId` | `SDK 需补充` | 权限回复结果需要会话归属，用于通知 gateway 权限卡片已处理 |
-| `permission.replied` | `properties.requestID` | `PermissionReplyFact.permissionId` | `SDK 需补充` | OpenCode `requestID` 在 SDK fact 中统一命名为 `permissionId`，用于匹配已有权限卡片 |
-| `permission.replied` | `properties.reply` | `PermissionReplyFact.response` | `SDK 需补充` | `reply` 归一为 `once/always/reject` 后进入 `PermissionReplyFact.response`；这是 OpenCode provider 主动上报权限 resolved 的事件来源之一 |
-| `question.asked` | gateway-schema 字段见第 4.5 节 | 见第 4.5 节逐字段承载关系 | `SDK 需补充` | 基础展示字段已有 fact；缺口集中在 `questionId` 和完整 `questions[]` |
+| `permission.replied` | `properties.sessionID` | `PermissionReplyFact.toolSessionId` | `SDK 已满足` | 当前 SDK 已有会话归属字段，可用于通知 gateway 权限卡片已处理 |
+| `permission.replied` | `properties.requestID` | `PermissionReplyFact.permissionId` | `SDK 已满足` | OpenCode `requestID` 在 SDK fact 中统一命名为 `permissionId`，用于匹配已有权限卡片 |
+| `permission.replied` | `properties.reply` | `PermissionReplyFact.response` | `SDK 已满足` | `reply` 归一为 `once/always/reject` 后进入 `PermissionReplyFact.response`；当前 projector 已可投影该 resolved 事件 |
+| `question.asked` | gateway-schema 字段见第 4.5 节 | 见第 4.5 节逐字段承载关系 | `SDK 已满足` | `questionId` 与完整 `questions[]` 已进入正式 fact，且 SDK public contract 已收紧为 `questions[]` 真源 |
 
 ### 4.3 `message.part.updated` 按 `part.type` 展开
 
@@ -226,35 +222,17 @@ OpenCode `Question.Answer = string[]`，`Question.Reply = { answers: QuestionAns
 |---|---|---|---|---|
 | `question.asked` | `properties.sessionID` | `QuestionAskFact.toolSessionId` | `SDK 已满足` | 问题请求会话归属已有 fact 字段承载 |
 | `question.asked` | `properties.id` | `QuestionAskFact.questionId` | `SDK 已满足` | `questionId` 已成为稳定 direct reply target，并要求全局唯一 |
-| `question.asked` | `properties.questions[0].question` / `properties.questions[0].header` | `QuestionAskFact.question` / `header` | `SDK 已满足` | `skill-server` 当前通过 `resolveQuestionPayload` 只取第一个问题，现有单问题字段可承接当前展示 |
-| `question.asked` | `properties.questions[0].options[].label` | `QuestionAskFact.options[]` | `SDK 已满足` | `gateway-schema` 当前 options 只保留 `label`，`skill-server` 也只提取 label 列表 |
-| `question.asked` | `properties.questions[]` | `QuestionAskFact.questions[]` | `SDK 已满足` | `questions[]` 已成为正式真源；`question/header/options` 只保留为 `questions[0]` 兼容快捷字段 |
+| `question.asked` | `properties.questions[0].question` / `properties.questions[0].header` | `QuestionAskFact.questions[0].question/header` | `SDK 已满足` | `skill-server` 当前通过 `resolveQuestionPayload` 只取第一个问题；展示层可直接从 `questions[0]` 读取，不再依赖 SDK 平铺快捷字段 |
+| `question.asked` | `properties.questions[0].options[].label` | `QuestionAskFact.questions[0].options[]` | `SDK 已满足` | `gateway-schema` 当前 options 只保留 `label`，`skill-server` 也只提取 label 列表；SDK 以 `questions[]` 为唯一真源 |
+| `question.asked` | `properties.questions[]` | `QuestionAskFact.questions[]` | `SDK 已满足` | `questions[]` 已成为正式真源；SDK public contract 不再要求平铺 `question/header/options` 字段 |
 | `question.asked` | `properties.tool.messageID` / `properties.tool.callID` | 无对应 SDK fact 字段 | `不纳入` | question 回复目标以 `properties.id -> QuestionAskFact.questionId` 为准；当前没有证据表明下游仍需要 `messageID/callID` 关联字段，SDK 不为可选 tool ref 扩大 contract |
 
 `questions[]` 的每个元素至少包含 `question/header/options[]`，其中当前 `gateway-schema` 的 `options[]` 元素只保留 `label`。SDK 目标模型必须保留多问题、多选和自定义输入兼容性，即使当前 bridge 输入仍只有单个 `answer: string`。
 
-## 5. SDK 缺口清单
+## 5. SDK 待决策清单
 
-1. `ProviderRunMessageInput.context`  
-   目标为 `{ assistantAccount?, sendUserAccount?, imGroupId?, suppressReply? }`，其中 `suppressReply` 仅透传给插件策略，不要求 SDK runtime 内建 provider run 短路。
-
-2. `ProviderPermissionReplyInput` direct target  
-   目标为 `permissionId + reply`，移除 `toolSessionId` 依赖；OpenCode provider 内部把 `permissionId` 映射到 `requestID`，不暴露 `requestID` 命名。
-
-3. `ProviderQuestionReplyInput` structured answers  
-   目标为 `questionId/requestID + answers: string[][]`。
-
-4. `QuestionAskFact.questionId/questions[]`  
-   目标是补齐 `questionId` direct reply target 和完整 `questions[]`。现有 `question/header/options` 可继续作为 `questions[0]` 的兼容快捷字段，但不能替代完整 contract；`messageID/callID` 不纳入 SDK fact。
-
-5. `PermissionReplyFact` / 权限 resolved fact  
-   目标为 `{ type: 'permission.reply', toolSessionId: string, permissionId: string, response: 'once' | 'always' | 'reject' }`，用于把权限卡片 resolved 状态同步给 gateway / skill-server / miniapp。事实来源包括用户下行 `permission_reply` 成功、agent 侧自动审批、provider 主动 `permission.replied`；所有来源统一产出同一 fact，并按 `permissionId` 幂等处理。OpenCode raw `permission.updated/status` 不触发权限回复 fact。
-
-6. `SessionTitleFact`  
-   目标为 `{ type: 'session.title', toolSessionId: string, title: string }`，用于承接 `session.updated.info.title -> session.title -> miniapp updateSessionTitle`。
-
-7. `ProviderError.code='session_not_found'` 与 terminal `tool_error.reason`  
-   目标是在 `ProviderError.code` 中新增或承接 `session_not_found` 稳定错误码，并由 SDK terminal `tool_error` 输出 gateway-schema 已定义的 `reason='session_not_found'`，用于触发 `skill-server` 会话重建。
+1. `permission_reply` 成功路径是否由 SDK 自动补发 `PermissionReplyFact`  
+   当前 SDK 已具备 `PermissionReplyFact`、对应 projector 与 gateway-schema 承接能力，也支持 provider 主动上报 `permission.reply`。仍待决策的是：用户下行 `permission_reply` 成功后，是否应由 SDK 在命令成功路径自动统一生成 resolved fact，还是继续要求 provider 在权限真正 resolved 时主动发出该 fact。若选择前者，需同步定义与 provider 主动上报之间的幂等 / 去重边界。
 
 ## 6. 插件闭环 / 非 SDK 缺口清单
 

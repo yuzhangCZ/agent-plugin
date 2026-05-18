@@ -306,6 +306,10 @@ export interface QuestionAskFact {
    * runtime 与 provider 都只依赖它定位问题回复，不需要 `toolSessionId` 二次定位。
    */
   questionId: string;
+  /**
+   * 问题事实的唯一真源。
+   * 下游如需兼容单问题展示，可自行从 `questions[0]` 派生快捷字段。
+   */
   questions: QuestionItem[];
   /**
    * 可选 tool call 关联字段。
@@ -314,9 +318,6 @@ export interface QuestionAskFact {
   toolCallId?: string;
   status?: string;
   extParam?: unknown;
-  header?: string;
-  question: string;
-  options?: string[];
   context?: Record<string, unknown>;
   raw?: unknown;
 }

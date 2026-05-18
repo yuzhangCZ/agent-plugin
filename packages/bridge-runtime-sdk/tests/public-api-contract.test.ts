@@ -57,6 +57,10 @@ test('public contract source locks interaction ids and tool.update string bounda
   assert.equal(questionAskBlock.includes('toolCallId?: string;'), true);
   assert.equal(questionAskBlock.includes('status?: string;'), true);
   assert.equal(questionAskBlock.includes('extParam?: unknown;'), true);
+  assert.equal(questionAskBlock.includes('questions: QuestionItem[];'), true);
+  assert.equal(questionAskBlock.includes('question: string;'), false);
+  assert.equal(questionAskBlock.includes('header?: string;'), false);
+  assert.equal(questionAskBlock.includes('options?: string[];'), false);
   assert.equal(questionReplyBlock.includes('questionId: string;'), true);
   assert.equal(questionReplyBlock.includes('answers: QuestionAnswer[];'), true);
   assert.equal(toolUpdateBlock.includes('input?: string;'), true);
