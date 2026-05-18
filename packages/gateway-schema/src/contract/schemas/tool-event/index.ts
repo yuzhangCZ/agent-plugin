@@ -102,7 +102,12 @@ type GatewayToolEventEnvelope =
   | { __providerKind: 'invalid'; value: unknown };
 
 function hasOwnProtocolField(raw: unknown): raw is Record<string, unknown> {
-  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) && Object.hasOwn(raw, 'protocol');
+  return (
+    typeof raw === 'object'
+    && raw !== null
+    && !Array.isArray(raw)
+    && Object.prototype.hasOwnProperty.call(raw, 'protocol')
+  );
 }
 
 /**

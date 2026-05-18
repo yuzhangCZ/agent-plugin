@@ -7,6 +7,10 @@ import { createLargeMessageUpdatedEvent } from '../fixtures/opencode-events/mess
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 describe('event uplink via hook boundary', () => {
+  function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+    runtime.ownershipResolver.attach(opencodeSessionId, anchor);
+  }
+
   test('session.created is handled as an internal control event and is not forwarded', async () => {
     const logs = [];
     const runtime = new BridgeRuntime({
@@ -49,6 +53,7 @@ describe('event uplink via hook boundary', () => {
     runtime.gatewayConnection = { send: (msg, ctx) => sent.push({ msg, ctx }) };
     runtime.eventFilter = new EventFilter(['message.updated']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'tool-1');
 
     await runtime.handleEvent({
       type: 'message.updated',
@@ -81,6 +86,7 @@ describe('event uplink via hook boundary', () => {
     runtime.gatewayConnection = { send: (msg, ctx) => sent.push({ msg, ctx }) };
     runtime.eventFilter = new EventFilter(['message.updated']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'ses_large_summary_fixture');
 
     await runtime.handleEvent(event);
 
@@ -167,6 +173,7 @@ describe('event uplink via hook boundary', () => {
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['question.asked']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'tool-question-invalid');
 
     await runtime.handleEvent({
       type: 'question.asked',
@@ -204,6 +211,7 @@ describe('event uplink via hook boundary', () => {
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['message.updated']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'tool-missing-time');
 
     await runtime.handleEvent({
       type: 'message.updated',
@@ -239,6 +247,7 @@ describe('event uplink via hook boundary', () => {
     runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
     runtime.eventFilter = new EventFilter(['message.part.updated', 'message.part.delta']);
     setRuntimeGatewayState(runtime, 'READY');
+    attach(runtime, 'tool-empty-text');
 
     await runtime.handleEvent({
       type: 'message.part.updated',

@@ -1,5 +1,5 @@
 import type { BridgeLogger } from '../types/logger.js';
-import type { OpencodeClient } from '../types/sdk.js';
+import type { BridgeSdkClient } from '../types/sdk.js';
 import { hasError } from '../types/sdk.js';
 import type { ToolErrorEvidence } from '../utils/error.js';
 import { getErrorDetailsForLog, getToolErrorEvidence } from '../utils/error.js';
@@ -53,7 +53,7 @@ export interface ResolveSessionDirectoryInput {
 }
 
 export class SessionDirectoryResolver {
-  constructor(private readonly getClient: () => OpencodeClient | null) {}
+  constructor(private readonly getClient: () => BridgeSdkClient | null) {}
 
   async resolve(input: ResolveSessionDirectoryInput): Promise<SessionDirectoryResolutionResult> {
     const client = this.requireClient();
@@ -126,7 +126,7 @@ export class SessionDirectoryResolver {
     };
   }
 
-  private requireClient(): OpencodeClient {
+  private requireClient(): BridgeSdkClient {
     const client = this.getClient();
     if (!client) {
       throw new Error('runtime.sdk_client_unavailable');

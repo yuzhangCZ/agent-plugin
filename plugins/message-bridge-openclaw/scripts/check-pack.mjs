@@ -55,6 +55,7 @@ async function main() {
 
   for (const entry of [
     "package/index.js",
+    "package/setup-entry.js",
     "package/package.json",
     "package/openclaw.plugin.json",
     "package/README.md",

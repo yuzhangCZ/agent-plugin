@@ -34,7 +34,6 @@ export interface CloseSessionPayload {
 
 export interface PermissionReplyPayloadTarget {
   permissionId: string;
-  toolSessionId: string;
   response: 'once' | 'always' | 'reject';
 }
 
@@ -48,9 +47,8 @@ export interface AbortSessionPayload {
 }
 
 export interface QuestionReplyPayload {
-  toolSessionId: string;
+  questionId: string;
   answer: string;
-  toolCallId?: string;
 }
 
 export interface InvokePayloadByAction {

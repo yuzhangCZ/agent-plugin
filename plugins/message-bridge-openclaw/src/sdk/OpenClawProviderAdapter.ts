@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   ProviderFact,
+  ProviderRuntimeContext,
   ProviderRun,
   ProviderTerminalResult,
   ThirdPartyAgentProvider,
@@ -10,6 +11,9 @@ import type {
 import { reconcileFinalText } from "../reconcileFinalText.js";
 import { resolveEffectiveReplyConfig } from "../resolveEffectiveReplyConfig.js";
 import type { BridgeLogger, MessageBridgeResolvedAccount } from "../types.js";
+import { ApprovalRegistry } from "../runtime/ApprovalRegistry.js";
+import { RuntimeApprovalPort, RuntimeQuestionReplyPort } from "../runtime/InteractionPorts.js";
+import { QuestionRegistry } from "../runtime/QuestionRegistry.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
 import {
   buildMessageDoneFact,
@@ -17,6 +21,8 @@ import {
   buildPermissionAskFact,
   buildQuestionAskFact,
   buildSessionErrorFact,
+  buildThinkingDeltaFact,
+  buildThinkingDoneFact,
   buildTextDeltaFact,
   buildTextDoneFact,
   buildToolUpdateFact,
@@ -39,6 +45,9 @@ type PluginRuntime = {
   };
   events?: {
     onAgentEvent?(listener: (evt: ToolAgentEvent) => void): () => boolean;
+    onGatewayEvent?(listener: (evt: RuntimeGatewayEvent) => void): () => boolean;
+    onSystemEvent?(listener: (evt: RuntimeGatewayEvent) => void): () => boolean;
+    onEvent?(listener: (evt: RuntimeGatewayEvent) => void): () => boolean;
   };
 };
 
@@ -58,6 +67,13 @@ type ToolAgentEvent = {
   runId?: string;
   sessionKey?: string;
   stream?: string;
+  data?: unknown;
+};
+
+type RuntimeGatewayEvent = {
+  event?: string;
+  type?: string;
+  payload?: unknown;
   data?: unknown;
 };
 
@@ -105,8 +121,9 @@ interface ActiveToolState {
   partId: string;
   title?: string;
   status: "pending" | "running" | "completed" | "error";
-  output?: string;
-  error?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
 }
 
 interface ActiveRunState {
@@ -115,6 +132,7 @@ interface ActiveRunState {
   runId: string;
   messageId: string;
   textPartId: string;
+  thinkingPartId: string;
   queue: AsyncQueueController<ProviderFact>;
   result: {
     promise: Promise<ProviderTerminalResult>;
@@ -125,8 +143,11 @@ interface ActiveRunState {
   completed: boolean;
   abortRequested: boolean;
   accumulatedText: string;
+  accumulatedThinking: string;
+  textDeltaCount: number;
   pendingFinalText: string | null;
   pendingToolResultTarget: string | null;
+  streamingEnabled: boolean;
   toolStates: Map<string, ActiveToolState>;
 }
 
@@ -138,6 +159,11 @@ export interface OpenClawProviderAdapterOptions {
   sessionRegistry: SessionRegistry;
   getSubagentRuntime: () => SubagentRuntime | null;
   isOnline: () => boolean;
+  onStreamingOutcome?: (outcome: {
+    executionPath: "runtime_reply" | "subagent_fallback";
+    streamingEnabled: boolean;
+    observedRealChunk: boolean;
+  }) => void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -148,6 +174,23 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asTrimmedString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function pickRecord(value: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  return asRecord(value[key]);
+}
+
+function hasOwnDefinedProperty(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key) && value[key] !== undefined;
+}
+
+function pickToolPayload(value: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (hasOwnDefinedProperty(value, key)) {
+      return value[key];
+    }
+  }
+  return undefined;
 }
 
 function createDeferred<T>() {
@@ -310,26 +353,42 @@ async function loadOpenClawPluginSdk(): Promise<OpenClawPluginSdkModule> {
  */
 export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   private readonly options: OpenClawProviderAdapterOptions;
+  private readonly approvalRegistry = new ApprovalRegistry();
+  private readonly questionRegistry = new QuestionRegistry();
+  private readonly approvalPort: RuntimeApprovalPort;
+  private readonly questionReplyPort: RuntimeQuestionReplyPort;
   private readonly activeRunsBySessionKey = new Map<string, ActiveRunState>();
   private readonly sessionKeyByRunId = new Map<string, string>();
+  private outbound: ProviderRuntimeContext["outbound"] | null = null;
   private unsubscribeAgentEvents: (() => boolean) | null = null;
+  private unsubscribeGatewayEvents: (() => boolean) | null = null;
 
   constructor(options: OpenClawProviderAdapterOptions) {
     this.options = options;
+    this.approvalPort = new RuntimeApprovalPort(options.runtime);
+    this.questionReplyPort = new RuntimeQuestionReplyPort(options.runtime);
   }
 
-  async initialize(): Promise<void> {
-    if (this.unsubscribeAgentEvents || !this.options.runtime.events?.onAgentEvent) {
-      return;
+  async initialize(context?: ProviderRuntimeContext): Promise<void> {
+    this.outbound = context?.outbound ?? null;
+    if (!this.unsubscribeAgentEvents && this.options.runtime.events?.onAgentEvent) {
+      this.unsubscribeAgentEvents = this.options.runtime.events.onAgentEvent((evt: ToolAgentEvent) => {
+        this.handleRuntimeAgentEvent(evt);
+      });
     }
-    this.unsubscribeAgentEvents = this.options.runtime.events.onAgentEvent((evt: ToolAgentEvent) => {
-      this.handleRuntimeAgentEvent(evt);
-    });
+    if (!this.unsubscribeGatewayEvents) {
+      this.unsubscribeGatewayEvents = this.subscribeRuntimeGatewayEvents();
+    }
   }
 
   async dispose(): Promise<void> {
     this.unsubscribeAgentEvents?.();
     this.unsubscribeAgentEvents = null;
+    this.unsubscribeGatewayEvents?.();
+    this.unsubscribeGatewayEvents = null;
+    this.outbound = null;
+    this.approvalRegistry.clearAll();
+    this.questionRegistry.clearAll();
   }
 
   async health(): Promise<{ online: boolean }> {
@@ -358,14 +417,18 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       runId: input.runId,
       messageId: `msg_${randomUUID()}`,
       textPartId: `part_${randomUUID()}`,
+      thinkingPartId: `part_${randomUUID()}`,
       queue,
       result,
       started: false,
       completed: false,
       abortRequested: false,
       accumulatedText: "",
+      accumulatedThinking: "",
+      textDeltaCount: 0,
       pendingFinalText: null,
       pendingToolResultTarget: null,
+      streamingEnabled: this.options.account.streaming !== false,
       toolStates: new Map(),
     };
 
@@ -390,6 +453,20 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const record = this.options.sessionRegistry.get(input.toolSessionId);
     if (!record) {
       throw new Error("unknown_tool_session");
+    }
+
+    const gatewayQuestionMatches = this.questionRegistry.findBySession(input.toolSessionId, input.toolCallId);
+    if (gatewayQuestionMatches.length > 0) {
+      const gatewayQuestion = gatewayQuestionMatches[0];
+      if (gatewayQuestion.status !== "pending") {
+        throw new Error(`question_${gatewayQuestion.status}`);
+      }
+      await this.questionReplyPort.reply({
+        requestId: gatewayQuestion.requestId,
+        answer: input.answer,
+      });
+      this.questionRegistry.markResolved(gatewayQuestion.requestId);
+      return { applied: true };
     }
 
     const handled = await callRuntimeMethod(
@@ -418,6 +495,25 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       throw new Error("unknown_tool_session");
     }
 
+    const gatewayApproval = this.approvalRegistry.get(input.permissionId);
+    if (gatewayApproval) {
+      if (gatewayApproval.status !== "pending") {
+        throw new Error(`permission_${gatewayApproval.status}`);
+      }
+      const decision =
+        input.response === "once"
+          ? "allow-once"
+          : input.response === "always"
+            ? "allow-always"
+            : "deny";
+      await this.approvalPort.resolve({
+        permissionId: input.permissionId,
+        decision,
+      });
+      this.approvalRegistry.markResolved(input.permissionId);
+      return { applied: true };
+    }
+
     const handled = await callRuntimeMethod(
       this.options.runtime.channel?.reply ?? {},
       ["replyPermission", "answerPermission", "submitPermissionAnswer"],
@@ -443,6 +539,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     if (activeRun) {
       activeRun.abortRequested = true;
     }
+    this.approvalRegistry.clearSession(input.toolSessionId);
+    this.questionRegistry.clearSession(input.toolSessionId);
 
     const subagent = this.options.getSubagentRuntime();
     if (subagent?.deleteSession) {
@@ -463,6 +561,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     if (activeRun) {
       activeRun.abortRequested = true;
     }
+    this.approvalRegistry.clearSession(input.toolSessionId);
+    this.questionRegistry.clearSession(input.toolSessionId);
 
     const replyRuntime = this.options.runtime.channel?.reply ?? {};
     const runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
@@ -484,7 +584,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   ): Promise<void> {
     try {
       const hasRouteResolver = !!this.options.runtime.channel?.routing?.resolveAgentRoute;
-      const hasReplyRuntime = !!this.options.runtime.channel?.reply;
+      const hasReplyRuntime = this.hasUsableReplyRuntime();
       if (hasRouteResolver && hasReplyRuntime) {
         await this.runWithReplyRuntime(state, input.text);
       } else {
@@ -514,9 +614,21 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
   }
 
+  private hasUsableReplyRuntime(): boolean {
+    const reply = this.options.runtime.channel?.reply;
+    return !!(
+      reply &&
+      typeof reply.resolveEnvelopeFormatOptions === "function" &&
+      typeof reply.formatAgentEnvelope === "function" &&
+      typeof reply.finalizeInboundContext === "function" &&
+      typeof reply.dispatchReplyWithBufferedBlockDispatcher === "function"
+    );
+  }
+
   private async runWithReplyRuntime(state: ActiveRunState, text: string): Promise<void> {
     const { createReplyPrefixOptions, normalizeOutboundReplyPayload } = await loadOpenClawPluginSdk();
-    const { effectiveConfig } = resolveEffectiveReplyConfig(this.options.config);
+    const { effectiveConfig, streamingEnabled } = resolveEffectiveReplyConfig(this.options.config);
+    state.streamingEnabled = this.options.account.streaming !== false && streamingEnabled;
     const route = this.options.runtime.channel!.routing!.resolveAgentRoute({
       cfg: effectiveConfig,
       channel: "message-bridge",
@@ -569,6 +681,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       dispatcherOptions: {
         ...prefixOptions,
         deliver: async (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => {
+          this.logChatRawEvent({
+            source: "runtime_reply_dispatcher",
+            eventName: info.kind === "block" ? "onBlock" : info.kind === "final" ? "onFinal" : "onTool",
+            toolSessionId: state.toolSessionId,
+            sessionKey: state.sessionKey,
+            payload: rawPayload,
+          });
           const payload =
             asRecord(rawPayload) ? normalizeOutboundReplyPayload(rawPayload) : normalizeOutboundReplyPayload({});
           await this.handleReplyDeliver(state, payload, info);
@@ -588,6 +707,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     });
 
     this.completeTextMessage(state);
+    this.options.onStreamingOutcome?.({
+      executionPath: "runtime_reply",
+      streamingEnabled: state.streamingEnabled,
+      observedRealChunk: state.textDeltaCount > 0,
+    });
     state.result.resolve({
       outcome: state.abortRequested ? "aborted" : "completed",
     });
@@ -637,8 +761,14 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
+    if (!state.streamingEnabled) {
+      state.accumulatedText += text;
+      return;
+    }
+
     this.ensureMessageStarted(state);
     state.accumulatedText += text;
+    state.textDeltaCount += 1;
     state.queue.push(buildTextDeltaFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
@@ -725,6 +855,217 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }));
   }
 
+  private subscribeRuntimeGatewayEvents(): (() => boolean) | null {
+    const events = this.options.runtime.events;
+    const subscribe = events?.onGatewayEvent ?? events?.onSystemEvent ?? events?.onEvent;
+    if (!subscribe) {
+      return null;
+    }
+
+    return subscribe((evt: RuntimeGatewayEvent) => {
+      this.handleRuntimeGatewayEvent(evt).catch((error) => {
+        this.options.logger.warn("runtime.gateway_event.failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+  }
+
+  private async handleRuntimeGatewayEvent(evt: RuntimeGatewayEvent): Promise<void> {
+    const eventName = typeof evt.event === "string" ? evt.event : typeof evt.type === "string" ? evt.type : "";
+    const payload = asRecord(evt.payload) ?? asRecord(evt.data);
+    if (!eventName || !payload) {
+      return;
+    }
+
+    if (eventName === "exec.approval.requested") {
+      await this.handleApprovalRequested(eventName, payload);
+      return;
+    }
+
+    if (eventName === "exec.approval.resolved") {
+      this.handleApprovalResolved(payload);
+      return;
+    }
+
+    if (eventName === "question.asked") {
+      await this.handleQuestionAsked(eventName, payload);
+    }
+  }
+
+  private async handleApprovalRequested(eventName: string, payload: Record<string, unknown>): Promise<void> {
+    const permissionId = asTrimmedString(payload.id) ?? asTrimmedString(payload.permissionId);
+    const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+    if (!permissionId || !toolSessionId) {
+      return;
+    }
+
+    const messageId = asTrimmedString(payload.messageId) ?? `msg_${randomUUID()}`;
+    const metadata = pickRecord(payload, "metadata") ?? pickRecord(payload, "meta");
+    const title = asTrimmedString(payload.title);
+    const expiresAt = typeof payload.expiresAt === "number" ? payload.expiresAt : undefined;
+    const record = this.approvalRegistry.upsertPending({
+      toolSessionId,
+      permissionId,
+      title,
+      messageId,
+      metadata,
+      expiresAt,
+    });
+    this.options.sessionRegistry.ensure(toolSessionId);
+
+    await this.emitRuntimeOutboundFacts({
+      toolSessionId,
+      messageId,
+      trigger: eventName,
+      facts: [
+        buildMessageStartFact({ toolSessionId, messageId, raw: payload }),
+        buildPermissionAskFact({
+          toolSessionId,
+          messageId,
+          permissionId,
+          permissionType: asTrimmedString(payload.type) ?? asTrimmedString(payload.permission),
+          metadata: {
+            ...(record.metadata ?? {}),
+            ...(record.title ? { title: record.title } : {}),
+            ...(record.expiresAt !== undefined ? { expiresAt: record.expiresAt } : {}),
+            status: record.status,
+            sourceEvent: eventName,
+          },
+          raw: payload,
+        }),
+        buildMessageDoneFact({ toolSessionId, messageId }),
+      ],
+    });
+  }
+
+  private handleApprovalResolved(payload: Record<string, unknown>): void {
+    const permissionId = asTrimmedString(payload.id) ?? asTrimmedString(payload.permissionId);
+    if (!permissionId) {
+      return;
+    }
+    this.approvalRegistry.markResolved(permissionId);
+  }
+
+  private async handleQuestionAsked(eventName: string, payload: Record<string, unknown>): Promise<void> {
+    const requestId = asTrimmedString(payload.id) ?? asTrimmedString(payload.requestId);
+    const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+    const questions = this.extractQuestionPrompts(payload);
+    if (!requestId || !toolSessionId || questions.length === 0) {
+      return;
+    }
+
+    const toolRaw = pickRecord(payload, "tool");
+    const toolCallId =
+      asTrimmedString(toolRaw?.callID) ??
+      asTrimmedString(payload.toolCallId) ??
+      requestId;
+    const messageId =
+      asTrimmedString(toolRaw?.messageID) ??
+      asTrimmedString(payload.messageId) ??
+      `msg_${randomUUID()}`;
+    const record = this.questionRegistry.upsertPending({
+      requestId,
+      toolSessionId,
+      toolCallId,
+      questions,
+      messageId,
+    });
+    this.options.sessionRegistry.ensure(toolSessionId);
+
+    const prompt = record.questions[0];
+    await this.emitRuntimeOutboundFacts({
+      toolSessionId,
+      messageId,
+      trigger: eventName,
+      facts: [
+        buildMessageStartFact({ toolSessionId, messageId, raw: payload }),
+        buildQuestionAskFact({
+          toolSessionId,
+          messageId,
+          toolCallId,
+          question: prompt.question,
+          header: prompt.header,
+          options: prompt.options?.map((option) => option.label),
+          context: {
+            requestId,
+            sourceEvent: eventName,
+          },
+          raw: payload,
+        }),
+        buildMessageDoneFact({ toolSessionId, messageId }),
+      ],
+    });
+  }
+
+  private async emitRuntimeOutboundFacts(input: {
+    toolSessionId: string;
+    messageId: string;
+    trigger: string;
+    facts: ProviderFact[];
+  }): Promise<void> {
+    if (!this.outbound) {
+      return;
+    }
+    await this.outbound.emitOutboundMessage({
+      toolSessionId: input.toolSessionId,
+      messageId: input.messageId,
+      trigger: input.trigger,
+      facts: this.iterateFacts(input.facts),
+    });
+  }
+
+  private async *iterateFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
+    for (const fact of facts) {
+      yield fact;
+    }
+  }
+
+  private extractQuestionPrompts(payload: Record<string, unknown>): Array<{
+    question: string;
+    header?: string;
+    options?: Array<{ label: string; description?: string }>;
+  }> {
+    const questionsRaw = Array.isArray(payload.questions) ? payload.questions : [];
+    const questions = questionsRaw
+      .map((question) => asRecord(question))
+      .filter((question): question is Record<string, unknown> => !!question)
+      .map((question) => ({
+        question: asTrimmedString(question.question) ?? "",
+        header: asTrimmedString(question.header),
+        options: Array.isArray(question.options)
+          ? question.options
+              .map((option) => asRecord(option))
+              .filter((option): option is Record<string, unknown> => !!option)
+              .map((option) => ({
+                label: asTrimmedString(option.label) ?? "",
+                description: asTrimmedString(option.description),
+              }))
+              .filter((option) => option.label.length > 0)
+          : undefined,
+      }))
+      .filter((question) => question.question.length > 0);
+    if (questions.length > 0) {
+      return questions;
+    }
+
+    const question = asTrimmedString(payload.question);
+    return question ? [{ question }] : [];
+  }
+
+  private extractToolSessionIdFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
+    const metadata = pickRecord(payload, "metadata");
+    const tool = pickRecord(payload, "tool");
+    return (
+      asTrimmedString(payload.toolSessionId) ??
+      asTrimmedString(payload.sessionID) ??
+      asTrimmedString(payload.sessionId) ??
+      asTrimmedString(metadata?.toolSessionId) ??
+      asTrimmedString(metadata?.sessionID) ??
+      asTrimmedString(tool?.sessionID)
+    );
+  }
+
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
     const payload = asRecord(evt.data);
     if (!payload) {
@@ -743,8 +1084,24 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
+    this.logChatRawEvent({
+      source: "runtime_agent_event",
+      eventName: typeof evt.stream === "string" ? evt.stream : "unknown",
+      toolSessionId: state.toolSessionId,
+      sessionKey,
+      payload: evt,
+    });
+
     if (evt.stream === "tool") {
       this.handleToolAgentEvent(state, payload);
+      return;
+    }
+    if (evt.stream === "assistant") {
+      this.handleAssistantAgentEvent(state, payload);
+      return;
+    }
+    if (evt.stream === "reasoning") {
+      this.handleReasoningAgentEvent(state, payload);
       return;
     }
     if (evt.stream === "question") {
@@ -774,12 +1131,20 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     toolState.toolName = toolName;
     toolState.title = asTrimmedString(payload.title) ?? asTrimmedString(asRecord(payload.meta)?.summary) ?? toolName;
-    if (phase === "start") {
-      toolState.status = "pending";
+    const directInput = pickToolPayload(payload, ["input", "args"]);
+    if (directInput !== undefined) {
+      toolState.input = directInput;
+    }
+
+    if (phase === "start" || phase === "update") {
+      toolState.status = "running";
     } else if (phase === "result") {
       const isError = payload.isError === true;
       toolState.status = isError ? "error" : "completed";
-      toolState.error = isError ? `tool_${toolName}_failed` : undefined;
+      const directOutput = pickToolPayload(payload, ["output", "result"]);
+      const directError = pickToolPayload(payload, ["error", "result"]);
+      toolState.output = !isError && directOutput !== undefined ? directOutput : toolState.output;
+      toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
       state.pendingToolResultTarget = toolCallId;
     } else {
       toolState.status = "running";
@@ -793,10 +1158,81 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       toolName,
       status: toolState.status,
       title: toolState.title,
+      ...(toolState.input !== undefined ? { input: toolState.input } : {}),
       ...(toolState.output !== undefined ? { output: toolState.output } : {}),
       ...(toolState.error ? { error: toolState.error } : {}),
       raw: payload,
     }));
+  }
+
+  private handleAssistantAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
+    const fullText = typeof payload.text === "string" ? payload.text : "";
+    let deltaText = typeof payload.delta === "string" ? payload.delta : "";
+
+    if (fullText.startsWith(state.accumulatedText)) {
+      const suffix = fullText.slice(state.accumulatedText.length);
+      if (suffix.length > 0) {
+        deltaText = suffix;
+      } else if (deltaText.length === 0 || state.accumulatedText.endsWith(deltaText)) {
+        return;
+      }
+    } else if (deltaText.length === 0) {
+      return;
+    }
+
+    if (deltaText.length === 0) {
+      return;
+    }
+
+    const nextText = fullText || `${state.accumulatedText}${deltaText}`;
+    state.accumulatedText = nextText;
+    if (!state.streamingEnabled) {
+      return;
+    }
+
+    this.ensureMessageStarted(state);
+    state.textDeltaCount += 1;
+    state.queue.push(buildTextDeltaFact({
+      toolSessionId: state.toolSessionId,
+      messageId: state.messageId,
+      partId: state.textPartId,
+      content: deltaText,
+      raw: payload,
+    }));
+  }
+
+  private handleReasoningAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
+    const phase = asTrimmedString(payload.phase) ?? "delta";
+    const deltaText = typeof payload.delta === "string"
+      ? payload.delta
+      : typeof payload.text === "string"
+        ? payload.text
+        : "";
+    const shouldEmitReasoningDelta =
+      deltaText.length > 0 &&
+      (phase !== "finish" && phase !== "result" || state.accumulatedThinking.length === 0);
+    if (shouldEmitReasoningDelta) {
+      state.accumulatedThinking += deltaText;
+      this.ensureMessageStarted(state);
+      state.queue.push(buildThinkingDeltaFact({
+        toolSessionId: state.toolSessionId,
+        messageId: state.messageId,
+        partId: state.thinkingPartId,
+        content: deltaText,
+        raw: payload,
+      }));
+    }
+
+    if (phase === "finish" || phase === "result") {
+      this.ensureMessageStarted(state);
+      state.queue.push(buildThinkingDoneFact({
+        toolSessionId: state.toolSessionId,
+        messageId: state.messageId,
+        partId: state.thinkingPartId,
+        content: state.accumulatedThinking,
+        raw: payload,
+      }));
+    }
   }
 
   private handleQuestionAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
@@ -842,5 +1278,25 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     state.completed = true;
     this.activeRunsBySessionKey.delete(state.sessionKey);
     this.sessionKeyByRunId.delete(state.runId);
+  }
+
+  private logChatRawEvent(params: {
+    source: string;
+    eventName: string;
+    toolSessionId?: string;
+    sessionKey?: string;
+    payload: unknown;
+  }): void {
+    if (!this.options.account.debug) {
+      return;
+    }
+    const log = this.options.logger.debug ?? this.options.logger.info;
+    log.call(this.options.logger, "bridge.chat.raw_event", {
+      source: params.source,
+      eventName: params.eventName,
+      toolSessionId: params.toolSessionId,
+      sessionKey: params.sessionKey,
+      payload: params.payload,
+    });
   }
 }

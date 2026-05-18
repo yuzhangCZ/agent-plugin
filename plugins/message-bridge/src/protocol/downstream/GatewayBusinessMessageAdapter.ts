@@ -64,7 +64,6 @@ function adaptInvokeMessage(
         welinkSessionId: withOptionalWelinkSessionId(message),
         payload: {
           permissionId: message.payload.permissionId,
-          toolSessionId: message.payload.toolSessionId,
           response: message.payload.response,
         },
       });
@@ -83,9 +82,8 @@ function adaptInvokeMessage(
         action: 'question_reply',
         welinkSessionId: withOptionalWelinkSessionId(message),
         payload: {
-          toolSessionId: message.payload.toolSessionId,
+          questionId: message.payload.questionId,
           answer: message.payload.answer,
-          ...(message.payload.toolCallId ? { toolCallId: message.payload.toolCallId } : {}),
         },
       });
     default: {

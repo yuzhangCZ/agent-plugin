@@ -313,14 +313,10 @@ describe('PermissionReplyAction coverage', () => {
       },
     });
 
-    const allow = await action.execute(
-      { permissionId: 'p1', toolSessionId: 's-tool', response: 'once' },
-      readyContext({}),
-    );
+    const allow = await action.execute({ permissionId: 'p1', response: 'once' }, readyContext({}));
 
     assert.strictEqual(allow.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionId: 's-tool',
       permissionId: 'p1',
       response: 'once',
     });
@@ -338,16 +334,12 @@ describe('PermissionReplyAction coverage', () => {
       },
     });
 
-    const result = await action.execute(
-      { permissionId: 'p2', toolSessionId: 's-tool-2', response: 'reject' },
-      readyContext({}, {
-        effectiveDirectory: '/tmp/bridge-dir',
-      }),
-    );
+    const result = await action.execute({ permissionId: 'p2', response: 'reject' }, readyContext({}, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
-      sessionId: 's-tool-2',
       permissionId: 'p2',
       response: 'reject',
     });
@@ -479,17 +471,13 @@ describe('QuestionReplyAction coverage', () => {
       },
     });
 
-    const result = await action.execute(
-      { toolSessionId: 'tool-9', toolCallId: 'call-1', answer: 'answer' },
-      readyContext({}),
-    );
+    const result = await action.execute({ questionId: 'question-1', answer: 'answer' }, readyContext({}));
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(result.data, { requestId: 'req-1', replied: true });
     assert.deepStrictEqual(calls, [
       {
-        sessionId: 'tool-9',
-        toolCallId: 'call-1',
+        questionId: 'question-1',
         answer: 'answer',
       },
     ]);
@@ -504,18 +492,14 @@ describe('QuestionReplyAction coverage', () => {
       },
     });
 
-    const result = await action.execute(
-      { toolSessionId: 'tool-10', toolCallId: 'call-2', answer: 'go' },
-      readyContext({}, {
-        effectiveDirectory: '/tmp/bridge-dir',
-      }),
-    );
+    const result = await action.execute({ questionId: 'question-2', answer: 'go' }, readyContext({}, {
+      effectiveDirectory: '/tmp/bridge-dir',
+    }));
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls, [
       {
-        sessionId: 'tool-10',
-        toolCallId: 'call-2',
+        questionId: 'question-2',
         answer: 'go',
       },
     ]);

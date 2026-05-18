@@ -7,8 +7,12 @@ PID_DIR="${ROOT_DIR}/logs/local-stack/pids"
 stop_by_pid_file() {
   local name="$1"
   local pid_file="${PID_DIR}/${name}.pid"
+  local launch_label="agent-plugin.local-stack.${name}"
   if [[ ! -f "${pid_file}" ]]; then
     echo "[skip] ${name}: pid file not found"
+    if command -v launchctl >/dev/null 2>&1; then
+      launchctl remove "${launch_label}" >/dev/null 2>&1 || true
+    fi
     return 0
   fi
 
@@ -32,6 +36,9 @@ stop_by_pid_file() {
   fi
 
   rm -f "${pid_file}"
+  if command -v launchctl >/dev/null 2>&1; then
+    launchctl remove "${launch_label}" >/dev/null 2>&1 || true
+  fi
 }
 
 stop_by_pid_file "skill-miniapp"

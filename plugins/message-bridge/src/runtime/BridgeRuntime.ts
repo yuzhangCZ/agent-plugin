@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import os from 'os';
 import {
   ActionResult,
+  ActionFailure,
   StatusQueryPayload,
   StatusQueryResultData,
 } from '../types/index.js';
@@ -22,6 +23,12 @@ import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
 import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
+import {
+  InMemoryOpencodeSessionOwnershipResolver,
+  InMemorySessionModelOverrideStore,
+  InMemoryToolSessionBindingStore,
+  SimpleSlashCommandParser,
+} from '../adapter/index.js';
 import {
   buildGatewayRegisterMessage,
   createAkSkAuthProvider,
@@ -54,7 +61,12 @@ import {
   type DownstreamNormalizationError,
   InvalidInvokeToolErrorResponder,
 } from '../protocol/downstream/index.js';
-import { ChatUseCase, CreateSessionUseCase, ResolveCreateSessionDirectoryUseCase } from '../usecase/index.js';
+import {
+  ChatUseCase,
+  CreateSessionRequestNormalizer,
+  CreateSessionUseCase,
+  ResolveCreateSessionDirectoryUseCase,
+} from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
@@ -67,6 +79,8 @@ import { warnUnknownToolType } from './ToolTypeWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
+import { BindingAwareChatRouter, HandledSlashCommandFailure } from './BindingAwareChatRouter.js';
+import { MemoryGatewayEnvelopeProjector } from './GatewayEnvelopeProjector.js';
 import {
   DefaultGatewayLifecycleCoordinator,
   type GatewayLifecycleCoordinator,
@@ -76,13 +90,25 @@ import {
   DefaultGatewaySessionSender,
   type GatewaySessionSenderPort,
 } from './GatewaySessionSender.js';
+import { RuntimeSlashCommandCompletionPort } from './SlashCommandCompletionPort.js';
 import {
   DefaultUpstreamTransportProjector,
   type UpstreamTransportProjector,
 } from '../transport/upstream/index.js';
-import type { HostClientLike, OpencodeClient } from '../types/index.js';
+import type {
+  HostModelInfo,
+  HostSessionInfo,
+  SessionScope,
+} from '../port/SlashCommandControlPlanePort.js';
+import type { BridgeSdkClient, HostClientLike } from '../types/index.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
+import { getToolErrorEvidence } from '../utils/error.js';
 import { asRecord, asString, asTrimmedString } from '../utils/type-guards.js';
+import {
+  DefaultSlashCommandOrchestrator,
+  DefaultSlashCommandReplyPresenter,
+  ResolveSlashCommandContextUseCase,
+} from '../usecase/index.js';
 
 export interface BridgeRuntimeOptions {
   workspacePath?: string;
@@ -137,13 +163,23 @@ export class BridgeRuntime {
   private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
+  private readonly createSessionRequestNormalizer: CreateSessionRequestNormalizer;
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
+  private readonly bindingStore = new InMemoryToolSessionBindingStore();
+  private readonly ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  private readonly sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
+  private readonly slashCommandParser = new SimpleSlashCommandParser();
+  private readonly gatewayEnvelopeProjector = new MemoryGatewayEnvelopeProjector();
+  private readonly slashCommandCompletionPort: RuntimeSlashCommandCompletionPort;
+  private readonly slashCommandContextResolver: ResolveSlashCommandContextUseCase;
+  private readonly slashCommandOrchestrator: DefaultSlashCommandOrchestrator;
+  private readonly bindingAwareChatRouter: BindingAwareChatRouter;
 
   private eventFilter: EventFilter | null = null;
   private started = false;
   private readonly rawClient: HostClientLike;
-  private sdkClient: OpencodeClient | null;
+  private sdkClient: BridgeSdkClient | null;
   private readonly missingSdkCapabilities: ReturnType<typeof getMissingSdkCapabilities>;
   private readonly workspacePath?: string;
   private readonly hostDirectory?: string;
@@ -187,11 +223,56 @@ export class BridgeRuntime {
       this.assiantDirectoryMappingPort,
       this.logger,
     );
+    this.createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
     this.createSessionUseCase = new CreateSessionUseCase(
       this.resolveCreateSessionDirectoryUseCase,
       this.opencodeSessionGatewayAdapter,
     );
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
+    this.slashCommandCompletionPort = new RuntimeSlashCommandCompletionPort({
+      projector: this.gatewayEnvelopeProjector,
+      sender: async (message) => this.sendControlPlaneMessage(message),
+    });
+    this.slashCommandContextResolver = new ResolveSlashCommandContextUseCase({
+      bindingStore: this.bindingStore,
+      ownershipResolver: this.ownershipResolver,
+      modelOverrideStore: this.sessionModelOverrideStore,
+      hostSessionCreationPort: {
+        createSession: async (input) => this.createControlPlaneSession(input),
+      },
+      hostSessionQueryPort: {
+        getSession: async (sessionId) => this.getControlPlaneSession(sessionId),
+        listSessions: async (scope) => this.listControlPlaneSessions(scope),
+      },
+    });
+    this.slashCommandOrchestrator = new DefaultSlashCommandOrchestrator({
+      bindingStore: this.bindingStore,
+      ownershipResolver: this.ownershipResolver,
+      modelOverrideStore: this.sessionModelOverrideStore,
+      hostSessionCreationPort: {
+        createSession: async (input) => this.createControlPlaneSession(input),
+      },
+      hostSessionQueryPort: {
+        getSession: async (sessionId) => this.getControlPlaneSession(sessionId),
+        listSessions: async (scope) => this.listControlPlaneSessions(scope),
+      },
+      hostPromptExecutionPort: {
+        prompt: async (input) => this.promptControlPlaneSession(input),
+      },
+      hostModelCatalogPort: {
+        listModels: async () => this.listControlPlaneModels(),
+      },
+      replyPresenter: new DefaultSlashCommandReplyPresenter(),
+      completionPort: this.slashCommandCompletionPort,
+    });
+    this.bindingAwareChatRouter = new BindingAwareChatRouter({
+      contextResolver: this.slashCommandContextResolver,
+      slashCommandParser: this.slashCommandParser,
+      slashCommandOrchestrator: this.slashCommandOrchestrator,
+      hostPromptExecutionPort: {
+        prompt: async (input) => this.promptControlPlaneSession(input),
+      },
+    });
     this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.invalidInvokeToolErrorResponder = new InvalidInvokeToolErrorResponder({
       sendToolError: (result, welinkSessionId, logOptions) => this.sendToolError(result, welinkSessionId, logOptions),
@@ -419,7 +500,15 @@ export class BridgeRuntime {
       });
     }
     const subagentMapping = subagentResolution.status === 'mapped' ? subagentResolution.mapping : null;
-    const envelopeToolSessionId = subagentMapping?.parentSessionId ?? normalized.common.toolSessionId;
+    const ownershipSessionId = subagentMapping?.parentSessionId ?? normalized.common.toolSessionId;
+    const envelopeToolSessionId = this.ownershipResolver.resolveAttachedAnchor(ownershipSessionId);
+    if (!envelopeToolSessionId) {
+      forwardingLogger.debug('event.dropped_unowned', {
+        opencodeSessionId: normalized.common.toolSessionId,
+        ownershipSessionId,
+      });
+      return;
+    }
     const subagentEnvelopeFields = subagentMapping
       ? {
           subagentSessionId: subagentMapping.childSessionId,
@@ -468,11 +557,11 @@ export class BridgeRuntime {
     // child session 的 idle 仅代表子代理收尾，不能向 parent 额外补发 tool_done。
     if (normalized.common.eventType === TOOL_EVENT_TYPE.SESSION_IDLE && !subagentMapping) {
       const decision = this.toolDoneCompat.handleSessionIdle({
-        toolSessionId: normalized.common.toolSessionId,
+        toolSessionId: envelopeToolSessionId,
         logger: forwardingLogger,
       });
       if (decision.emit && decision.source) {
-        const sent = this.sendToolDone(normalized.common.toolSessionId, undefined, decision.source, {
+        const sent = this.sendToolDone(envelopeToolSessionId, undefined, decision.source, {
           connection,
           logger: forwardingLogger,
           traceId: bridgeMessageId,
@@ -480,13 +569,13 @@ export class BridgeRuntime {
         });
         if (sent) {
           this.toolDoneCompat.handleToolDoneSent({
-            toolSessionId: normalized.common.toolSessionId,
+            toolSessionId: envelopeToolSessionId,
             source: decision.source,
             logger: forwardingLogger,
           });
         } else {
           this.toolDoneCompat.handleToolDoneSendFailed({
-            toolSessionId: normalized.common.toolSessionId,
+            toolSessionId: envelopeToolSessionId,
             source: decision.source,
             logger: forwardingLogger,
           });
@@ -516,7 +605,7 @@ export class BridgeRuntime {
   private registerActions(): void {
     const actions = [
       new ChatAction(this.chatUseCase),
-      new CreateSessionAction(this.createSessionUseCase),
+      new CreateSessionAction(this.createSessionUseCase, this.createSessionRequestNormalizer),
       new CloseSessionAction(this.opencodeSessionGatewayAdapter),
       new PermissionReplyAction(this.opencodeSessionGatewayAdapter),
       new StatusQueryAction(),
@@ -667,6 +756,10 @@ export class BridgeRuntime {
         return;
       }
 
+      // 首次 create_session/session_created 是临时态建链入口，必须同步建立 binding/ownership。
+      this.bindingStore.bind(toolSessionId, toolSessionId);
+      this.ownershipResolver.attach(toolSessionId, toolSessionId);
+
       const sessionCreated: GatewaySendPayload = {
         type: UPSTREAM_MESSAGE_TYPE.SESSION_CREATED,
         welinkSessionId: normalizedWelinkSessionId,
@@ -734,6 +827,94 @@ export class BridgeRuntime {
         completionSource: 'deny_fast_path',
         latencyMs: Date.now() - startedAt,
       });
+      return;
+    }
+
+    if (invokeMessage.action === 'chat' && toolSessionId) {
+      this.toolDoneCompat.handleInvokeStarted({
+        action: invokeMessage.action,
+        toolSessionId,
+      });
+      try {
+        const routeResult = await this.bindingAwareChatRouter.route({
+          anchor: toolSessionId,
+          text: invokeMessage.payload.text,
+          assistantId: invokeMessage.payload.assistantId,
+          imGroupId: invokeMessage.payload.imGroupId,
+          logger: invokeLogger,
+        });
+        if (routeResult.kind === 'slash_completed') {
+          this.toolDoneCompat.handleInvokeFailed({
+            action: invokeMessage.action,
+            toolSessionId,
+          });
+          invokeLogger.info('runtime.invoke.completed', {
+            action: invokeMessage.action,
+            welinkSessionId,
+            toolSessionId,
+            completionSource: 'slash_control_plane',
+            latencyMs: Date.now() - startedAt,
+          });
+          return;
+        }
+      } catch (error) {
+        this.toolDoneCompat.handleInvokeFailed({
+          action: invokeMessage.action,
+          toolSessionId,
+        });
+        const slashSourceError = error instanceof HandledSlashCommandFailure ? error.sourceError : error;
+        this.handleControlPlanePromptFailure(toolSessionId, slashSourceError);
+        if (error instanceof HandledSlashCommandFailure) {
+          return;
+        }
+        this.sendToolError(
+          this.toControlPlaneActionFailure(error),
+          welinkSessionId,
+          {
+            connection,
+            logger: invokeLogger,
+            traceId,
+            gatewayMessageId: downstreamFields.gatewayMessageId,
+            action: invokeMessage.action,
+            toolSessionId,
+          },
+        );
+        return;
+      }
+
+      invokeLogger.info('runtime.invoke.completed', {
+        action: invokeMessage.action,
+        welinkSessionId,
+        toolSessionId,
+        latencyMs: Date.now() - startedAt,
+      });
+      const decision = this.toolDoneCompat.handleInvokeCompleted({
+        action: invokeMessage.action,
+        toolSessionId,
+        logger: invokeLogger,
+      });
+      if (decision.emit && decision.source) {
+        const sent = this.sendToolDone(toolSessionId, welinkSessionId, decision.source, {
+          connection,
+          logger: invokeLogger,
+          traceId,
+          gatewayMessageId: downstreamFields.gatewayMessageId,
+          action: invokeMessage.action,
+        });
+        if (sent) {
+          this.toolDoneCompat.handleToolDoneSent({
+            toolSessionId,
+            source: decision.source,
+            logger: invokeLogger,
+          });
+        } else {
+          this.toolDoneCompat.handleToolDoneSendFailed({
+            toolSessionId,
+            source: decision.source,
+            logger: invokeLogger,
+          });
+        }
+      }
       return;
     }
 
@@ -831,12 +1012,295 @@ export class BridgeRuntime {
       connectionState: connection.getState(),
       welinkSessionId,
       effectiveDirectory: this.effectiveDirectory,
-      assiantDirectoryMappingConfigured: this.assiantDirectoryMappingPort.isConfigured(),
+      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
       logger: logger.child({
         component: 'action',
         welinkSessionId,
       }),
     };
+  }
+
+  /** 控制面会话创建入口：把 SDK 结果收口为稳定宿主会话视图。 */
+  private async createControlPlaneSession(input?: { assistantId?: string; imGroupId?: string }): Promise<HostSessionInfo> {
+    const normalizedRequest = this.createSessionRequestNormalizer.fromChatContext({
+      assistantId: input?.assistantId,
+      imGroupId: input?.imGroupId,
+    });
+    const createSessionInput = {
+      ...normalizedRequest,
+      effectiveDirectory: this.effectiveDirectory,
+      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
+    };
+    const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession(createSessionInput);
+    const result = await this.createSessionUseCase.execute(createSessionInput, preparedCreateSession);
+    if (!result.success) {
+      throw this.toControlPlaneError(result);
+    }
+
+    const session = asRecord(result.data.session);
+    const sessionId = asTrimmedString(result.data.sessionId) ?? asTrimmedString(session?.id);
+    if (!sessionId) {
+      throw new Error('control_plane.session_create_missing_id');
+    }
+
+    return {
+      id: sessionId,
+      title: asTrimmedString(session?.title),
+      projectID: asTrimmedString(session?.projectID),
+      workspaceID: asTrimmedString(session?.workspaceID),
+      directory: asTrimmedString(session?.directory),
+    };
+  }
+
+  /** 控制面会话查询入口：只解析当前所需字段，不向 use case 泄露 SDK 原始结构。 */
+  private async getControlPlaneSession(sessionId: string): Promise<HostSessionInfo> {
+    const client = this.requireSdkClient();
+    let payload: unknown;
+    try {
+      const result = await client.session.get({ sessionID: sessionId });
+      payload = this.unwrapSdkData(result);
+    } catch (error) {
+      throw {
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message',
+        errorEvidence: getToolErrorEvidence(error, 'session.get'),
+      };
+    }
+    const session = asRecord(payload);
+    const resolvedId = asTrimmedString(session?.id);
+    if (!resolvedId) {
+      throw new Error(`control_plane.session_get_missing_id:${sessionId}`);
+    }
+
+    return {
+      id: resolvedId,
+      title: asTrimmedString(session?.title),
+      projectID: asTrimmedString(session?.projectID),
+      workspaceID: asTrimmedString(session?.workspaceID),
+      directory: asTrimmedString(session?.directory),
+    };
+  }
+
+  /** 控制面会话列表入口：按 scope 快照请求宿主并收口字段。 */
+  private async listControlPlaneSessions(scope: SessionScope): Promise<HostSessionInfo[]> {
+    const client = this.requireSdkClient();
+    const result = await client.session.list({
+      ...(scope.directory ? { directory: scope.directory } : {}),
+    });
+    const payload = this.unwrapSdkData(result);
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+
+    const sessions: HostSessionInfo[] = [];
+    for (const item of payload) {
+      const session = asRecord(item);
+      const id = asTrimmedString(session?.id);
+      if (!id) {
+        continue;
+      }
+      const projected = {
+        id,
+        ...(asTrimmedString(session?.title) ? { title: asTrimmedString(session?.title) } : {}),
+        ...(asTrimmedString(session?.projectID) ? { projectID: asTrimmedString(session?.projectID) } : {}),
+        ...(asTrimmedString(session?.workspaceID) ? { workspaceID: asTrimmedString(session?.workspaceID) } : {}),
+        ...(asTrimmedString(session?.directory) ? { directory: asTrimmedString(session?.directory) } : {}),
+      };
+      if (scope.projectID && projected.projectID !== scope.projectID) {
+        continue;
+      }
+      if (scope.workspaceID && projected.workspaceID !== scope.workspaceID) {
+        continue;
+      }
+      sessions.push(projected);
+    }
+    return sessions;
+  }
+
+  /** 控制面模型目录入口：兼容不同 SDK 宿主返回 shape。 */
+  private async listControlPlaneModels(): Promise<HostModelInfo[]> {
+    const client = this.requireSdkClient();
+    const providersResult = await client.config.providers();
+    const payload = this.unwrapSdkData(providersResult);
+    const providers = Array.isArray(payload)
+      ? payload
+      : Array.isArray(asRecord(payload)?.providers)
+        ? (asRecord(payload)?.providers as unknown[])
+        : [];
+
+    return providers.flatMap((provider) => {
+      const providerRecord = asRecord(provider);
+      const providerId =
+        asTrimmedString(providerRecord?.id)
+        ?? asTrimmedString(providerRecord?.providerID)
+        ?? asTrimmedString(providerRecord?.name);
+      if (!providerId) {
+        return [];
+      }
+      const modelCatalog = asRecord(providerRecord?.models);
+      const models = modelCatalog ? Object.values(modelCatalog) : [];
+      return models.flatMap((model) => {
+        const modelRecord = asRecord(model);
+        const modelId =
+          asTrimmedString(modelRecord?.id)
+          ?? asTrimmedString(modelRecord?.modelID)
+          ?? asTrimmedString(modelRecord?.name);
+        if (!modelId) {
+          return [];
+        }
+        return [{
+          providerId,
+          modelId,
+          label: asTrimmedString(modelRecord?.label),
+        }];
+      });
+    });
+  }
+
+  /** 控制面 prompt 执行入口：把 ActionResult 失败抬升为统一异常对象，供 runtime 统一回错。 */
+  private async promptControlPlaneSession(input: {
+    sessionId: string;
+    text: string;
+    assistantId?: string;
+    modelOverride?: { providerId: string; modelId: string };
+    logger?: BridgeLogger;
+  }): Promise<void> {
+    const result = await this.opencodeSessionGatewayAdapter.promptSession({
+      sessionId: input.sessionId,
+      text: input.text,
+      agent: input.assistantId,
+      modelOverride: input.modelOverride,
+      logger: input.logger,
+    });
+    if (!result.success) {
+      throw this.toControlPlaneError(result);
+    }
+  }
+
+  /** 控制面上送只负责投影和发送，不复用普通 chat 的 ToolDoneCompat。 */
+  private sendControlPlaneMessage(message: Record<string, unknown>): boolean {
+    const connection = this.getActiveGatewayConnection();
+    if (!connection) {
+      this.logger.warn('runtime.control_plane_send.skipped_no_connection', {
+        messageType: typeof message?.type === 'string' ? message.type : undefined,
+      });
+      return false;
+    }
+    const payload = message as GatewaySendPayload;
+    const toolSessionId =
+      'toolSessionId' in payload && typeof payload.toolSessionId === 'string'
+        ? payload.toolSessionId
+        : undefined;
+    const validated = this.validateGatewayUplinkBusinessMessageOrLog(
+      payload,
+      {
+        traceId: this.logger.getTraceId(),
+        runtimeTraceId: this.logger.getTraceId(),
+        toolSessionId,
+        eventType: payload.type === 'tool_event' && typeof payload.event?.type === 'string'
+          ? payload.event.type
+          : undefined,
+      },
+      this.logger,
+    );
+    if (!validated) {
+      return false;
+    }
+    return this.sessionSender.sendIfActive(connection, validated, {
+      traceId: this.logger.getTraceId(),
+      runtimeTraceId: this.logger.getTraceId(),
+      toolSessionId,
+      eventType: payload.type === 'tool_event' && typeof payload.event?.type === 'string'
+        ? payload.event.type
+        : undefined,
+    });
+  }
+
+  /** 控制面错误转成 runtime 可用的 ActionFailure 结构。 */
+  private toControlPlaneActionFailure(error: unknown): ActionFailure {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'errorCode' in error
+      && 'errorMessage' in error
+    ) {
+      return {
+        success: false,
+        errorCode: this.normalizeControlPlaneErrorCode((error as { errorCode?: string }).errorCode),
+        errorMessage: (error as { errorMessage?: string }).errorMessage ?? 'Control plane failed',
+        errorEvidence: 'errorEvidence' in error
+          ? (error as { errorEvidence?: ActionFailure['errorEvidence'] }).errorEvidence
+          : undefined,
+      };
+    }
+
+    return {
+      success: false,
+      errorCode: 'SDK_UNREACHABLE',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  /** 宿主会话缺失时，同步失效 binding 与 ownership，避免后续事件串线。 */
+  private handleControlPlanePromptFailure(anchor: string, error: unknown): void {
+    const actionFailure = this.toControlPlaneActionFailure(error);
+    const sourceErrorCode = actionFailure.errorEvidence?.sourceErrorCode;
+    const sourceOperation = actionFailure.errorEvidence?.sourceOperation;
+    if (sourceErrorCode !== 'session_not_found' && sourceOperation !== 'session.get') {
+      return;
+    }
+
+    const binding = this.bindingStore.get(anchor);
+    if (!binding) {
+      return;
+    }
+    this.bindingStore.invalidate(anchor);
+    this.ownershipResolver.detach(binding.activeOpencodeSessionId);
+  }
+
+  /** 把现有 adapter 的 ActionResult 失败抬升为统一控制面错误对象。 */
+  private toControlPlaneError(result: ActionFailure): {
+    errorCode: string;
+    errorMessage: string;
+    errorEvidence?: ActionFailure['errorEvidence'];
+  } {
+    return {
+      errorCode: result.errorCode ?? 'SDK_UNREACHABLE',
+      errorMessage: result.errorMessage ?? 'Control plane failed',
+      errorEvidence: result.errorEvidence,
+    };
+  }
+
+  private normalizeControlPlaneErrorCode(errorCode?: string): ActionFailure['errorCode'] {
+    switch (errorCode) {
+      case 'GATEWAY_UNREACHABLE':
+      case 'SDK_TIMEOUT':
+      case 'SDK_UNREACHABLE':
+      case 'AGENT_NOT_READY':
+      case 'INVALID_PAYLOAD':
+      case 'UNSUPPORTED_ACTION':
+        return errorCode;
+      default:
+        return 'SDK_UNREACHABLE';
+    }
+  }
+
+  private requireSdkClient(): BridgeSdkClient {
+    if (!this.sdkClient) {
+      throw new Error('runtime.sdk_client_unavailable');
+    }
+    return this.sdkClient;
+  }
+
+  private unwrapSdkData(result: unknown): unknown {
+    const record = asRecord(result);
+    if (record?.error !== undefined) {
+      throw record.error;
+    }
+    if ('data' in (record ?? {})) {
+      return record?.data;
+    }
+    return result;
   }
 
   private async validateStartupPrerequisites() {
@@ -1074,6 +1538,7 @@ export class BridgeRuntime {
       action?: string;
     },
   ): boolean {
+    // todo connection判断
     const connection = logOptions?.connection ?? this.getActiveGatewayConnection();
     if (!connection) {
       this.logger.warn('runtime.tool_done.skipped_no_connection', { toolSessionId, welinkSessionId, source });

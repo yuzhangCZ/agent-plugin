@@ -1,15 +1,16 @@
-import type { CreateSessionPayload, CreateSessionResultData } from '../contracts/downstream-messages.js';
+import type { CreateSessionResultData } from '../contracts/downstream-messages.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type {
   ResolveCreateSessionDirectoryUseCase,
   ResolvedCreateSessionDirectory,
 } from './ResolveCreateSessionDirectoryUseCase.js';
+import type { CreateSessionRequest } from './CreateSessionRequestNormalizer.js';
 
-export interface CreateSessionUseCaseInput {
-  payload: CreateSessionPayload;
+/** 统一建会话用例输入：只保留业务语义与环境注入，不再泄露入口差异。 */
+export interface CreateSessionUseCaseInput extends CreateSessionRequest {
   effectiveDirectory?: string;
-  mappingConfigured?: boolean;
+  directoryMappingEnabled: boolean;
 }
 
 export interface PreparedCreateSession extends ResolvedCreateSessionDirectory {
@@ -40,9 +41,9 @@ export class CreateSessionUseCase {
 
   async resolveCreateSession(input: CreateSessionUseCaseInput): Promise<PreparedCreateSession> {
     const resolvedDirectory = await this.resolveCreateSessionDirectoryUseCase.execute({
-      assistantId: input.payload.assistantId,
+      assistantId: input.assistantId,
       effectiveDirectory: input.effectiveDirectory,
-      mappingConfigured: input.mappingConfigured,
+      directoryMappingEnabled: input.directoryMappingEnabled,
     });
 
     return {
@@ -54,7 +55,7 @@ export class CreateSessionUseCase {
 
   /** IM 群会话默认收紧高风险工具权限；非 IM 群保持不传 permission 字段。 */
   resolvePermission(input: CreateSessionUseCaseInput): Array<Record<string, unknown>> | undefined {
-    if (!input.payload.title?.match(/^im-group/)) {
+    if (!input.isGroupChat) {
       return undefined;
     }
 
@@ -73,7 +74,7 @@ export class CreateSessionUseCase {
     const permission = this.resolvePermission(input);
 
     return this.sessionCreationPort.createSession({
-      title: input.payload.title,
+      title: input.title,
       directory: prepared.resolvedDirectory,
       ...(permission ? { permission } : {}),
     });

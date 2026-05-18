@@ -45,7 +45,7 @@ OpenClaw 安装兼容窗口：
   - 自动安装到 `~/.openclaw-dev/extensions/skill-openclaw-plugin`
   - 不需要手动修改任何文件
 - 手动复制 bundle
-  - 把 `bundle/index.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md` 复制到 OpenClaw profile 的 `extensions/skill-openclaw-plugin/`
+  - 把 `bundle/index.js`、`bundle/setup-entry.js`、`bundle/package.json`、`bundle/openclaw.plugin.json`、`bundle/README.md` 复制到 OpenClaw profile 的 `extensions/skill-openclaw-plugin/`
 - `openclaw plugins install`
   - 这是 OpenClaw 的通用安装入口
   - 但本仓库当前没有已验证的 npm 发布安装流，本文不把它作为主路径
@@ -144,6 +144,7 @@ npx --yes \
 export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/skill-openclaw-plugin
 mkdir -p "$OPENCLAW_EXT_DIR"
 cp ./bundle/index.js "$OPENCLAW_EXT_DIR/index.js"
+cp ./bundle/setup-entry.js "$OPENCLAW_EXT_DIR/setup-entry.js"
 cp ./bundle/package.json "$OPENCLAW_EXT_DIR/package.json"
 cp ./bundle/openclaw.plugin.json "$OPENCLAW_EXT_DIR/openclaw.plugin.json"
 cp ./bundle/README.md "$OPENCLAW_EXT_DIR/README.md"
@@ -155,6 +156,7 @@ cp ./bundle/README.md "$OPENCLAW_EXT_DIR/README.md"
 $target = "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item .\bundle\index.js "$target\index.js" -Force
+Copy-Item .\bundle\setup-entry.js "$target\setup-entry.js" -Force
 Copy-Item .\bundle\package.json "$target\package.json" -Force
 Copy-Item .\bundle\openclaw.plugin.json "$target\openclaw.plugin.json" -Force
 Copy-Item .\bundle\README.md "$target\README.md" -Force
@@ -163,6 +165,7 @@ Copy-Item .\bundle\README.md "$target\README.md" -Force
 安装后的目标目录建议只保留：
 
 - `index.js`
+- `setup-entry.js`
 - `package.json`
 - `openclaw.plugin.json`
 - `README.md`
@@ -194,6 +197,7 @@ pnpm run install:bundle:dev
 `build:bundle` 的输出文件：
 
 - `bundle/index.js`
+- `bundle/setup-entry.js`
 - `bundle/package.json`
 - `bundle/openclaw.plugin.json`
 - `bundle/README.md`
@@ -225,6 +229,7 @@ macOS / Linux：
 export OPENCLAW_EXT_DIR=~/.openclaw-dev/extensions/skill-openclaw-plugin
 mkdir -p "$OPENCLAW_EXT_DIR"
 cp ./bundle/index.js "$OPENCLAW_EXT_DIR/index.js"
+cp ./bundle/setup-entry.js "$OPENCLAW_EXT_DIR/setup-entry.js"
 cp ./bundle/package.json "$OPENCLAW_EXT_DIR/package.json"
 cp ./bundle/openclaw.plugin.json "$OPENCLAW_EXT_DIR/openclaw.plugin.json"
 cp ./bundle/README.md "$OPENCLAW_EXT_DIR/README.md"
@@ -236,12 +241,13 @@ Windows PowerShell：
 $target = "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item .\bundle\index.js "$target\index.js" -Force
+Copy-Item .\bundle\setup-entry.js "$target\setup-entry.js" -Force
 Copy-Item .\bundle\package.json "$target\package.json" -Force
 Copy-Item .\bundle\openclaw.plugin.json "$target\openclaw.plugin.json" -Force
 Copy-Item .\bundle\README.md "$target\README.md" -Force
 ```
 
-Bundle 安装目录不需要再修改 `package.json`。生成的 `bundle/package.json` 已经固定为 `index.js` 入口。
+Bundle 安装目录不需要再修改 `package.json`。生成的 `bundle/package.json` 已经固定包含 `index.js` 运行时入口和 `setup-entry.js` guided setup 入口。
 
 ## 6.5 运行时版本冲突排查
 
@@ -319,7 +325,7 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 - `channels.message-bridge.auth.ak`
 - `channels.message-bridge.auth.sk`
 
-`setup` / `onboarding` 当前只支持写入这些字段：
+`setup` / guided setup（底层由 `setupWizard` 驱动）当前只支持写入这些字段：
 
 - `channels.message-bridge.name`
 - `channels.message-bridge.gateway.url`
@@ -337,33 +343,33 @@ Get-ChildItem "$env:USERPROFILE\.openclaw-dev\extensions\skill-openclaw-plugin" 
 
 当前阶段默认 `runTimeoutMs` 已提高到 `300000`，它当前同时作用于两条执行链：
 
-- `dispatchReplyWithBufferedBlockDispatcher(... replyOptions.timeoutOverrideSeconds)`
+- `dispatchReplyFromConfig(... replyOptions.timeoutOverrideSeconds)`
 - `subagent.waitForRun(... timeoutMs)`
 
 如果你没有显式配置 `runTimeoutMs`，插件会使用这个更保守的默认值；如果你已经在配置里写了该字段，则继续以你的显式值为准。
 
-如果你想进一步调细 block 级 streaming，再按需补充：
+当前未显式配置时，插件默认注入一个更稳的 block streaming profile。在 OpenClaw 2026.3.24 的本地验证里，`8-24` 比此前的极小块配置更稳定，能避免退化成整段一次性输出；如果你想继续调细，再按需覆盖：
 
 ```json
 {
   "agents": {
     "defaults": {
       "blockStreamingChunk": {
-        "minChars": 20,
-        "maxChars": 80,
+        "minChars": 8,
+        "maxChars": 24,
         "breakPreference": "sentence"
       },
       "blockStreamingCoalesce": {
-        "minChars": 20,
-        "maxChars": 80,
-        "idleMs": 150
+        "minChars": 8,
+        "maxChars": 24,
+        "idleMs": 40
       }
     }
   }
 }
 ```
 
-说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。
+说明：`channels.message-bridge.blockStreaming` 已移除，不再支持；插件只认 `channels.message-bridge.streaming` 作为流式开关。默认 `blockStreamingBreak` 仍保持 `text_end`，若你需要继续试验 `message_end`，请显式覆盖 `agents.defaults.blockStreamingBreak`。
 
 当前文本流式行为（v0.7）：
 
@@ -548,6 +554,6 @@ redis-cli publish agent:test-ak-openclaw-001 '{"type":"invoke","action":"chat","
 需要嵌入式交付时建议：
 
 - 使用 `npm run build:bundle`
-- 交付单个 `index.js` + `package.json` + `openclaw.plugin.json`
+- 交付最小 bundle 时至少包含 `index.js`、`setup-entry.js`、`package.json`、`openclaw.plugin.json`
 
 这样目标环境不需要复制整套源码目录，只需要最小插件文件集。

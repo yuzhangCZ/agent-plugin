@@ -13,16 +13,20 @@ function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
     session: {
-      create: async () => ({}),
+      create: async () => ({ data: { id: 'session-bootstrap-1', directory: '/session/default-directory' } }),
       get: async (options) => ({
         data: {
           id: options?.path?.id ?? 'session-default',
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({ data: { ok: true } }),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
@@ -43,6 +47,10 @@ function createRuntimeClient(overrides = {}) {
       ...base.session,
       ...(overrides.session ?? {}),
     },
+    config: {
+      ...base.config,
+      ...(overrides.config ?? {}),
+    },
     _client: {
       ...base._client,
       ...(overrides._client ?? {}),
@@ -53,6 +61,11 @@ function createRuntimeClient(overrides = {}) {
 async function loadFixture(fileName) {
   const raw = await readFile(join(FIXTURE_DIR, fileName), 'utf8');
   return JSON.parse(raw);
+}
+
+function attach(runtime, opencodeSessionId, anchor = opencodeSessionId) {
+  runtime.bindingStore.bind(anchor, opencodeSessionId);
+  runtime.ownershipResolver.attach(opencodeSessionId, anchor);
 }
 
 describe('protocol chat-stream', () => {
@@ -70,6 +83,8 @@ describe('protocol chat-stream', () => {
 
     const deltaEvent = await loadFixture('message.part.delta.json');
     const updatedEvent = await loadFixture('message.part.updated.text.json');
+    attach(runtime, 'ses_fixture_delta');
+    attach(runtime, 'ses_32c9fea15ffe2Rnv8tITmfmGmQ');
 
     await runtime.handleEvent(deltaEvent);
     await runtime.handleEvent(updatedEvent);
@@ -109,11 +124,13 @@ describe('protocol chat-stream', () => {
       action: 'chat',
       payload: { toolSessionId: 'tool-chat-1', text: 'hello' },
     });
+    const binding = runtime.bindingStore.get('tool-chat-1');
+    attach(runtime, binding?.activeOpencodeSessionId ?? 'tool-chat-1', 'tool-chat-1');
 
     await runtime.handleEvent({
       type: 'session.idle',
       properties: {
-        sessionID: 'tool-chat-1',
+        sessionID: binding?.activeOpencodeSessionId ?? 'tool-chat-1',
       },
     });
 
@@ -125,7 +142,7 @@ describe('protocol chat-stream', () => {
         event: {
           type: 'session.idle',
           properties: {
-            sessionID: 'tool-chat-1',
+            sessionID: binding?.activeOpencodeSessionId ?? 'tool-chat-1',
           },
         },
       },

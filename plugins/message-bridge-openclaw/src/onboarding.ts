@@ -2,7 +2,6 @@ import type { ChannelOnboardingAdapter } from "openclaw/plugin-sdk";
 import {
   CHANNEL_ID,
   DEFAULT_ACCOUNT_ID,
-  LEGACY_ACCOUNTS_MIGRATION_FIX,
   applyMessageBridgeSetupConfig,
   describeAccount,
   hasLegacyAccountsConfig,
@@ -10,28 +9,13 @@ import {
   resolveAccount,
   validateMessageBridgeSetupInput,
 } from "./config.js";
+import { buildLegacyAccountsMessage, buildSelectionHint } from "./setup-wizard.js";
 
 const SETUP_TITLE = "Message Bridge setup";
 const SETUP_INTRO = [
   "配置 ai-gateway 的 WebSocket 地址以及对应的 AK/SK。",
   "更新现有配置时，凭证留空会保留当前值。",
 ].join("\n");
-
-function buildSelectionHint(configured: boolean, enabled: boolean, requiresMigration: boolean): string {
-  if (requiresMigration) {
-    return "migration required";
-  }
-
-  if (!configured) {
-    return "not configured";
-  }
-
-  return enabled ? "configured" : "configured · disabled";
-}
-
-function buildLegacyAccountsMessage(): string {
-  return `检测到已废弃的 channels.${CHANNEL_ID}.accounts 配置。${LEGACY_ACCOUNTS_MIGRATION_FIX}`;
-}
 
 async function promptMessageBridgeSetup(params: {
   cfg: Parameters<ChannelOnboardingAdapter["configure"]>[0]["cfg"];
@@ -132,7 +116,7 @@ export const messageBridgeOnboardingAdapter: ChannelOnboardingAdapter = {
           ? `Message Bridge: migration required`
           : `Message Bridge: ${status}${configured ? ` · ${account.gateway.url}` : ""}`,
         ...(summary.name ? [`name: ${summary.name}`] : []),
-        ...(requiresMigration ? [LEGACY_ACCOUNTS_MIGRATION_FIX] : []),
+        ...(requiresMigration ? [buildLegacyAccountsMessage()] : []),
       ],
     };
   },

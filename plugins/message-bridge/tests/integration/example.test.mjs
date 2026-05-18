@@ -23,16 +23,20 @@ function createRuntimeClient() {
   return {
     global: {},
     session: {
-      create: async () => ({}),
+      create: async () => ({ data: { id: 'session-bootstrap-1', directory: '/session/default-directory' } }),
       get: async (options) => ({
         data: {
           id: options?.path?.id ?? 'session-default',
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {

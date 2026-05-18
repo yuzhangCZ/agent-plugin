@@ -470,7 +470,6 @@ export function createPermissionReplyInvokeMessage(overrides = {}) {
     welinkSessionId: 'wl-permission',
     action: 'permission_reply',
     payload: {
-      toolSessionId: 'tool-permission',
       permissionId: 'perm-1',
       response: 'once',
     },
@@ -483,7 +482,7 @@ export function createQuestionReplyInvokeMessage(overrides = {}) {
     welinkSessionId: 'wl-question',
     action: 'question_reply',
     payload: {
-      toolSessionId: 'tool-question',
+      questionId: 'question-1',
       answer: 'ok',
     },
     ...overrides,

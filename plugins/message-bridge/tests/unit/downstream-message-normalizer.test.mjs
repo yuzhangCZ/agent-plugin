@@ -137,7 +137,6 @@ describe('downstream message normalizer', () => {
         action: 'permission_reply',
         payload: {
           permissionId: 'perm-1',
-          toolSessionId: 'tool-2',
           response: 'once',
         },
       },
@@ -151,7 +150,6 @@ describe('downstream message normalizer', () => {
       welinkSessionId: 'skill-2',
       payload: {
         permissionId: 'perm-1',
-        toolSessionId: 'tool-2',
         response: 'once',
       },
     });
@@ -206,7 +204,6 @@ describe('downstream message normalizer', () => {
         action: 'permission_reply',
         payload: {
           permissionId: 'perm-3',
-          toolSessionId: 'tool-3',
           response: 'allow',
         },
       },
@@ -400,8 +397,7 @@ describe('downstream message normalizer', () => {
         type: 'invoke',
         action: 'question_reply',
         payload: {
-          toolSessionId: 'tool-42',
-          toolCallId: 'call-7',
+          questionId: 'question-7',
           answer: 'approved',
         },
       },
@@ -413,8 +409,7 @@ describe('downstream message normalizer', () => {
       type: 'invoke',
       action: 'question_reply',
       payload: {
-        toolSessionId: 'tool-42',
-        toolCallId: 'call-7',
+        questionId: 'question-7',
         answer: 'approved',
       },
       welinkSessionId: undefined,

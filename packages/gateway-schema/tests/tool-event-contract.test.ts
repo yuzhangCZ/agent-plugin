@@ -57,13 +57,28 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
   permissionUpdatedInput.properties.messageID = 'msg-gateway-wire';
   permissionUpdatedInput.properties.type = 'permission';
   permissionUpdatedInput.properties.title = 'Need approval';
-  permissionUpdatedInput.properties.metadata = { source: 'test', scope: 'repo' };
+  permissionUpdatedInput.properties.metadata = {
+    source: 'test',
+    scope: 'repo',
+    include: undefined,
+    filters: {
+      mode: 'repo',
+      include: undefined,
+    },
+    items: ['a', undefined, { include: undefined, keep: true }],
+  };
   permissionUpdatedInput.properties.response = 'allow';
   permissionUpdatedInput.properties.resolved = true;
 
   const permissionAskedInput = structuredClone(createGatewayWirePermissionAskedEvent());
   permissionAskedInput.properties.debug = 'drop-me';
   permissionAskedInput.properties.metadata.scope = 'repo';
+  permissionAskedInput.properties.metadata.include = undefined;
+  permissionAskedInput.properties.metadata.filters = {
+    mode: 'repo',
+    include: undefined,
+  };
+  permissionAskedInput.properties.metadata.items = ['a', undefined, { include: undefined, keep: true }];
 
   const permissionRepliedInput = structuredClone(createGatewayWirePermissionRepliedEvent());
   permissionRepliedInput.properties.extra = 'drop-me';
@@ -163,6 +178,12 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
           metadata: {
             source: 'test',
             scope: 'repo',
+            include: undefined,
+            filters: {
+              mode: 'repo',
+              include: undefined,
+            },
+            items: ['a', undefined, { include: undefined, keep: true }],
           },
           status: 'granted',
           response: 'allow',
@@ -184,6 +205,12 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
           metadata: {
             source: 'test',
             scope: 'repo',
+            include: undefined,
+            filters: {
+              mode: 'repo',
+              include: undefined,
+            },
+            items: ['a', undefined, { include: undefined, keep: true }],
           },
         },
       },

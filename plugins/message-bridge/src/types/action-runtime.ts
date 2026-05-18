@@ -5,18 +5,18 @@ import type {
   ActionPayloadByName,
   ActionResultDataByName,
 } from '../contracts/downstream-messages.js';
-import type { HostClientLike, OpencodeClient } from './sdk.js';
+import type { BridgeSdkClient, HostClientLike } from './sdk.js';
 import type { BridgeLogger } from './logger.js';
 import type { ToolErrorEvidence } from '../utils/error.js';
 
 export interface ActionContext {
-  client: OpencodeClient;
+  client: BridgeSdkClient;
   hostClient: HostClientLike;
   connectionState: GatewayClientState;
   welinkSessionId?: string;
   // 兼容字段：仅 create_session 的目录决策链路消费，其他 action 不应透传。
   effectiveDirectory?: string;
-  assiantDirectoryMappingConfigured?: boolean;
+  directoryMappingEnabled?: boolean;
   logger?: BridgeLogger;
 }
 

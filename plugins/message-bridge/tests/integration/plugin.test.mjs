@@ -39,9 +39,13 @@ function createPluginClient(overrides = {}) {
           directory: '/session/default-directory',
         },
       }),
+      list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
       prompt: async () => ({}),
+    },
+    config: {
+      providers: async () => ({ data: { providers: [] } }),
     },
     postSessionIdPermissionsPermissionId: async () => ({}),
     _client: {
@@ -61,6 +65,7 @@ function createPluginClient(overrides = {}) {
     global: { ...base.global, ...(overrides.global ?? {}) },
     app: { ...base.app, ...(overrides.app ?? {}) },
     session: { ...base.session, ...(overrides.session ?? {}) },
+    config: { ...base.config, ...(overrides.config ?? {}) },
     _client: { ...base._client, ...(overrides._client ?? {}) },
   };
 }
