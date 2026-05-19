@@ -1219,6 +1219,113 @@ test("executeRelease installs missing packages with update-lockfile mode", () =>
   );
 });
 
+test("executeRelease installs before dependency check with update-lockfile mode even when dependencies resolve", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: false,
+      installDepsUpdateLockfile: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  const result = executeRelease(plan, {
+    repoRoot,
+    fs,
+    exec: execDouble.exec,
+    stdout: stdout.stream,
+    inspectDependencies: () => ({
+      missingPackages: [],
+      ok: true,
+      targetId: "message-bridge",
+    }),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.ok(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "pnpm" &&
+        entry.cwd === repoRoot &&
+        entry.args.length === 1 &&
+        entry.args[0] === "install",
+    ),
+  );
+  assert.match(stdout.toString(), /dependency presence install: pnpm install/);
+});
+
+test("executeRelease only installs once when update-lockfile mode still fails dependency checks", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      version: "1.1.0",
+      bump: null,
+      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
+      preid: "beta",
+      release: null,
+      dryRun: false,
+      push: false,
+      skipGit: true,
+      skipPublish: true,
+      allowDirty: true,
+      installDeps: false,
+      installDepsUpdateLockfile: true,
+      bridgeVersion: null,
+      openclawVersion: null,
+    },
+    { repoRoot, fs, exec: execDouble.exec },
+  );
+
+  assert.throws(
+    () =>
+      executeRelease(plan, {
+        repoRoot,
+        fs,
+        exec: execDouble.exec,
+        stdout: stdout.stream,
+        inspectDependencies: () => missingDependencyResult("message-bridge", ["esbuild"]),
+      }),
+    /dependency presence sanity check failed before build/,
+  );
+
+  const installCalls = execDouble.calls.filter(
+    (entry) =>
+      entry.command === "pnpm" &&
+      entry.cwd === repoRoot &&
+      entry.args.length === 1 &&
+      entry.args[0] === "install",
+  );
+  assert.equal(installCalls.length, 1);
+});
+
 test("executeRelease does not install when dependency presence already passes", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);

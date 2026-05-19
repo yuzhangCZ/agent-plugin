@@ -1283,6 +1283,15 @@ function formatMissingDependenciesMessage(failures) {
 function prepareDependencies(plan, ports, stdout) {
   const installMode = getDependencyInstallMode(plan.parsed);
   const inspectDependencies = ports.inspectDependencies ?? ((target) => inspectManifestDependencies(target, ports.fs, ports.exec));
+  const installCommand =
+    installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
+  let installAttempted = false;
+
+  if (installMode === "update-lockfile") {
+    stdout.write(`dependency presence install: ${formatCommand(installCommand)}\n`);
+    runCommand(ports.exec, installCommand, plan.repoRoot);
+    installAttempted = true;
+  }
 
   const checkTargets = () =>
     plan.targets
@@ -1300,10 +1309,10 @@ function prepareDependencies(plan, ports, stdout) {
     throw new Error(formatMissingDependenciesMessage(failures));
   }
 
-  const installCommand =
-    installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
-  stdout.write(`dependency presence install: ${formatCommand(installCommand)}\n`);
-  runCommand(ports.exec, installCommand, plan.repoRoot);
+  if (!installAttempted) {
+    stdout.write(`dependency presence install: ${formatCommand(installCommand)}\n`);
+    runCommand(ports.exec, installCommand, plan.repoRoot);
+  }
 
   failures = checkTargets();
   if (failures.length === 0) {
