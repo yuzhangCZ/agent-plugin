@@ -200,8 +200,8 @@ export type SlashCommandSuccessDeliveryResult =
   | { success: true }
   | { success: false; failureStage: SlashCommandSuccessDeliveryFailureStage };
 
-/** slash 失败回包的送达阶段；不包含 tool_done。 */
-export type SlashCommandFailureDeliveryFailureStage = Exclude<SlashCommandSuccessDeliveryFailureStage, 'tool_done'>;
+/** slash 失败回包的送达阶段；与成功路径保持一致，最终也必须收敛到 tool_done。 */
+export type SlashCommandFailureDeliveryFailureStage = SlashCommandSuccessDeliveryFailureStage;
 
 /** slash 失败回包的投递结果。 */
 export type SlashCommandFailureDeliveryResult =

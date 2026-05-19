@@ -166,7 +166,7 @@ describe('SimpleSlashCommandParser', () => {
 });
 
 describe('RuntimeSlashCommandCompletionPort', () => {
-  test('completeFailure sends synthetic assistant failure reply only', async () => {
+  test('completeFailure sends synthetic assistant failure reply plus tool_done', async () => {
     const projected = [];
     const completionPort = new RuntimeSlashCommandCompletionPort({
       projector: new MemoryGatewayEnvelopeProjector(),
@@ -175,14 +175,20 @@ describe('RuntimeSlashCommandCompletionPort', () => {
 
     const result = await completionPort.completeFailure({
       anchor: 'tool-failure-only',
+      welinkSessionId: 'wl-failure-only',
       text: '查询会话列表失败, 当前宿主不可用',
     });
 
     assert.deepStrictEqual(result, { success: true });
-    assert.strictEqual(projected.length, 6);
+    assert.strictEqual(projected.length, 7);
     assertSyntheticAssistantReply(projected, 0, 'tool-failure-only', '查询会话列表失败, 当前宿主不可用');
+    assert.deepStrictEqual(projected[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-failure-only',
+      welinkSessionId: 'wl-failure-only',
+    });
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), true);
   });
 
   test('completeFailure returns delivery failure when sender returns false', async () => {
@@ -254,6 +260,32 @@ describe('RuntimeSlashCommandCompletionPort', () => {
     assert.strictEqual(projected[2].event.properties.part.type, 'text');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+  });
+
+  test('completeFailure returns delivery failure when tool_done cannot be sent', async () => {
+    const projected = [];
+    const completionPort = new RuntimeSlashCommandCompletionPort({
+      projector: new MemoryGatewayEnvelopeProjector(),
+      sender: createCompletionPortSenderStub(projected, { failAtCall: 7 }),
+    });
+
+    const result = await completionPort.completeFailure({
+      anchor: 'tool-failure-tool-done-fail',
+      welinkSessionId: 'wl-failure-tool-done-fail',
+      text: '失败回包也需要 tool_done',
+    });
+
+    assert.deepStrictEqual(result, {
+      success: false,
+      failureStage: 'tool_done',
+    });
+    assert.strictEqual(projected.length, 7);
+    assertSyntheticAssistantReply(projected, 0, 'tool-failure-tool-done-fail', '失败回包也需要 tool_done');
+    assert.deepStrictEqual(projected[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-failure-tool-done-fail',
+      welinkSessionId: 'wl-failure-tool-done-fail',
+    });
   });
 
   test('completeSuccess returns delivery failure when a synthetic reply event cannot be sent', async () => {
@@ -445,6 +477,7 @@ describe('BindingAwareChatRouter', () => {
     assert.deepStrictEqual(prompts, []);
     assertSyntheticAssistantReply(projected, 0, 'tool-invalid-slash', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), true);
   });
 
   test('invalid known slash command remains handled when failure reply sender throws', async () => {
@@ -560,14 +593,14 @@ describe('BindingAwareChatRouter', () => {
     await router.route({ anchor: 'tool-invalid-model-extra', text: '/model a/b/c', logger: createLoggerStub() });
 
     assertSyntheticAssistantReply(projected, 0, 'tool-invalid-new', '新建会话失败 请直接使用 /new');
-    assertSyntheticAssistantReply(projected, 6, 'tool-invalid-session', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
-    assertSyntheticAssistantReply(projected, 12, 'tool-invalid-session-extra', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
-    assertSyntheticAssistantReply(projected, 18, 'tool-invalid-models', '查询模型列表失败, 请直接使用 /models');
-    assertSyntheticAssistantReply(projected, 24, 'tool-invalid-model', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
-    assertSyntheticAssistantReply(projected, 30, 'tool-invalid-model-provider', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
-    assertSyntheticAssistantReply(projected, 36, 'tool-invalid-model-extra', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 7, 'tool-invalid-session', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 14, 'tool-invalid-session-extra', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 21, 'tool-invalid-models', '查询模型列表失败, 请直接使用 /models');
+    assertSyntheticAssistantReply(projected, 28, 'tool-invalid-model', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 35, 'tool-invalid-model-provider', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 42, 'tool-invalid-model-extra', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(projected.filter((message) => message.type === 'tool_done').length, 7);
   });
 
   test('bootstraps first chat by reusing the most recent session and prompts active session', async () => {
@@ -1403,8 +1436,12 @@ describe('BindingAwareChatRouter', () => {
       /slash_command\.failure_handled/u,
     );
 
-    assert.strictEqual(projected.length, 6);
+    assert.strictEqual(projected.length, 7);
     assertSyntheticAssistantReply(projected, 0, 'tool-context-fail', '查询会话列表失败, 当前没有可用会话');
+    assert.deepStrictEqual(projected[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-context-fail',
+    });
   });
 
   test('matched slash context failure still throws handled error when failure reply sender throws', async () => {
