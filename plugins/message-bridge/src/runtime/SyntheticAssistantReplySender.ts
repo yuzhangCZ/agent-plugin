@@ -20,7 +20,14 @@ type ToolEventPayload = Extract<GatewaySendPayload, { type: 'tool_event' }>;
  */
 export interface SyntheticAssistantReplyResult {
   success: boolean;
-  failureStage?: 'message.updated' | 'message.part.updated.step-start' | 'message.part.updated.text' | 'message.part.updated.step-finish' | 'tool_done';
+  failureStage?:
+    | 'message.updated'
+    | 'message.part.updated.step-start'
+    | 'message.part.updated.text-seed'
+    | 'message.part.delta.text'
+    | 'message.part.updated.text-final'
+    | 'message.part.updated.step-finish'
+    | 'tool_done';
 }
 
 /**
@@ -87,11 +94,25 @@ export class SyntheticAssistantReplySender {
       return { success: false, failureStage: 'message.part.updated.step-start' };
     }
 
-    if (!this.sendToolEvent(sequence.text, {
+    if (!this.sendToolEvent(sequence.textSeedUpdated, {
       ...commonLogOptions,
       eventType: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
     })) {
-      return { success: false, failureStage: 'message.part.updated.text' };
+      return { success: false, failureStage: 'message.part.updated.text-seed' };
+    }
+
+    if (!this.sendToolEvent(sequence.textDelta, {
+      ...commonLogOptions,
+      eventType: TOOL_EVENT_TYPE.MESSAGE_PART_DELTA,
+    })) {
+      return { success: false, failureStage: 'message.part.delta.text' };
+    }
+
+    if (!this.sendToolEvent(sequence.textFinalUpdated, {
+      ...commonLogOptions,
+      eventType: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
+    })) {
+      return { success: false, failureStage: 'message.part.updated.text-final' };
     }
 
     if (!this.sendToolEvent(sequence.stepFinish, {

@@ -24,6 +24,7 @@ export class BindingAwareChatRouter {
 
   async route(input: {
     anchor: string;
+    welinkSessionId?: string;
     text: string;
     assistantId?: string;
     imGroupId?: string;
@@ -46,6 +47,7 @@ export class BindingAwareChatRouter {
         await this.dependencies.slashCommandOrchestrator.execute({
           command: parseResult.command,
           context,
+          welinkSessionId: input.welinkSessionId,
           createContext,
           ...(input.logger ? { logger: input.logger } : {}),
         });
@@ -53,6 +55,7 @@ export class BindingAwareChatRouter {
         await this.dependencies.slashCommandOrchestrator.completeFailure({
           command: parseResult.command,
           anchor: input.anchor,
+          welinkSessionId: input.welinkSessionId,
           error,
           ...(input.logger ? { logger: input.logger } : {}),
         });
@@ -65,6 +68,7 @@ export class BindingAwareChatRouter {
       await this.dependencies.slashCommandOrchestrator.completeFailure({
         command: parseResult.command,
         anchor: input.anchor,
+        welinkSessionId: input.welinkSessionId,
         error: { code: 'invalid_command' },
         ...(input.logger ? { logger: input.logger } : {}),
       });

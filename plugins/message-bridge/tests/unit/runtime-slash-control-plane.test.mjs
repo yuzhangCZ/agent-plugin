@@ -15,14 +15,24 @@ function assertSyntheticAssistantReply(sent, index, toolSessionId, expectedText)
   assert.match(messageId, /^msg_[a-f0-9]{32}$/);
 
   const stepStart = sent[index + 1];
-  const text = sent[index + 2];
-  const stepFinish = sent[index + 3];
+  const textSeedUpdated = sent[index + 2];
+  const textDelta = sent[index + 3];
+  const textFinalUpdated = sent[index + 4];
+  const stepFinish = sent[index + 5];
 
   assert.strictEqual(stepStart.event.properties.part.type, 'step-start');
   assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
-  assert.strictEqual(text.event.properties.part.type, 'text');
-  assert.strictEqual(text.event.properties.part.messageID, messageId);
-  assert.strictEqual(text.event.properties.part.text, expectedText);
+  assert.strictEqual(textSeedUpdated.event.properties.part.type, 'text');
+  assert.strictEqual(textSeedUpdated.event.properties.part.messageID, messageId);
+  assert.strictEqual(textSeedUpdated.event.properties.part.text, '');
+  assert.strictEqual(textDelta.event.type, 'message.part.delta');
+  assert.strictEqual(textDelta.event.properties.partID, textSeedUpdated.event.properties.part.id);
+  assert.strictEqual(textDelta.event.properties.messageID, messageId);
+  assert.strictEqual(textDelta.event.properties.delta, expectedText);
+  assert.strictEqual(textFinalUpdated.event.properties.part.type, 'text');
+  assert.strictEqual(textFinalUpdated.event.properties.part.id, textSeedUpdated.event.properties.part.id);
+  assert.strictEqual(textFinalUpdated.event.properties.part.messageID, messageId);
+  assert.strictEqual(textFinalUpdated.event.properties.part.text, expectedText);
   assert.strictEqual(stepFinish.event.properties.part.type, 'step-finish');
   assert.strictEqual(stepFinish.event.properties.part.messageID, messageId);
 }
@@ -108,7 +118,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-invalid-slash', text: '/sessions fdsfs' },
     });
 
-    assert.strictEqual(sent.length, 4);
+    assert.strictEqual(sent.length, 6);
     assertSyntheticAssistantReply(sent, 0, 'tool-invalid-slash', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
@@ -185,9 +195,13 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-group-1', text: '@bot /sessions', imGroupId: 'group-a' },
     });
 
-    assert.strictEqual(sent.length, 5);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-group-1', '可切换会话列表\n\n- `ses-group-1` 群聊会话一（当前）');
-    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-group-1' });
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-1',
+      welinkSessionId: 'wl-group-1',
+    });
   });
 
   test('group chat invalid slash strips mention and still returns failure reply only', async () => {
@@ -206,7 +220,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-group-invalid', text: '@bot /sessions fdsfs', imGroupId: 'group-a' },
     });
 
-    assert.strictEqual(sent.length, 4);
+    assert.strictEqual(sent.length, 6);
     assertSyntheticAssistantReply(sent, 0, 'tool-group-invalid', '查询会话列表失败, 请直接使用 /sessions');
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
@@ -261,7 +275,11 @@ describe('runtime slash control-plane', () => {
       ]);
     }
     assert.strictEqual(sent[0].toolSessionId, 'tool-group-new');
-    assert.deepStrictEqual(sent.at(-1), { type: 'tool_done', toolSessionId: 'tool-group-new' });
+    assert.deepStrictEqual(sent.at(-1), {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-new',
+      welinkSessionId: 'wl-group-new',
+    });
   });
 
   test('matched slash failure does not fall back to tool_error when failure reply delivery throws', async () => {
@@ -620,14 +638,18 @@ describe('runtime slash control-plane', () => {
         },
       },
     ]);
-    assert.strictEqual(sent.length, 5);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(
       sent,
       0,
       'tool-sessions',
       '可切换会话列表\n\n- `ses-scope-1` 当前会话（当前）\n- `ses-scope-2` 第二个会话',
     );
-    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-sessions' });
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-sessions',
+      welinkSessionId: 'wl-sessions',
+    });
   });
 
   test('slash session out of scope returns fixed failure text without changing binding', async () => {
@@ -680,7 +702,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-session-fail', text: '/session ses-scope-2' },
     });
 
-    assert.strictEqual(sent.length, 4);
+    assert.strictEqual(sent.length, 6);
     assertSyntheticAssistantReply(sent, 0, 'tool-session-fail', '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内');
     assert.deepStrictEqual(runtime.bindingStore.get('tool-session-fail'), {
       anchor: 'tool-session-fail',
@@ -955,7 +977,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-models', text: '/models' },
     });
 
-    assert.strictEqual(sent.length, 5);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(
       sent,
       0,
@@ -970,7 +992,11 @@ describe('runtime slash control-plane', () => {
         url: '/config/providers',
       },
     ]);
-    assert.deepStrictEqual(sent[4], { type: 'tool_done', toolSessionId: 'tool-models' });
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-models',
+      welinkSessionId: 'wl-models',
+    });
     assert.deepStrictEqual(runtime.bindingStore.get('tool-models'), {
       anchor: 'tool-models',
       activeOpencodeSessionId: 'ses-models-1',
@@ -1023,7 +1049,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-fail-1', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 4);
+    assert.strictEqual(sent.length, 6);
     assertSyntheticAssistantReply(sent, 0, 'tool-fail-1', '查询会话列表失败, 当前宿主不可用');
   });
 
@@ -1128,7 +1154,7 @@ describe('runtime slash control-plane', () => {
     });
 
     assertSyntheticAssistantReply(sent, 0, 'tool-model-1', '后续请求将使用该模型 openai/gpt-5.4');
-    assertSyntheticAssistantReply(sent, 6, 'tool-model-1', '已切换会话 `ses-model-2` 模型会话二');
+    assertSyntheticAssistantReply(sent, 8, 'tool-model-1', '已切换会话 `ses-model-2` 模型会话二');
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-model-1' },
@@ -1387,7 +1413,7 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 4);
+    assert.strictEqual(sent.length, 6);
     assertSyntheticAssistantReply(sent, 0, 'tool-slash-invalid', '查询会话列表失败, 当前没有可用会话');
     assert.deepStrictEqual(runtime.bindingStore.get('tool-slash-invalid'), {
       anchor: 'tool-slash-invalid',
@@ -1403,9 +1429,13 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 9);
-    assertSyntheticAssistantReply(sent, 4, 'tool-slash-invalid', '当前范围内没有可切换的会话');
-    assert.deepStrictEqual(sent[8], { type: 'tool_done', toolSessionId: 'tool-slash-invalid' });
+    assert.strictEqual(sent.length, 13);
+    assertSyntheticAssistantReply(sent, 6, 'tool-slash-invalid', '当前范围内没有可切换的会话');
+    assert.deepStrictEqual(sent[12], {
+      type: 'tool_done',
+      toolSessionId: 'tool-slash-invalid',
+      welinkSessionId: 'wl-slash-invalid-2',
+    });
   });
 
   test('permission_reply keeps targeting the original host session after slash creates a new active session', async () => {

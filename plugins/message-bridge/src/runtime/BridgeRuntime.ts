@@ -837,6 +837,7 @@ export class BridgeRuntime {
       try {
         const routeResult = await this.bindingAwareChatRouter.route({
           anchor: toolSessionId,
+          welinkSessionId,
           text: invokeMessage.payload.text,
           assistantId: invokeMessage.payload.assistantId,
           imGroupId: invokeMessage.payload.imGroupId,
