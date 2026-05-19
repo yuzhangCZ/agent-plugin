@@ -19,6 +19,8 @@
 | `docs/architecture/prd-traceability.md` | `docs/quality/traceability-matrix.md` | 2026-03-07 | 迁移到质量证据层 |
 | `docs/architecture/test-validation.md` | `docs/quality/test-strategy.md` | 2026-03-07 | 迁移到测试策略层 |
 | `docs/architecture/architecture-validation.md` | `docs/quality/validation-report.md` | 2026-03-07 | 迁移到验证报告层 |
+| `docs/design/interfaces/bridge-runtime-sdk-field-mapping.md` | `docs/design/interfaces/bridge-runtime-sdk-replacement-assessment.md` | 2026-05-16 | 收敛为 SDK 替换评估与字段映射单一文档 |
+| `docs/design/bridge-runtime-sdk-capability-assessment.md` | `docs/design/interfaces/bridge-runtime-sdk-replacement-assessment.md` | 2026-05-16 | 合并重复能力评估结论 |
 
 ## 兼容规则
 
