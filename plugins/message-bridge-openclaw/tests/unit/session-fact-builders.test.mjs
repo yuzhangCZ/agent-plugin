@@ -5,7 +5,6 @@ import {
   buildMessageDoneFact,
   buildMessageStartFact,
   buildPermissionAskFact,
-  buildQuestionAskFact,
   buildSessionErrorFact,
   buildThinkingDeltaFact,
   buildThinkingDoneFact,
@@ -59,16 +58,16 @@ test("session fact builders keep stable ids on toolSessionId", () => {
       query: "docs",
     },
   });
-  const questionAsk = buildQuestionAskFact({
-    toolSessionId,
-    messageId: "msg_1",
-    toolCallId: "call_2",
-    question: "continue?",
-  });
   const permissionAsk = buildPermissionAskFact({
     toolSessionId,
     messageId: "msg_1",
+    partId: "part_perm_1",
     permissionId: "perm_1",
+    permissionType: "exec",
+    title: "Run command?",
+    metadata: {
+      command: "echo hi",
+    },
   });
   const messageDone = buildMessageDoneFact({ toolSessionId, messageId: "msg_1" });
   const sessionError = buildSessionErrorFact({
@@ -86,7 +85,6 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     thinkingDelta,
     thinkingDone,
     toolUpdate,
-    questionAsk,
     permissionAsk,
     messageDone,
     sessionError,
@@ -95,5 +93,8 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     assert.equal("sessionKey" in fact, false);
   }
 
+  assert.equal(permissionAsk.partId, "part_perm_1");
+  assert.equal(permissionAsk.title, "Run command?");
+  assert.deepEqual(permissionAsk.metadata, { command: "echo hi" });
   assert.equal(toolUpdate.input, '{"query":"docs"}');
 });

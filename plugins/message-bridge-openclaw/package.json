@@ -18,6 +18,7 @@
   "scripts": {
     "build": "pnpm run build:bundle",
     "build:bundle": "node scripts/build-bundle.mjs",
+    "typecheck": "pnpm exec tsc -p ./tsconfig.typecheck.json",
     "install:bundle:dev": "node -e \"const {execSync}=require('node:child_process'); const isWin=process.platform==='win32'; const cmd=isWin ? 'powershell -ExecutionPolicy Bypass -File scripts/install-bundle-dev.ps1' : 'sh scripts/install-bundle-dev.sh'; execSync('pnpm run build:bundle', {stdio:'inherit'}); execSync(cmd, {stdio:'inherit'});\"",
     "pack:bundle": "pnpm run build:bundle && node scripts/pack-bundle.mjs",
     "pack:check": "pnpm run build:bundle && node scripts/check-pack.mjs",
@@ -28,7 +29,7 @@
     "verify:openclaw:env": "node ./scripts/verify-openclaw-env.mjs",
     "verify:openclaw:load": "pnpm run build && node ./scripts/verify-openclaw-load.mjs",
     "test:runtime": "pnpm run build && node ./scripts/runtime-smoke.mjs",
-    "verify:core": "pnpm test && pnpm run pack:check",
+    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check",
     "verify:release": "pnpm run verify:core && pnpm run verify:openclaw:env && pnpm run verify:openclaw:load && pnpm run test:runtime"
   },
   "peerDependencies": {

@@ -2,7 +2,6 @@ import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 import {
   createBridgeRuntime,
   type BridgeGatewayHostConfig,
-  type BridgeGatewayHostConnection,
   type BridgeRuntime,
 } from "@agent-plugin/bridge-runtime-sdk";
 
@@ -13,6 +12,10 @@ import { SessionRegistry } from "./session/SessionRegistry.js";
 import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./gateway-host.js";
 import { resolveEffectiveReplyConfig } from "./resolveEffectiveReplyConfig.js";
 import { resolveStreamingExecutionPlan } from "./resolveStreamingExecutionPlan.js";
+import {
+  type BridgeRuntimeConnectionFactory,
+  withOptionalConnectionFactory,
+} from "./runtime/bridgeRuntimeConnectionFactory.js";
 import { OpenClawProviderAdapter } from "./sdk/OpenClawProviderAdapter.js";
 
 export interface OpenClawGatewayBridgeOptions {
@@ -22,7 +25,7 @@ export interface OpenClawGatewayBridgeOptions {
   runtime: PluginRuntime;
   setStatus: (status: MessageBridgeStatusSnapshot) => void;
   registerMetadata?: RegisterMetadata;
-  connectionFactory?: (gatewayHost: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+  connectionFactory?: BridgeRuntimeConnectionFactory;
 }
 
 type SubagentRuntime = PluginRuntime & {
@@ -62,7 +65,7 @@ export class OpenClawGatewayBridge {
     warnUnknownToolType(options.logger, registerMetadata.toolType, options.account.accountId);
 
     const sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
-    this.bridgeRuntime = createBridgeRuntime({
+    const runtimeOptions = withOptionalConnectionFactory({
       provider: new OpenClawProviderAdapter({
         account: this.options.account,
         config: this.options.config,
@@ -78,11 +81,12 @@ export class OpenClawGatewayBridge {
       gatewayHost: buildBridgeGatewayHostConfig(options.account, registerMetadata),
       logger: options.logger,
       debug: options.account.debug,
-      connectionFactory: options.connectionFactory,
       onTelemetryUpdated: () => {
         this.requestImmediateStatusRefresh();
       },
-    }).then((runtime) => {
+    }, options.connectionFactory);
+
+    this.bridgeRuntime = createBridgeRuntime(runtimeOptions as Parameters<typeof createBridgeRuntime>[0]).then((runtime) => {
       this.bridgeRuntimeFacade = runtime;
       return runtime;
     });
@@ -159,7 +163,8 @@ export class OpenClawGatewayBridge {
     MessageBridgeStatusSnapshot,
     "routeResolverAvailable" | "replyRuntimeAvailable" | "streamingPathHealthy" | "streamingPathReason"
   > {
-    const hasRouteResolver = typeof this.runtime.channel?.routing?.resolveAgentRoute === "function";
+    const routing = this.runtime.channel?.routing as { resolveAgentRoute?: unknown } | undefined;
+    const hasRouteResolver = typeof routing?.resolveAgentRoute === "function";
     const reply = this.runtime.channel?.reply as {
       resolveEnvelopeFormatOptions?: unknown;
       formatAgentEnvelope?: unknown;
