@@ -13,15 +13,18 @@ export class MemoryGatewayEnvelopeProjector implements GatewayEnvelopeProjector 
     return [
       sequence.messageUpdated,
       sequence.stepStart,
-      sequence.text,
+      sequence.textSeedUpdated,
+      sequence.textDelta,
+      sequence.textFinalUpdated,
       sequence.stepFinish,
     ];
   }
 
-  projectToolDone(input: { anchor: string }): Record<string, unknown> {
+  projectToolDone(input: { anchor: string; welinkSessionId?: string }): Record<string, unknown> {
     return {
       type: 'tool_done',
       toolSessionId: input.anchor,
+      ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
     };
   }
 }

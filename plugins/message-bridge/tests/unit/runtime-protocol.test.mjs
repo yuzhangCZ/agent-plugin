@@ -1253,9 +1253,9 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(prompts.length, 0);
-    assert.strictEqual(sent.length, 5);
+    assert.strictEqual(sent.length, 7);
 
-    const [messageUpdated, stepStart, text, stepFinish, toolDone] = sent;
+    const [messageUpdated, stepStart, textSeedUpdated, textDelta, textFinalUpdated, stepFinish, toolDone] = sent;
     assert.strictEqual(messageUpdated.type, 'tool_event');
     assert.strictEqual(messageUpdated.event.type, 'message.updated');
     assert.strictEqual(messageUpdated.event.properties.info.role, 'assistant');
@@ -1267,10 +1267,19 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual(stepStart.event.type, 'message.part.updated');
     assert.strictEqual(stepStart.event.properties.part.type, 'step-start');
 
-    assert.strictEqual(text.type, 'tool_event');
-    assert.strictEqual(text.event.type, 'message.part.updated');
-    assert.strictEqual(text.event.properties.part.type, 'text');
-    assert.strictEqual(text.event.properties.part.text, '本机器人不处理群聊消息，请勿在群内@提问');
+    assert.strictEqual(textSeedUpdated.type, 'tool_event');
+    assert.strictEqual(textSeedUpdated.event.type, 'message.part.updated');
+    assert.strictEqual(textSeedUpdated.event.properties.part.type, 'text');
+    assert.strictEqual(textSeedUpdated.event.properties.part.text, '');
+
+    assert.strictEqual(textDelta.type, 'tool_event');
+    assert.strictEqual(textDelta.event.type, 'message.part.delta');
+    assert.strictEqual(textDelta.event.properties.delta, '本机器人不处理群聊消息，请勿在群内@提问');
+
+    assert.strictEqual(textFinalUpdated.type, 'tool_event');
+    assert.strictEqual(textFinalUpdated.event.type, 'message.part.updated');
+    assert.strictEqual(textFinalUpdated.event.properties.part.type, 'text');
+    assert.strictEqual(textFinalUpdated.event.properties.part.text, '本机器人不处理群聊消息，请勿在群内@提问');
 
     assert.strictEqual(stepFinish.type, 'tool_event');
     assert.strictEqual(stepFinish.event.type, 'message.part.updated');
@@ -1280,13 +1289,17 @@ describe('runtime protocol strictness', () => {
     const messageId = messageUpdated.event.properties.info.id;
     const partIds = [
       stepStart.event.properties.part.id,
-      text.event.properties.part.id,
+      textSeedUpdated.event.properties.part.id,
+      textDelta.event.properties.partID,
+      textFinalUpdated.event.properties.part.id,
       stepFinish.event.properties.part.id,
     ];
     assert.ok(partIds.every((id) => /^prt_[a-f0-9]{32}$/.test(id)));
     assert.strictEqual(new Set(partIds).size, 3);
     assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
-    assert.strictEqual(text.event.properties.part.messageID, messageId);
+    assert.strictEqual(textSeedUpdated.event.properties.part.messageID, messageId);
+    assert.strictEqual(textDelta.event.properties.messageID, messageId);
+    assert.strictEqual(textFinalUpdated.event.properties.part.messageID, messageId);
     assert.strictEqual(stepFinish.event.properties.part.messageID, messageId);
 
     assert.strictEqual(toolDone.type, 'tool_done');
@@ -1323,9 +1336,9 @@ describe('runtime protocol strictness', () => {
     });
 
     const firstMessageId = sent[0].event.properties.info.id;
-    const secondMessageId = sent[5].event.properties.info.id;
-    const firstPartIds = sent.slice(1, 4).map((entry) => entry.event.properties.part.id);
-    const secondPartIds = sent.slice(6, 9).map((entry) => entry.event.properties.part.id);
+    const secondMessageId = sent[7].event.properties.info.id;
+    const firstPartIds = [sent[1], sent[2], sent[5]].map((entry) => entry.event.properties.part.id);
+    const secondPartIds = [sent[8], sent[9], sent[12]].map((entry) => entry.event.properties.part.id);
 
     assert.notStrictEqual(firstMessageId, secondMessageId);
     for (const firstPartId of firstPartIds) {
@@ -1347,7 +1360,7 @@ describe('runtime protocol strictness', () => {
     });
     const originalValidate = runtime.validateGatewayUplinkBusinessMessageOrLog.bind(runtime);
     runtime.validateGatewayUplinkBusinessMessageOrLog = (message, logContext, logger) => {
-      if (message.type === 'tool_event' && message.event.type === 'message.part.updated' && message.event.properties.part.type === 'text') {
+      if (message.type === 'tool_event' && message.event.type === 'message.part.delta') {
         return null;
       }
       return originalValidate(message, logContext, logger);
@@ -1366,12 +1379,15 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(prompts.length, 0);
-    assert.strictEqual(sent.length, 2);
+    assert.strictEqual(sent.length, 3);
     assert.strictEqual(sent[0].type, 'tool_event');
     assert.strictEqual(sent[0].event.type, 'message.updated');
     assert.strictEqual(sent[1].type, 'tool_event');
     assert.strictEqual(sent[1].event.type, 'message.part.updated');
     assert.strictEqual(sent[1].event.properties.part.type, 'step-start');
+    assert.strictEqual(sent[2].type, 'tool_event');
+    assert.strictEqual(sent[2].event.type, 'message.part.updated');
+    assert.strictEqual(sent[2].event.properties.part.type, 'text');
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
   });
 
@@ -2024,8 +2040,8 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_done').length, 1);
-    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 4);
-    assert.strictEqual(sent[4].message.type, 'tool_done');
+    assert.strictEqual(sent.filter((entry) => entry.message.type === 'tool_event').length, 6);
+    assert.strictEqual(sent[6].message.type, 'tool_done');
   });
 
   test('missing suppressReply keeps the existing chat prompt path', async () => {
