@@ -542,16 +542,52 @@ await qrcodeAuth.run({
 });
 ```
 
-## 6. 公共类型与通用约束
+## 6. 整体主流程时序图
 
-### 6.1 `ProviderFact` 与 `OutboundFact`
+```mermaid
+sequenceDiagram
+  participant I as Integrator
+  participant RT as Runtime
+  participant P as Provider
+
+  I->>RT: createBridgeRuntime(options)
+  I->>RT: start()
+  opt initialized
+    RT->>P: initialize(context)
+  end
+
+  RT->>P: createSession(input)
+  RT->>P: runMessage(input)
+  P-->>RT: ProviderRun { runId, facts, result() }
+  P-->>RT: facts stream
+
+  opt interaction reply
+    RT->>P: replyQuestion(input)
+    RT->>P: replyPermission(input)
+  end
+
+  P-->>RT: result() => ProviderTerminalResult
+  I->>RT: stop()
+  opt cleanup
+    RT->>P: dispose()
+  end
+```
+
+- `createBridgeRuntime()` 只创建实例，`start()` 成功后 Runtime 才进入可处理请求状态。
+- `createSession()`、`runMessage()`、`replyQuestion()`、`replyPermission()` 都属于 Runtime 对 Provider 的调用路径。
+- `runMessage()` 返回的是 `ProviderRun` 句柄，不是最终结果；run 的终态以 `result()` 为准。
+- `stop()` 后 Runtime 不再继续使用旧上下文；若实现了 `dispose()`，会进入清理阶段。
+
+## 7. 公共类型与通用约束
+
+### 7.1 `ProviderFact` 与 `OutboundFact`
 
 `ProviderFact` 是 request run 使用的事实集合，`OutboundFact` 与其共用同一套事实类型。两者差别只在生命周期来源：
 
 - request run 通过 `ProviderRun.facts` 产出，并由 `result()` 收口
 - outbound 通过 `emitOutboundMessage()` 主动发送，不包含 `runId`，也不通过 `result()` 收口
 
-### 6.2 事实类型分组
+### 7.2 事实类型分组
 
 - 消息生命周期：`message.start`、`message.done`
 - 文本输出：`text.delta`、`text.done`
@@ -561,7 +597,7 @@ await qrcodeAuth.run({
 - 会话信息：`session.title`
 - 会话错误：`session.error`
 
-### 6.3 主要 fact 字段
+### 7.3 主要 fact 字段
 
 #### `MessageStartFact`
 
@@ -706,7 +742,7 @@ await qrcodeAuth.run({
 | `error` | `ProviderError` | 是 | 会话级错误信息。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
-### 6.4 文本流规则
+### 7.4 文本流规则
 
 - `message.start` 表示一条消息开始。
 - `text.delta` 用于发送尚未收口的文本增量。
@@ -722,7 +758,7 @@ yield { type: 'text.done', toolSessionId, messageId, partId: 'part-1', content: 
 yield { type: 'message.done', toolSessionId, messageId };
 ```
 
-### 6.5 标识符约束
+### 7.5 标识符约束
 
 - `toolSessionId` 标识会话作用域。
 - `messageId` 必须在所属 `toolSessionId` 内唯一。
@@ -730,7 +766,7 @@ yield { type: 'message.done', toolSessionId, messageId };
 - `runId` 绑定一次 request run，不得由 Provider 改写。
 - `questionId` 与 `permissionId` 是直接回复目标，必须可唯一定位到底层宿主对象。
 
-### 6.6 `ProviderError`
+### 7.6 `ProviderError`
 
 用于表达执行期错误或 run 失败原因。
 
@@ -741,7 +777,7 @@ yield { type: 'message.done', toolSessionId, messageId };
 | `retryable` | `boolean` | 否 | 是否建议重试。 |
 | `details` | `Record<string, unknown>` | 否 | 可选补充上下文。 |
 
-### 6.7 `ProviderCommandError`
+### 7.7 `ProviderCommandError`
 
 用于表达命令应用阶段失败。
 
@@ -752,7 +788,7 @@ yield { type: 'message.done', toolSessionId, messageId };
 | `retryable` | `boolean` | 否 | 是否建议重试。 |
 | `details` | `Record<string, unknown>` | 否 | 可选补充上下文。 |
 
-### 6.8 失败表达边界
+### 7.8 失败表达边界
 
 - Provider 方法在命令应用阶段失败时，应抛出 `ProviderCommandError`。
 - 宿主需要在事实流中表达会话级错误时，应发送 `SessionErrorFact`。
@@ -760,9 +796,9 @@ yield { type: 'message.done', toolSessionId, messageId };
 - 集成方不得把命令应用失败伪装成 `ProviderTerminalResult.error`。
 - 集成方不得用 `SessionErrorFact` 代替 `ProviderRun.result()` 收口。
 
-## 7. 最小接入示例
+## 8. 最小接入示例
 
-### 7.1 最小 Provider 示例
+### 8.1 最小 Provider 示例
 
 ```ts
 import type {
@@ -837,7 +873,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 }
 ```
 
-### 7.2 最小文本输出示例
+### 8.2 最小文本输出示例
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
@@ -870,7 +906,7 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 }
 ```
 
-### 7.3 挂起交互与回复示例
+### 8.3 挂起交互与回复示例
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
@@ -904,7 +940,7 @@ async replyQuestion(input: ProviderQuestionReplyInput) {
 }
 ```
 
-### 7.4 常见错误用法
+### 8.4 常见错误用法
 
 - 用 `message.done` 代替 `result()` 收口。
 - 返回的 `ProviderRun.runId` 与输入 `runId` 不一致。
