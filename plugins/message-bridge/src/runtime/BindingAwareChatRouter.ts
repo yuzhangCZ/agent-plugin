@@ -49,6 +49,7 @@ export class BindingAwareChatRouter {
           await this.dependencies.slashCommandOrchestrator.completeFailure({
             command: parseResult.command,
             anchor: input.anchor,
+            welinkSessionId: input.welinkSessionId,
             error: {
               code: 'command_disabled_in_group_chat',
               reasonKey: 'command_not_available_in_group_chat',

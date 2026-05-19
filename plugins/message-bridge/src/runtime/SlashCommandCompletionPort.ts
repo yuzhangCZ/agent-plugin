@@ -15,8 +15,24 @@ export class RuntimeSlashCommandCompletionPort implements SlashCommandCompletion
   }) {}
 
   async completeSuccess(input: { anchor: string; welinkSessionId?: string; text: string }): Promise<SlashCommandSuccessDeliveryResult> {
+    return this.deliver(input);
+  }
+
+  async completeFailure(input: { anchor: string; welinkSessionId?: string; text: string }): Promise<SlashCommandFailureDeliveryResult> {
+    return this.deliver(input);
+  }
+
+  /**
+   * 统一 slash 完成态发送时序。
+   * @remarks success / failure 都必须发送同一组 synthetic assistant reply，并以 tool_done 收尾。
+   */
+  private async deliver(input: {
+    anchor: string;
+    welinkSessionId?: string;
+    text: string;
+  }): Promise<SlashCommandSuccessDeliveryResult | SlashCommandFailureDeliveryResult> {
     const messages = this.dependencies.projector.projectSyntheticAssistantReply(input);
-    const stages: SlashCommandSuccessDeliveryFailureStage[] = [
+    const stages: Array<SlashCommandSuccessDeliveryFailureStage | SlashCommandFailureDeliveryFailureStage> = [
       'message.updated',
       'message.part.updated.step-start',
       'message.part.updated.text-seed',
@@ -36,25 +52,6 @@ export class RuntimeSlashCommandCompletionPort implements SlashCommandCompletion
     }));
     if (toolDoneSent === false) {
       return { success: false, failureStage: 'tool_done' };
-    }
-    return { success: true };
-  }
-
-  async completeFailure(input: { anchor: string; welinkSessionId?: string; text: string }): Promise<SlashCommandFailureDeliveryResult> {
-    const messages = this.dependencies.projector.projectSyntheticAssistantReply(input);
-    const stages: SlashCommandFailureDeliveryFailureStage[] = [
-      'message.updated',
-      'message.part.updated.step-start',
-      'message.part.updated.text-seed',
-      'message.part.delta.text',
-      'message.part.updated.text-final',
-      'message.part.updated.step-finish',
-    ];
-    for (const [index, message] of messages.entries()) {
-      const sent = await this.trySend(message);
-      if (sent === false) {
-        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text-final' };
-      }
     }
     return { success: true };
   }

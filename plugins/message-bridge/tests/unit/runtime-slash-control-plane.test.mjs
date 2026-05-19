@@ -102,7 +102,7 @@ function createRuntimeClient(overrides = {}) {
 }
 
 describe('runtime slash control-plane', () => {
-  test('invalid slash command returns failure reply without tool_error or tool_done', async () => {
+  test('invalid slash command returns failure reply plus tool_done without tool_error', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
     });
@@ -118,10 +118,15 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-invalid-slash', text: '/sessions fdsfs' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-invalid-slash', '查询会话列表失败, 请直接使用 /sessions');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-invalid-slash',
+      welinkSessionId: 'wl-invalid-slash',
+    });
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
   });
 
   test('invalid slash command does not fall back to tool_error when failure reply delivery returns false', async () => {
@@ -146,7 +151,7 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(sent, []);
   });
 
-  test('group chat slash sessions returns disabled reply and does not query session list', async () => {
+  test('group chat slash sessions returns disabled reply plus tool_done and does not query session list', async () => {
     const sessionListRequests = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -197,14 +202,19 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-group-1', text: '@bot /sessions', imGroupId: 'group-a' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-group-1', '查询会话列表失败, 群聊场景不支持 /sessions，请在单聊中使用');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-1',
+      welinkSessionId: 'wl-group-1',
+    });
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
     assert.deepStrictEqual(sessionListRequests, []);
   });
 
-  test('group chat invalid slash strips mention and still returns failure reply only', async () => {
+  test('group chat invalid slash strips mention and still returns failure reply plus tool_done', async () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient(),
     });
@@ -220,13 +230,18 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-group-invalid', text: '@bot /sessions fdsfs', imGroupId: 'group-a' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-group-invalid', '查询会话列表失败, 请直接使用 /sessions');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-invalid',
+      welinkSessionId: 'wl-group-invalid',
+    });
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
   });
 
-  test('group chat slash session returns disabled reply and keeps binding unchanged', async () => {
+  test('group chat slash session returns disabled reply plus tool_done and keeps binding unchanged', async () => {
     const sessionListRequests = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
@@ -263,10 +278,15 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-group-session', text: '@bot /session ses-target', imGroupId: 'group-a' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-group-session', '切换会话失败, 群聊场景不支持 /session，请在单聊中使用');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-session',
+      welinkSessionId: 'wl-group-session',
+    });
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
-    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
     assert.deepStrictEqual(runtime.bindingStore.get('tool-group-session'), {
       anchor: 'tool-group-session',
       activeOpencodeSessionId: 'ses-existing',
@@ -797,8 +817,13 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-session-fail', text: '/session ses-scope-2' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-session-fail', '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-session-fail',
+      welinkSessionId: 'wl-session-fail',
+    });
     assert.deepStrictEqual(runtime.bindingStore.get('tool-session-fail'), {
       anchor: 'tool-session-fail',
       activeOpencodeSessionId: 'ses-scope-1',
@@ -1144,8 +1169,13 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-fail-1', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-fail-1', '查询会话列表失败, 当前宿主不可用');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-fail-1',
+      welinkSessionId: 'wl-fail-1',
+    });
   });
 
   test('slash model sets override for current session and later chat carries model until session switch', async () => {
@@ -1508,8 +1538,13 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent.length, 7);
     assertSyntheticAssistantReply(sent, 0, 'tool-slash-invalid', '查询会话列表失败, 当前没有可用会话');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-slash-invalid',
+      welinkSessionId: 'wl-slash-invalid-1',
+    });
     assert.deepStrictEqual(runtime.bindingStore.get('tool-slash-invalid'), {
       anchor: 'tool-slash-invalid',
       activeOpencodeSessionId: 'ses-slash-invalid-1',
@@ -1524,9 +1559,9 @@ describe('runtime slash control-plane', () => {
       payload: { toolSessionId: 'tool-slash-invalid', text: '/sessions' },
     });
 
-    assert.strictEqual(sent.length, 13);
-    assertSyntheticAssistantReply(sent, 6, 'tool-slash-invalid', '当前范围内没有可切换的会话');
-    assert.deepStrictEqual(sent[12], {
+    assert.strictEqual(sent.length, 14);
+    assertSyntheticAssistantReply(sent, 7, 'tool-slash-invalid', '当前范围内没有可切换的会话');
+    assert.deepStrictEqual(sent[13], {
       type: 'tool_done',
       toolSessionId: 'tool-slash-invalid',
       welinkSessionId: 'wl-slash-invalid-2',
