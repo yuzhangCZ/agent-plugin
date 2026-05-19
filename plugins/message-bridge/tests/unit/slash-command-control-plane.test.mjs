@@ -490,6 +490,43 @@ describe('BindingAwareChatRouter', () => {
     ]);
   });
 
+  test('group-disabled slash command still throws handled error when failure completion throws', async () => {
+    const prompts = [];
+    const { logger, errors } = createRecordingLogger();
+    const bindingStore = new InMemoryToolSessionBindingStore();
+    const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+    const modelStore = new InMemorySessionModelOverrideStore();
+    const router = new BindingAwareChatRouter({
+      contextResolver: new ResolveSlashCommandContextUseCase({
+        bindingStore,
+        ownershipResolver,
+        modelOverrideStore: modelStore,
+        hostSessionCreationPort: { async createSession() { throw new Error('should not create'); } },
+        hostSessionQueryPort: {
+          async getSession() { throw new Error('should not get'); },
+          async listSessions() { throw new Error('should not list'); },
+        },
+      }),
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCommandOrchestrator: {
+        async execute() {
+          throw new Error('should not execute');
+        },
+        async completeFailure() {
+          throw new Error('send exploded');
+        },
+      },
+      hostPromptExecutionPort: { async prompt(input) { prompts.push(input); } },
+    });
+
+    await assert.rejects(
+      router.route({ anchor: 'tool-group-disabled-throw', text: '@bot /sessions', imGroupId: 'group-a', logger }),
+      /slash_command\.failure_handled/u,
+    );
+    assert.deepStrictEqual(prompts, []);
+    assert.deepStrictEqual(errors, []);
+  });
+
   test('invalid slash commands return command-specific usage hints', async () => {
     const projected = [];
     const bindingStore = new InMemoryToolSessionBindingStore();
