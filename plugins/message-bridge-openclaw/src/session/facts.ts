@@ -5,7 +5,6 @@ import type {
   MessageStartFact,
   PermissionAskFact,
   ProviderError,
-  QuestionAskFact,
   SessionErrorFact,
   ThinkingDeltaFact,
   ThinkingDoneFact,
@@ -28,23 +27,13 @@ export interface ToolUpdateFactInput {
   raw?: unknown;
 }
 
-export interface QuestionAskFactInput {
-  toolSessionId: string;
-  messageId: string;
-  toolCallId: string;
-  question: string;
-  header?: string;
-  options?: string[];
-  context?: Record<string, unknown>;
-  raw?: unknown;
-}
-
 export interface PermissionAskFactInput {
   toolSessionId: string;
   messageId: string;
+  partId: string;
   permissionId: string;
-  toolCallId?: string;
   permissionType?: string;
+  title?: string;
   metadata?: Record<string, unknown>;
   raw?: unknown;
 }
@@ -174,21 +163,7 @@ export function buildToolUpdateFact(input: ToolUpdateFactInput): ToolUpdateFact 
     ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.input !== undefined ? { input: stringifyToolPayload(input.input) } : {}),
     ...(input.output !== undefined ? { output: stringifyToolPayload(input.output) } : {}),
-    ...(input.error !== undefined ? { error: input.error } : {}),
-    ...(input.raw !== undefined ? { raw: input.raw } : {}),
-  };
-}
-
-export function buildQuestionAskFact(input: QuestionAskFactInput): QuestionAskFact {
-  return {
-    type: "question.ask",
-    toolSessionId: input.toolSessionId,
-    messageId: input.messageId,
-    toolCallId: input.toolCallId,
-    question: input.question,
-    ...(input.header !== undefined ? { header: input.header } : {}),
-    ...(input.options !== undefined ? { options: input.options } : {}),
-    ...(input.context !== undefined ? { context: input.context } : {}),
+    ...(input.error !== undefined ? { error: stringifyToolPayload(input.error) } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };
 }
@@ -198,9 +173,10 @@ export function buildPermissionAskFact(input: PermissionAskFactInput): Permissio
     type: "permission.ask",
     toolSessionId: input.toolSessionId,
     messageId: input.messageId,
+    partId: input.partId,
     permissionId: input.permissionId,
-    ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
     ...(input.permissionType !== undefined ? { permissionType: input.permissionType } : {}),
+    ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };

@@ -83,72 +83,19 @@ test("provider adapter createSession generates ses_ prefixed ids", async () => {
   assert.match(created.toolSessionId, /^ses_/);
 });
 
-test("provider adapter forwards question replies to runtime reply host", async () => {
-  const calls = [];
-  const sessionRegistry = new SessionRegistry("agent:acct");
-  sessionRegistry.ensure("tool-1");
-  const provider = createAdapter({
-    sessionRegistry,
-    runtime: {
-      channel: {
-        reply: {
-          async replyQuestion(input) {
-            calls.push(input);
-          },
-        },
-      },
-    },
-  });
+test("provider adapter rejects question replies as unsupported", async () => {
+  const provider = createAdapter();
 
-  const result = await provider.replyQuestion({
-    traceId: "trace-1",
-    toolSessionId: "tool-1",
-    toolCallId: "call-1",
-    answer: "yes",
-  });
-
-  assert.deepEqual(result, { applied: true });
-  assert.deepEqual(calls, [
-    {
-      sessionKey: "agent:acct:tool-1",
-      toolCallId: "call-1",
-      answer: "yes",
-    },
-  ]);
-});
-
-test("provider adapter forwards permission replies to runtime reply host", async () => {
-  const calls = [];
-  const sessionRegistry = new SessionRegistry("agent:acct");
-  sessionRegistry.ensure("tool-1");
-  const provider = createAdapter({
-    sessionRegistry,
-    runtime: {
-      channel: {
-        reply: {
-          async replyPermission(input) {
-            calls.push(input);
-          },
-        },
-      },
-    },
-  });
-
-  const result = await provider.replyPermission({
-    traceId: "trace-1",
-    toolSessionId: "tool-1",
-    permissionId: "perm-1",
-    response: "once",
-  });
-
-  assert.deepEqual(result, { applied: true });
-  assert.deepEqual(calls, [
-    {
-      sessionKey: "agent:acct:tool-1",
-      permissionId: "perm-1",
-      response: "once",
-    },
-  ]);
+  await assert.rejects(
+    provider.replyQuestion({
+      traceId: "trace-1",
+      questionId: "question-1",
+      answers: [["yes"]],
+    }),
+    (error) =>
+      error?.code === "not_supported"
+      && /does not support question replies/.test(error.message),
+  );
 });
 
 test("provider adapter abort prefers runtime abort hook over session deletion", async () => {
@@ -196,65 +143,6 @@ test("provider adapter abort prefers runtime abort hook over session deletion", 
       runId: "run-1",
     },
   ]);
-});
-
-test("provider adapter question facts keep stable fields on toolSessionId", async () => {
-  const listeners = [];
-  const provider = createAdapter({
-    runtime: {
-      events: {
-        onAgentEvent(listener) {
-          listeners.push(listener);
-          return () => true;
-        },
-      },
-    },
-    getSubagentRuntime: () => ({
-      async run() {
-        return { runId: "sub-1" };
-      },
-      async waitForRun() {
-        return { status: "ok" };
-      },
-      async getSessionMessages() {
-        return {
-          messages: [{ role: "assistant", content: "done" }],
-        };
-      },
-    }),
-  });
-
-  await provider.initialize();
-  const run = await provider.runMessage({
-    traceId: "trace-1",
-    runId: "run-1",
-    toolSessionId: "ses_tool_1",
-    text: "hi",
-  });
-
-  listeners[0]({
-    stream: "question",
-    sessionKey: "agent:acct:ses_tool_1",
-    data: {
-      toolCallId: "call-1",
-      question: "continue?",
-      header: "Confirm",
-      options: ["yes", "no"],
-      sessionKey: "agent:acct:ses_tool_1",
-    },
-  });
-
-  const facts = [];
-  for await (const fact of run.facts) {
-    facts.push(fact);
-  }
-
-  const questionFact = facts.find((fact) => fact.type === "question.ask");
-  assert.ok(questionFact);
-  assert.equal(questionFact.toolSessionId, "ses_tool_1");
-  assert.equal(questionFact.messageId, facts[0].messageId);
-  assert.equal(questionFact.toolCallId, "call-1");
-  assert.equal(questionFact.context.sessionKey, "agent:acct:ses_tool_1");
 });
 
 test("provider adapter serializes tool input and output from runtime events", async () => {
@@ -604,85 +492,6 @@ test("provider adapter suppresses runtime reply block deltas when config streami
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "partial final");
 });
 
-test("provider adapter maps runtime question gateway events and replies through request id", async () => {
-  let gatewayListener;
-  const emitted = [];
-  const replies = [];
-  const provider = createAdapter({
-    runtime: {
-      events: {
-        onGatewayEvent(listener) {
-          gatewayListener = listener;
-          return () => true;
-        },
-      },
-      question: {
-        async reply(input) {
-          replies.push(input);
-        },
-      },
-    },
-  });
-
-  await provider.initialize({
-    outbound: {
-      async emitOutboundMessage(input) {
-        const facts = [];
-        for await (const fact of input.facts) {
-          facts.push(fact);
-        }
-        emitted.push({ input, facts });
-        return { applied: true };
-      },
-    },
-  });
-
-  gatewayListener({
-    event: "question.asked",
-    payload: {
-      id: "request-1",
-      sessionID: "ses_gateway_question_1",
-      tool: {
-        callID: "call-question-1",
-        messageID: "msg-question-1",
-      },
-      questions: [
-        {
-          question: "continue?",
-          header: "Confirm",
-          options: [{ label: "yes" }, { label: "no" }],
-        },
-      ],
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(emitted.length, 1);
-  assert.deepEqual(
-    emitted[0].facts.map((fact) => fact.type),
-    ["message.start", "question.ask", "message.done"],
-  );
-  const questionFact = emitted[0].facts.find((fact) => fact.type === "question.ask");
-  assert.equal(questionFact.toolSessionId, "ses_gateway_question_1");
-  assert.equal(questionFact.toolCallId, "call-question-1");
-  assert.equal(questionFact.question, "continue?");
-  assert.deepEqual(questionFact.options, ["yes", "no"]);
-
-  await provider.replyQuestion({
-    traceId: "trace-1",
-    toolSessionId: "ses_gateway_question_1",
-    toolCallId: "call-question-1",
-    answer: "yes",
-  });
-
-  assert.deepEqual(replies, [
-    {
-      requestId: "request-1",
-      answer: "yes",
-    },
-  ]);
-});
-
 test("provider adapter maps runtime approval gateway events and resolves permissions", async () => {
   let gatewayListener;
   const emitted = [];
@@ -737,14 +546,15 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
   assert.equal(permissionFact.toolSessionId, "ses_gateway_permission_1");
   assert.equal(permissionFact.permissionId, "approval-1");
   assert.equal(permissionFact.permissionType, "exec");
-  assert.equal(permissionFact.metadata.title, "Run command?");
+  assert.match(permissionFact.partId, /^part_/);
+  assert.equal(permissionFact.title, "Run command?");
   assert.equal(permissionFact.metadata.command, "echo hi");
+  assert.equal(permissionFact.metadata.title, undefined);
 
   await provider.replyPermission({
     traceId: "trace-1",
-    toolSessionId: "ses_gateway_permission_1",
     permissionId: "approval-1",
-    response: "once",
+    reply: "once",
   });
 
   assert.deepEqual(requests, [
@@ -756,6 +566,137 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
       },
     },
   ]);
+});
+
+test("provider adapter rejects unknown permission replies", async () => {
+  const provider = createAdapter();
+
+  await assert.rejects(
+    provider.replyPermission({
+      traceId: "trace-1",
+      permissionId: "missing",
+      reply: "once",
+    }),
+    (error) => error?.code === "not_found" && /Permission approval not found/.test(error.message),
+  );
+});
+
+test("provider adapter rejects resolved approval replies", async () => {
+  let gatewayListener;
+  const provider = createAdapter({
+    runtime: {
+      events: {
+        onGatewayEvent(listener) {
+          gatewayListener = listener;
+          return () => true;
+        },
+      },
+      async request() {},
+    },
+  });
+
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        return { applied: true };
+      },
+    },
+  });
+
+  gatewayListener({
+    event: "exec.approval.requested",
+    payload: {
+      id: "approval-1",
+      sessionID: "ses_gateway_permission_1",
+      title: "Run command?",
+      type: "exec",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  gatewayListener({
+    event: "exec.approval.resolved",
+    payload: {
+      id: "approval-1",
+    },
+  });
+
+  await assert.rejects(
+    provider.replyPermission({
+      traceId: "trace-1",
+      permissionId: "approval-1",
+      reply: "once",
+    }),
+    (error) =>
+      error?.code === "invalid_input"
+      && /already resolved/.test(error.message),
+  );
+});
+
+test("provider adapter ignores question and permission runtime streams", async () => {
+  const listeners = [];
+  let finishRun;
+  const provider = createAdapter({
+    runtime: {
+      events: {
+        onAgentEvent(listener) {
+          listeners.push(listener);
+          return () => true;
+        },
+      },
+    },
+    getSubagentRuntime: () => ({
+      async run() {
+        return { runId: "sub-1" };
+      },
+      async waitForRun() {
+        return await new Promise((resolve) => {
+          finishRun = () => resolve({ status: "ok" });
+        });
+      },
+      async getSessionMessages() {
+        return {
+          messages: [{ role: "assistant", content: "done" }],
+        };
+      },
+    }),
+  });
+
+  await provider.initialize();
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "run-1",
+    toolSessionId: "ses_ignore_runtime_streams",
+    text: "hi",
+  });
+
+  listeners[0]({
+    stream: "question",
+    sessionKey: "agent:acct:ses_ignore_runtime_streams",
+    data: {
+      toolCallId: "call-1",
+      question: "continue?",
+    },
+  });
+  listeners[0]({
+    stream: "permission",
+    sessionKey: "agent:acct:ses_ignore_runtime_streams",
+    data: {
+      permissionId: "perm-1",
+    },
+  });
+  finishRun();
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.equal(facts.some((fact) => fact.type === "question.ask"), false);
+  assert.equal(
+    facts.some((fact) => fact.type === "permission.ask" && fact.permissionId === "perm-1"),
+    false,
+  );
 });
 
 test("provider adapter debug logs raw runtime agent and reply dispatcher events", async () => {

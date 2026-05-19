@@ -2,7 +2,7 @@ import type {
   AbortSessionPayload,
   ChatPayload,
   CloseSessionPayload,
-  GatewayDownstreamBusinessRequest as DownstreamMessage,
+  GatewayDownstreamBusinessRequest,
   DownstreamMessageType,
   InvokeAction,
   InvokeMessage,
@@ -21,14 +21,16 @@ export type {
   AbortSessionPayload,
   ChatPayload,
   CloseSessionPayload,
-  DownstreamMessage,
   DownstreamMessageType,
+  GatewayDownstreamBusinessRequest,
   InvokeMessage,
   InvokeAction,
   PermissionReplyPayload,
   QuestionReplyPayload,
   StatusQueryMessage,
 } from "@agent-plugin/gateway-schema";
+
+export type DownstreamMessage = GatewayDownstreamBusinessRequest;
 
 export interface CreateSessionResultData {
   sessionId: string;
