@@ -8,12 +8,26 @@ import process from "node:process";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(SCRIPT_DIR, "..");
 
+function resolveExecutable(command) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "pnpm" || command === "npm" || command === "npx") {
+    return `${command}.cmd`;
+  }
+
+  return command;
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const resolvedCommand = resolveExecutable(command);
+    const child = spawn(resolvedCommand, args, {
       cwd: options.cwd ?? PACKAGE_DIR,
       env: { ...process.env, ...(options.env ?? {}) },
       stdio: options.stdio ?? "inherit",
+      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand),
     });
 
     child.on("error", reject);
@@ -23,7 +37,7 @@ function run(command, args, options = {}) {
         return;
       }
 
-      reject(new Error(`${command} ${args.join(" ")} failed with code ${code}`));
+      reject(new Error(`${resolvedCommand} ${args.join(" ")} failed with code ${code}`));
     });
   });
 }
