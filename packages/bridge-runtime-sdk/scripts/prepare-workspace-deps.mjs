@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, '..');
+const qrCodeAuthPackageDir = path.resolve(packageDir, '../skill-qrcode-auth');
 
 function resolveExecutable(command) {
   if (process.platform !== 'win32') {
@@ -48,7 +49,8 @@ export async function prepareWorkspaceDeps() {
   const buildMode = (process.env.BRIDGE_RUNTIME_SDK_BUILD_MODE ?? 'prod').trim().toLowerCase();
   const buildScript = buildMode === 'dev' ? 'build:dev' : 'build';
 
-  await run('pnpm', ['--dir', '../skill-qrcode-auth', 'run', buildScript]);
+  // 使用绝对路径传递 --dir，避免 Windows 在嵌套 pnpm 调用时对相对目录解析不一致。
+  await run('pnpm', ['--dir', qrCodeAuthPackageDir, 'run', buildScript]);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

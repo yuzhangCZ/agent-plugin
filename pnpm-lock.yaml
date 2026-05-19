@@ -136,7 +136,7 @@ importers:
 
   plugins/message-bridge-openclaw:
     dependencies:
-      '@agent-plugin/bridge-runtime-sdk':
+      '@wecode/bridge-runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/bridge-runtime-sdk
       '@agent-plugin/gateway-schema':

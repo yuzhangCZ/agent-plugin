@@ -11,7 +11,7 @@
 本文定义二维码授权能力从 `@wecode/skill-qrcode-auth` 向两个上层边界暴露时的设计结论：
 
 - OpenCode 插件宿主私有访问面
-- `@agent-plugin/bridge-runtime-sdk` 根入口稳定导出面
+- `@wecode/bridge-runtime-sdk` 根入口稳定导出面
 
 本文只负责冻结能力暴露边界、公开接口语义与职责分界，不负责：
 
@@ -34,7 +34,7 @@
 
 - `@wecode/skill-qrcode-auth`：二维码授权语义真源
 - `message-bridge` 宿主私有 Runtime API 扩版：同进程访问载体
-- `@agent-plugin/bridge-runtime-sdk`：宿主复用能力聚合入口
+- `@wecode/bridge-runtime-sdk`：宿主复用能力聚合入口
 
 这里的“升级”是新增设计结论，不视为旧需求或旧方案的自然外推。
 
@@ -55,7 +55,7 @@
 围绕“包真源”和“集成方式”，本方案的直接结论如下：
 
 - `message-bridge`：不是通过 npm/package 依赖集成 `skill-qrcode-auth`；宿主最终消费的是插件构建产物内部已装配好的 `qrcodeAuth` 能力。
-- `bridge-runtime-sdk`：对使用方继续作为 `@agent-plugin/bridge-runtime-sdk` 根入口包级消费；SDK 内部可以通过 package 依赖集成 `@wecode/skill-qrcode-auth`，再稳定转导出相关 facade 与类型。
+- `bridge-runtime-sdk`：对使用方继续作为 `@wecode/bridge-runtime-sdk` 根入口包级消费；SDK 内部可以通过 package 依赖集成 `@wecode/skill-qrcode-auth`，再稳定转导出相关 facade 与类型。
 
 这里需要明确区分三层概念：
 
@@ -89,7 +89,7 @@
 
 ### 3.3 `bridge-runtime-sdk` 扩边为宿主复用能力聚合入口
 
-`@agent-plugin/bridge-runtime-sdk` 当前以 runtime/provider/gateway 集成为主。本方案允许它在根入口稳定转导出二维码授权 facade，但该决定必须被视为一次显式扩边。
+`@wecode/bridge-runtime-sdk` 当前以 runtime/provider/gateway 集成为主。本方案允许它在根入口稳定转导出二维码授权 facade，但该决定必须被视为一次显式扩边。
 
 本次扩边的含义是：
 
@@ -114,7 +114,7 @@
 
 `bridge-runtime-sdk` 对 `skill-qrcode-auth` 的集成方式明确如下：
 
-- 对外消费方式：SDK 使用方继续通过 `@agent-plugin/bridge-runtime-sdk` 根入口进行稳定包级导入。
+- 对外消费方式：SDK 使用方继续通过 `@wecode/bridge-runtime-sdk` 根入口进行稳定包级导入。
 - 内部集成方式：SDK 可以通过 npm/package 依赖引入 `@wecode/skill-qrcode-auth`，并在根入口 stable re-export 相关 facade 与类型。
 - 仓库内开发场景可以由 workspace 依赖承载这一 package 集成关系，但对外契约仍是 SDK 根入口包级消费。
 
@@ -170,7 +170,7 @@ interface MessageBridgeRuntimeApi {
 
 ### 4.2 `bridge-runtime-sdk` 根入口导出面
 
-`@agent-plugin/bridge-runtime-sdk` 根入口稳定导出二维码授权 facade 及其直接相关类型：
+`@wecode/bridge-runtime-sdk` 根入口稳定导出二维码授权 facade 及其直接相关类型：
 
 - `qrcodeAuth`
 - `QrCodeAuth`
@@ -243,7 +243,7 @@ interface MessageBridgeRuntimeApi {
 
 - `@wecode/skill-qrcode-auth` 的 `qrcodeAuth.run(input)` 仍是低层 facade；其 public contract 不会替调用方省略 `channel`、`mac` 或 `onSnapshot`。
 - `message-bridge` 通过构建期内嵌/内部装配将该能力挂载到宿主私有 Runtime API，不将其暴露为宿主需额外安装的包依赖。
-- `@agent-plugin/bridge-runtime-sdk` 通过 package 依赖集成并稳定转导出该 facade 与相关类型，不新增默认值注入。
+- `@wecode/bridge-runtime-sdk` 通过 package 依赖集成并稳定转导出该 facade 与相关类型，不新增默认值注入。
 - 当前 OpenCode 宿主私有接入面可以通过 host adapter 预填宿主侧默认值。
 
 宿主接入层仍需承担以下责任：

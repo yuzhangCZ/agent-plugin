@@ -21,7 +21,7 @@
 ## External Dependencies
 
 1. OpenClaw `plugin-sdk` 提供 channel 注册、runtime 与 subagent 能力。
-2. `@agent-plugin/bridge-runtime-sdk` 提供统一 runtime 命令与 fact 投影编排。
+2. `@wecode/bridge-runtime-sdk` 提供统一 runtime 命令与 fact 投影编排。
 3. `@agent-plugin/gateway-schema` 提供共享协议边界。
 4. `ai-gateway` 提供 WebSocket 侧上下行 wire 协议。
 

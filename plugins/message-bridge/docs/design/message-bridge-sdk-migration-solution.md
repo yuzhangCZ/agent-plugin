@@ -41,7 +41,7 @@
 
 ## External Dependencies
 
-1. `@agent-plugin/bridge-runtime-sdk`
+1. `@wecode/bridge-runtime-sdk`
 2. `@agent-plugin/gateway-schema`
 3. OpenCode SDK / API
 4. `message-bridge` 当前实现

@@ -8,9 +8,9 @@
 
 ## 1. 文档定位
 
-本文面向 `@agent-plugin/bridge-runtime-sdk` 的 API 使用方，说明如何基于当前实现接入一个第三方 Agent Provider，并通过 Runtime 与 AI Gateway 建立稳定的上下行闭环。
+本文面向 `@wecode/bridge-runtime-sdk` 的 API 使用方，说明如何基于当前实现接入一个第三方 Agent Provider，并通过 Runtime 与 AI Gateway 建立稳定的上下行闭环。
 
-本文只覆盖根入口 `@agent-plugin/bridge-runtime-sdk` 的稳定导出与使用方式，重点包括：
+本文只覆盖根入口 `@wecode/bridge-runtime-sdk` 的稳定导出与使用方式，重点包括：
 
 - `createBridgeRuntime()` 的装配入口
 - `BridgeRuntime` 的生命周期与诊断能力
@@ -68,7 +68,7 @@ import {
   type ToolUpdateFact,
   type PermissionAskFact,
   type SessionErrorFact,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 ```
 
 本文中的对外接口说明都以 [packages/bridge-runtime-sdk/src/index.ts](/Users/zy/Code/agent-plugin/packages/bridge-runtime-sdk/src/index.ts) 为准。上面的代码块用于展示常见 public contract 的导入方式，不要求穷举全部导出。当前根入口同时导出 `ProviderFact` / `OutboundFact`、主要命令输入类型以及全部 fact 成员类型，便于 Provider 实现方为具体 fact 编写 helper、builder 与测试断言。`BridgeGatewayHostConnection`、`connectionFactory` 一类测试缝或内部装配细节，不属于对外集成契约。
@@ -94,7 +94,7 @@ import type {
   ProviderTerminalResult,
   ProviderRuntimeContext,
   ThirdPartyAgentProvider,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 
 function fromArray<T>(items: T[]): AsyncIterable<T> {
   return {
@@ -166,7 +166,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 import {
   createBridgeRuntime,
   type BridgeGatewayHostConfig,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 import { randomUUID } from 'node:crypto';
 
 import { DemoProvider } from './DemoProvider';
@@ -205,7 +205,7 @@ import {
   qrcodeAuth,
   type QrCodeAuthRunInput,
   type QrCodeAuthSnapshot,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 
 const input: QrCodeAuthRunInput = {
   channel: 'openx',
@@ -961,7 +961,7 @@ export interface ProviderCommandError {
 import type {
   ProviderCommandError,
   ProviderQuestionReplyInput,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 
 async function replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
   if (!input.questionId || input.answers.length === 0) {

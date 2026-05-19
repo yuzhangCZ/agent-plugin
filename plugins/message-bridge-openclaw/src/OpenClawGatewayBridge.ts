@@ -4,7 +4,7 @@ import {
   type BridgeGatewayHostConfig,
   type BridgeGatewayHostConnection,
   type BridgeRuntime,
-} from "@agent-plugin/bridge-runtime-sdk";
+} from "@wecode/bridge-runtime-sdk";
 
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";

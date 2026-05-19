@@ -141,7 +141,7 @@ function createRepoState(repoRoot = "/repo") {
   const bundleRoot = path.join(openclawRoot, "bundle");
   const runtimeRoot = path.join(repoRoot, "packages/bridge-runtime-sdk");
   const runtimePackRoot = path.join(runtimeRoot, ".tmp", "release-pack");
-  const runtimePackFile = "agent-plugin-bridge-runtime-sdk-0.1.0.tgz";
+  const runtimePackFile = "wecode-bridge-runtime-sdk-0.1.0.tgz";
   const runtimePackPath = path.join(runtimePackRoot, runtimePackFile);
 
   return {
@@ -176,7 +176,7 @@ function createRepoState(repoRoot = "/repo") {
         version: "0.2.0",
       },
       [path.join(runtimeRoot, "package.json")]: {
-        name: "@agent-plugin/bridge-runtime-sdk",
+        name: "@wecode/bridge-runtime-sdk",
         version: "0.0.0",
       },
     },
@@ -964,7 +964,7 @@ test("evaluatePublishReadiness supports bridge-runtime-sdk tarball artifacts", (
     { repoRoot, fs, exec },
   );
   fs.writeJson(path.join(state.runtimeRoot, "package.json"), {
-    name: "@agent-plugin/bridge-runtime-sdk",
+    name: "@wecode/bridge-runtime-sdk",
     version: "0.1.0",
   });
 
@@ -978,7 +978,7 @@ test("evaluatePublishReadiness supports bridge-runtime-sdk tarball artifacts", (
   assert.equal(readiness.resolvedDistTag, "latest");
   assert.equal(
     readiness.resolvedPublishRoot,
-    path.join("packages", "bridge-runtime-sdk", ".tmp", "release-pack", "agent-plugin-bridge-runtime-sdk-0.1.0.tgz"),
+    path.join("packages", "bridge-runtime-sdk", ".tmp", "release-pack", "wecode-bridge-runtime-sdk-0.1.0.tgz"),
   );
   assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("dist/index.js")), true);
   assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("package/dist/index.d.ts")), true);
@@ -2202,7 +2202,7 @@ test("executeRelease publishes bridge-runtime-sdk tarball with gateway injection
       (entry) =>
         entry.command === "npm"
         && entry.args[0] === "publish"
-        && entry.args[1] === path.join(repoRoot, "packages/bridge-runtime-sdk/.tmp/release-pack/agent-plugin-bridge-runtime-sdk-0.1.0.tgz")
+        && entry.args[1] === path.join(repoRoot, "packages/bridge-runtime-sdk/.tmp/release-pack/wecode-bridge-runtime-sdk-0.1.0.tgz")
         && entry.args.includes("--tag")
         && entry.args.includes("latest")
         && entry.cwd === repoRoot,

@@ -8,7 +8,7 @@
 
 ## In Scope
 
-1. 说明 `@agent-plugin/bridge-runtime-sdk` 作为统一 bridge runtime 的职责边界。
+1. 说明 `@wecode/bridge-runtime-sdk` 作为统一 bridge runtime 的职责边界。
 2. 说明其下行命令、provider fact、projector、registry 与 host connection 的结构分工。
 3. 说明其如何被 OpenClaw 侧桥接模块依赖，以及哪些能力不应下沉回插件内重复实现。
 

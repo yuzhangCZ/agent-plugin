@@ -1,4 +1,4 @@
-import type { BridgeGatewayHostConfig } from "@agent-plugin/bridge-runtime-sdk";
+import type { BridgeGatewayHostConfig } from "@wecode/bridge-runtime-sdk";
 import type { RegisterMetadata } from "./runtime/RegisterMetadata.js";
 import type { MessageBridgeResolvedAccount } from "./types.js";
 
