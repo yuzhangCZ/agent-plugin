@@ -124,6 +124,7 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
         toolSessionId,
         text: command.source.payload.text,
         assistantId: command.source.payload.assistantId,
+        ...(command.source.extParameters !== undefined ? { extParameters: command.source.extParameters } : {}),
         ...(Object.keys(context).length > 0 ? { context } : {}),
       });
       await this.coordinator.executeRun({

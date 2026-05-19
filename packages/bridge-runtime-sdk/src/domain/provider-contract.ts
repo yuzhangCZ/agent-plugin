@@ -107,6 +107,10 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  /**
+   * 服务端 chat 顶层字段透传，Runtime SDK 不处理其业务语义。
+   */
+  extParameters?: Record<string, unknown>;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;

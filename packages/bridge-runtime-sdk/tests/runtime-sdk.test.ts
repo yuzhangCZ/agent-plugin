@@ -306,6 +306,12 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     action: 'chat',
     welinkSessionId: 'welink-1',
     suppressReply: true,
+    extParameters: {
+      scene: 'workflow',
+      nested: {
+        enabled: true,
+      },
+    },
     payload: {
       toolSessionId: 'tool-1',
       text: 'hi',
@@ -324,6 +330,12 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     toolSessionId: 'tool-1',
     text: 'hi',
     assistantId: 'assistant-1',
+    extParameters: {
+      scene: 'workflow',
+      nested: {
+        enabled: true,
+      },
+    },
     context: {
       assistantAccount: 'assistant-account',
       sendUserAccount: 'user-account',
@@ -331,6 +343,55 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
       suppressReply: true,
     },
   });
+});
+
+test('start_request_run omits absent extParameters in provider runMessage input', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedInput: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          capturedInput = input as unknown as Record<string, unknown>;
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: {
+      toolSessionId: 'tool-1',
+      text: 'hi',
+    },
+  });
+  await flushEvents();
+
+  assert.ok(capturedInput);
+  assert.equal('extParameters' in capturedInput, false);
 });
 
 test('runtime consumes question replies by questionId and forwards structured answers', async () => {

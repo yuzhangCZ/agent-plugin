@@ -10,6 +10,7 @@ import {
   optionalStrictTrimmedString,
   requiredTrimmedString,
 } from './shared.ts';
+import { jsonValueSchema } from './tool-event/opencode-provider-event/json.ts';
 
 const [INVOKE_MESSAGE_TYPE, STATUS_QUERY_MESSAGE_TYPE] = DOWNSTREAM_MESSAGE_TYPES;
 const [CHAT_ACTION, CREATE_SESSION_ACTION, CLOSE_SESSION_ACTION, PERMISSION_REPLY_ACTION, ABORT_SESSION_ACTION, QUESTION_REPLY_ACTION] =
@@ -19,6 +20,8 @@ export const statusQueryMessageSchema = z.object({
   type: z.literal(STATUS_QUERY_MESSAGE_TYPE),
 });
 export type StatusQueryMessage = z.output<typeof statusQueryMessageSchema>;
+
+const jsonObjectSchema = z.record(z.string(), jsonValueSchema);
 
 export const chatPayloadSchema = z
   .object({
@@ -83,6 +86,7 @@ export const chatInvokeSchema = z
     action: z.literal(CHAT_ACTION),
     welinkSessionId: optionalLooseTrimmedString,
     suppressReply: z.boolean().optional(),
+    extParameters: jsonObjectSchema.optional(),
     payload: chatPayloadSchema,
   })
   .transform((message) => ({
@@ -91,6 +95,7 @@ export const chatInvokeSchema = z
     payload: message.payload,
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
     ...(message.suppressReply !== undefined ? { suppressReply: message.suppressReply } : {}),
+    ...(message.extParameters !== undefined ? { extParameters: message.extParameters } : {}),
   }));
 
 export const createSessionInvokeSchema = z

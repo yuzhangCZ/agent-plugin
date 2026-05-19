@@ -205,6 +205,8 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  // extParameters 来自服务端 chat 顶层字段，SDK 仅透传，不参与业务语义处理。
+  extParameters?: Record<string, unknown>;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
