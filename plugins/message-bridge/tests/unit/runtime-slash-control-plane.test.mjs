@@ -151,7 +151,8 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(sent, []);
   });
 
-  test('group chat slash strips leading mention before routing slash command', async () => {
+  test('group chat slash sessions returns disabled reply plus tool_done and does not query session list', async () => {
+    const sessionListRequests = [];
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
@@ -177,6 +178,7 @@ describe('runtime slash control-plane', () => {
         _client: {
           get: async (options) => {
             if (options?.url === '/session') {
+              sessionListRequests.push(options);
               return {
                 data: [
                   { id: 'ses-group-1', title: '群聊会话一', directory: '/tmp/group-1', projectID: 'proj-group-1', workspaceID: 'ws-group-1' },
@@ -201,12 +203,15 @@ describe('runtime slash control-plane', () => {
     });
 
     assert.strictEqual(sent.length, 7);
-    assertSyntheticAssistantReply(sent, 0, 'tool-group-1', '可切换会话列表\n\n- `ses-group-1` 群聊会话一（当前）');
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-1', '查询会话列表失败, 群聊场景不支持 /sessions，请在单聊中使用');
     assert.deepStrictEqual(sent[6], {
       type: 'tool_done',
       toolSessionId: 'tool-group-1',
       welinkSessionId: 'wl-group-1',
     });
+    assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
+    assert.deepStrictEqual(sessionListRequests, []);
   });
 
   test('group chat invalid slash strips mention and still returns failure reply plus tool_done', async () => {
@@ -234,6 +239,61 @@ describe('runtime slash control-plane', () => {
     });
     assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
+  });
+
+  test('group chat slash session returns disabled reply plus tool_done and keeps binding unchanged', async () => {
+    const sessionListRequests = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          get: async (options) => ({
+            data: {
+              id: options?.path?.id ?? 'ses-existing',
+              title: '已有会话',
+              directory: '/tmp/group-session',
+            },
+          }),
+        },
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/session') {
+              sessionListRequests.push(options);
+            }
+            return { data: [] };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.bindingStore.bind('tool-group-session', 'ses-existing');
+    runtime.ownershipResolver.attach('ses-existing', 'tool-group-session');
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-session',
+      action: 'chat',
+      payload: { toolSessionId: 'tool-group-session', text: '@bot /session ses-target', imGroupId: 'group-a' },
+    });
+
+    assert.strictEqual(sent.length, 7);
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-session', '切换会话失败, 群聊场景不支持 /session，请在单聊中使用');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-session',
+      welinkSessionId: 'wl-group-session',
+    });
+    assert.strictEqual(sent.some((message) => message.type === 'tool_error'), false);
+    assert.strictEqual(sent.some((message) => message.type === 'tool_done'), true);
+    assert.deepStrictEqual(runtime.bindingStore.get('tool-group-session'), {
+      anchor: 'tool-group-session',
+      activeOpencodeSessionId: 'ses-existing',
+      status: 'active',
+    });
+    assert.strictEqual(runtime.ownershipResolver.resolveAttachedAnchor('ses-existing'), 'tool-group-session');
+    assert.deepStrictEqual(sessionListRequests, []);
   });
 
   test('group chat slash new creates sessions without technical title and with deny permissions', async () => {

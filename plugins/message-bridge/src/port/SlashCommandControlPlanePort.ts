@@ -93,6 +93,7 @@ export type SlashCommandFailureCode =
   | 'session_out_of_scope'
   | 'model_not_found'
   | 'invalid_command'
+  | 'command_disabled_in_group_chat'
   | 'sdk_unreachable';
 
 /** 受控失败原因键：仅允许进入统一文案策略的白名单原因。 */
@@ -101,6 +102,7 @@ export type SlashCommandFailureReasonKey =
   | 'target_session_out_of_scope'
   | 'target_model_unavailable'
   | 'unsupported_command'
+  | 'command_not_available_in_group_chat'
   | 'host_unavailable';
 
 /** slash 成功结果，供 presenter 组装回包文案。 */

@@ -1,5 +1,6 @@
 import type {
   HostPromptExecutionPort,
+  SlashCommand,
   SlashCommandContextResolver,
   SlashCommandParser,
 } from '../port/SlashCommandControlPlanePort.js';
@@ -37,11 +38,29 @@ export class BindingAwareChatRouter {
       assistantId: input.assistantId,
       imGroupId: input.imGroupId,
     };
+    const isGroupChat = Boolean(input.imGroupId?.trim());
     const parseResult = this.dependencies.slashCommandParser.tryParse({
       text: input.text,
-      isGroupChat: Boolean(input.imGroupId?.trim()),
+      isGroupChat,
     });
     if (parseResult.kind === 'matched') {
+      if (isGroupChat && this.isGroupDisabledCommand(parseResult.command)) {
+        try {
+          await this.dependencies.slashCommandOrchestrator.completeFailure({
+            command: parseResult.command,
+            anchor: input.anchor,
+            welinkSessionId: input.welinkSessionId,
+            error: {
+              code: 'command_disabled_in_group_chat',
+              reasonKey: 'command_not_available_in_group_chat',
+            },
+            ...(input.logger ? { logger: input.logger } : {}),
+          });
+        } catch (error) {
+          throw new HandledSlashCommandFailure(error);
+        }
+        return { kind: 'slash_completed' };
+      }
       try {
         const context = await this.dependencies.contextResolver.resolve(input.anchor, createContext, input.logger);
         await this.dependencies.slashCommandOrchestrator.execute({
@@ -96,5 +115,10 @@ export class BindingAwareChatRouter {
       kind: 'chat_forwarded',
       sessionId: context.activeOpencodeSessionId,
     };
+  }
+
+  /** 群聊下禁用显式列会话和切会话，避免绕开当前会话隔离边界。 */
+  private isGroupDisabledCommand(command: SlashCommand): boolean {
+    return command.kind === 'sessions' || command.kind === 'session';
   }
 }
