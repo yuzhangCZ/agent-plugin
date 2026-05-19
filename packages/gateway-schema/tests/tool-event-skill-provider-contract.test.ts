@@ -19,7 +19,8 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         status: 'running',
         toolCallId: 'call-1',
         title: 'Execute ls',
-        input: { command: 'ls' },
+        input: 'ls',
+        output: 'file-a',
       },
     },
     {
@@ -27,12 +28,18 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         messageId: 'msg-1',
         partId: 'part-4',
-        question: '继续执行吗？',
-        toolName: 'question',
+        questionId: 'question-1',
         toolCallId: 'call-q-1',
         status: 'running',
-        header: '确认操作',
-        options: ['是', '否'],
+        extParam: { scene: 'confirm' },
+        questions: [
+          {
+            question: '继续执行吗？',
+            header: '确认操作',
+            multiSelect: false,
+            options: [{ label: '是' }, { label: '否' }],
+          },
+        ],
       },
     },
     {
@@ -40,9 +47,9 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         messageId: 'msg-1',
         partId: 'part-5',
+        toolCallId: 'perm-1',
         permissionId: 'perm-1',
         permType: 'file_write',
-        toolName: 'write',
         title: '允许写文件',
         metadata: { path: '/tmp/a.ts' },
       },
@@ -52,6 +59,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         permissionId: 'perm-1',
         response: 'once',
+        permType: 'file_write',
         messageId: 'msg-1',
         partId: 'part-5',
       },
@@ -66,8 +74,9 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         reason: 'stop',
       },
     },
-    { type: 'session.status', properties: { sessionStatus: 'idle', welinkSessionId: 'wl-1' } },
-    { type: 'session.error', properties: { error: 'Agent offline', welinkSessionId: 'wl-1' } },
+    { type: 'session.status', properties: { sessionStatus: 'idle' } },
+    { type: 'session.title', properties: { title: '新会话标题' } },
+    { type: 'session.error', properties: { error: 'Agent offline' } },
   ] as const;
 
   for (const item of cases) {
@@ -86,6 +95,47 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       type: item.type,
       properties: item.properties,
     });
+  }
+});
+
+test('validateToolEvent accepts cloud events with deprecated fields that are now stripped from the contract', () => {
+  const cases = [
+    {
+      type: 'question',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-4',
+        questionId: 'question-1',
+        questions: [
+          {
+            question: '继续执行吗？',
+          },
+        ],
+      },
+    },
+    {
+      type: 'session.status',
+      properties: {
+        sessionStatus: 'busy',
+        welinkSessionId: 'wl-1',
+      },
+    },
+    {
+      type: 'session.error',
+      properties: {
+        error: 'boom',
+        welinkSessionId: 'wl-1',
+      },
+    },
+  ] as const;
+
+  for (const item of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: item.type,
+      properties: item.properties,
+    });
+    assert.equal(result.ok, true, item.type);
   }
 });
 
@@ -140,7 +190,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       },
     },
     {
-      name: 'tool.update invalid status',
+      name: 'tool.update missing toolCallId',
       eventType: 'tool.update',
       input: {
         protocol: 'cloud',
@@ -149,7 +199,146 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           messageId: 'msg-1',
           partId: 'part-1',
           toolName: 'bash',
-          status: 'queued',
+          status: 'running',
+        },
+      },
+    },
+    {
+      name: 'tool.update non-string input',
+      eventType: 'tool.update',
+      input: {
+        protocol: 'cloud',
+        type: 'tool.update',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-1',
+          toolName: 'bash',
+          status: 'running',
+          toolCallId: 'call-1',
+          input: { command: 'ls' },
+        },
+      },
+    },
+    {
+      name: 'question missing questions',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          questionId: 'question-1',
+          toolCallId: 'question-1',
+        },
+      },
+    },
+    {
+      name: 'question missing questionId',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          toolCallId: 'question-1',
+          questions: [
+            {
+              question: '继续执行吗？',
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing toolCallId',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          permissionId: 'perm-1',
+        },
+      },
+    },
+    {
+      name: 'permission.ask toolCallId must equal permissionId',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          toolCallId: 'perm-2',
+          permissionId: 'perm-1',
+        },
+      },
+    },
+    {
+      name: 'question flat payload is rejected',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          questionId: 'question-1',
+          toolCallId: 'question-1',
+          question: '继续执行吗？',
+          options: [{ label: '是' }],
+        },
+      },
+    },
+    {
+      name: 'question string options are rejected',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          questions: [
+            {
+              question: '继续执行吗？',
+              options: ['是', '否'],
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: 'question top-level multiSelect is rejected',
+      eventType: 'question',
+      input: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-4',
+          multiSelect: true,
+          questions: [
+            {
+              question: '继续执行吗？',
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: 'step.done tokens must be numeric map',
+      eventType: 'step.done',
+      input: {
+        protocol: 'cloud',
+        type: 'step.done',
+        properties: {
+          messageId: 'msg-1',
+          tokens: { input: '10' },
         },
       },
     },
@@ -159,7 +348,25 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       input: {
         protocol: 'cloud',
         type: 'session.status',
-        properties: { welinkSessionId: 'wl-1' },
+        properties: {},
+      },
+    },
+    {
+      name: 'session.status invalid status value',
+      eventType: 'session.status',
+      input: {
+        protocol: 'cloud',
+        type: 'session.status',
+        properties: { sessionStatus: 'waiting' },
+      },
+    },
+    {
+      name: 'session.title missing title',
+      eventType: 'session.title',
+      input: {
+        protocol: 'cloud',
+        type: 'session.title',
+        properties: {},
       },
     },
   ];

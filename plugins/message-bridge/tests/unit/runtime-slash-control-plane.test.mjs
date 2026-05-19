@@ -352,6 +352,51 @@ describe('runtime slash control-plane', () => {
     });
   });
 
+  test('group chat slash-looking text with suppressReply still uses deny fast path', async () => {
+    const prompts = [];
+    const sessionListRequests = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async (options) => {
+            prompts.push(options);
+            return { data: { ok: true } };
+          },
+        },
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/session') {
+              sessionListRequests.push(options);
+            }
+            return { data: [] };
+          },
+        },
+      }),
+    });
+    const sent = [];
+
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-group-deny-slash',
+      action: 'chat',
+      suppressReply: true,
+      payload: { toolSessionId: 'tool-group-deny-slash', text: '@bot /sessions', imGroupId: 'group-a' },
+    });
+
+    assert.deepStrictEqual(prompts, []);
+    assert.deepStrictEqual(sessionListRequests, []);
+    assert.strictEqual(sent.length, 7);
+    assertSyntheticAssistantReply(sent, 0, 'tool-group-deny-slash', '本机器人不处理群聊消息，请勿在群内@提问');
+    assert.deepStrictEqual(sent[6], {
+      type: 'tool_done',
+      toolSessionId: 'tool-group-deny-slash',
+      welinkSessionId: 'wl-group-deny-slash',
+    });
+  });
+
   test('matched slash failure does not fall back to tool_error when failure reply delivery throws', async () => {
     let createCount = 0;
     const runtime = new BridgeRuntime({

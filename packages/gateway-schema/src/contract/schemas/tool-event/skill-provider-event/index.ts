@@ -10,8 +10,10 @@ import {
 import {
   skillSessionErrorEventSchema,
   skillSessionStatusEventSchema,
+  skillSessionTitleEventSchema,
   type SkillSessionErrorEvent,
   type SkillSessionStatusEvent,
+  type SkillSessionTitleEvent,
 } from './session.ts';
 import {
   skillTextDeltaEventSchema,
@@ -48,6 +50,7 @@ export const skillProviderEventSchema = z.union([
   skillStepStartEventSchema,
   skillStepDoneEventSchema,
   skillSessionStatusEventSchema,
+  skillSessionTitleEventSchema,
   skillSessionErrorEventSchema,
 ]);
 
@@ -65,6 +68,7 @@ export {
   skillStepStartEventSchema,
   skillStepDoneEventSchema,
   skillSessionStatusEventSchema,
+  skillSessionTitleEventSchema,
   skillSessionErrorEventSchema,
 };
 
@@ -80,5 +84,6 @@ export type {
   SkillStepStartEvent,
   SkillStepDoneEvent,
   SkillSessionStatusEvent,
+  SkillSessionTitleEvent,
   SkillSessionErrorEvent,
 };

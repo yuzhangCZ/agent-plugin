@@ -64,6 +64,16 @@
 - ai-gateway 继续承载桥接传输，但不再参与宿主内部会话映射与切换
 - 当前设计与修订后的 requirements 文档保持一致，统一采用“复数命令列目录、单数命令做切换/设置”的外部命令面
 
+### 2.1 群聊命令能力收敛
+
+当前实现对群聊场景额外收口如下：
+
+- 群聊允许：`/new`、`/models`、`/model <providerId/modelId>`
+- 群聊禁用：`/sessions`、`/session <sessionId>`
+- 命中禁用命令时，插件返回统一 synthetic assistant failure reply，不回退普通 chat，不发送 `tool_error`
+
+这样做的目的不是改变 slash command 语法集合，而是避免群聊场景显式枚举或切换宿主会话，绕开当前会话隔离和权限约束。
+
 ## 3. In Scope
 
 - 梳理 `message-bridge` 与 `message-bridge-openclaw` 在新前提下如何承接五个 slash commands
@@ -154,6 +164,8 @@ v1 当前收口的已知命令仅包括：
 - 群聊中的 `@bot /sessions`、`@bot /sessions fdsfs` 仅在明确群聊时才允许先剥离 mention 再做 slash 判定
 
 对已识别但参数非法的已知命令，v1 用户可见失败文案必须返回命令专属用法提示，而不是泛化成“命令不受支持”。
+
+对已识别且语法合法、但当前场景不允许执行的命令，v1 用户可见失败文案必须返回场景级限制提示；当前仅群聊下的 `/sessions`、`/session <sessionId>` 适用该规则。
 
 本节的群聊 slash 规则只在“请求已获准继续处理”前提下成立。若上游在同一条 `invoke.chat` 上显式下发 `suppressReply=true`，runtime 必须先走群聊拒答短路，既不做 mention 剥离，也不做 slash 三态判定。
 

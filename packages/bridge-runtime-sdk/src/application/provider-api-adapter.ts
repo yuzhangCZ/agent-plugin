@@ -57,7 +57,6 @@ export class ProviderApiAdapter implements ProviderCommandHandlers {
   replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
     this.trace.recordProviderCall({
       command: 'replyQuestion',
-      toolSessionId: input.toolSessionId,
     });
     return this.provider.replyQuestion(input);
   }
@@ -65,7 +64,6 @@ export class ProviderApiAdapter implements ProviderCommandHandlers {
   replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }> {
     this.trace.recordProviderCall({
       command: 'replyPermission',
-      toolSessionId: input.toolSessionId,
     });
     return this.provider.replyPermission(input);
   }

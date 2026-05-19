@@ -73,9 +73,9 @@
 当前共享包通过 `family` 分层维护事件白名单，并由 `SUPPORTED_TOOL_EVENT_TYPES` 暴露并集：
 
 - `opencode` family：12 个历史兼容事件
-- `skill` family：12 个协议收敛事件（不做兼容兜底）
+- `skill` family：13 个协议收敛事件（不做兼容兜底）
 
-### opencode family（11）
+### opencode family（12）
 
 - `message.updated`
 - `message.part.updated`
@@ -90,7 +90,7 @@
 - `permission.replied`
 - `question.asked`
 
-### skill family（12）
+### skill family（13）
 
 - `text.delta`
 - `text.done`
@@ -103,11 +103,12 @@
 - `step.start`
 - `step.done`
 - `session.status`
+- `session.title`
 - `session.error`
 
 说明：
 
-- `skill` family 只接受上述 12 个事件，未知或历史别名（如 `question.ask`、`permission.replied`、`session.idle`）必须 fail-closed。
+- `skill` family 只接受上述 13 个事件，未知或历史别名（如 `question.ask`、`permission.replied`、`session.idle`）必须 fail-closed。
 - `skill` family 不包含 `raw` 字段。
 
 ## `message.updated`
@@ -562,10 +563,10 @@
 | `properties.partId` | string | 是 | - | tool part ID | provider fact | 同上 |
 | `properties.toolName` | string | 是 | - | 工具名 | provider fact | 同上 |
 | `properties.status` | string | 是 | `pending` / `running` / `completed` / `error` | 工具状态 | provider fact | 同上 |
-| `properties.toolCallId` | string | 否 | - | 工具调用 ID | provider fact | 同上 |
+| `properties.toolCallId` | string | 是 | - | 工具调用 ID | provider fact | 同上 |
 | `properties.title` | string | 否 | - | 工具标题 | provider fact | 同上 |
-| `properties.input` | unknown | 否 | - | 工具输入快照 | provider fact | 同上 |
-| `properties.output` | unknown | 否 | - | 工具输出快照 | provider fact | 同上 |
+| `properties.input` | string | 否 | - | 工具输入快照 | provider fact | 同上 |
+| `properties.output` | string | 否 | - | 工具输出快照 | provider fact | 同上 |
 | `properties.error` | string | 否 | - | 错误消息 | provider fact | 同上 |
 
 ## `question`
@@ -578,9 +579,14 @@
   "type": "question",
   "properties": {
     "messageId": "msg-001",
-    "partId": "call-001",
+    "partId": "part-001",
     "toolCallId": "call-001",
-    "question": "Proceed?"
+    "questions": [
+      {
+        "question": "Proceed?",
+        "options": [{ "label": "Yes" }]
+      }
+    ]
   }
 }
 ```
@@ -592,9 +598,14 @@
 | `properties.messageId` | string | 是 | - | 消息 ID | provider fact | 同上 |
 | `properties.partId` | string | 是 | - | 交互 part ID | provider fact | 同上 |
 | `properties.toolCallId` | string | 否 | - | 工具调用 ID | provider fact | 同上 |
-| `properties.question` | string | 是 | - | 问题文本 | provider fact | 同上 |
-| `properties.header` | string | 否 | - | 问题标题 | provider fact | 同上 |
-| `properties.options` | array<string> | 否 | - | 选项列表 | provider fact | 同上 |
+| `properties.status` | string | 否 | - | 问题状态 | provider fact | 同上 |
+| `properties.extParam` | unknown | 否 | - | 扩展参数 | provider fact | 同上 |
+| `properties.questions` | array<object> | 是 | 非空数组 | 问题列表 | provider fact | 同上 |
+| `properties.questions[].question` | string | 是 | - | 问题文本 | provider fact | 同上 |
+| `properties.questions[].header` | string | 否 | - | 问题标题 | provider fact | 同上 |
+| `properties.questions[].multiSelect` | boolean | 否 | `true` / `false` | 是否多选 | provider fact | 同上 |
+| `properties.questions[].options` | array<object> | 否 | - | 选项列表 | provider fact | 同上 |
+| `properties.questions[].options[].label` | string | 是 | - | 选项显示文本 | provider fact | 同上 |
 
 ## `permission.ask`
 
@@ -646,6 +657,7 @@
 | `properties.messageId` | string | 是 | - | 消息 ID | provider / projector | 同上 |
 | `properties.partId` | string | 是 | - | 交互 part ID | provider / projector | 同上 |
 | `properties.permissionId` | string | 是 | - | 权限请求 ID | provider / projector | 同上 |
+| `properties.permType` | string | 否 | - | 权限类型 | provider / projector | 同上 |
 | `properties.response` | string | 是 | `once` / `always` / `reject` | 回复结果 | provider / projector | 同上 |
 
 ## `step.start`
@@ -688,9 +700,29 @@
 | `family` | string | 是 | `skill` | payload family discriminator | SDK runtime 内部派生 | 同上 |
 | `type` | string | 是 | `step.done` | 事件类型 | `message.done` 派生 | 同上 |
 | `properties.messageId` | string | 是 | - | 消息 ID | runtime 派生 | 同上 |
-| `properties.tokens` | unknown | 否 | - | token 用量 | provider fact | 同上 |
+| `properties.tokens` | object | 否 | `Record<string, number>` | token 用量 | provider fact | 同上 |
 | `properties.cost` | number | 否 | - | 成本 | provider fact | 同上 |
 | `properties.reason` | string | 否 | - | 收口原因 | provider fact | 同上 |
+
+## `session.title`
+
+用途：`skill` family 会话标题更新事件。
+
+```json
+{
+  "family": "skill",
+  "type": "session.title",
+  "properties": {
+    "title": "new session title"
+  }
+}
+```
+
+| 字段路径 | 类型 | 必填 | 取值/枚举 | 说明 | 来源 | 参考宿主版本 |
+|---|---|---|---|---|---|---|
+| `family` | string | 是 | `skill` | payload family discriminator | SDK runtime projector | 同上 |
+| `type` | string | 是 | `session.title` | 事件类型 | `ProviderFact -> SkillProviderEvent` 投影 | 同上 |
+| `properties.title` | string | 是 | - | 会话标题 | provider fact | 同上 |
 
 ## 失败规则
 

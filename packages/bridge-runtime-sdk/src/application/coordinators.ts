@@ -30,28 +30,58 @@ export class InteractionCoordinator {
 
   registerFromFact(fact: ProviderFact): void {
     if (fact.type === 'question.ask') {
-      this.registry.register({
+      const result = this.registry.register({
         toolSessionId: fact.toolSessionId,
         kind: 'question',
         messageId: fact.messageId,
-        tokenId: fact.toolCallId,
+        tokenId: fact.questionId,
       });
+      if (!result.ok) {
+        if (result.reason === 'duplicate_same_session') {
+          return;
+        }
+        this.registry.clearSession(fact.toolSessionId);
+        throw new RuntimeContractError(
+          'pending_interaction_conflict',
+          'question interaction reply target must be globally unique',
+          {
+            currentToolSessionId: fact.toolSessionId,
+            existingToolSessionId: result.conflict.existing.toolSessionId,
+            tokenId: fact.questionId,
+          },
+        );
+      }
       this.trace.recordInteraction({
         action: 'register',
         kind: 'question',
         toolSessionId: fact.toolSessionId,
-        tokenId: fact.toolCallId,
+        tokenId: fact.questionId,
       });
       return;
     }
 
     if (fact.type === 'permission.ask') {
-      this.registry.register({
+      const result = this.registry.register({
         toolSessionId: fact.toolSessionId,
         kind: 'permission',
         messageId: fact.messageId,
         tokenId: fact.permissionId,
       });
+      if (!result.ok) {
+        if (result.reason === 'duplicate_same_session') {
+          return;
+        }
+        this.registry.clearSession(fact.toolSessionId);
+        throw new RuntimeContractError(
+          'pending_interaction_conflict',
+          'permission interaction reply target must be globally unique',
+          {
+            currentToolSessionId: fact.toolSessionId,
+            existingToolSessionId: result.conflict.existing.toolSessionId,
+            tokenId: fact.permissionId,
+          },
+        );
+      }
       this.trace.recordInteraction({
         action: 'register',
         kind: 'permission',
@@ -61,11 +91,10 @@ export class InteractionCoordinator {
     }
   }
 
-  consume(toolSessionId: string, kind: 'question' | 'permission', tokenId: string): void {
-    const interaction = this.registry.consume({ toolSessionId, kind, tokenId });
+  consume(kind: 'question' | 'permission', tokenId: string): string {
+    const interaction = this.registry.consume({ kind, tokenId });
     if (!interaction) {
       throw new RuntimeContractError('pending_interaction_not_found', `${kind} interaction not found`, {
-        toolSessionId,
         tokenId,
       });
     }
@@ -73,9 +102,10 @@ export class InteractionCoordinator {
     this.trace.recordInteraction({
       action: 'consume',
       kind,
-      toolSessionId,
+      toolSessionId: interaction.toolSessionId,
       tokenId,
     });
+    return interaction.toolSessionId;
   }
 
   clearSession(toolSessionId: string): void {

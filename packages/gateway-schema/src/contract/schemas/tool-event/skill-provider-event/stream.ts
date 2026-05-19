@@ -47,10 +47,10 @@ const skillToolUpdateEventBaseSchema = z.object({
     partId: requiredTrimmedString,
     toolName: requiredTrimmedString,
     status: z.enum(MESSAGE_PART_STATE_STATUSES),
-    toolCallId: requiredTrimmedString.optional(),
+    toolCallId: requiredTrimmedString,
     title: requiredTrimmedString.optional(),
-    input: z.unknown().optional(),
-    output: z.unknown().optional(),
+    input: requiredTrimmedString.optional(),
+    output: requiredTrimmedString.optional(),
     error: requiredTrimmedString.optional(),
   }),
 });

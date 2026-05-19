@@ -501,20 +501,26 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  context?: {
+    assistantAccount?: string;
+    sendUserAccount?: string;
+    imGroupId?: string;
+    suppressReply?: boolean;
+  };
 }
+
+export type QuestionAnswer = string[];
 
 export interface ProviderQuestionReplyInput {
   traceId: string;
-  toolSessionId: string;
-  toolCallId: string;
-  answer: string;
+  questionId: string;
+  answers: QuestionAnswer[];
 }
 
 export interface ProviderPermissionReplyInput {
   traceId: string;
-  toolSessionId: string;
   permissionId: string;
-  response: 'once' | 'always' | 'reject';
+  reply: 'once' | 'always' | 'reject';
 }
 
 export interface ProviderCloseSessionInput {
@@ -605,7 +611,9 @@ export type ProviderFact =
   | ToolUpdateFact
   | QuestionAskFact
   | PermissionAskFact
+  | PermissionReplyFact
   | MessageDoneFact
+  | SessionTitleFact
   | SessionErrorFact;
 ```
 
@@ -615,7 +623,8 @@ export type ProviderFact =
 - 文本输出：`text.delta`、`text.done`
 - 思考输出：`thinking.delta`、`thinking.done`
 - 工具调用：`tool.update`
-- 挂起交互：`question.ask`、`permission.ask`
+- 挂起交互：`question.ask`、`permission.ask`、`permission.reply`
+- 会话元信息：`session.title`
 - 会话错误：`session.error`
 
 ### 7.2 主要 fact shape
@@ -671,10 +680,21 @@ export interface ToolUpdateFact {
   toolName: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
-  input?: unknown;
-  output?: unknown;
+  input?: string;
+  output?: string;
   error?: string;
   raw?: unknown;
+}
+
+export interface QuestionOption {
+  label: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header?: string;
+  options?: QuestionOption[];
+  multiSelect?: boolean;
 }
 
 /**
@@ -685,7 +705,12 @@ export interface QuestionAskFact {
   type: 'question.ask';
   toolSessionId: string;
   messageId: string;
-  toolCallId: string;
+  partId: string;
+  questionId: string;
+  questions: QuestionItem[];
+  toolCallId?: string;
+  status?: string;
+  extParam?: unknown;
   header?: string;
   question: string;
   options?: string[];
@@ -701,10 +726,24 @@ export interface PermissionAskFact {
   type: 'permission.ask';
   toolSessionId: string;
   messageId: string;
+  partId: string;
   permissionId: string;
-  toolCallId?: string;
   permissionType?: string;
+  title?: string;
   metadata?: Record<string, unknown>;
+  raw?: unknown;
+}
+
+`QuestionAskFact.questionId` 与 `PermissionAskFact.permissionId` 都是全局唯一的 direct reply target。Runtime 投影 cloud `permission.ask` 事件时固定输出 `toolCallId = permissionId`；对 cloud `question`，若 fact 自身带了 `toolCallId` 则保留其 tool call 关联语义，否则才回填 `toolCallId = questionId` 兼容旧下游回复目标读取口径。`partId` 始终只表示消息组成部分的稳定分片 ID，不承担回复目标语义。
+
+export interface PermissionReplyFact {
+  type: 'permission.reply';
+  toolSessionId: string;
+  permissionId: string;
+  response: 'once' | 'always' | 'reject';
+  messageId?: string;
+  partId?: string;
+  permissionType?: string;
   raw?: unknown;
 }
 
@@ -719,6 +758,13 @@ export interface MessageDoneFact {
   reason?: string;
   tokens?: unknown;
   cost?: number;
+  raw?: unknown;
+}
+
+export interface SessionTitleFact {
+  type: 'session.title';
+  toolSessionId: string;
+  title: string;
   raw?: unknown;
 }
 
@@ -799,7 +845,15 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
         type: 'question.ask',
         toolSessionId: input.toolSessionId,
         messageId: 'msg-q-1',
-        toolCallId: 'tool-call-1',
+        partId: 'part-q-1',
+        questionId: 'question-1',
+        status: 'running',
+        questions: [
+          {
+            question: '请选择部署环境',
+            options: [{ label: 'staging' }, { label: 'production' }],
+          },
+        ],
         question: '请选择部署环境',
         options: ['staging', 'production'],
       };
@@ -811,7 +865,7 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 }
 
 async replyQuestion(input: ProviderQuestionReplyInput) {
-  console.log(input.toolCallId, input.answer);
+  console.log(input.questionId, input.answers);
   return { applied: true };
 }
 ```
@@ -910,14 +964,14 @@ import type {
 } from '@agent-plugin/bridge-runtime-sdk';
 
 async function replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
-  if (!input.toolCallId) {
+  if (!input.questionId || input.answers.length === 0) {
     throw {
       code: 'invalid_input',
-      message: 'toolCallId is required',
+      message: 'questionId and answers are required',
     } satisfies ProviderCommandError;
   }
 
-  const applied = await host.applyQuestionReply(input.toolCallId, input.answer);
+  const applied = await host.applyQuestionReply(input.questionId, input.answers);
   if (!applied) {
     throw {
       code: 'not_found',
