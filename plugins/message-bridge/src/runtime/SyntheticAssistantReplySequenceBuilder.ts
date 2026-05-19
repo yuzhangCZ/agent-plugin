@@ -7,11 +7,13 @@ import { UPSTREAM_MESSAGE_TYPE } from '../gateway-wire/transport.js';
 
 type ToolEventPayload = Extract<GatewaySendPayload, { type: 'tool_event' }>;
 
-/** canonical synthetic assistant reply 的四段事件序列。 */
+/** canonical synthetic assistant reply 的六段事件序列。 */
 export interface SyntheticAssistantReplySequence {
   messageUpdated: ToolEventPayload;
   stepStart: ToolEventPayload;
-  text: ToolEventPayload;
+  textSeedUpdated: ToolEventPayload;
+  textDelta: ToolEventPayload;
+  textFinalUpdated: ToolEventPayload;
   stepFinish: ToolEventPayload;
 }
 
@@ -57,7 +59,37 @@ export class SyntheticAssistantReplySequenceBuilder {
           },
         },
       },
-      text: {
+      textSeedUpdated: {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: input.toolSessionId,
+        event: {
+          type: TOOL_EVENT_TYPE.MESSAGE_PART_UPDATED,
+          properties: {
+            part: {
+              id: textPartId,
+              sessionID: input.toolSessionId,
+              messageID: messageId,
+              type: 'text',
+              text: '',
+            },
+          },
+        },
+      },
+      textDelta: {
+        type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
+        toolSessionId: input.toolSessionId,
+        event: {
+          type: TOOL_EVENT_TYPE.MESSAGE_PART_DELTA,
+          properties: {
+            sessionID: input.toolSessionId,
+            messageID: messageId,
+            partID: textPartId,
+            field: 'text',
+            delta: input.text,
+          },
+        },
+      },
+      textFinalUpdated: {
         type: UPSTREAM_MESSAGE_TYPE.TOOL_EVENT,
         toolSessionId: input.toolSessionId,
         event: {

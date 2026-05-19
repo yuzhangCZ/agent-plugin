@@ -59,6 +59,20 @@ function normalizeSyntheticReplyEvents(events) {
       };
     }
 
+    if (event.event?.type === 'message.part.delta') {
+      return {
+        ...event,
+        event: {
+          ...event.event,
+          properties: {
+            ...event.event.properties,
+            messageID: '<message-id>',
+            partID: '<part-id:text>',
+          },
+        },
+      };
+    }
+
     return event;
   });
 }
@@ -97,9 +111,9 @@ test('synthetic assistant reply sender emits canonical reply events using input 
 
   assert.deepStrictEqual(result, { success: true });
   assert.strictEqual(toolDoneCalls, 1);
-  assert.strictEqual(sent.length, 4);
+  assert.strictEqual(sent.length, 6);
 
-  const [messageUpdated, stepStart, text, stepFinish] = sent.map((entry) => entry.payload);
+  const [messageUpdated, stepStart, textSeedUpdated, textDelta, textFinalUpdated, stepFinish] = sent.map((entry) => entry.payload);
   assert.strictEqual(messageUpdated.type, 'tool_event');
   assert.strictEqual(messageUpdated.event.type, 'message.updated');
   assert.match(messageUpdated.event.properties.info.id, /^msg_[a-f0-9]{32}$/);
@@ -107,14 +121,20 @@ test('synthetic assistant reply sender emits canonical reply events using input 
   const messageId = messageUpdated.event.properties.info.id;
   const partIds = [
     stepStart.event.properties.part.id,
-    text.event.properties.part.id,
+    textSeedUpdated.event.properties.part.id,
+    textDelta.event.properties.partID,
+    textFinalUpdated.event.properties.part.id,
     stepFinish.event.properties.part.id,
   ];
   assert.ok(partIds.every((id) => /^prt_[a-f0-9]{32}$/.test(id)));
   assert.strictEqual(new Set(partIds).size, 3);
-  assert.strictEqual(text.event.properties.part.text, '这是本地合成回复');
+  assert.strictEqual(textSeedUpdated.event.properties.part.text, '');
+  assert.strictEqual(textDelta.event.properties.delta, '这是本地合成回复');
+  assert.strictEqual(textFinalUpdated.event.properties.part.text, '这是本地合成回复');
   assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
-  assert.strictEqual(text.event.properties.part.messageID, messageId);
+  assert.strictEqual(textSeedUpdated.event.properties.part.messageID, messageId);
+  assert.strictEqual(textDelta.event.properties.messageID, messageId);
+  assert.strictEqual(textFinalUpdated.event.properties.part.messageID, messageId);
   assert.strictEqual(stepFinish.event.properties.part.messageID, messageId);
   assert.strictEqual(stepFinish.event.properties.part.reason, 'stop');
 });
@@ -129,7 +149,7 @@ test('synthetic assistant reply sender fails closed when text event validation f
       },
     },
     (message) => {
-      if (message.type === 'tool_event' && message.event.type === 'message.part.updated' && message.event.properties.part.type === 'text') {
+      if (message.type === 'tool_event' && message.event.type === 'message.part.delta') {
         return null;
       }
       return message;
@@ -152,9 +172,9 @@ test('synthetic assistant reply sender fails closed when text event validation f
 
   assert.deepStrictEqual(result, {
     success: false,
-    failureStage: 'message.part.updated.text',
+    failureStage: 'message.part.delta.text',
   });
-  assert.strictEqual(sent.length, 2);
+  assert.strictEqual(sent.length, 3);
 });
 
 test('slash projector and synthetic sender stay aligned with the canonical builder shape', () => {
@@ -166,7 +186,9 @@ test('slash projector and synthetic sender stay aligned with the canonical build
   const canonicalEvents = [
     canonical.messageUpdated,
     canonical.stepStart,
-    canonical.text,
+    canonical.textSeedUpdated,
+    canonical.textDelta,
+    canonical.textFinalUpdated,
     canonical.stepFinish,
   ];
 

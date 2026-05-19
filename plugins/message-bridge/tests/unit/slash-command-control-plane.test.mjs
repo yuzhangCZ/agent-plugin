@@ -60,19 +60,34 @@ function assertSyntheticAssistantReply(projected, index, toolSessionId, expected
   assert.match(messageId, /^msg_[a-f0-9]{32}$/);
 
   const stepStart = projected[index + 1];
-  const text = projected[index + 2];
-  const stepFinish = projected[index + 3];
+  const textSeedUpdated = projected[index + 2];
+  const textDelta = projected[index + 3];
+  const textFinalUpdated = projected[index + 4];
+  const stepFinish = projected[index + 5];
 
   assert.strictEqual(stepStart.type, 'tool_event');
   assert.strictEqual(stepStart.event.type, 'message.part.updated');
   assert.strictEqual(stepStart.event.properties.part.type, 'step-start');
   assert.strictEqual(stepStart.event.properties.part.messageID, messageId);
 
-  assert.strictEqual(text.type, 'tool_event');
-  assert.strictEqual(text.event.type, 'message.part.updated');
-  assert.strictEqual(text.event.properties.part.type, 'text');
-  assert.strictEqual(text.event.properties.part.messageID, messageId);
-  assert.strictEqual(text.event.properties.part.text, expectedText);
+  assert.strictEqual(textSeedUpdated.type, 'tool_event');
+  assert.strictEqual(textSeedUpdated.event.type, 'message.part.updated');
+  assert.strictEqual(textSeedUpdated.event.properties.part.type, 'text');
+  assert.strictEqual(textSeedUpdated.event.properties.part.messageID, messageId);
+  assert.strictEqual(textSeedUpdated.event.properties.part.text, '');
+
+  assert.strictEqual(textDelta.type, 'tool_event');
+  assert.strictEqual(textDelta.event.type, 'message.part.delta');
+  assert.strictEqual(textDelta.event.properties.partID, textSeedUpdated.event.properties.part.id);
+  assert.strictEqual(textDelta.event.properties.messageID, messageId);
+  assert.strictEqual(textDelta.event.properties.delta, expectedText);
+
+  assert.strictEqual(textFinalUpdated.type, 'tool_event');
+  assert.strictEqual(textFinalUpdated.event.type, 'message.part.updated');
+  assert.strictEqual(textFinalUpdated.event.properties.part.type, 'text');
+  assert.strictEqual(textFinalUpdated.event.properties.part.id, textSeedUpdated.event.properties.part.id);
+  assert.strictEqual(textFinalUpdated.event.properties.part.messageID, messageId);
+  assert.strictEqual(textFinalUpdated.event.properties.part.text, expectedText);
 
   assert.strictEqual(stepFinish.type, 'tool_event');
   assert.strictEqual(stepFinish.event.type, 'message.part.updated');
@@ -164,7 +179,7 @@ describe('RuntimeSlashCommandCompletionPort', () => {
     });
 
     assert.deepStrictEqual(result, { success: true });
-    assert.strictEqual(projected.length, 4);
+    assert.strictEqual(projected.length, 6);
     assertSyntheticAssistantReply(projected, 0, 'tool-failure-only', '查询会话列表失败, 当前宿主不可用');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
@@ -231,7 +246,7 @@ describe('RuntimeSlashCommandCompletionPort', () => {
 
     assert.deepStrictEqual(result, {
       success: false,
-      failureStage: 'message.part.updated.text',
+      failureStage: 'message.part.updated.text-seed',
     });
     assert.strictEqual(projected.length, 3);
     assert.strictEqual(projected[0].event.type, 'message.updated');
@@ -255,24 +270,25 @@ describe('RuntimeSlashCommandCompletionPort', () => {
 
     assert.deepStrictEqual(result, {
       success: false,
-      failureStage: 'message.part.updated.text',
+      failureStage: 'message.part.updated.text-seed',
     });
     assert.strictEqual(projected.length, 3);
     assert.strictEqual(projected[0].event.type, 'message.updated');
     assert.strictEqual(projected[1].event.properties.part.type, 'step-start');
     assert.strictEqual(projected[2].event.properties.part.type, 'text');
-    assert.strictEqual(projected[2].event.properties.part.text, '不会完整发送');
+    assert.strictEqual(projected[2].event.properties.part.text, '');
   });
 
   test('completeSuccess returns delivery failure when tool_done cannot be sent', async () => {
     const projected = [];
     const completionPort = new RuntimeSlashCommandCompletionPort({
       projector: new MemoryGatewayEnvelopeProjector(),
-      sender: createCompletionPortSenderStub(projected, { failAtCall: 5 }),
+      sender: createCompletionPortSenderStub(projected, { failAtCall: 7 }),
     });
 
     const result = await completionPort.completeSuccess({
       anchor: 'tool-tool-done-fail',
+      welinkSessionId: 'wl-tool-done-fail',
       text: '会先发出成功回复',
     });
 
@@ -280,11 +296,12 @@ describe('RuntimeSlashCommandCompletionPort', () => {
       success: false,
       failureStage: 'tool_done',
     });
-    assert.strictEqual(projected.length, 5);
+    assert.strictEqual(projected.length, 7);
     assertSyntheticAssistantReply(projected, 0, 'tool-tool-done-fail', '会先发出成功回复');
-    assert.deepStrictEqual(projected[4], {
+    assert.deepStrictEqual(projected[6], {
       type: 'tool_done',
       toolSessionId: 'tool-tool-done-fail',
+      welinkSessionId: 'wl-tool-done-fail',
     });
   });
 
@@ -543,12 +560,12 @@ describe('BindingAwareChatRouter', () => {
     await router.route({ anchor: 'tool-invalid-model-extra', text: '/model a/b/c', logger: createLoggerStub() });
 
     assertSyntheticAssistantReply(projected, 0, 'tool-invalid-new', '新建会话失败 请直接使用 /new');
-    assertSyntheticAssistantReply(projected, 4, 'tool-invalid-session', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
-    assertSyntheticAssistantReply(projected, 8, 'tool-invalid-session-extra', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
-    assertSyntheticAssistantReply(projected, 12, 'tool-invalid-models', '查询模型列表失败, 请直接使用 /models');
-    assertSyntheticAssistantReply(projected, 16, 'tool-invalid-model', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
-    assertSyntheticAssistantReply(projected, 20, 'tool-invalid-model-provider', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
-    assertSyntheticAssistantReply(projected, 24, 'tool-invalid-model-extra', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 6, 'tool-invalid-session', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 12, 'tool-invalid-session-extra', '切换会话失败, 请使用 /session <sessionId>，例如 /session ses_123');
+    assertSyntheticAssistantReply(projected, 18, 'tool-invalid-models', '查询模型列表失败, 请直接使用 /models');
+    assertSyntheticAssistantReply(projected, 24, 'tool-invalid-model', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 30, 'tool-invalid-model-provider', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
+    assertSyntheticAssistantReply(projected, 36, 'tool-invalid-model-extra', '设置模型失败,请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4');
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
     assert.strictEqual(projected.some((message) => message.type === 'tool_done'), false);
   });
@@ -789,6 +806,7 @@ describe('BindingAwareChatRouter', () => {
 
     await router.route({
       anchor: 'tool-1',
+      welinkSessionId: 'wl-new-1',
       text: 'hello',
       assistantId: 'persona-new',
       imGroupId: 'group-new',
@@ -796,6 +814,7 @@ describe('BindingAwareChatRouter', () => {
     });
     const result = await router.route({
       anchor: 'tool-1',
+      welinkSessionId: 'wl-new-1',
       text: '/new',
       assistantId: 'persona-new',
       imGroupId: 'group-new',
@@ -821,11 +840,12 @@ describe('BindingAwareChatRouter', () => {
     });
     assert.strictEqual(ownershipResolver.resolveAttachedAnchor('ses-bootstrap'), undefined);
     assert.strictEqual(ownershipResolver.resolveAttachedAnchor('ses-new'), 'tool-1');
-    assert.strictEqual(projected.length, 5);
+    assert.strictEqual(projected.length, 7);
     assertSyntheticAssistantReply(projected, 0, 'tool-1', '已切换到新会话 `ses-new` ses-new');
-    assert.deepStrictEqual(projected[4], {
+    assert.deepStrictEqual(projected[6], {
       type: 'tool_done',
       toolSessionId: 'tool-1',
+      welinkSessionId: 'wl-new-1',
     });
   });
 
@@ -1184,7 +1204,7 @@ describe('BindingAwareChatRouter', () => {
         replyPresenter: new DefaultSlashCommandReplyPresenter(),
         completionPort: new RuntimeSlashCommandCompletionPort({
           projector: new MemoryGatewayEnvelopeProjector(),
-          sender: createCompletionPortSenderStub(projected, { failAtCall: 5 }),
+          sender: createCompletionPortSenderStub(projected, { failAtCall: 7 }),
         }),
       }),
       hostPromptExecutionPort: {
@@ -1214,7 +1234,7 @@ describe('BindingAwareChatRouter', () => {
     });
     assert.strictEqual(projected.some((message) => message.type === 'tool_error'), false);
     assertSyntheticAssistantReply(projected, 0, 'tool-switch-tool-done-fail', '已切换会话 `ses-2` 切换后会话');
-    assert.deepStrictEqual(projected[4], {
+    assert.deepStrictEqual(projected[6], {
       type: 'tool_done',
       toolSessionId: 'tool-switch-tool-done-fail',
     });
@@ -1383,7 +1403,7 @@ describe('BindingAwareChatRouter', () => {
       /slash_command\.failure_handled/u,
     );
 
-    assert.strictEqual(projected.length, 4);
+    assert.strictEqual(projected.length, 6);
     assertSyntheticAssistantReply(projected, 0, 'tool-context-fail', '查询会话列表失败, 当前没有可用会话');
   });
 
@@ -1619,7 +1639,7 @@ describe('BindingAwareChatRouter', () => {
     await router.route({ anchor: 'tool-model', text: 'second prompt', logger: createLoggerStub() });
 
     assertSyntheticAssistantReply(projected, 0, 'tool-model', '后续请求将使用该模型 openai/gpt-5.4');
-    assertSyntheticAssistantReply(projected, 5, 'tool-model', '已切换会话 `ses-2` 会话二');
+    assertSyntheticAssistantReply(projected, 7, 'tool-model', '已切换会话 `ses-2` 会话二');
     assert.deepStrictEqual(prompts, [
       {
         sessionId: 'ses-1',
@@ -1709,6 +1729,6 @@ describe('BindingAwareChatRouter', () => {
       'tool-models',
       '可用模型列表\n\n- `openai/gpt-5.4`\n- `anthropic/claude-sonnet-4`',
     );
-    assertSyntheticAssistantReply(projected, 5, 'tool-models', '设置模型失败,目标模型不存在或当前宿主不可用');
+    assertSyntheticAssistantReply(projected, 7, 'tool-models', '设置模型失败,目标模型不存在或当前宿主不可用');
   });
 });

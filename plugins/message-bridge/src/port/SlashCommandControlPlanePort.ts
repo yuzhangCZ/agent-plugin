@@ -189,7 +189,9 @@ export interface SlashCommandReplyPresenter {
 export type SlashCommandSuccessDeliveryFailureStage =
   | 'message.updated'
   | 'message.part.updated.step-start'
-  | 'message.part.updated.text'
+  | 'message.part.updated.text-seed'
+  | 'message.part.delta.text'
+  | 'message.part.updated.text-final'
   | 'message.part.updated.step-finish'
   | 'tool_done';
 
@@ -208,12 +210,16 @@ export type SlashCommandFailureDeliveryResult =
 
 /** slash 完成态发送端口。 */
 export interface SlashCommandCompletionPort {
-  completeSuccess(input: { anchor: ExternalConversationAnchor; text: string }): Promise<SlashCommandSuccessDeliveryResult>;
-  completeFailure(input: { anchor: ExternalConversationAnchor; text: string }): Promise<SlashCommandFailureDeliveryResult>;
+  completeSuccess(
+    input: { anchor: ExternalConversationAnchor; welinkSessionId?: string; text: string },
+  ): Promise<SlashCommandSuccessDeliveryResult>;
+  completeFailure(
+    input: { anchor: ExternalConversationAnchor; welinkSessionId?: string; text: string },
+  ): Promise<SlashCommandFailureDeliveryResult>;
 }
 
 /** 外层 gateway envelope 投影 seam。 */
 export interface GatewayEnvelopeProjector {
   projectSyntheticAssistantReply(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>[];
-  projectToolDone(input: { anchor: ExternalConversationAnchor }): Record<string, unknown>;
+  projectToolDone(input: { anchor: ExternalConversationAnchor; welinkSessionId?: string }): Record<string, unknown>;
 }

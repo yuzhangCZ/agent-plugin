@@ -14,39 +14,46 @@ export class RuntimeSlashCommandCompletionPort implements SlashCommandCompletion
     sender: (message: Record<string, unknown>) => Promise<boolean | void>;
   }) {}
 
-  async completeSuccess(input: { anchor: string; text: string }): Promise<SlashCommandSuccessDeliveryResult> {
+  async completeSuccess(input: { anchor: string; welinkSessionId?: string; text: string }): Promise<SlashCommandSuccessDeliveryResult> {
     const messages = this.dependencies.projector.projectSyntheticAssistantReply(input);
     const stages: SlashCommandSuccessDeliveryFailureStage[] = [
       'message.updated',
       'message.part.updated.step-start',
-      'message.part.updated.text',
+      'message.part.updated.text-seed',
+      'message.part.delta.text',
+      'message.part.updated.text-final',
       'message.part.updated.step-finish',
     ];
     for (const [index, message] of messages.entries()) {
       const sent = await this.trySend(message);
       if (sent === false) {
-        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text' };
+        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text-final' };
       }
     }
-    const toolDoneSent = await this.trySend(this.dependencies.projector.projectToolDone({ anchor: input.anchor }));
+    const toolDoneSent = await this.trySend(this.dependencies.projector.projectToolDone({
+      anchor: input.anchor,
+      welinkSessionId: input.welinkSessionId,
+    }));
     if (toolDoneSent === false) {
       return { success: false, failureStage: 'tool_done' };
     }
     return { success: true };
   }
 
-  async completeFailure(input: { anchor: string; text: string }): Promise<SlashCommandFailureDeliveryResult> {
+  async completeFailure(input: { anchor: string; welinkSessionId?: string; text: string }): Promise<SlashCommandFailureDeliveryResult> {
     const messages = this.dependencies.projector.projectSyntheticAssistantReply(input);
     const stages: SlashCommandFailureDeliveryFailureStage[] = [
       'message.updated',
       'message.part.updated.step-start',
-      'message.part.updated.text',
+      'message.part.updated.text-seed',
+      'message.part.delta.text',
+      'message.part.updated.text-final',
       'message.part.updated.step-finish',
     ];
     for (const [index, message] of messages.entries()) {
       const sent = await this.trySend(message);
       if (sent === false) {
-        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text' };
+        return { success: false, failureStage: stages[index] ?? 'message.part.updated.text-final' };
       }
     }
     return { success: true };

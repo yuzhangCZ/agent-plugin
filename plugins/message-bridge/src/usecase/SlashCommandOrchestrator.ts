@@ -38,6 +38,7 @@ export class DefaultSlashCommandOrchestrator {
   async execute(input: {
     command: SlashCommand;
     context: SlashCommandContext;
+    welinkSessionId?: string;
     createContext?: HostSessionCreateContext;
     logger?: BridgeLogger;
   }): Promise<void> {
@@ -46,6 +47,7 @@ export class DefaultSlashCommandOrchestrator {
       const text = this.dependencies.replyPresenter.presentSuccess(result);
       const deliveryResult = await this.dependencies.completionPort.completeSuccess({
         anchor: input.context.anchor,
+        welinkSessionId: input.welinkSessionId,
         text,
       });
       this.logSyntheticReplyDeliveryFailure({
@@ -59,6 +61,7 @@ export class DefaultSlashCommandOrchestrator {
       await this.completeFailure({
         command: input.command,
         anchor: input.context.anchor,
+        welinkSessionId: input.welinkSessionId,
         error,
         ...(input.logger ? { logger: input.logger } : {}),
       });
@@ -68,6 +71,7 @@ export class DefaultSlashCommandOrchestrator {
   async completeFailure(input: {
     command: SlashCommandDescriptor;
     anchor: string;
+    welinkSessionId?: string;
     error: unknown;
     logger?: BridgeLogger;
   }): Promise<void> {
@@ -75,6 +79,7 @@ export class DefaultSlashCommandOrchestrator {
     const text = this.dependencies.replyPresenter.presentFailure(input.command, failure);
     const deliveryResult = await this.dependencies.completionPort.completeFailure({
       anchor: input.anchor,
+      welinkSessionId: input.welinkSessionId,
       text,
     });
     this.logSyntheticReplyDeliveryFailure({
@@ -230,12 +235,15 @@ export class DefaultSlashCommandOrchestrator {
 
   private resolveDeliveryFailureMessageType(
     failureStage: SlashCommandSuccessDeliveryFailureStage | SlashCommandFailureDeliveryFailureStage,
-  ): 'message.updated' | 'message.part.updated' | 'tool_done' {
+  ): 'message.updated' | 'message.part.updated' | 'message.part.delta' | 'tool_done' {
     if (failureStage === 'message.updated') {
       return 'message.updated';
     }
     if (failureStage === 'tool_done') {
       return 'tool_done';
+    }
+    if (failureStage === 'message.part.delta.text') {
+      return 'message.part.delta';
     }
     return 'message.part.updated';
   }
