@@ -12,7 +12,7 @@ import type {
   TextDeltaFact,
   TextDoneFact,
   ToolUpdateFact,
-} from "@agent-plugin/bridge-runtime-sdk";
+} from "@wecode/bridge-runtime-sdk";
 
 export interface ToolUpdateFactInput {
   toolSessionId: string;

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-plugin/bridge-runtime-sdk",
+  "name": "@wecode/bridge-runtime-sdk",
   "version": "0.0.0",
   "type": "module",
   "main": "./src/index.ts",

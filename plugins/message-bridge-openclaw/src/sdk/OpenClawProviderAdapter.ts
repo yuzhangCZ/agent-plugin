@@ -6,7 +6,7 @@ import type {
   ProviderRun,
   ProviderTerminalResult,
   ThirdPartyAgentProvider,
-} from "@agent-plugin/bridge-runtime-sdk";
+} from "@wecode/bridge-runtime-sdk";
 
 import { reconcileFinalText } from "../reconcileFinalText.js";
 import { resolveEffectiveReplyConfig } from "../resolveEffectiveReplyConfig.js";

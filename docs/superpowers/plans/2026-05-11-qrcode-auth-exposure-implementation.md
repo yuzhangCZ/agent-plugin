@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 让二维码授权能力同时通过 `message-bridge` 宿主私有 Runtime API 和 `@agent-plugin/bridge-runtime-sdk` 根入口稳定暴露，并保持插件产物零运行时依赖约束。
+**目标：** 让二维码授权能力同时通过 `message-bridge` 宿主私有 Runtime API 和 `@wecode/bridge-runtime-sdk` 根入口稳定暴露，并保持插件产物零运行时依赖约束。
 
 **架构：** 继续以 `@wecode/skill-qrcode-auth` 作为二维码授权语义真源。`message-bridge` 在构建期内嵌该能力并挂载到 `globalThis.__MB_RUNTIME_API__.qrcodeAuth`；`bridge-runtime-sdk` 通过 workspace/package 依赖稳定转导出同一套 facade 与类型，不新增新的生命周期或装配语义。
 
@@ -369,7 +369,7 @@ import {
   qrcodeAuth,
   type QrCodeAuthRunInput,
   type QrCodeAuthSnapshot,
-} from '@agent-plugin/bridge-runtime-sdk';
+} from '@wecode/bridge-runtime-sdk';
 ```
 
 ```md

@@ -14,7 +14,7 @@ import {
   type BridgeGatewayHostConnection,
   type BridgeRuntime,
   type ThirdPartyAgentProvider,
-} from "@agent-plugin/bridge-runtime-sdk";
+} from "@wecode/bridge-runtime-sdk";
 import {
   CHANNEL_ADD_FIX,
   DEFAULT_ACCOUNT_ID,

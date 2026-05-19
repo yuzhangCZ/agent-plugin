@@ -6,7 +6,7 @@
 - `@wecode/skill-plugin-cli`
 - `@wecode/skill-opencode-plugin`
 - `@wecode/skill-openclaw-plugin`
-- `@agent-plugin/bridge-runtime-sdk`
+- `@wecode/bridge-runtime-sdk`
 
 这个 CLI 面向维护者，适用于在开发机上完成构建、校验、发布，以及生成本地 release git 元数据，而不依赖 GitHub release workflow。
 
