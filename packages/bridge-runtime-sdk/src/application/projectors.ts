@@ -10,6 +10,14 @@ import type {
 
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
 
+function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number');
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 /**
  * runtime 统一上行发送端口。
  */
@@ -81,7 +89,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
               partId: fact.partId,
               toolName: fact.toolName,
               status: fact.status,
-              ...(fact.toolCallId ? { toolCallId: fact.toolCallId } : {}),
+              toolCallId: fact.toolCallId,
               ...(fact.title ? { title: fact.title } : {}),
               ...(fact.input !== undefined ? { input: fact.input } : {}),
               ...(fact.output !== undefined ? { output: fact.output } : {}),
@@ -96,11 +104,23 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
             type: 'question',
             properties: {
               messageId: fact.messageId,
-              partId: fact.toolCallId,
-              question: fact.question,
-              ...(fact.toolCallId ? { toolCallId: fact.toolCallId } : {}),
-              ...(fact.header ? { header: fact.header } : {}),
-              ...(fact.options?.length ? { options: fact.options } : {}),
+              partId: fact.partId,
+              questionId: fact.questionId,
+              toolCallId: fact.toolCallId ?? fact.questionId,
+              ...(fact.status ? { status: fact.status } : {}),
+              ...(fact.extParam !== undefined ? { extParam: fact.extParam } : {}),
+              questions: fact.questions.map((question) => ({
+                question: question.question,
+                ...(question.header ? { header: question.header } : {}),
+                ...(question.options?.length
+                  ? {
+                      options: question.options.map((option) => ({
+                        label: option.label,
+                      })),
+                    }
+                  : {}),
+                ...(question.multiSelect !== undefined ? { multiSelect: question.multiSelect } : {}),
+              })),
             },
           },
         ];
@@ -111,10 +131,26 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
             type: 'permission.ask',
             properties: {
               messageId: fact.messageId,
-              partId: fact.toolCallId ?? fact.permissionId,
+              partId: fact.partId,
+              toolCallId: fact.permissionId,
               permissionId: fact.permissionId,
               ...(fact.permissionType ? { permType: fact.permissionType } : {}),
+              ...(fact.title ? { title: fact.title } : {}),
               ...(fact.metadata ? { metadata: fact.metadata } : {}),
+            },
+          },
+        ];
+      case 'permission.reply':
+        return [
+          {
+            protocol: 'cloud',
+            type: 'permission.reply',
+            properties: {
+              permissionId: fact.permissionId,
+              response: fact.response,
+              ...(fact.permissionType ? { permType: fact.permissionType } : {}),
+              ...(fact.messageId ? { messageId: fact.messageId } : {}),
+              ...(fact.partId ? { partId: fact.partId } : {}),
             },
           },
         ];
@@ -135,9 +171,19 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
             type: 'step.done',
             properties: {
               messageId: fact.messageId,
-              ...(fact.tokens !== undefined ? { tokens: fact.tokens } : {}),
+              ...(toOptionalNumericRecord(fact.tokens) ? { tokens: toOptionalNumericRecord(fact.tokens) } : {}),
               ...(fact.cost !== undefined ? { cost: fact.cost } : {}),
               ...(fact.reason ? { reason: fact.reason } : {}),
+            },
+          },
+        ];
+      case 'session.title':
+        return [
+          {
+            protocol: 'cloud',
+            type: 'session.title',
+            properties: {
+              title: fact.title,
             },
           },
         ];
@@ -213,6 +259,7 @@ export class DefaultRunTerminalSignalProjector implements RunTerminalSignalProje
       toolSessionId: input.toolSessionId,
       ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
       error: input.result.error?.message ?? 'provider_run_failed',
+      ...(input.result.error?.code === 'session_not_found' ? { reason: 'session_not_found' as const } : {}),
     };
   }
 }

@@ -4,6 +4,14 @@ import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
 import type { SessionLifecycleState } from './registries.ts';
 
+function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number');
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 export type LifecycleProfileKind = 'request_run' | 'outbound';
 
 export interface LifecycleProfile {
@@ -82,7 +90,12 @@ export class FactSequenceValidator {
       return;
     }
 
-    if (fact.type === 'message.start' || fact.type === 'question.ask' || fact.type === 'permission.ask') {
+    if (
+      fact.type === 'message.start'
+      || fact.type === 'question.ask'
+      || fact.type === 'permission.ask'
+      || fact.type === 'session.title'
+    ) {
       throw new RuntimeContractError('fact_sequence_invalid', 'aborting session rejects new activity facts', {
         factType: fact.type,
       });
@@ -131,6 +144,8 @@ export class FactSequenceValidator {
           state.terminalReached = true;
         }
         return;
+      case 'permission.reply':
+      case 'session.title':
       case 'session.error':
         return;
     }
@@ -154,14 +169,27 @@ export class FactSequenceValidator {
       return;
     }
     if (fact.type === 'tool.update') {
+      if (fact.input !== undefined && typeof fact.input !== 'string') {
+        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update input must be a string', {
+          toolCallId: fact.toolCallId,
+        });
+      }
+      if (fact.output !== undefined && typeof fact.output !== 'string') {
+        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update output must be a string', {
+          toolCallId: fact.toolCallId,
+        });
+      }
+      if ((fact.input !== undefined && fact.input.trim().length === 0) || (fact.output !== undefined && fact.output.trim().length === 0)) {
+        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update input/output must not be blank strings', {
+          toolCallId: fact.toolCallId,
+        });
+      }
       state.knownToolCallIds.add(fact.toolCallId);
       return;
     }
     if (fact.type === 'question.ask') {
-      state.knownToolCallIds.add(fact.toolCallId);
       return;
     }
-
   }
 
   private deriveEvents(fact: ProviderFact): SkillProviderEvent[] {
@@ -184,7 +212,7 @@ export class FactSequenceValidator {
           type: 'step.done',
           properties: {
             messageId: fact.messageId,
-            ...(fact.tokens !== undefined ? { tokens: fact.tokens } : {}),
+            ...(toOptionalNumericRecord(fact.tokens) ? { tokens: toOptionalNumericRecord(fact.tokens) } : {}),
             ...(fact.cost !== undefined ? { cost: fact.cost } : {}),
             ...(fact.reason ? { reason: fact.reason } : {}),
           },

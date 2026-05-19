@@ -18,6 +18,16 @@ export interface PendingInteractionRecord {
   tokenId: string;
 }
 
+export interface PendingInteractionConflict {
+  current: PendingInteractionRecord;
+  existing: PendingInteractionRecord;
+}
+
+export type PendingInteractionRegisterResult =
+  | { ok: true }
+  | { ok: false; reason: 'duplicate_same_session' }
+  | { ok: false; reason: 'conflict_cross_session'; conflict: PendingInteractionConflict };
+
 /**
  * request run / outbound 的局部状态注册表。
  */
@@ -37,7 +47,10 @@ export interface SessionRuntimeRegistry {
  * 挂起交互的原子 register / consume 注册表。
  */
 export interface PendingInteractionRegistry {
-  register(record: PendingInteractionRecord): { ok: true } | { ok: false };
-  consume(input: { toolSessionId: string; kind: PendingInteractionRecord['kind']; tokenId: string }): PendingInteractionRecord | undefined;
+  register(record: PendingInteractionRecord): PendingInteractionRegisterResult;
+  consume(input: {
+    kind: PendingInteractionRecord['kind'];
+    tokenId: string;
+  }): PendingInteractionRecord | undefined;
   clearSession(toolSessionId: string): void;
 }

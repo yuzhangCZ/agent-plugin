@@ -14,7 +14,7 @@ const skillStepDoneEventBaseSchema = z.object({
   type: z.literal('step.done'),
   properties: z.object({
     messageId: requiredTrimmedString,
-    tokens: z.unknown().optional(),
+    tokens: z.record(z.string(), z.number()).optional(),
     cost: z.number().optional(),
     reason: requiredTrimmedString.optional(),
   }),

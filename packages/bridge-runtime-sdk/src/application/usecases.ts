@@ -112,12 +112,20 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
     });
 
     try {
+      const context = {
+        ...(command.source.payload.assistantAccount ? { assistantAccount: command.source.payload.assistantAccount } : {}),
+        ...(command.source.payload.sendUserAccount ? { sendUserAccount: command.source.payload.sendUserAccount } : {}),
+        ...(command.source.payload.imGroupId ? { imGroupId: command.source.payload.imGroupId } : {}),
+        ...(command.source.suppressReply !== undefined ? { suppressReply: command.source.suppressReply } : {}),
+      };
       const run = await this.handlers.startRequestRun({
         traceId: command.traceId,
         runId,
         toolSessionId,
         text: command.source.payload.text,
         assistantId: command.source.payload.assistantId,
+        ...(command.source.extParameters !== undefined ? { extParameters: command.source.extParameters } : {}),
+        ...(Object.keys(context).length > 0 ? { context } : {}),
       });
       await this.coordinator.executeRun({
         toolSessionId,
@@ -141,16 +149,11 @@ export class ReplyQuestionUseCase implements RuntimeUseCase {
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'reply_question' }>): Promise<void> {
-    const toolCallId = command.source.payload.toolCallId;
-    if (!toolCallId) {
-      throw new Error('question_reply requires toolCallId');
-    }
-    this.interactionCoordinator.consume(command.source.payload.toolSessionId, 'question', toolCallId);
+    this.interactionCoordinator.consume('question', command.source.payload.questionId);
     await this.handlers.replyQuestion({
       traceId: command.traceId,
-      toolSessionId: command.source.payload.toolSessionId,
-      toolCallId,
-      answer: command.source.payload.answer,
+      questionId: command.source.payload.questionId,
+      answers: [[command.source.payload.answer]],
     });
   }
 }
@@ -165,16 +168,11 @@ export class ReplyPermissionUseCase implements RuntimeUseCase {
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'reply_permission' }>): Promise<void> {
-    this.interactionCoordinator.consume(
-      command.source.payload.toolSessionId,
-      'permission',
-      command.source.payload.permissionId,
-    );
+    this.interactionCoordinator.consume('permission', command.source.payload.permissionId);
     await this.handlers.replyPermission({
       traceId: command.traceId,
-      toolSessionId: command.source.payload.toolSessionId,
       permissionId: command.source.payload.permissionId,
-      response: command.source.payload.response,
+      reply: command.source.payload.response,
     });
   }
 }

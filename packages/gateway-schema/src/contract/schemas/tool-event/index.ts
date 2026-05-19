@@ -51,6 +51,7 @@ import {
   skillPermissionReplyEventSchema,
   skillQuestionEventSchema,
   skillSessionStatusEventSchema,
+  skillSessionTitleEventSchema,
   skillSessionErrorEventSchema,
   skillStepDoneEventSchema,
   skillStepStartEventSchema,
@@ -65,6 +66,7 @@ import {
   type SkillQuestionEvent,
   type SkillSessionErrorEvent,
   type SkillSessionStatusEvent,
+  type SkillSessionTitleEvent,
   type SkillStepDoneEvent,
   type SkillStepStartEvent,
   type SkillTextDeltaEvent,
@@ -206,6 +208,7 @@ export {
   skillStepStartEventSchema,
   skillStepDoneEventSchema,
   skillSessionStatusEventSchema,
+  skillSessionTitleEventSchema,
   skillSessionErrorEventSchema,
 };
 
@@ -246,5 +249,6 @@ export type {
   SkillStepStartEvent,
   SkillStepDoneEvent,
   SkillSessionStatusEvent,
+  SkillSessionTitleEvent,
   SkillSessionErrorEvent,
 };

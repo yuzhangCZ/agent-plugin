@@ -20,6 +20,7 @@ export interface ProviderCommandError {
 export interface ProviderError {
   code:
     | 'not_found'
+    | 'session_not_found'
     | 'invalid_input'
     | 'not_supported'
     | 'timeout'
@@ -41,6 +42,7 @@ export class RuntimeContractError extends Error {
     | 'session_closed'
     | 'run_already_active'
     | 'outbound_already_active'
+    | 'pending_interaction_conflict'
     | 'pending_interaction_not_found'
     | 'fact_sequence_invalid';
   readonly details?: Record<string, unknown>;
