@@ -208,6 +208,7 @@ export class DefaultSlashCommandOrchestrator {
       || code === 'session_out_of_scope'
       || code === 'model_not_found'
       || code === 'invalid_command'
+      || code === 'command_disabled_in_group_chat'
       || code === 'sdk_unreachable';
   }
 

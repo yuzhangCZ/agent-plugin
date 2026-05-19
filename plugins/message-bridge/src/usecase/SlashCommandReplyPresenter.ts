@@ -68,6 +68,9 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
   /** 统一失败策略：只允许白名单原因进入用户可见文案。 */
   private presentFailureReason(command: SlashCommandDescriptor, error: SlashCommandFailure): string {
     switch (error.reasonKey ?? error.code) {
+      case 'command_not_available_in_group_chat':
+      case 'command_disabled_in_group_chat':
+        return this.presentGroupDisabledReason(command);
       case 'target_session_out_of_scope':
       case 'session_out_of_scope':
         return '目标会话不在当前 project/workspace 可切换范围内';
@@ -101,6 +104,17 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
         return '请使用 /model <providerId/modelId>，例如 /model openai/gpt-5.4';
       default:
         throw new Error(`Unhandled invalid slash command descriptor: ${JSON.stringify(command)}`);
+    }
+  }
+
+  private presentGroupDisabledReason(command: SlashCommandDescriptor): string {
+    switch (command.kind) {
+      case 'sessions':
+        return '群聊场景不支持 /sessions，请在单聊中使用';
+      case 'session':
+        return '群聊场景不支持 /session，请在单聊中使用';
+      default:
+        return '当前场景不支持该命令';
     }
   }
 
