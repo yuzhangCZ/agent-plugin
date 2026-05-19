@@ -10,6 +10,8 @@
 
 本文面向 `@wecode/bridge-runtime-sdk` 的 API 使用方，说明如何基于当前实现接入一个第三方 Agent Provider，并通过 Runtime 与 AI Gateway 建立稳定的上下行闭环。
 
+`third-party-agent-provider-v1.md` 当前仍保留阶段性设计稿内容；如果它与本文或当前代码实现冲突，以本文和根入口 public contract 为准。
+
 本文只覆盖根入口 `@wecode/bridge-runtime-sdk` 的稳定导出与使用方式，重点包括：
 
 - `createBridgeRuntime()` 的装配入口
@@ -30,6 +32,7 @@
 
 ```ts
 import {
+  type BridgeGatewayLogger,
   createBridgeRuntime,
   qrcodeAuth,
   type BridgeGatewayHostConfig,
@@ -71,7 +74,7 @@ import {
 } from '@wecode/bridge-runtime-sdk';
 ```
 
-本文中的对外接口说明都以 [packages/bridge-runtime-sdk/src/index.ts](/Users/zy/Code/agent-plugin/packages/bridge-runtime-sdk/src/index.ts) 为准。上面的代码块用于展示常见 public contract 的导入方式，不要求穷举全部导出。当前根入口同时导出 `ProviderFact` / `OutboundFact`、主要命令输入类型以及全部 fact 成员类型，便于 Provider 实现方为具体 fact 编写 helper、builder 与测试断言。`BridgeGatewayHostConnection`、`connectionFactory` 一类测试缝或内部装配细节，不属于对外集成契约。
+本文中的对外接口说明都以 [packages/bridge-runtime-sdk/src/index.ts](/Users/zy/Code/agent-plugin/feat-opencode-sdk/packages/bridge-runtime-sdk/src/index.ts) 为准。上面的代码块用于展示常见 public contract 的导入方式，不要求穷举全部导出。当前根入口同时导出 `ProviderFact` / `OutboundFact`、主要命令输入类型、`BridgeGatewayLogger` 以及全部 fact 成员类型，便于 Provider 实现方为具体 fact 编写 helper、builder 与测试断言。`BridgeGatewayHostConnection`、`connectionFactory` 一类测试缝或内部装配细节，不属于对外集成契约。
 
 除 Runtime / Provider 契约外，根入口还稳定聚合导出二维码授权 facade：
 
@@ -106,7 +109,7 @@ function fromArray<T>(items: T[]): AsyncIterable<T> {
   };
 }
 
-function createRun(toolSessionId: string, text: string): ProviderRun {
+function createRun(runId: string, toolSessionId: string, text: string): ProviderRun {
   const facts: ProviderFact[] = [
     { type: 'message.start', toolSessionId, messageId: 'msg-1' },
     { type: 'text.delta', toolSessionId, messageId: 'msg-1', partId: 'part-1', content: text.slice(0, 2) },
@@ -115,7 +118,7 @@ function createRun(toolSessionId: string, text: string): ProviderRun {
   ];
 
   return {
-    runId: 'run-1',
+    runId,
     facts: fromArray(facts),
     async result(): Promise<ProviderTerminalResult> {
       return { outcome: 'completed' };
@@ -139,7 +142,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
   }
 
   async runMessage(input: ProviderRunMessageInput) {
-    return createRun(input.toolSessionId, `echo: ${input.text}`);
+    return createRun(input.runId, input.toolSessionId, `echo: ${input.text}`);
   }
 
   async replyQuestion() {
@@ -247,7 +250,7 @@ export interface BridgeRuntimeOptions {
    */
   logger?: BridgeGatewayLogger;
   /**
-   * 是否打开 gateway-client 侧调试日志。
+   * 是否打开 gateway host 侧调试日志。
    */
   debug?: boolean;
   /**
@@ -265,7 +268,7 @@ export interface BridgeRuntimeOptions {
 
 - `provider`：宿主适配实现，必填
 - `gatewayHost`：网关地址、鉴权信息、注册元数据，必填
-- `logger`：可选日志端口；根入口不单独导出 `BridgeGatewayLogger` 类型，直接传入兼容 `info` / `warn` / `error` 方法的对象即可
+- `logger`：可选日志端口；根入口当前导出 `BridgeGatewayLogger` 类型，也可以直接传入兼容该接口的对象
 - `debug`：是否打开 gateway 侧调试日志
 - `traceIdFactory`：为每次下行请求生成 traceId；未提供时 Runtime 会自行生成
 - `onTelemetryUpdated`：网关状态、上下行时间戳或诊断数据更新时触发
@@ -279,9 +282,9 @@ export interface BridgeRuntimeOptions {
  */
 export interface BridgeGatewayHostConfig {
   /**
-   * Gateway WebSocket 地址。
+   * 可选 Gateway WebSocket 地址。
    */
-  url: string;
+  url?: string;
   auth: {
     /**
      * Gateway 鉴权 AK。
@@ -294,18 +297,22 @@ export interface BridgeGatewayHostConfig {
   };
   register: {
     /**
-     * 工具注册类型，沿用 gateway-client 的枚举约束。
+     * 接入方自定义的工具注册类型。
      */
     toolType: BridgeGatewayToolType;
     /**
-     * 当前宿主实现版本。
+     * 当前宿主 agent 版本。
      */
     toolVersion: string;
+    /**
+     * 可选的上层插件版本。
+     */
+    pluginVersion?: string;
   };
 }
 ```
 
-`toolType` 当前直接复用 `gateway-client` 的注册枚举约束；文档不重复枚举具体字面量，使用方应以当前导出类型检查结果为准。
+`toolType` 由接入方自定义，SDK 不对具体字面量做产品级枚举限制。`toolVersion` 表示宿主 agent 版本，`pluginVersion` 表示上层插件版本；若当前没有插件封装层，可省略 `pluginVersion`。
 
 ### 4.3 `BridgeRuntime`
 
@@ -501,6 +508,7 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
+  extParameters?: Record<string, unknown>;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -557,7 +565,7 @@ export interface ProviderCreateSessionResult {
  */
 export interface ProviderRun {
   /**
-   * 本次 request run 的宿主侧运行 ID。
+   * 本次 request run 的运行 ID。
    */
   runId: string;
   /**
@@ -591,7 +599,7 @@ export interface ProviderTerminalResult {
 }
 ```
 
-`ProviderRun.result()` 是 run 终态真源。`message.done` 或 `session.error` 只是事实流中的事件，不能替代 `result()` 对最终 outcome 的定义。
+`ProviderRun.result()` 是 run 终态真源。当前链路中 `runId` 由 Runtime 生成并传入 `runMessage(input)`；Provider 返回的 `ProviderRun.runId` 必须与输入中的 `runId` 保持一致，不应重新生成或替换。`message.done` 或 `session.error` 只是事实流中的事件，不能替代 `result()` 对最终 outcome 的定义。
 
 ## 7. 事实流模型
 
@@ -711,9 +719,6 @@ export interface QuestionAskFact {
   toolCallId?: string;
   status?: string;
   extParam?: unknown;
-  header?: string;
-  question: string;
-  options?: string[];
   context?: Record<string, unknown>;
   raw?: unknown;
 }
@@ -734,7 +739,7 @@ export interface PermissionAskFact {
   raw?: unknown;
 }
 
-`QuestionAskFact.questionId` 与 `PermissionAskFact.permissionId` 都是全局唯一的 direct reply target。Runtime 投影 cloud `permission.ask` 事件时固定输出 `toolCallId = permissionId`；对 cloud `question`，若 fact 自身带了 `toolCallId` 则保留其 tool call 关联语义，否则才回填 `toolCallId = questionId` 兼容旧下游回复目标读取口径。`partId` 始终只表示消息组成部分的稳定分片 ID，不承担回复目标语义。
+`QuestionAskFact.questionId` 与 `PermissionAskFact.permissionId` 都是全局唯一的 direct reply target。`questions: QuestionItem[]` 是问题事实的稳定真源；如果下游展示层需要 `header`、`question`、`options` 这类扁平字段，应由 projector 或消费侧从 `questions[0]` 派生，而不是把它们视为 Provider fact contract 的一部分。Runtime 投影 cloud `permission.ask` 事件时固定输出 `toolCallId = permissionId`；对 cloud `question`，若 fact 自身带了 `toolCallId` 则保留其 tool call 关联语义，否则才回填 `toolCallId = questionId` 兼容旧下游回复目标读取口径。`partId` 始终只表示消息组成部分的稳定分片 ID，不承担回复目标语义。
 
 export interface PermissionReplyFact {
   type: 'permission.reply';
@@ -854,8 +859,6 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
             options: [{ label: 'staging' }, { label: 'production' }],
           },
         ],
-        question: '请选择部署环境',
-        options: ['staging', 'production'],
       };
     })(),
     async result() {
