@@ -488,8 +488,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     this.approvalRegistry.clearSession(input.toolSessionId);
 
     const replyRuntime = this.options.runtime.channel?.reply ?? {};
+    let runtimeHandled = false;
     try {
-      await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
+      runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
         sessionKey: record.sessionKey,
         runId: abortRunId,
       });
@@ -503,6 +504,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         runId: abortRunId,
         error: error instanceof Error ? error.message : String(error),
       });
+      runtimeHandled = true;
+    }
+    if (!runtimeHandled) {
+      const subagent = this.options.getSubagentRuntime();
+      if (subagent?.deleteSession) {
+        await subagent.deleteSession({ sessionKey: record.sessionKey });
+      }
     }
     return { applied: true };
   }
@@ -1094,12 +1102,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private finalizeRun(state: ActiveRunState): void {
     state.completed = true;
-    if (this.activeRunsBySessionKey.get(state.sessionKey) === state) {
-      this.activeRunsBySessionKey.delete(state.sessionKey);
-    }
-    if (this.sessionKeyByRunId.get(state.runId) === state.sessionKey) {
-      this.sessionKeyByRunId.delete(state.runId);
-    }
+    this.activeRunsBySessionKey.delete(state.sessionKey);
+    this.sessionKeyByRunId.delete(state.runId);
   }
 
   /**

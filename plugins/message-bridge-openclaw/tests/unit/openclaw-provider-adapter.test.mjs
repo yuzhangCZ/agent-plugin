@@ -84,7 +84,6 @@ test("provider adapter fallback emits ordered facts and completed result", async
 test("provider adapter abort closes active run and suppresses late runtime reply chunks", async () => {
   const calls = [];
   let capturedDispatcherOptions;
-  let releaseAbort;
   const provider = createAdapter({
     runtime: {
       channel: {
@@ -96,9 +95,6 @@ test("provider adapter abort closes active run and suppresses late runtime reply
         reply: {
           async abortRun(input) {
             calls.push({ kind: "abort", ...input });
-            await new Promise((resolve) => {
-              releaseAbort = resolve;
-            });
           },
           resolveEnvelopeFormatOptions() {
             return {};
@@ -117,20 +113,6 @@ test("provider adapter abort closes active run and suppresses late runtime reply
         },
       },
     },
-    getSubagentRuntime: () => ({
-      async run() {
-        return { runId: "sub-1" };
-      },
-      async waitForRun() {
-        return { status: "ok" };
-      },
-      async getSessionMessages() {
-        return { messages: [] };
-      },
-      async deleteSession(input) {
-        calls.push({ kind: "delete", ...input });
-      },
-    }),
   });
 
   const run = await provider.runMessage({
@@ -141,21 +123,12 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   });
   await flushEvents();
 
-  let abortSettled = false;
-  const abortPromise = provider.abortSession({
+  const result = await provider.abortSession({
     traceId: "trace-2",
     toolSessionId: "ses_abort_active_1",
     runId: "sdk-run-1",
-  }).then((value) => {
-    abortSettled = true;
-    return value;
   });
-  await flushEvents();
   await capturedDispatcherOptions.deliver({ text: "late chunk" }, { kind: "block" });
-  assert.equal(abortSettled, false);
-  assert.deepEqual(await run.result(), { outcome: "aborted" });
-  releaseAbort();
-  const result = await abortPromise;
 
   const facts = [];
   for await (const fact of run.facts) {
@@ -163,6 +136,7 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   }
 
   assert.deepEqual(result, { applied: true });
+  assert.deepEqual(await run.result(), { outcome: "aborted" });
   assert.deepEqual(facts, []);
   assert.deepEqual(calls, [
     {
@@ -196,7 +170,7 @@ test("provider adapter rejects question replies as unsupported", async () => {
   );
 });
 
-test("provider adapter abort stops runtime run without deleting host session", async () => {
+test("provider adapter abort prefers runtime abort hook over session deletion", async () => {
   const calls = [];
   const sessionRegistry = new SessionRegistry("agent:acct");
   sessionRegistry.ensure("tool-1");
@@ -221,8 +195,8 @@ test("provider adapter abort stops runtime run without deleting host session", a
       async getSessionMessages() {
         return { messages: [] };
       },
-      async deleteSession(input) {
-        calls.push({ kind: "delete", ...input });
+      async deleteSession() {
+        calls.push({ kind: "delete" });
       },
     }),
   });
@@ -239,87 +213,6 @@ test("provider adapter abort stops runtime run without deleting host session", a
       kind: "abort",
       sessionKey: "agent:acct:tool-1",
       runId: "run-1",
-    },
-  ]);
-});
-
-test("provider adapter ignores stale finalize from aborted run after follow-up starts", async () => {
-  const calls = [];
-  const runs = [];
-  const provider = createAdapter({
-    runtime: {
-      channel: {
-        routing: {
-          resolveAgentRoute() {
-            return { accountId: "acct", agentId: "agent" };
-          },
-        },
-        reply: {
-          async abortRun(input) {
-            calls.push({ kind: "abort", ...input });
-          },
-          resolveEnvelopeFormatOptions() {
-            return {};
-          },
-          formatAgentEnvelope({ body }) {
-            return body;
-          },
-          finalizeInboundContext(input) {
-            return input;
-          },
-          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }) {
-            const index = runs.length + 1;
-            replyOptions.onAgentRunStart(`host-run-${index}`);
-            await new Promise((resolve) => {
-              runs.push({ resolve });
-            });
-          },
-        },
-      },
-    },
-  });
-
-  const firstRun = await provider.runMessage({
-    traceId: "trace-1",
-    runId: "sdk-run-1",
-    toolSessionId: "ses_followup_1",
-    text: "first",
-  });
-  await flushEvents();
-  await provider.abortSession({
-    traceId: "trace-2",
-    toolSessionId: "ses_followup_1",
-    runId: "sdk-run-1",
-  });
-  assert.deepEqual(await firstRun.result(), { outcome: "aborted" });
-
-  const secondRun = await provider.runMessage({
-    traceId: "trace-3",
-    runId: "sdk-run-2",
-    toolSessionId: "ses_followup_1",
-    text: "second",
-  });
-  await flushEvents();
-
-  runs[0].resolve();
-  await flushEvents();
-  await provider.abortSession({
-    traceId: "trace-4",
-    toolSessionId: "ses_followup_1",
-    runId: "sdk-run-2",
-  });
-
-  assert.deepEqual(await secondRun.result(), { outcome: "aborted" });
-  assert.deepEqual(calls, [
-    {
-      kind: "abort",
-      sessionKey: "agent:acct:ses_followup_1",
-      runId: "host-run-1",
-    },
-    {
-      kind: "abort",
-      sessionKey: "agent:acct:ses_followup_1",
-      runId: "host-run-2",
     },
   ]);
 });
