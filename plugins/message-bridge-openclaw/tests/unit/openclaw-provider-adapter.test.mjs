@@ -147,12 +147,17 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   ]);
 });
 
-test("provider adapter createSession generates ses_ prefixed ids", async () => {
-  const provider = createAdapter();
+test("provider adapter createSession generates ses_ prefixed ids and stores requested title locally", async () => {
+  const sessionRegistry = new SessionRegistry("agent:acct");
+  const provider = createAdapter({ sessionRegistry });
 
-  const created = await provider.createSession();
+  const created = await provider.createSession({
+    traceId: "trace-1",
+    title: "Requested Title",
+  });
 
   assert.match(created.toolSessionId, /^ses_/);
+  assert.equal(sessionRegistry.get(created.toolSessionId).title, "Requested Title");
 });
 
 test("provider adapter rejects question replies as unsupported", async () => {
@@ -638,6 +643,88 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
       },
     },
   ]);
+});
+
+test("provider adapter emits session.title only for changed runtime session title events", async () => {
+  let gatewayListener;
+  const emitted = [];
+  const sessionRegistry = new SessionRegistry("agent:acct");
+  sessionRegistry.ensure("ses_title_1", undefined, { title: "Requested Title" });
+  const provider = createAdapter({
+    sessionRegistry,
+    runtime: {
+      events: {
+        onGatewayEvent(listener) {
+          gatewayListener = listener;
+          return () => true;
+        },
+      },
+    },
+  });
+
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage(input) {
+        const facts = [];
+        for await (const fact of input.facts) {
+          facts.push(fact);
+        }
+        emitted.push({ input, facts });
+        return { applied: true };
+      },
+    },
+  });
+
+  gatewayListener({
+    event: "session.updated",
+    payload: {
+      sessionID: "ses_title_1",
+      info: {
+        title: "Requested Title",
+      },
+    },
+  });
+  await flushEvents();
+
+  gatewayListener({
+    event: "session.updated",
+    payload: {
+      sessionID: "ses_title_1",
+      info: {
+        title: "Runtime Generated Title",
+      },
+    },
+  });
+  await flushEvents();
+
+  gatewayListener({
+    event: "session.updated",
+    payload: {
+      sessionID: "ses_title_1",
+      info: {
+        title: "Runtime Generated Title",
+      },
+    },
+  });
+  await flushEvents();
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].input.toolSessionId, "ses_title_1");
+  assert.equal(emitted[0].input.trigger, "session.updated");
+  assert.deepEqual(emitted[0].facts, [
+    {
+      type: "session.title",
+      toolSessionId: "ses_title_1",
+      title: "Runtime Generated Title",
+      raw: {
+        sessionID: "ses_title_1",
+        info: {
+          title: "Runtime Generated Title",
+        },
+      },
+    },
+  ]);
+  assert.equal(sessionRegistry.get("ses_title_1").title, "Runtime Generated Title");
 });
 
 test("provider adapter rejects unknown permission replies", async () => {

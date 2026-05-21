@@ -40,6 +40,21 @@ export class SessionRegistry {
     return this.byToolSessionId.get(toolSessionId);
   }
 
+  updateTitle(
+    toolSessionId: string,
+    title: string,
+    updatedAt = Date.now(),
+  ): { record: MessageBridgeSessionRecord; changed: boolean } {
+    const record = this.ensure(toolSessionId);
+    if (record.title === title) {
+      return { record, changed: false };
+    }
+
+    record.title = title;
+    record.updatedAt = updatedAt;
+    return { record, changed: true };
+  }
+
   delete(toolSessionId: string): MessageBridgeSessionRecord | undefined {
     const existing = this.byToolSessionId.get(toolSessionId);
     this.byToolSessionId.delete(toolSessionId);

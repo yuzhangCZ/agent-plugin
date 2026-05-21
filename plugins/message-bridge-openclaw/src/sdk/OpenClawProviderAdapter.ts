@@ -23,6 +23,7 @@ import {
   buildMessageStartFact,
   buildPermissionAskFact,
   buildSessionErrorFact,
+  buildSessionTitleFact,
   buildThinkingDeltaFact,
   buildThinkingDoneFact,
   buildTextDeltaFact,
@@ -160,6 +161,12 @@ function pickToolPayload(value: Record<string, unknown>, keys: string[]): unknow
     }
   }
   return undefined;
+}
+
+function isSessionTitleEvent(eventName: string): boolean {
+  return eventName === "session.updated"
+    || eventName === "session.title"
+    || eventName === "session.title.updated";
 }
 
 function createDeferred<T>() {
@@ -372,9 +379,17 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { online: this.options.isOnline() };
   }
 
-  async createSession(): Promise<{ toolSessionId: string }> {
+  async createSession(input: {
+    traceId: string;
+    title?: string;
+    assistantId?: string;
+  }): Promise<{ toolSessionId: string }> {
     const toolSessionId = createToolSessionId();
-    this.options.sessionRegistry.ensure(toolSessionId);
+    const title = asTrimmedString(input.title);
+    // 下行 title 只作为本地初始标题；对 gateway 的标题上报必须来自宿主确认的 session 事件。
+    this.options.sessionRegistry.ensure(toolSessionId, undefined, {
+      ...(title ? { title } : {}),
+    });
     return { toolSessionId };
   }
 
@@ -823,6 +838,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
+    if (isSessionTitleEvent(eventName)) {
+      await this.handleSessionTitleUpdated(eventName, payload);
+      return;
+    }
+
     if (eventName === "exec.approval.requested") {
       await this.handleApprovalRequested(eventName, payload);
       return;
@@ -833,6 +853,32 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
+  }
+
+  private async handleSessionTitleUpdated(eventName: string, payload: Record<string, unknown>): Promise<void> {
+    const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+    const title = this.extractSessionTitleFromRuntimePayload(payload);
+    if (!toolSessionId || !title) {
+      return;
+    }
+
+    const { changed } = this.options.sessionRegistry.updateTitle(toolSessionId, title);
+    if (!changed) {
+      return;
+    }
+
+    await this.emitRuntimeOutboundFacts({
+      toolSessionId,
+      messageId: `msg_${randomUUID()}`,
+      trigger: eventName,
+      facts: [
+        buildSessionTitleFact({
+          toolSessionId,
+          title,
+          raw: payload,
+        }),
+      ],
+    });
   }
 
   private async handleApprovalRequested(eventName: string, payload: Record<string, unknown>): Promise<void> {
@@ -915,14 +961,30 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private extractToolSessionIdFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
     const metadata = pickRecord(payload, "metadata");
+    const info = pickRecord(payload, "info");
+    const session = pickRecord(payload, "session");
     const tool = pickRecord(payload, "tool");
     return (
       asTrimmedString(payload.toolSessionId) ??
       asTrimmedString(payload.sessionID) ??
       asTrimmedString(payload.sessionId) ??
+      asTrimmedString(info?.id) ??
+      asTrimmedString(session?.id) ??
       asTrimmedString(metadata?.toolSessionId) ??
       asTrimmedString(metadata?.sessionID) ??
       asTrimmedString(tool?.sessionID)
+    );
+  }
+
+  private extractSessionTitleFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
+    const info = pickRecord(payload, "info");
+    const session = pickRecord(payload, "session");
+    const metadata = pickRecord(payload, "metadata");
+    return (
+      asTrimmedString(payload.title) ??
+      asTrimmedString(info?.title) ??
+      asTrimmedString(session?.title) ??
+      asTrimmedString(metadata?.sessionTitle)
     );
   }
 
