@@ -483,15 +483,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const activeRun = this.activeRunsBySessionKey.get(record.sessionKey);
     const abortRunId = activeRun?.runId ?? input.runId;
     if (activeRun) {
-      // 先阻断插件侧输出，但暂不释放 active run；避免下一轮问答早于宿主 run 停止进入同一 sessionKey。
-      activeRun.abortRequested = true;
+      this.abortActiveRun(activeRun);
     }
     this.approvalRegistry.clearSession(input.toolSessionId);
 
     const replyRuntime = this.options.runtime.channel?.reply ?? {};
-    let runtimeHandled = false;
     try {
-      runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
+      await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
         sessionKey: record.sessionKey,
         runId: abortRunId,
       });
@@ -505,16 +503,22 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         runId: abortRunId,
         error: error instanceof Error ? error.message : String(error),
       });
-      runtimeHandled = true;
     }
-    if (!runtimeHandled) {
-      const subagent = this.options.getSubagentRuntime();
-      if (subagent?.deleteSession) {
+    const subagent = this.options.getSubagentRuntime();
+    if (subagent?.deleteSession) {
+      try {
         await subagent.deleteSession({ sessionKey: record.sessionKey });
+      } catch (error) {
+        if (!activeRun) {
+          throw error;
+        }
+        this.options.logger.warn("runtime.abort_session.delete_session_failed", {
+          toolSessionId: input.toolSessionId,
+          sessionKey: record.sessionKey,
+          runId: abortRunId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-    }
-    if (activeRun) {
-      this.abortActiveRun(activeRun);
     }
     return { applied: true };
   }

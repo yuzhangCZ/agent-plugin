@@ -117,6 +117,20 @@ test("provider adapter abort closes active run and suppresses late runtime reply
         },
       },
     },
+    getSubagentRuntime: () => ({
+      async run() {
+        return { runId: "sub-1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages() {
+        return { messages: [] };
+      },
+      async deleteSession(input) {
+        calls.push({ kind: "delete", ...input });
+      },
+    }),
   });
 
   const run = await provider.runMessage({
@@ -139,6 +153,7 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   await flushEvents();
   await capturedDispatcherOptions.deliver({ text: "late chunk" }, { kind: "block" });
   assert.equal(abortSettled, false);
+  assert.deepEqual(await run.result(), { outcome: "aborted" });
   releaseAbort();
   const result = await abortPromise;
 
@@ -148,13 +163,16 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   }
 
   assert.deepEqual(result, { applied: true });
-  assert.deepEqual(await run.result(), { outcome: "aborted" });
   assert.deepEqual(facts, []);
   assert.deepEqual(calls, [
     {
       kind: "abort",
       sessionKey: "agent:acct:ses_abort_active_1",
       runId: "host-run-1",
+    },
+    {
+      kind: "delete",
+      sessionKey: "agent:acct:ses_abort_active_1",
     },
   ]);
 });
@@ -182,7 +200,7 @@ test("provider adapter rejects question replies as unsupported", async () => {
   );
 });
 
-test("provider adapter abort prefers runtime abort hook over session deletion", async () => {
+test("provider adapter abort stops runtime run and clears host session state", async () => {
   const calls = [];
   const sessionRegistry = new SessionRegistry("agent:acct");
   sessionRegistry.ensure("tool-1");
@@ -207,8 +225,8 @@ test("provider adapter abort prefers runtime abort hook over session deletion", 
       async getSessionMessages() {
         return { messages: [] };
       },
-      async deleteSession() {
-        calls.push({ kind: "delete" });
+      async deleteSession(input) {
+        calls.push({ kind: "delete", ...input });
       },
     }),
   });
@@ -225,6 +243,10 @@ test("provider adapter abort prefers runtime abort hook over session deletion", 
       kind: "abort",
       sessionKey: "agent:acct:tool-1",
       runId: "run-1",
+    },
+    {
+      kind: "delete",
+      sessionKey: "agent:acct:tool-1",
     },
   ]);
 });
