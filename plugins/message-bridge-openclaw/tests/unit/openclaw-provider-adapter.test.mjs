@@ -170,10 +170,6 @@ test("provider adapter abort closes active run and suppresses late runtime reply
       sessionKey: "agent:acct:ses_abort_active_1",
       runId: "host-run-1",
     },
-    {
-      kind: "delete",
-      sessionKey: "agent:acct:ses_abort_active_1",
-    },
   ]);
 });
 
@@ -200,7 +196,7 @@ test("provider adapter rejects question replies as unsupported", async () => {
   );
 });
 
-test("provider adapter abort stops runtime run and clears host session state", async () => {
+test("provider adapter abort stops runtime run without deleting host session", async () => {
   const calls = [];
   const sessionRegistry = new SessionRegistry("agent:acct");
   sessionRegistry.ensure("tool-1");
@@ -243,10 +239,6 @@ test("provider adapter abort stops runtime run and clears host session state", a
       kind: "abort",
       sessionKey: "agent:acct:tool-1",
       runId: "run-1",
-    },
-    {
-      kind: "delete",
-      sessionKey: "agent:acct:tool-1",
     },
   ]);
 });

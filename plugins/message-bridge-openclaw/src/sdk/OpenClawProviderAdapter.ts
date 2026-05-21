@@ -504,22 +504,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    const subagent = this.options.getSubagentRuntime();
-    if (subagent?.deleteSession) {
-      try {
-        await subagent.deleteSession({ sessionKey: record.sessionKey });
-      } catch (error) {
-        if (!activeRun) {
-          throw error;
-        }
-        this.options.logger.warn("runtime.abort_session.delete_session_failed", {
-          toolSessionId: input.toolSessionId,
-          sessionKey: record.sessionKey,
-          runId: abortRunId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
     return { applied: true };
   }
 
