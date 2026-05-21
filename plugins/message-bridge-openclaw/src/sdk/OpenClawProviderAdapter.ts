@@ -483,7 +483,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const activeRun = this.activeRunsBySessionKey.get(record.sessionKey);
     const abortRunId = activeRun?.runId ?? input.runId;
     if (activeRun) {
-      this.abortActiveRun(activeRun);
+      // 先阻断插件侧输出，但暂不释放 active run；避免下一轮问答早于宿主 run 停止进入同一 sessionKey。
+      activeRun.abortRequested = true;
     }
     this.approvalRegistry.clearSession(input.toolSessionId);
 
@@ -511,6 +512,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       if (subagent?.deleteSession) {
         await subagent.deleteSession({ sessionKey: record.sessionKey });
       }
+    }
+    if (activeRun) {
+      this.abortActiveRun(activeRun);
     }
     return { applied: true };
   }

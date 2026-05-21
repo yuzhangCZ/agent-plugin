@@ -84,6 +84,7 @@ test("provider adapter fallback emits ordered facts and completed result", async
 test("provider adapter abort closes active run and suppresses late runtime reply chunks", async () => {
   const calls = [];
   let capturedDispatcherOptions;
+  let releaseAbort;
   const provider = createAdapter({
     runtime: {
       channel: {
@@ -95,6 +96,9 @@ test("provider adapter abort closes active run and suppresses late runtime reply
         reply: {
           async abortRun(input) {
             calls.push({ kind: "abort", ...input });
+            await new Promise((resolve) => {
+              releaseAbort = resolve;
+            });
           },
           resolveEnvelopeFormatOptions() {
             return {};
@@ -123,12 +127,20 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   });
   await flushEvents();
 
-  const result = await provider.abortSession({
+  let abortSettled = false;
+  const abortPromise = provider.abortSession({
     traceId: "trace-2",
     toolSessionId: "ses_abort_active_1",
     runId: "sdk-run-1",
+  }).then((value) => {
+    abortSettled = true;
+    return value;
   });
+  await flushEvents();
   await capturedDispatcherOptions.deliver({ text: "late chunk" }, { kind: "block" });
+  assert.equal(abortSettled, false);
+  releaseAbort();
+  const result = await abortPromise;
 
   const facts = [];
   for await (const fact of run.facts) {
