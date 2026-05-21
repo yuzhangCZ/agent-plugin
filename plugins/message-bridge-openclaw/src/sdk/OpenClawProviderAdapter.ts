@@ -1094,8 +1094,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private finalizeRun(state: ActiveRunState): void {
     state.completed = true;
-    this.activeRunsBySessionKey.delete(state.sessionKey);
-    this.sessionKeyByRunId.delete(state.runId);
+    if (this.activeRunsBySessionKey.get(state.sessionKey) === state) {
+      this.activeRunsBySessionKey.delete(state.sessionKey);
+    }
+    if (this.sessionKeyByRunId.get(state.runId) === state.sessionKey) {
+      this.sessionKeyByRunId.delete(state.runId);
+    }
   }
 
   /**

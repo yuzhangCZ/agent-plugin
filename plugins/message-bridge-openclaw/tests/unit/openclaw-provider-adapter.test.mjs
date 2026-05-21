@@ -243,6 +243,87 @@ test("provider adapter abort stops runtime run without deleting host session", a
   ]);
 });
 
+test("provider adapter ignores stale finalize from aborted run after follow-up starts", async () => {
+  const calls = [];
+  const runs = [];
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { accountId: "acct", agentId: "agent" };
+          },
+        },
+        reply: {
+          async abortRun(input) {
+            calls.push({ kind: "abort", ...input });
+          },
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }) {
+            const index = runs.length + 1;
+            replyOptions.onAgentRunStart(`host-run-${index}`);
+            await new Promise((resolve) => {
+              runs.push({ resolve });
+            });
+          },
+        },
+      },
+    },
+  });
+
+  const firstRun = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-1",
+    toolSessionId: "ses_followup_1",
+    text: "first",
+  });
+  await flushEvents();
+  await provider.abortSession({
+    traceId: "trace-2",
+    toolSessionId: "ses_followup_1",
+    runId: "sdk-run-1",
+  });
+  assert.deepEqual(await firstRun.result(), { outcome: "aborted" });
+
+  const secondRun = await provider.runMessage({
+    traceId: "trace-3",
+    runId: "sdk-run-2",
+    toolSessionId: "ses_followup_1",
+    text: "second",
+  });
+  await flushEvents();
+
+  runs[0].resolve();
+  await flushEvents();
+  await provider.abortSession({
+    traceId: "trace-4",
+    toolSessionId: "ses_followup_1",
+    runId: "sdk-run-2",
+  });
+
+  assert.deepEqual(await secondRun.result(), { outcome: "aborted" });
+  assert.deepEqual(calls, [
+    {
+      kind: "abort",
+      sessionKey: "agent:acct:ses_followup_1",
+      runId: "host-run-1",
+    },
+    {
+      kind: "abort",
+      sessionKey: "agent:acct:ses_followup_1",
+      runId: "host-run-2",
+    },
+  ]);
+});
+
 test("provider adapter serializes tool input and output from runtime events", async () => {
   const listeners = [];
   let finishRun;
