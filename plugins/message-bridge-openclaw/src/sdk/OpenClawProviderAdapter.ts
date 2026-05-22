@@ -163,10 +163,13 @@ function pickToolPayload(value: Record<string, unknown>, keys: string[]): unknow
   return undefined;
 }
 
-function isSessionTitleEvent(eventName: string): boolean {
-  return eventName === "session.updated"
-    || eventName === "session.title"
-    || eventName === "session.title.updated";
+function scheduleOutboundAfterCreateSession(callback: () => void): void {
+  if (typeof setImmediate === "function") {
+    setImmediate(callback);
+    return;
+  }
+
+  setTimeout(callback, 0);
 }
 
 function createDeferred<T>() {
@@ -385,11 +388,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     assistantId?: string;
   }): Promise<{ toolSessionId: string }> {
     const toolSessionId = createToolSessionId();
-    const title = asTrimmedString(input.title);
-    // 下行 title 只作为本地初始标题；对 gateway 的标题上报必须来自宿主确认的 session 事件。
-    this.options.sessionRegistry.ensure(toolSessionId, undefined, {
-      ...(title ? { title } : {}),
-    });
+    // OpenClaw 无独立会话标题事件，建会后使用 session_id 作为对 gateway 的稳定标题。
+    this.options.sessionRegistry.ensure(toolSessionId);
+    this.emitCreatedSessionTitleSoon(toolSessionId);
     return { toolSessionId };
   }
 
@@ -838,11 +839,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
-    if (isSessionTitleEvent(eventName)) {
-      await this.handleSessionTitleUpdated(eventName, payload);
-      return;
-    }
-
     if (eventName === "exec.approval.requested") {
       await this.handleApprovalRequested(eventName, payload);
       return;
@@ -853,32 +849,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
 
-  }
-
-  private async handleSessionTitleUpdated(eventName: string, payload: Record<string, unknown>): Promise<void> {
-    const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
-    const title = this.extractSessionTitleFromRuntimePayload(payload);
-    if (!toolSessionId || !title) {
-      return;
-    }
-
-    const { changed } = this.options.sessionRegistry.updateTitle(toolSessionId, title);
-    if (!changed) {
-      return;
-    }
-
-    await this.emitRuntimeOutboundFacts({
-      toolSessionId,
-      messageId: `msg_${randomUUID()}`,
-      trigger: eventName,
-      facts: [
-        buildSessionTitleFact({
-          toolSessionId,
-          title,
-          raw: payload,
-        }),
-      ],
-    });
   }
 
   private async handleApprovalRequested(eventName: string, payload: Record<string, unknown>): Promise<void> {
@@ -936,11 +906,34 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     this.approvalRegistry.markResolved(permissionId);
   }
 
+  private emitCreatedSessionTitleSoon(toolSessionId: string): void {
+    // createSession 返回后 SDK 会先发 session_created；title outbound 延后一轮，避免抢在建会回包前。
+    scheduleOutboundAfterCreateSession(() => {
+      const queue = createAsyncQueue<ProviderFact>();
+      queue.push(buildSessionTitleFact({
+        toolSessionId,
+        title: toolSessionId,
+      }));
+      queue.close();
+      this.emitRuntimeOutboundFacts({
+        toolSessionId,
+        messageId: `msg_${randomUUID()}`,
+        trigger: "create_session.title",
+        facts: queue.iterable,
+      }).catch((error) => {
+        this.options.logger.warn("runtime.session_title_emit.failed", {
+          toolSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+  }
+
   private async emitRuntimeOutboundFacts(input: {
     toolSessionId: string;
     messageId: string;
     trigger: string;
-    facts: ProviderFact[];
+    facts: ProviderFact[] | AsyncIterable<ProviderFact>;
   }): Promise<void> {
     if (!this.outbound) {
       return;
@@ -949,7 +942,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       toolSessionId: input.toolSessionId,
       messageId: input.messageId,
       trigger: input.trigger,
-      facts: this.iterateFacts(input.facts),
+      facts: Array.isArray(input.facts) ? this.iterateFacts(input.facts) : input.facts,
     });
   }
 
@@ -973,18 +966,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       asTrimmedString(metadata?.toolSessionId) ??
       asTrimmedString(metadata?.sessionID) ??
       asTrimmedString(tool?.sessionID)
-    );
-  }
-
-  private extractSessionTitleFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
-    const info = pickRecord(payload, "info");
-    const session = pickRecord(payload, "session");
-    const metadata = pickRecord(payload, "metadata");
-    return (
-      asTrimmedString(payload.title) ??
-      asTrimmedString(info?.title) ??
-      asTrimmedString(session?.title) ??
-      asTrimmedString(metadata?.sessionTitle)
     );
   }
 
