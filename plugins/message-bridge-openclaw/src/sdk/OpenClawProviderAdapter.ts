@@ -909,17 +909,16 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   private emitCreatedSessionTitleSoon(toolSessionId: string): void {
     // createSession 返回后 SDK 会先发 session_created；title outbound 延后一轮，避免抢在建会回包前。
     scheduleOutboundAfterCreateSession(() => {
-      const queue = createAsyncQueue<ProviderFact>();
-      queue.push(buildSessionTitleFact({
-        toolSessionId,
-        title: toolSessionId,
-      }));
-      queue.close();
       this.emitRuntimeOutboundFacts({
         toolSessionId,
         messageId: `msg_${randomUUID()}`,
         trigger: "create_session.title",
-        facts: queue.iterable,
+        facts: [
+          buildSessionTitleFact({
+            toolSessionId,
+            title: toolSessionId,
+          }),
+        ],
       }).catch((error) => {
         this.options.logger.warn("runtime.session_title_emit.failed", {
           toolSessionId,
