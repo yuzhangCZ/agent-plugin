@@ -3,39 +3,12 @@ import type {
   BridgeGatewayHostState,
   BridgeGatewayProbeResult,
 } from '../../infrastructure/gateway/gateway-host.ts';
+import { DEFAULT_PROBE_TIMEOUT_MS, RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
-import type { RuntimeObservation } from '../runtime-observation.ts';
+import type { RuntimeObservation } from '../runtime-observation/index.ts';
 import type { BridgeRuntimeStatusSnapshot } from '../runtime.ts';
 import type { RuntimeCore } from '../runtime/runtime-core.types.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './runtime-lifecycle.types.ts';
-
-function normalizeErrorMessage(error: unknown): string {
-  if (
-    typeof error === 'object'
-    && error !== null
-    && 'message' in error
-    && typeof (error as { message?: unknown }).message === 'string'
-  ) {
-    return (error as { message: string }).message;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isGatewayReady(state: BridgeGatewayHostState): boolean {
-  return state === 'READY';
-}
-
-function isGatewayRecovering(state: BridgeGatewayHostState): boolean {
-  return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
-}
-
-function isRuntimeReady(state: BridgeRuntimeStatusSnapshot['state']): state is 'ready' {
-  return state === 'ready';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * host runtime 生命周期服务。
@@ -70,7 +43,7 @@ export class RuntimeLifecycleService {
     if (this.status.state === 'idle' || this.status.state === 'stopping' || this.status.state === 'failed') {
       return;
     }
-    if (isGatewayReady(gatewayState)) {
+    if (this.isGatewayReady(gatewayState)) {
       this.status = {
         state: 'ready',
         failureReason: null,
@@ -78,7 +51,7 @@ export class RuntimeLifecycleService {
       this.onTelemetryUpdated?.();
       return;
     }
-    if (this.status.state !== 'starting' && isGatewayRecovering(gatewayState)) {
+    if (this.status.state !== 'starting' && this.isGatewayRecovering(gatewayState)) {
       this.status = {
         state: 'reconnecting',
         failureReason: null,
@@ -88,7 +61,7 @@ export class RuntimeLifecycleService {
   }
 
   handleGatewayRuntimeError(error: BridgeGatewayHostError): void {
-    this.setFailed('gateway_runtime_failure', 'runtime', error, error.code);
+    this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'runtime', error, error.code);
     this.onTelemetryUpdated?.();
   }
 
@@ -120,7 +93,7 @@ export class RuntimeLifecycleService {
         this.onTelemetryUpdated?.();
       } catch (error) {
         this.driver.disconnect();
-        this.setFailed('startup_failure', 'start', error);
+        this.setFailed(RUNTIME_FAILURE_KIND.startup, 'start', error);
         this.observation.runtimeStartFailed(error);
         this.onTelemetryUpdated?.();
         throw error;
@@ -166,7 +139,7 @@ export class RuntimeLifecycleService {
         this.observation.runtimeStopCompleted();
         this.onTelemetryUpdated?.();
       } catch (error) {
-        this.setFailed('gateway_runtime_failure', 'stop', error);
+        this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', error);
         this.observation.runtimeStopFailed(error);
         this.onTelemetryUpdated?.();
         throw error;
@@ -182,7 +155,7 @@ export class RuntimeLifecycleService {
     return { ...this.status };
   }
 
-  async probe(input = { timeoutMs: 5_000 }): Promise<BridgeGatewayProbeResult> {
+  async probe(input = { timeoutMs: DEFAULT_PROBE_TIMEOUT_MS }): Promise<BridgeGatewayProbeResult> {
     const startedAt = Date.now();
     if (this.status.state === 'ready') {
       return {
@@ -195,12 +168,12 @@ export class RuntimeLifecycleService {
     if (this.status.state === 'starting' || this.status.state === 'reconnecting') {
       const waitMs = Math.min(input.timeoutMs, 1_000);
       if (this.startPromise) {
-        await Promise.race([this.startPromise.catch(() => undefined), sleep(waitMs)]);
+        await Promise.race([this.startPromise.catch(() => undefined), this.sleep(waitMs)]);
       } else {
-        await sleep(waitMs);
+        await this.sleep(waitMs);
       }
       const postWaitState = this.status.state;
-      if (isRuntimeReady(postWaitState)) {
+      if (this.isRuntimeReady(postWaitState)) {
         return {
           state: 'ready',
           latencyMs: Math.max(0, Date.now() - startedAt),
@@ -230,17 +203,12 @@ export class RuntimeLifecycleService {
   }
 
   recordFailure(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): string {
-    const message = normalizeErrorMessage(error);
+    const message = this.normalizeErrorMessage(error);
     this.observation.failureRecorded(kind, phase, message, code);
     return message;
   }
 
-  private setFailed(
-    kind: 'startup_failure' | 'gateway_runtime_failure',
-    phase: RuntimeFailurePhase,
-    error: unknown,
-    code?: string,
-  ): void {
+  private setFailed(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): void {
     const message = this.recordFailure(kind, phase, error, code);
     this.status = {
       ...this.status,
@@ -255,5 +223,33 @@ export class RuntimeLifecycleService {
     }
     this.probeAbortController.abort(new Error('probe_cancelled_for_runtime_start'));
     await this.probePromise.catch(() => undefined);
+  }
+
+  private normalizeErrorMessage(error: unknown): string {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'message' in error
+      && typeof (error as { message?: unknown }).message === 'string'
+    ) {
+      return (error as { message: string }).message;
+    }
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private isGatewayReady(state: BridgeGatewayHostState): boolean {
+    return state === 'READY';
+  }
+
+  private isGatewayRecovering(state: BridgeGatewayHostState): boolean {
+    return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
+  }
+
+  private isRuntimeReady(state: BridgeRuntimeStatusSnapshot['state']): state is 'ready' {
+    return state === 'ready';
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

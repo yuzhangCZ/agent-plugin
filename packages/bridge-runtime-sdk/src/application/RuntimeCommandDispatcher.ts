@@ -1,7 +1,7 @@
 import type { RuntimeCommand } from '../domain/runtime-command.ts';
 import type { RuntimeCommandDispatcher as RuntimeCommandDispatcherPort } from './ports/runtime-command-dispatcher.ts';
 import type { RuntimeUseCaseMap } from './ports/runtime-usecase.ts';
-import type { RuntimeObservation } from './runtime-observation.ts';
+import type { RuntimeObservation } from './runtime-observation/index.ts';
 
 /**
  * runtime 命令分发器；仅负责路由与 use case 装配。

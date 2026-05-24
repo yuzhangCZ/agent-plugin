@@ -1,7 +1,7 @@
 import type { ThirdPartyAgentProvider } from '../../domain/provider.ts';
 import type { RuntimeCommand } from '../../domain/runtime-command.ts';
 import type { RuntimeCommandDispatcher } from '../ports/runtime-command-dispatcher.ts';
-import type { RuntimeObservation, RuntimeObservationCommand } from '../runtime-observation.ts';
+import type { RuntimeObservation, RuntimeObservationCommand } from '../runtime-observation/index.ts';
 
 export interface RuntimeOutboundEmitter {
   emitOutbound(input: {

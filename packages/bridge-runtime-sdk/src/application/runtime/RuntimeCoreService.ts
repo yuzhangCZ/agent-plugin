@@ -40,7 +40,7 @@ export class RuntimeCoreService implements RuntimeCore {
     this.options.observation.runtimeCoreStopped();
   }
 
-  async handleCommand(command: RuntimeCommand): Promise<import('../runtime-observation.ts').RuntimeObservationCommand> {
+  async handleCommand(command: RuntimeCommand): Promise<import('../runtime-observation/index.ts').RuntimeObservationCommand> {
     await this.options.dispatcher.dispatch(command);
     return command.kind;
   }

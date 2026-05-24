@@ -10,7 +10,7 @@ import {
   DefaultRuntimeObservation,
   type RuntimeObservationEvent,
   type RuntimeObservationPort,
-} from '../src/application/runtime-observation.ts';
+} from '../src/application/runtime-observation/index.ts';
 import { RuntimeTraceCollectorAdapter } from '../src/adapters/observation/runtime-trace-observation.ts';
 import {
   ObservedProviderCommandHandlers,
@@ -23,9 +23,9 @@ import {
   QueryStatusUseCase,
   ReplyPermissionUseCase,
   ReplyQuestionUseCase,
-} from '../src/application/usecases.ts';
-import { InteractionCoordinator } from '../src/application/coordinators.ts';
-import type { PendingInteractionRegistry, SessionRuntimeRegistry } from '../src/application/registries.ts';
+} from '../src/application/usecases/index.ts';
+import { InteractionCoordinator } from '../src/application/coordinators/index.ts';
+import type { PendingInteractionRegistry, SessionRuntimeRegistry } from '../src/application/registries/index.ts';
 
 class StubSessionRuntimeRegistry implements SessionRuntimeRegistry {
   ensure(input: { toolSessionId: string; welinkSessionId?: string }) {

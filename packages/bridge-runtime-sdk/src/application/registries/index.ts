@@ -4,9 +4,9 @@ export type {
   PendingInteractionRecord,
   PendingInteractionRegisterResult,
   PendingInteractionRegistry,
-} from './ports/pending-interaction-registry.ts';
+} from '../ports/pending-interaction-registry.ts';
 export type {
   SessionLifecycleState,
   SessionRuntimeRecord,
   SessionRuntimeRegistry,
-} from './ports/session-runtime-registry.ts';
+} from '../ports/session-runtime-registry.ts';

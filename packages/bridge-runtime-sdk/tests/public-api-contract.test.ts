@@ -75,9 +75,9 @@ test('public contract source locks interaction ids and tool.update string bounda
 
 test('application ports own runtime orchestration contracts without duplicate local interfaces', async () => {
   const runtimeUsecaseSource = await readFile(new URL('../src/application/ports/runtime-usecase.ts', import.meta.url), 'utf8');
-  const usecasesSource = await readFile(new URL('../src/application/usecases.ts', import.meta.url), 'utf8');
+  const usecasesSource = await readFile(new URL('../src/application/usecases/index.ts', import.meta.url), 'utf8');
   const dispatcherSource = await readFile(new URL('../src/application/RuntimeCommandDispatcher.ts', import.meta.url), 'utf8');
-  const registriesSource = await readFile(new URL('../src/application/registries.ts', import.meta.url), 'utf8');
+  const registriesSource = await readFile(new URL('../src/application/registries/index.ts', import.meta.url), 'utf8');
   const infrastructureIndexSource = await readFile(new URL('../src/infrastructure/index.ts', import.meta.url), 'utf8');
 
   assert.equal(runtimeUsecaseSource.includes('ProviderHealthResult'), false);

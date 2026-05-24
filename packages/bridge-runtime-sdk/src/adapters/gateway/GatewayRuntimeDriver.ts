@@ -12,7 +12,7 @@ import type {
   GatewayRuntimeDriverHandlers,
 } from '../../application/ports/gateway-runtime-driver.ts';
 import type { InboundPolicy } from '../../application/ports/inbound-policy.ts';
-import type { RuntimeObservation } from '../../application/runtime-observation.ts';
+import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
 import {
   createDefaultBridgeGatewayHostConnection,
   normalizeBridgeGatewayHostConfig,

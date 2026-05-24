@@ -1,5 +1,5 @@
 import type { BridgeGatewayLogger } from '../../infrastructure/gateway/gateway-host.ts';
-import type { RuntimeObservationEvent, RuntimeObservationPort } from '../../application/runtime-observation.ts';
+import type { RuntimeObservationEvent, RuntimeObservationPort } from '../../application/runtime-observation/index.ts';
 
 function redactMeta(meta: Record<string, unknown>): Record<string, unknown> {
   const sensitiveKeys = ['ak', 'sk', 'token', 'authorization', 'cookie', 'secret', 'password', 'content', 'text', 'answers'];

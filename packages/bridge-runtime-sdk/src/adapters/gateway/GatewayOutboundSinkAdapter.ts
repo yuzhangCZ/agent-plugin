@@ -1,8 +1,9 @@
 import { validateGatewayUplinkBusinessMessage, type GatewayUplinkBusinessMessage } from '@agent-plugin/gateway-schema';
 
+import { RUNTIME_FAILURE_KIND } from '../../application/constants/runtime.ts';
 import type { GatewayRuntimeDriver } from '../../application/ports/gateway-runtime-driver.ts';
 import type { OutboundSink } from '../../application/ports/outbound-sink.ts';
-import type { RuntimeObservation } from '../../application/runtime-observation.ts';
+import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
 
 /**
  * uplink validation + send 适配器。
@@ -30,7 +31,7 @@ export class GatewayOutboundSinkAdapter implements OutboundSink {
         validation.error.violation.message,
       );
       this.observation.failureRecorded(
-        'outbound_validation_failure',
+        RUNTIME_FAILURE_KIND.outboundValidation,
         'runtime',
         validation.error.violation.message,
         validation.error.violation.code,
