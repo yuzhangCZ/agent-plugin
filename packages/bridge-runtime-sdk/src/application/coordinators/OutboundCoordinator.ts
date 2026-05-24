@@ -1,5 +1,6 @@
 import type { ProviderFact } from '../../domain/provider.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
+import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
 import type { EventPipeline } from './coordinator.types.ts';
@@ -46,29 +47,24 @@ export class OutboundCoordinator {
       for await (const fact of input.facts) {
         this.pipeline.observation.factReceived(input.toolSessionId, fact, OUTBOUND_PROFILE.kind);
         const sessionLifecycle = this.sessionRegistry.get(input.toolSessionId)?.lifecycle ?? 'active';
-        const validation = this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE, sessionLifecycle);
+        const classification = classifyFact(fact.type);
+        this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE, sessionLifecycle);
         this.interactionCoordinator.registerFromFact(input.toolSessionId, fact);
         const envelopeFields = this.toToolEventEnvelopeFields(fact);
+        const events = this.pipeline.factProjector.project(fact);
 
-        for (const derivedEvent of validation.derivedEvents) {
-          this.pipeline.observation.derivedEventProjected(
-            input.toolSessionId,
-            fact.type,
-            derivedEvent,
-            OUTBOUND_PROFILE.kind,
-          );
-          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, derivedEvent, envelopeFields);
-          this.pipeline.observation.uplinkEmitted(uplink);
-          await this.pipeline.sink.send(uplink);
-        }
-
-        if (!validation.projectFact) {
-          continue;
-        }
-
-        for (const event of this.pipeline.factProjector.project(fact)) {
+        for (const event of events) {
           const uplink = this.pipeline.eventProjector.project(input.toolSessionId, event, envelopeFields);
-          this.pipeline.observation.uplinkProjected(input.toolSessionId, fact.type, uplink.type, OUTBOUND_PROFILE.kind);
+          if (classification.emitsDerivedEvent) {
+            this.pipeline.observation.derivedEventProjected(
+              input.toolSessionId,
+              fact.type,
+              event,
+              OUTBOUND_PROFILE.kind,
+            );
+          } else if (classification.projectsFactEvent) {
+            this.pipeline.observation.uplinkProjected(input.toolSessionId, fact.type, uplink.type, OUTBOUND_PROFILE.kind);
+          }
           this.pipeline.observation.uplinkEmitted(uplink);
           await this.pipeline.sink.send(uplink);
         }

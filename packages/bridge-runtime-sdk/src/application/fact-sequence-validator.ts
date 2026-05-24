@@ -1,16 +1,7 @@
-import type { SkillProviderEvent } from '@agent-plugin/gateway-schema';
-
+import { classifyFact } from './fact-semantics.ts';
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
 import type { SessionLifecycleState } from './ports/session-runtime-registry.ts';
-
-function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-  const entries = Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number');
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
 
 export type LifecycleProfileKind = 'request_run' | 'outbound';
 
@@ -25,21 +16,6 @@ export interface ValidationSessionState {
   openTextParts: Set<string>;
   openThinkingParts: Set<string>;
   knownToolCallIds: Set<string>;
-}
-
-export interface ValidationResult {
-  accepted: true;
-  projectFact: boolean;
-  derivedEvents: SkillProviderEvent[];
-}
-
-function requiresOpenMessage(fact: ProviderFact): fact is Exclude<ProviderFact, { type: 'permission.ask' | 'permission.reply' | 'session.title' | 'session.error' | 'message.start' | 'message.done' }> | Extract<ProviderFact, { type: 'question.ask' }> {
-  return fact.type === 'text.delta'
-    || fact.type === 'text.done'
-    || fact.type === 'thinking.delta'
-    || fact.type === 'thinking.done'
-    || fact.type === 'tool.update'
-    || fact.type === 'question.ask';
 }
 
 /**
@@ -67,15 +43,9 @@ export class FactSequenceValidator {
     state: ValidationSessionState,
     profile: LifecycleProfile,
     sessionLifecycle: SessionLifecycleState,
-  ): ValidationResult {
+  ): void {
     this.assertSessionLifecycle(toolSessionId, fact, state, sessionLifecycle);
     this.assertFactOrder(fact, state, profile);
-
-    return {
-      accepted: true,
-      projectFact: fact.type !== 'message.start' && fact.type !== 'message.done',
-      derivedEvents: this.deriveEvents(fact),
-    };
   }
 
   private assertSessionLifecycle(
@@ -101,12 +71,9 @@ export class FactSequenceValidator {
       return;
     }
 
-    if (
-      fact.type === 'message.start'
-      || fact.type === 'question.ask'
-      || fact.type === 'permission.ask'
-      || fact.type === 'session.title'
-    ) {
+    const classification = classifyFact(fact.type);
+
+    if (classification.rejectInAbortingSession) {
       throw new RuntimeContractError('fact_sequence_invalid', 'aborting session rejects new activity facts', {
         factType: fact.type,
       });
@@ -136,7 +103,10 @@ export class FactSequenceValidator {
       case 'tool.update':
       case 'question.ask':
       case 'permission.ask':
-        if (requiresOpenMessage(fact) && (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId))) {
+        if (
+          classifyFact(fact.type).requiresOpenMessage
+          && (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId))
+        ) {
           throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
             messageId: fact.messageId,
             factType: fact.type,
@@ -151,7 +121,7 @@ export class FactSequenceValidator {
         }
         state.openMessages.delete(fact.messageId);
         state.closedMessages.add(fact.messageId);
-        if (profile.kind === 'outbound') {
+        if (profile.kind === 'outbound' && classifyFact(fact.type).marksOutboundTerminal) {
           state.terminalReached = true;
         }
         return;
@@ -201,36 +171,5 @@ export class FactSequenceValidator {
     if (fact.type === 'question.ask') {
       return;
     }
-  }
-
-  private deriveEvents(fact: ProviderFact): SkillProviderEvent[] {
-    if (fact.type === 'message.start') {
-      return [
-        {
-          protocol: 'cloud',
-          type: 'step.start',
-          properties: {
-            messageId: fact.messageId,
-          },
-        },
-      ];
-    }
-
-    if (fact.type === 'message.done') {
-      return [
-        {
-          protocol: 'cloud',
-          type: 'step.done',
-          properties: {
-            messageId: fact.messageId,
-            ...(toOptionalNumericRecord(fact.tokens) ? { tokens: toOptionalNumericRecord(fact.tokens) } : {}),
-            ...(fact.cost !== undefined ? { cost: fact.cost } : {}),
-            ...(fact.reason ? { reason: fact.reason } : {}),
-          },
-        },
-      ];
-    }
-
-    return [];
   }
 }

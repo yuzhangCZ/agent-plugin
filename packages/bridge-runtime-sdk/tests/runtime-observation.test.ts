@@ -25,7 +25,8 @@ import {
   ReplyQuestionUseCase,
 } from '../src/application/usecases/index.ts';
 import { InteractionCoordinator } from '../src/application/coordinators/index.ts';
-import type { PendingInteractionRegistry, SessionRuntimeRegistry } from '../src/application/registries/index.ts';
+import type { PendingInteractionRegistry } from '../src/application/ports/pending-interaction-registry.ts';
+import type { SessionRuntimeRegistry } from '../src/application/ports/session-runtime-registry.ts';
 
 class StubSessionRuntimeRegistry implements SessionRuntimeRegistry {
   ensure(input: { toolSessionId: string; welinkSessionId?: string }) {

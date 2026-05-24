@@ -77,7 +77,14 @@ test('application ports own runtime orchestration contracts without duplicate lo
   const runtimeUsecaseSource = await readFile(new URL('../src/application/ports/runtime-usecase.ts', import.meta.url), 'utf8');
   const usecasesSource = await readFile(new URL('../src/application/usecases/index.ts', import.meta.url), 'utf8');
   const dispatcherSource = await readFile(new URL('../src/application/RuntimeCommandDispatcher.ts', import.meta.url), 'utf8');
-  const registriesSource = await readFile(new URL('../src/application/registries/index.ts', import.meta.url), 'utf8');
+  const pendingRegistrySource = await readFile(
+    new URL('../src/application/ports/pending-interaction-registry.ts', import.meta.url),
+    'utf8',
+  );
+  const sessionRegistrySource = await readFile(
+    new URL('../src/application/ports/session-runtime-registry.ts', import.meta.url),
+    'utf8',
+  );
   const infrastructureIndexSource = await readFile(new URL('../src/infrastructure/index.ts', import.meta.url), 'utf8');
 
   assert.equal(runtimeUsecaseSource.includes('ProviderHealthResult'), false);
@@ -88,8 +95,8 @@ test('application ports own runtime orchestration contracts without duplicate lo
   assert.equal(usecasesSource.includes('export interface RuntimeUseCase'), false);
   assert.equal(dispatcherSource.includes("from './usecases.ts'"), false);
   assert.equal(dispatcherSource.includes("from './ports/runtime-usecase.ts'"), true);
-  assert.equal(registriesSource.includes('export interface SessionRuntimeRegistry'), false);
-  assert.equal(registriesSource.includes('export interface PendingInteractionRegistry'), false);
+  assert.equal(sessionRegistrySource.includes('export interface SessionRuntimeRegistry'), true);
+  assert.equal(pendingRegistrySource.includes('export interface PendingInteractionRegistry'), true);
   assert.equal(infrastructureIndexSource.includes("./registries/in-memory-session-runtime-registry.ts"), false);
   assert.equal(infrastructureIndexSource.includes("./registries/in-memory-pending-interaction-registry.ts"), false);
 });

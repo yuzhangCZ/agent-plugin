@@ -1,4 +1,5 @@
 import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
+import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
@@ -78,24 +79,19 @@ export class RequestRunCoordinator {
     for await (const fact of facts) {
       this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
       const sessionLifecycle = this.sessionRegistry.get(toolSessionId)?.lifecycle ?? 'active';
-      const validation = this.validator.consume(toolSessionId, fact, state, profile, sessionLifecycle);
+      const classification = classifyFact(fact.type);
+      this.validator.consume(toolSessionId, fact, state, profile, sessionLifecycle);
       this.interactionCoordinator.registerFromFact(toolSessionId, fact);
       const envelopeFields = this.toToolEventEnvelopeFields(fact);
+      const events = this.pipeline.factProjector.project(fact);
 
-      for (const derivedEvent of validation.derivedEvents) {
-        this.pipeline.observation.derivedEventProjected(toolSessionId, fact.type, derivedEvent, profile.kind);
-        const uplink = this.pipeline.eventProjector.project(toolSessionId, derivedEvent, envelopeFields);
-        this.pipeline.observation.uplinkEmitted(uplink);
-        await this.pipeline.sink.send(uplink);
-      }
-
-      if (!validation.projectFact) {
-        continue;
-      }
-
-      for (const event of this.pipeline.factProjector.project(fact)) {
+      for (const event of events) {
         const uplink = this.pipeline.eventProjector.project(toolSessionId, event, envelopeFields);
-        this.pipeline.observation.uplinkProjected(toolSessionId, fact.type, uplink.type, profile.kind);
+        if (classification.emitsDerivedEvent) {
+          this.pipeline.observation.derivedEventProjected(toolSessionId, fact.type, event, profile.kind);
+        } else if (classification.projectsFactEvent) {
+          this.pipeline.observation.uplinkProjected(toolSessionId, fact.type, uplink.type, profile.kind);
+        }
         this.pipeline.observation.uplinkEmitted(uplink);
         await this.pipeline.sink.send(uplink);
       }
