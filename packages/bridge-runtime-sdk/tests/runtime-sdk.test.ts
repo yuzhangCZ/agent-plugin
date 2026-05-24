@@ -14,7 +14,7 @@ import type {
   BridgeGatewayHostConnection,
   BridgeGatewayHostError,
   BridgeGatewayHostState,
-} from '../src/application/gateway-host.ts';
+} from '../src/infrastructure/gateway/gateway-host.ts';
 import { createBridgeRuntime } from '../src/index.ts';
 
 function createAsyncFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {

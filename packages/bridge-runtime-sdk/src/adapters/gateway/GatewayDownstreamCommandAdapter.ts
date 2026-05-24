@@ -1,6 +1,6 @@
 import type { GatewayDownstreamBusinessRequest } from '@agent-plugin/gateway-schema';
 
-import type { RuntimeCommand } from '../domain/runtime-command.ts';
+import type { RuntimeCommand } from '../../domain/runtime-command.ts';
 
 /**
  * 网关下行请求到 runtime command 的适配边界。

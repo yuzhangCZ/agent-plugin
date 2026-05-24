@@ -11,11 +11,11 @@ import type {
   ReplyQuestionUseCase as ReplyQuestionUseCasePort,
   StartRequestRunUseCase as StartRequestRunUseCasePort,
 } from './ports/runtime-usecase.ts';
-import type { ProviderCommandHandlers } from './provider-api-adapter.ts';
+import type { ProviderCommandHandlers } from '../adapters/provider/provider-api-adapter.ts';
 import type {
   GatewayCommandResultProjector,
-  GatewayOutboundSink,
 } from './projectors.ts';
+import type { OutboundSink } from './ports/outbound-sink.ts';
 import type { PendingInteractionRegistry } from './ports/pending-interaction-registry.ts';
 import type { SessionRuntimeRegistry } from './ports/session-runtime-registry.ts';
 import { InteractionCoordinator, RequestRunCoordinator } from './coordinators.ts';
@@ -23,13 +23,13 @@ import type { RuntimeObservation } from './runtime-observation.ts';
 
 export class QueryStatusUseCase implements QueryStatusUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
-  private readonly sink: GatewayOutboundSink;
+  private readonly sink: OutboundSink;
   private readonly projector: GatewayCommandResultProjector;
   private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
-    sink: GatewayOutboundSink,
+    sink: OutboundSink,
     projector: GatewayCommandResultProjector,
     observation: RuntimeObservation,
   ) {
@@ -57,14 +57,14 @@ export class QueryStatusUseCase implements QueryStatusUseCasePort {
 export class CreateSessionUseCase implements CreateSessionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
-  private readonly sink: GatewayOutboundSink;
+  private readonly sink: OutboundSink;
   private readonly projector: GatewayCommandResultProjector;
   private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
-    sink: GatewayOutboundSink,
+    sink: OutboundSink,
     projector: GatewayCommandResultProjector,
     observation: RuntimeObservation,
   ) {

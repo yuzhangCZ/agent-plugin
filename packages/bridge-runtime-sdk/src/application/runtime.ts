@@ -1,5 +1,5 @@
 import type { RuntimeDiagnostics } from './runtime-trace.ts';
-import type { BridgeGatewayProbeResult } from './gateway-host.ts';
+import type { BridgeGatewayProbeResult } from '../infrastructure/gateway/gateway-host.ts';
 
 /**
  * 对外稳定暴露的 host runtime 状态。

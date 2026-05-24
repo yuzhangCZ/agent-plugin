@@ -4,7 +4,10 @@ import { EventEmitter } from 'node:events';
 
 import { qrcodeAuth as sourceQrCodeAuth } from '@wecode/skill-qrcode-auth';
 import { createBridgeRuntime, qrcodeAuth } from '../src/index.ts';
-import type { BridgeGatewayHostConnection, BridgeGatewayHostState } from '../src/application/gateway-host.ts';
+import type {
+  BridgeGatewayHostConnection,
+  BridgeGatewayHostState,
+} from '../src/infrastructure/gateway/gateway-host.ts';
 
 class AssemblyGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   private state: BridgeGatewayHostState = 'DISCONNECTED';

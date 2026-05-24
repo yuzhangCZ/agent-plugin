@@ -1,21 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { BridgeGatewayLogger } from '../src/application/gateway-host.ts';
+import type { BridgeGatewayLogger } from '../src/infrastructure/gateway/gateway-host.ts';
 import {
   BridgeGatewayLoggerObservationAdapter,
-} from '../src/application/runtime-logger-observation.ts';
+} from '../src/adapters/observation/runtime-logger-observation.ts';
 import {
   CompositeRuntimeObservationPort,
   DefaultRuntimeObservation,
   type RuntimeObservationEvent,
   type RuntimeObservationPort,
 } from '../src/application/runtime-observation.ts';
-import { RuntimeTraceCollectorAdapter } from '../src/application/runtime-trace-observation.ts';
+import { RuntimeTraceCollectorAdapter } from '../src/adapters/observation/runtime-trace-observation.ts';
 import {
   ObservedProviderCommandHandlers,
   type ProviderCommandHandlers,
-} from '../src/application/provider-api-adapter.ts';
+} from '../src/adapters/provider/provider-api-adapter.ts';
 import {
   AbortExecutionUseCase,
   CloseSessionUseCase,

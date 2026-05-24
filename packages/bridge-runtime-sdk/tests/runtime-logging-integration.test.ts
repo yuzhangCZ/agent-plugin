@@ -9,7 +9,7 @@ import type {
   BridgeGatewayHostError,
   BridgeGatewayHostState,
   BridgeGatewayLogger,
-} from '../src/application/gateway-host.ts';
+} from '../src/infrastructure/gateway/gateway-host.ts';
 
 type RecordedLog = {
   level: 'debug' | 'info' | 'warn' | 'error';

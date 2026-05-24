@@ -2,11 +2,11 @@ import type { ProviderFact, ProviderRun, ProviderTerminalResult } from '../domai
 import { RuntimeContractError } from '../domain/errors.ts';
 import type {
   FactToSkillEventProjector,
-  GatewayOutboundSink,
   RunTerminalSignalProjector,
   SkillEventToGatewayMessageProjector,
 } from './projectors.ts';
 import { FactSequenceValidator, type LifecycleProfile } from './fact-sequence-validator.ts';
+import type { OutboundSink } from './ports/outbound-sink.ts';
 import type { PendingInteractionRegistry } from './ports/pending-interaction-registry.ts';
 import type { SessionRuntimeRegistry } from './ports/session-runtime-registry.ts';
 import type { RuntimeObservation } from './runtime-observation.ts';
@@ -110,7 +110,7 @@ export class InteractionCoordinator {
 }
 
 interface EventPipeline {
-  sink: GatewayOutboundSink;
+  sink: OutboundSink;
   factProjector: FactToSkillEventProjector;
   eventProjector: SkillEventToGatewayMessageProjector;
   observation: RuntimeObservation;

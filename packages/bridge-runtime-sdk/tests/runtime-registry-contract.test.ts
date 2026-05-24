@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  InMemoryPendingInteractionRegistry,
-  InMemorySessionRuntimeRegistry,
-} from '../src/infrastructure/InMemoryRegistries.ts';
+import { InMemoryPendingInteractionRegistry } from '../src/infrastructure/registries/InMemoryPendingInteractionRegistry.ts';
+import { InMemorySessionRuntimeRegistry } from '../src/infrastructure/registries/InMemorySessionRuntimeRegistry.ts';
 
 test('session runtime registry enforces active run/outbound coordination and closed session rejection', () => {
   const registry = new InMemorySessionRuntimeRegistry();

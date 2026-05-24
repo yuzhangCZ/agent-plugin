@@ -3,7 +3,7 @@ import {
   type GatewayClientHostConfig,
   resolveGatewayClientHostConfig,
 } from '@agent-plugin/gateway-client';
-import { resolvePackageVersion } from '../packageVersion.ts';
+import { resolvePackageVersion } from '../../packageVersion.ts';
 
 /**
  * `toolType` 由接入方定义，SDK 不对具体字面量做产品级限制。

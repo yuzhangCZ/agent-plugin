@@ -1,5 +1,5 @@
-import { RuntimeTraceCollector, type RuntimeDiagnostics } from './runtime-trace.ts';
-import type { RuntimeObservationEvent, RuntimeObservationPort } from './runtime-observation.ts';
+import { RuntimeTraceCollector, type RuntimeDiagnostics } from '../../application/runtime-trace.ts';
+import type { RuntimeObservationEvent, RuntimeObservationPort } from '../../application/runtime-observation.ts';
 
 /**
  * 把 observation event 投影为 runtime diagnostics。

@@ -10,8 +10,8 @@ import type {
   ProviderRun,
   ProviderRunMessageInput,
   ThirdPartyAgentProvider,
-} from '../domain/provider.ts';
-import type { RuntimeObservation } from './runtime-observation.ts';
+} from '../../domain/provider.ts';
+import type { RuntimeObservation } from '../../application/runtime-observation.ts';
 
 export interface ProviderCommandHandlers {
   queryStatus(input: ProviderHealthInput): Promise<ProviderHealthResult>;

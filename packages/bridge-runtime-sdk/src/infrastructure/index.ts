@@ -1,1 +1,1 @@
-export * from './InMemoryRegistries.ts';
+export {};

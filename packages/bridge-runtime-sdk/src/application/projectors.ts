@@ -9,6 +9,7 @@ import type {
 } from '@agent-plugin/gateway-schema';
 
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
+import type { OutboundSink } from './ports/outbound-sink.ts';
 
 type ToolEventEnvelopeFields = {
   subagentSessionId?: string;
@@ -23,12 +24,7 @@ function toOptionalNumericRecord(value: unknown): Record<string, number> | undef
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-/**
- * runtime 统一上行发送端口。
- */
-export interface GatewayOutboundSink {
-  send(message: GatewayUplinkBusinessMessage): Promise<void> | void;
-}
+export type GatewayOutboundSink = OutboundSink;
 
 /**
  * `ProviderFact -> SkillProviderEvent` 投影端口。
