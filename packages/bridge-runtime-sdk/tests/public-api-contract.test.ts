@@ -53,6 +53,7 @@ test('public contract source locks interaction ids and tool.update string bounda
 
   assert.equal(factBaseBlock.includes('subagentSessionId?: string;'), true);
   assert.equal(factBaseBlock.includes('subagentName?: string;'), true);
+  assert.equal(factBaseBlock.includes('toolSessionId:'), false);
   assert.equal(permissionAskBlock.includes('messageId?: string;'), true);
   assert.equal(permissionAskBlock.includes('partId: string;'), true);
   assert.equal(permissionAskBlock.includes('title?: string;'), true);

@@ -62,12 +62,13 @@ export class FactSequenceValidator {
   }
 
   consume(
+    toolSessionId: string,
     fact: ProviderFact,
     state: ValidationSessionState,
     profile: LifecycleProfile,
     sessionLifecycle: SessionLifecycleState,
   ): ValidationResult {
-    this.assertSessionLifecycle(fact, state, sessionLifecycle);
+    this.assertSessionLifecycle(toolSessionId, fact, state, sessionLifecycle);
     this.assertFactOrder(fact, state, profile);
 
     return {
@@ -78,6 +79,7 @@ export class FactSequenceValidator {
   }
 
   private assertSessionLifecycle(
+    toolSessionId: string,
     fact: ProviderFact,
     state: ValidationSessionState,
     sessionLifecycle: SessionLifecycleState,
@@ -85,7 +87,7 @@ export class FactSequenceValidator {
     if (sessionLifecycle === 'closed') {
       throw new RuntimeContractError('fact_sequence_invalid', 'closed session must reject all facts', {
         factType: fact.type,
-        toolSessionId: fact.toolSessionId,
+        toolSessionId,
       });
     }
 

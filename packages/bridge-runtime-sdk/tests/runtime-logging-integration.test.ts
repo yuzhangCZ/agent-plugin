@@ -99,8 +99,8 @@ function createProvider(): ThirdPartyAgentProvider {
       return {
         runId: 'run-1',
         facts: (async function* () {
-          yield { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' } as const;
-          yield { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' } as const;
+          yield { type: 'message.start', messageId: 'msg-1' } as const;
+          yield { type: 'message.done', messageId: 'msg-1' } as const;
         })(),
         async result() {
           return { outcome: 'completed' as const };

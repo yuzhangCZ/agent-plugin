@@ -167,7 +167,7 @@ test('logger observation adapter projects observation events into runtime_sdk lo
     type: 'fact_processed',
     phase: 'received',
     toolSessionId: 'tool-1',
-    fact: { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+    fact: { type: 'message.start', messageId: 'msg-1' },
     profile: 'request_run',
   });
 
@@ -262,7 +262,7 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     type: 'fact_processed',
     phase: 'received',
     toolSessionId: 'tool-1',
-    fact: { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+    fact: { type: 'message.start', messageId: 'msg-1' },
     profile: 'request_run',
   });
   observation.record({

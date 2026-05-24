@@ -24,7 +24,7 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
         return;
       case 'fact_processed':
         if (event.phase === 'received') {
-          this.trace.recordFact(event.fact);
+          this.trace.recordFact(event.toolSessionId, event.fact);
           return;
         }
         if (event.phase === 'derived_event_projected') {

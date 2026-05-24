@@ -34,11 +34,14 @@ function buildSyntheticPartId(): string {
   return `prt_${randomUUID().replaceAll('-', '')}`;
 }
 
+function resolveGeneratedPartId(properties: Record<string, unknown> | undefined): string | undefined {
+  return asTrimmedString(properties?.partID) ?? asTrimmedString(properties?.partId);
+}
+
 function buildFactRoutingFields(
   context: TranslationContext,
-): Pick<MessageStartFact, 'toolSessionId' | 'subagentSessionId' | 'subagentName'> {
+): Pick<MessageStartFact, 'subagentSessionId' | 'subagentName'> {
   return {
-    toolSessionId: context.factSessionContext.anchorSessionId,
     ...(context.factSessionContext.subagentSessionId
       ? { subagentSessionId: context.factSessionContext.subagentSessionId }
       : {}),
@@ -112,7 +115,7 @@ export class AssistantMessageEventTranslator implements EventTranslator {
     if (role !== 'assistant') {
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [],
       };
@@ -166,7 +169,7 @@ export class AssistantMessageEventTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: messageId,
       facts,
       terminalCandidateMessageId,
@@ -221,7 +224,7 @@ export class MessagePartDeltaTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: messageId,
       facts: [fact],
     };
@@ -245,7 +248,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
     if (partType === 'step-start' || partType === 'step-finish') {
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [],
       };
@@ -264,7 +267,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       }
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [{
           type: 'text.done',
@@ -290,7 +293,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       }
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [{
           type: 'thinking.done',
@@ -323,7 +326,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       }
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [{
           type: 'tool.update',
@@ -344,7 +347,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: messageId,
       facts: [],
     };
@@ -373,7 +376,7 @@ export class QuestionAskedTranslator implements EventTranslator {
       });
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: buildDeterministicEnvelopeMessageId('question', questionId),
         facts: [],
       };
@@ -387,18 +390,19 @@ export class QuestionAskedTranslator implements EventTranslator {
       });
       return {
         recognized: true,
-        toolSessionId: factRoutingFields.toolSessionId,
+        toolSessionId: context.factSessionContext.anchorSessionId,
         envelopeMessageId: messageId,
         facts: [],
       };
     }
 
     const toolCallId = asTrimmedString(tool?.callID) ?? undefined;
+    const partId = resolveGeneratedPartId(properties) ?? questionId;
     const fact: QuestionAskFact = {
       type: 'question.ask',
       ...factRoutingFields,
       messageId,
-      partId: toolCallId ?? questionId,
+      partId,
       questionId,
       questions: questions
         .map((item) => asObject(item))
@@ -424,7 +428,7 @@ export class QuestionAskedTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: messageId,
       facts: [fact],
     };
@@ -442,7 +446,7 @@ export class PermissionAskedTranslator implements EventTranslator {
     const factRoutingFields = buildFactRoutingFields(context);
     const tool = asObject(properties?.tool);
     const messageId = asTrimmedString(tool?.messageID) ?? asTrimmedString(properties?.messageID) ?? undefined;
-    const partId = asTrimmedString(tool?.callID) ?? buildSyntheticPartId();
+    const partId = resolveGeneratedPartId(properties) ?? buildSyntheticPartId();
     const fact: PermissionAskFact = {
       type: 'permission.ask',
       ...factRoutingFields,
@@ -457,7 +461,7 @@ export class PermissionAskedTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: messageId ?? buildDeterministicEnvelopeMessageId('permission', permissionId),
       facts: [fact],
     };
@@ -487,7 +491,7 @@ export class PermissionRepliedTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: buildDeterministicEnvelopeMessageId('permission-reply', permissionId),
       facts: [fact],
     };
@@ -516,7 +520,7 @@ export class SessionErrorTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: buildDeterministicEnvelopeMessageId('session-error', rawSessionId),
       facts: [fact],
     };
@@ -544,7 +548,7 @@ export class SessionUpdatedTranslator implements EventTranslator {
 
     return {
       recognized: true,
-      toolSessionId: factRoutingFields.toolSessionId,
+      toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: buildDeterministicEnvelopeMessageId('session-title', rawSessionId),
       facts: [fact],
     };

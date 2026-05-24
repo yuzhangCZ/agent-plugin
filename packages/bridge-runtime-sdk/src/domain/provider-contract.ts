@@ -179,7 +179,7 @@ export interface ProviderTerminalResult {
 }
 
 export interface ProviderFactBase {
-  toolSessionId: string;
+  // 子代理 envelope 提示字段；不参与 runtime session ownership、校验或回复路由。
   subagentSessionId?: string;
   subagentName?: string;
 }

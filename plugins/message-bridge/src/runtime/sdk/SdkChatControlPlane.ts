@@ -45,19 +45,16 @@ function buildSyntheticRun(toolSessionId: string, text: string): ProviderRun {
   const facts: ProviderFact[] = [
     {
       type: 'message.start',
-      toolSessionId,
       messageId,
     } satisfies MessageStartFact,
     {
       type: 'text.done',
-      toolSessionId,
       messageId,
       partId,
       content: text,
     } satisfies TextDoneFact,
     {
       type: 'message.done',
-      toolSessionId,
       messageId,
       reason: 'stop',
     } satisfies MessageDoneFact,

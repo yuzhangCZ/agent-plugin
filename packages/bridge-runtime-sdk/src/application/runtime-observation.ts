@@ -347,7 +347,7 @@ export interface RuntimeObservation {
     code?: string,
     context?: RuntimeObservationProviderContext,
   ): void;
-  factReceived(fact: ProviderFact, profile: 'request_run' | 'outbound'): void;
+  factReceived(toolSessionId: string, fact: ProviderFact, profile: 'request_run' | 'outbound'): void;
   derivedEventProjected(
     toolSessionId: string,
     factType: ProviderFact['type'],
@@ -629,11 +629,11 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
     });
   }
 
-  factReceived(fact: ProviderFact, profile: 'request_run' | 'outbound'): void {
+  factReceived(toolSessionId: string, fact: ProviderFact, profile: 'request_run' | 'outbound'): void {
     this.port.record({
       type: 'fact_processed',
       phase: 'received',
-      toolSessionId: fact.toolSessionId,
+      toolSessionId,
       fact,
       profile,
     });

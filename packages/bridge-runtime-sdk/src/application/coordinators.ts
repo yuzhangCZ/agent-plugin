@@ -28,10 +28,10 @@ export class InteractionCoordinator {
     this.observation = observation;
   }
 
-  registerFromFact(fact: ProviderFact): void {
+  registerFromFact(toolSessionId: string, fact: ProviderFact): void {
     if (fact.type === 'question.ask') {
       const result = this.registry.register({
-        toolSessionId: fact.toolSessionId,
+        toolSessionId,
         kind: 'question',
         messageId: fact.messageId,
         tokenId: fact.questionId,
@@ -42,28 +42,28 @@ export class InteractionCoordinator {
         }
         this.observation.interactionConflict(
           'question',
-          fact.toolSessionId,
+          toolSessionId,
           fact.questionId,
           result.conflict.existing.toolSessionId,
         );
-        this.registry.clearSession(fact.toolSessionId);
+        this.registry.clearSession(toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
           'question interaction reply target must be globally unique',
           {
-            currentToolSessionId: fact.toolSessionId,
+            currentToolSessionId: toolSessionId,
             existingToolSessionId: result.conflict.existing.toolSessionId,
             tokenId: fact.questionId,
           },
         );
       }
-      this.observation.interactionRegistered('question', fact.toolSessionId, fact.questionId);
+      this.observation.interactionRegistered('question', toolSessionId, fact.questionId);
       return;
     }
 
     if (fact.type === 'permission.ask') {
       const result = this.registry.register({
-        toolSessionId: fact.toolSessionId,
+        toolSessionId,
         kind: 'permission',
         messageId: fact.messageId,
         tokenId: fact.permissionId,
@@ -74,22 +74,22 @@ export class InteractionCoordinator {
         }
         this.observation.interactionConflict(
           'permission',
-          fact.toolSessionId,
+          toolSessionId,
           fact.permissionId,
           result.conflict.existing.toolSessionId,
         );
-        this.registry.clearSession(fact.toolSessionId);
+        this.registry.clearSession(toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
           'permission interaction reply target must be globally unique',
           {
-            currentToolSessionId: fact.toolSessionId,
+            currentToolSessionId: toolSessionId,
             existingToolSessionId: result.conflict.existing.toolSessionId,
             tokenId: fact.permissionId,
           },
         );
       }
-      this.observation.interactionRegistered('permission', fact.toolSessionId, fact.permissionId);
+      this.observation.interactionRegistered('permission', toolSessionId, fact.permissionId);
     }
   }
 
@@ -198,10 +198,10 @@ export class RequestRunCoordinator {
     state: ReturnType<FactSequenceValidator['createState']>,
   ): Promise<void> {
     for await (const fact of facts) {
-      this.pipeline.observation.factReceived(fact, profile.kind);
+      this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
       const sessionLifecycle = this.sessionRegistry.get(toolSessionId)?.lifecycle ?? 'active';
-      const validation = this.validator.consume(fact, state, profile, sessionLifecycle);
-      this.interactionCoordinator.registerFromFact(fact);
+      const validation = this.validator.consume(toolSessionId, fact, state, profile, sessionLifecycle);
+      this.interactionCoordinator.registerFromFact(toolSessionId, fact);
       const envelopeFields = toToolEventEnvelopeFields(fact);
 
       for (const derivedEvent of validation.derivedEvents) {
@@ -262,10 +262,10 @@ export class OutboundCoordinator {
     const state = this.validator.createState();
     try {
       for await (const fact of input.facts) {
-        this.pipeline.observation.factReceived(fact, OUTBOUND_PROFILE.kind);
+        this.pipeline.observation.factReceived(input.toolSessionId, fact, OUTBOUND_PROFILE.kind);
         const sessionLifecycle = this.sessionRegistry.get(input.toolSessionId)?.lifecycle ?? 'active';
-        const validation = this.validator.consume(fact, state, OUTBOUND_PROFILE, sessionLifecycle);
-        this.interactionCoordinator.registerFromFact(fact);
+        const validation = this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE, sessionLifecycle);
+        this.interactionCoordinator.registerFromFact(input.toolSessionId, fact);
         const envelopeFields = toToolEventEnvelopeFields(fact);
 
         for (const derivedEvent of validation.derivedEvents) {

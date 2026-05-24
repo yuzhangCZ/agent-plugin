@@ -86,10 +86,10 @@ export class RuntimeTraceCollector {
     this.diagnostics.providerCalls.push(call);
   }
 
-  recordFact(fact: ProviderFact): void {
+  recordFact(toolSessionId: string, fact: ProviderFact): void {
     this.diagnostics.facts.push({
       type: fact.type,
-      toolSessionId: fact.toolSessionId,
+      toolSessionId,
       ...('messageId' in fact ? { messageId: fact.messageId } : {}),
     });
   }

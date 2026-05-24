@@ -198,10 +198,10 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
     async runMessage() {
       return createFakeRun(
         [
-          { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
-          { type: 'text.delta', toolSessionId: 'tool-1', messageId: 'msg-1', partId: 'part-1', content: 'he' },
-          { type: 'text.done', toolSessionId: 'tool-1', messageId: 'msg-1', partId: 'part-1', content: 'hello' },
-          { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+          { type: 'message.start', messageId: 'msg-1' },
+          { type: 'text.delta', messageId: 'msg-1', partId: 'part-1', content: 'he' },
+          { type: 'text.done', messageId: 'msg-1', partId: 'part-1', content: 'hello' },
+          { type: 'message.done', messageId: 'msg-1' },
         ],
         { outcome: 'completed' },
       );
@@ -281,14 +281,12 @@ test('runtime projects subagent envelope fields from provider facts onto tool_ev
         [
           {
             type: 'message.start',
-            toolSessionId: 'tool-parent-1',
             subagentSessionId: 'ses-child-1',
             subagentName: 'research-agent',
             messageId: 'msg-subagent-1',
           },
           {
             type: 'text.done',
-            toolSessionId: 'tool-parent-1',
             subagentSessionId: 'ses-child-1',
             subagentName: 'research-agent',
             messageId: 'msg-subagent-1',
@@ -297,7 +295,6 @@ test('runtime projects subagent envelope fields from provider facts onto tool_ev
           },
           {
             type: 'message.done',
-            toolSessionId: 'tool-parent-1',
             subagentSessionId: 'ses-child-1',
             subagentName: 'research-agent',
             messageId: 'msg-subagent-1',
@@ -529,10 +526,9 @@ test('runtime consumes question replies by questionId and forwards structured an
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'question.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-question-1',
                 questionId: 'question-1',
@@ -546,7 +542,7 @@ test('runtime consumes question replies by questionId and forwards structured an
                   },
                 ],
               },
-              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.done', messageId: 'msg-1' },
             ],
             { outcome: 'completed' },
           );
@@ -606,15 +602,14 @@ test('runtime consumes permission replies by permissionId and forwards reply con
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'permission.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-permission-1',
                 permissionId: 'permission-1',
               },
-              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.done', messageId: 'msg-1' },
             ],
             { outcome: 'completed' },
           );
@@ -673,10 +668,9 @@ test('question.ask projects cloud questions payload and omits legacy flat fields
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'question.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-question-1',
                 questionId: 'question-1',
@@ -692,7 +686,7 @@ test('question.ask projects cloud questions payload and omits legacy flat fields
                   },
                 ],
               },
-              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.done', messageId: 'msg-1' },
             ],
             { outcome: 'completed' },
           );
@@ -776,7 +770,6 @@ test('permission.reply and session.title facts project to gateway tool_event upl
             [
               {
                 type: 'permission.reply',
-                toolSessionId: 'tool-1',
                 permissionId: 'permission-1',
                 response: 'once',
                 messageId: 'msg-1',
@@ -784,7 +777,6 @@ test('permission.reply and session.title facts project to gateway tool_event upl
               },
               {
                 type: 'session.title',
-                toolSessionId: 'tool-1',
                 title: 'Updated Title',
               },
             ],
@@ -865,10 +857,9 @@ test('question.ask duplicate registration in the same session is idempotent', as
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'question.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-question-1',
                 questionId: 'question-1',
@@ -876,13 +867,12 @@ test('question.ask duplicate registration in the same session is idempotent', as
               },
               {
                 type: 'question.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-question-1',
                 questionId: 'question-1',
                 questions: [{ question: 'Pick one' }],
               },
-              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.done', messageId: 'msg-1' },
             ],
             { outcome: 'completed' },
           );
@@ -944,17 +934,16 @@ test('permission.ask projects independent partId and toolCallId derived from per
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'permission.ask',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-permission-1',
                 permissionId: 'permission-1',
                 permissionType: 'file_write',
                 title: 'Allow file write',
               },
-              { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.done', messageId: 'msg-1' },
             ],
             { outcome: 'completed' },
           );
@@ -1023,7 +1012,6 @@ test('permission.ask remains valid without messageId and still registers reply t
             [
               {
                 type: 'permission.ask',
-                toolSessionId: 'tool-1',
                 partId: 'permission-1',
                 permissionId: 'permission-1',
                 permissionType: 'file_write',
@@ -1106,32 +1094,30 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
           if (input.toolSessionId === 'tool-1') {
             return createFakeRun(
               [
-                { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                { type: 'message.start', messageId: 'msg-1' },
                 {
                   type: 'question.ask',
-                  toolSessionId: 'tool-1',
                   messageId: 'msg-1',
                   partId: 'part-question-1',
                   questionId: 'question-dup',
                   questions: [{ question: 'First question' }],
                 },
-                { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                { type: 'message.done', messageId: 'msg-1' },
               ],
               { outcome: 'completed' },
             );
           }
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              { type: 'message.start', messageId: 'msg-2' },
               {
                 type: 'question.ask',
-                toolSessionId: 'tool-2',
                 messageId: 'msg-2',
                 partId: 'part-question-2',
                 questionId: 'question-dup',
                 questions: [{ question: 'Second question' }],
               },
-              { type: 'message.done', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              { type: 'message.done', messageId: 'msg-2' },
             ],
             { outcome: 'completed' },
           );
@@ -1202,30 +1188,28 @@ test('permission.ask rejects globally duplicated permissionId across sessions an
           if (input.toolSessionId === 'tool-1') {
             return createFakeRun(
               [
-                { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                { type: 'message.start', messageId: 'msg-1' },
                 {
                   type: 'permission.ask',
-                  toolSessionId: 'tool-1',
                   messageId: 'msg-1',
                   partId: 'part-permission-1',
                   permissionId: 'permission-dup',
                 },
-                { type: 'message.done', toolSessionId: 'tool-1', messageId: 'msg-1' },
+                { type: 'message.done', messageId: 'msg-1' },
               ],
               { outcome: 'completed' },
             );
           }
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              { type: 'message.start', messageId: 'msg-2' },
               {
                 type: 'permission.ask',
-                toolSessionId: 'tool-2',
                 messageId: 'msg-2',
                 partId: 'part-permission-2',
                 permissionId: 'permission-dup',
               },
-              { type: 'message.done', toolSessionId: 'tool-2', messageId: 'msg-2' },
+              { type: 'message.done', messageId: 'msg-2' },
             ],
             { outcome: 'completed' },
           );
@@ -1579,7 +1563,6 @@ test('request run projects session.error exactly once before terminal tool_error
             [
               {
                 type: 'session.error',
-                toolSessionId: 'tool-1',
                 error: {
                   code: 'internal_error',
                   message: 'agent offline',
@@ -1720,7 +1703,7 @@ test('invalid outbound messages stay ready and record outbound_validation_failur
         },
         async runMessage() {
           return createFakeRun(
-            [{ type: 'text.delta', toolSessionId: 'tool-1', messageId: 'msg-1', partId: 'part-1', content: 'bad' }],
+            [{ type: 'text.delta', messageId: 'msg-1', partId: 'part-1', content: 'bad' }],
             { outcome: 'completed' },
           );
         },
@@ -1774,10 +1757,9 @@ test('tool.update with non-string output fails closed before uplink projection',
         async runMessage() {
           return createFakeRun(
             [
-              { type: 'message.start', toolSessionId: 'tool-1', messageId: 'msg-1' },
+              { type: 'message.start', messageId: 'msg-1' },
               {
                 type: 'tool.update',
-                toolSessionId: 'tool-1',
                 messageId: 'msg-1',
                 partId: 'part-tool-1',
                 toolCallId: 'tool-call-1',

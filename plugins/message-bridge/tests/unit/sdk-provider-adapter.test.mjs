@@ -546,7 +546,6 @@ test('provider adapter translates active run raw events into ProviderFacts and t
   );
   assert.deepEqual(facts.at(-1), {
     type: 'message.done',
-    toolSessionId: 'tool-stream',
     messageId: 'msg-1',
     reason: 'stop',
     tokens: {
@@ -784,32 +783,27 @@ test('provider adapter reuses legacy subagent mapping to route child facts into 
   assert.deepEqual(
     facts.map((fact) => ({
       type: fact.type,
-      toolSessionId: fact.toolSessionId,
       subagentSessionId: fact.subagentSessionId,
       subagentName: fact.subagentName,
     })),
     [
       {
         type: 'message.start',
-        toolSessionId: 'ses-parent-1',
         subagentSessionId: 'ses-child-1',
         subagentName: 'research-agent',
       },
       {
         type: 'text.delta',
-        toolSessionId: 'ses-parent-1',
         subagentSessionId: 'ses-child-1',
         subagentName: 'research-agent',
       },
       {
         type: 'text.done',
-        toolSessionId: 'ses-parent-1',
         subagentSessionId: 'ses-child-1',
         subagentName: 'research-agent',
       },
       {
         type: 'message.done',
-        toolSessionId: 'ses-parent-1',
         subagentSessionId: 'ses-child-1',
         subagentName: 'research-agent',
       },
@@ -858,17 +852,24 @@ test('provider adapter writes subagent envelope fields for outbound child events
     },
   });
 
-  assert.deepEqual(outboundMessages, [
+  assert.deepEqual(
+    outboundMessages.map((message) => ({
+      ...message,
+      facts: message.facts.map((fact) => ({
+        ...fact,
+        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
+      })),
+    })),
+    [
     {
       toolSessionId: 'ses-parent-outbound-1',
       facts: [
         {
           type: 'permission.ask',
-          toolSessionId: 'ses-parent-outbound-1',
           subagentSessionId: 'ses-child-outbound-1',
           subagentName: 'planner-agent',
           messageId: 'msg-perm-1',
-          partId: 'call-perm-1',
+          partId: '<generated>',
           permissionId: 'perm-1',
           permissionType: 'shell',
           title: 'Need permission',
@@ -885,7 +886,9 @@ test('provider adapter writes subagent envelope fields for outbound child events
         },
       ],
     },
-  ]);
+    ],
+  );
+  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
 });
 
 test('provider adapter omits subagentName when mapper only knows child parent relation without reliable title', async () => {
@@ -926,16 +929,23 @@ test('provider adapter omits subagentName when mapper only knows child parent re
     },
   });
 
-  assert.deepEqual(outboundMessages, [
+  assert.deepEqual(
+    outboundMessages.map((message) => ({
+      ...message,
+      facts: message.facts.map((fact) => ({
+        ...fact,
+        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
+      })),
+    })),
+    [
     {
       toolSessionId: 'ses-parent-no-name-1',
       facts: [
         {
           type: 'permission.ask',
-          toolSessionId: 'ses-parent-no-name-1',
           subagentSessionId: 'ses-child-no-name-1',
           messageId: 'msg-no-name-1',
-          partId: 'call-no-name-1',
+          partId: '<generated>',
           permissionId: 'perm-no-name-1',
           raw: {
             sessionID: 'ses-child-no-name-1',
@@ -948,7 +958,9 @@ test('provider adapter omits subagentName when mapper only knows child parent re
         },
       ],
     },
-  ]);
+    ],
+  );
+  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
 });
 
 test('provider adapter fail-opens outbound child events on subagent lookup failure when raw session is directly owned', async () => {
@@ -993,15 +1005,22 @@ test('provider adapter fail-opens outbound child events on subagent lookup failu
   });
 
   assert.equal(handled, true);
-  assert.deepEqual(outboundMessages, [
+  assert.deepEqual(
+    outboundMessages.map((message) => ({
+      ...message,
+      facts: message.facts.map((fact) => ({
+        ...fact,
+        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
+      })),
+    })),
+    [
     {
       toolSessionId: 'ses-child-fail-open-1',
       facts: [
         {
           type: 'permission.ask',
-          toolSessionId: 'ses-child-fail-open-1',
           messageId: 'msg-fail-open-1',
-          partId: 'call-fail-open-1',
+          partId: '<generated>',
           permissionId: 'perm-fail-open-1',
           raw: {
             sessionID: 'ses-child-fail-open-1',
@@ -1014,7 +1033,9 @@ test('provider adapter fail-opens outbound child events on subagent lookup failu
         },
       ],
     },
-  ]);
+    ],
+  );
+  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
   assert.deepEqual(warnings, [
     {
       message: 'provider_adapter.subagent_lookup_failed',
@@ -1079,15 +1100,22 @@ test('provider adapter records root session.created so later events avoid lazy s
 
   assert.equal(handled, true);
   assert.equal(sessionGetCalls, 0);
-  assert.deepEqual(outboundMessages, [
+  assert.deepEqual(
+    outboundMessages.map((message) => ({
+      ...message,
+      facts: message.facts.map((fact) => ({
+        ...fact,
+        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
+      })),
+    })),
+    [
     {
       toolSessionId: 'ses-root-created-1',
       facts: [
         {
           type: 'permission.ask',
-          toolSessionId: 'ses-root-created-1',
           messageId: 'msg-root-created-1',
-          partId: 'call-root-created-1',
+          partId: '<generated>',
           permissionId: 'perm-root-created-1',
           raw: {
             sessionID: 'ses-root-created-1',
@@ -1100,7 +1128,9 @@ test('provider adapter records root session.created so later events avoid lazy s
         },
       ],
     },
-  ]);
+    ],
+  );
+  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
 });
 
 test('provider adapter cleans child tracking state after subagent run completes', async () => {
@@ -1223,6 +1253,7 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     properties: {
       sessionID: 'tool-permission',
       id: 'perm-1',
+      partID: 'part-permission-1',
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -1249,9 +1280,8 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
   assert.equal(facts.length, 2);
   assert.deepEqual(facts[0], {
     type: 'permission.ask',
-    toolSessionId: 'tool-permission',
     messageId: 'msg-tool-1',
-    partId: 'call-tool-1',
+    partId: 'part-permission-1',
     permissionId: 'perm-1',
     metadata: {
       scope: 'workspace',
@@ -1259,6 +1289,7 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     raw: {
       sessionID: 'tool-permission',
       id: 'perm-1',
+      partID: 'part-permission-1',
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -1275,7 +1306,6 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     },
     {
       type: 'permission.ask',
-      toolSessionId: 'tool-permission',
       partId: '<generated>',
       permissionId: 'perm-2',
       metadata: {
@@ -1326,6 +1356,7 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
     properties: {
       sessionID: 'tool-question',
       id: 'question-1',
+      partID: 'part-question-1',
       tool: {
         messageID: 'msg-1',
         callID: 'call-question-1',
@@ -1350,7 +1381,6 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
   assert.deepEqual(facts, [
     {
       type: 'message.start',
-      toolSessionId: 'tool-question',
       messageId: 'msg-1',
       raw: {
         info: {
@@ -1365,9 +1395,8 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
     },
     {
       type: 'question.ask',
-      toolSessionId: 'tool-question',
       messageId: 'msg-1',
-      partId: 'call-question-1',
+      partId: 'part-question-1',
       questionId: 'question-1',
       questions: [
         {
@@ -1384,6 +1413,7 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
       raw: {
         sessionID: 'tool-question',
         id: 'question-1',
+        partID: 'part-question-1',
         tool: {
           messageID: 'msg-1',
           callID: 'call-question-1',
@@ -1523,7 +1553,6 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
   const facts = await collect(run.facts);
   assert.deepEqual(facts, [{
     type: 'session.error',
-    toolSessionId: 'tool-failed',
     error: {
       code: 'internal_error',
       message: 'model backend failed',
@@ -1769,7 +1798,6 @@ test('provider adapter emits permission.reply through outbound continuation when
   assert.strictEqual(outboundCalls[0].facts.length, 1);
   assert.deepEqual(outboundCalls[0].facts[0], {
     type: 'permission.reply',
-    toolSessionId: 'tool-outbound',
     permissionId: 'permission-1',
     response: 'always',
     raw: {
@@ -1864,7 +1892,6 @@ test('provider adapter emits session.title from session.updated outbound continu
   assert.strictEqual(outboundCalls[0].input.toolSessionId, 'tool-session-42');
   assert.deepEqual(outboundCalls[0].facts, [{
     type: 'session.title',
-    toolSessionId: 'tool-session-42',
     title: '讨论项目架构',
     raw: {
       info: {

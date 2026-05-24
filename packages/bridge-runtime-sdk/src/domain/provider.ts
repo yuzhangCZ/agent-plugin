@@ -11,7 +11,7 @@ export interface ProviderTerminalResult {
 }
 
 export interface ProviderFactBase {
-  toolSessionId: string;
+  // 仅透传 provider 提供的子代理 envelope 提示，不承担 runtime session ownership 语义。
   subagentSessionId?: string;
   subagentName?: string;
 }
