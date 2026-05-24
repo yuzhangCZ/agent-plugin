@@ -951,6 +951,158 @@ test('provider adapter omits subagentName when mapper only knows child parent re
   ]);
 });
 
+test('provider adapter fail-opens outbound child events on subagent lookup failure when raw session is directly owned', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const outboundMessages = [];
+  const adapter = createAdapter({
+    logger,
+    bindings: [['ses-child-fail-open-1', 'ses-child-fail-open-1']],
+    session: {
+      get: async () => {
+        throw new Error('session lookup flaked');
+      },
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async (input) => {
+        outboundMessages.push({
+          toolSessionId: input.toolSessionId,
+          facts: await collect(input.facts),
+        });
+        return { applied: true };
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'ses-child-fail-open-1',
+      id: 'perm-fail-open-1',
+      tool: {
+        messageID: 'msg-fail-open-1',
+        callID: 'call-fail-open-1',
+      },
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(outboundMessages, [
+    {
+      toolSessionId: 'ses-child-fail-open-1',
+      facts: [
+        {
+          type: 'permission.ask',
+          toolSessionId: 'ses-child-fail-open-1',
+          messageId: 'msg-fail-open-1',
+          partId: 'call-fail-open-1',
+          permissionId: 'perm-fail-open-1',
+          raw: {
+            sessionID: 'ses-child-fail-open-1',
+            id: 'perm-fail-open-1',
+            tool: {
+              messageID: 'msg-fail-open-1',
+              callID: 'call-fail-open-1',
+            },
+          },
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(warnings, [
+    {
+      message: 'provider_adapter.subagent_lookup_failed',
+      extra: {
+        toolSessionId: 'ses-child-fail-open-1',
+        error: 'session lookup flaked',
+      },
+    },
+  ]);
+});
+
+test('provider adapter records root session.created so later events avoid lazy subagent lookup', async () => {
+  let sessionGetCalls = 0;
+  const outboundMessages = [];
+  const adapter = createAdapter({
+    bindings: [['ses-root-created-1', 'ses-root-created-1']],
+    session: {
+      get: async (input) => {
+        sessionGetCalls += 1;
+        return {
+          data: {
+            id: input?.path?.id ?? input?.sessionID ?? 'session-1',
+            directory: '/workspace/test',
+          },
+        };
+      },
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async (input) => {
+        outboundMessages.push({
+          toolSessionId: input.toolSessionId,
+          facts: await collect(input.facts),
+        });
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'session.created',
+    properties: {
+      info: {
+        id: 'ses-root-created-1',
+        title: 'root-session-title',
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'ses-root-created-1',
+      id: 'perm-root-created-1',
+      tool: {
+        messageID: 'msg-root-created-1',
+        callID: 'call-root-created-1',
+      },
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(sessionGetCalls, 0);
+  assert.deepEqual(outboundMessages, [
+    {
+      toolSessionId: 'ses-root-created-1',
+      facts: [
+        {
+          type: 'permission.ask',
+          toolSessionId: 'ses-root-created-1',
+          messageId: 'msg-root-created-1',
+          partId: 'call-root-created-1',
+          permissionId: 'perm-root-created-1',
+          raw: {
+            sessionID: 'ses-root-created-1',
+            id: 'perm-root-created-1',
+            tool: {
+              messageID: 'msg-root-created-1',
+              callID: 'call-root-created-1',
+            },
+          },
+        },
+      ],
+    },
+  ]);
+});
+
 test('provider adapter cleans child tracking state after subagent run completes', async () => {
   const promptDeferred = createDeferred();
   const adapter = createAdapter({
@@ -997,8 +1149,8 @@ test('provider adapter cleans child tracking state after subagent run completes'
   await collect(run.facts);
   await run.result();
 
-  assert.equal(adapter.partKinds.has('ses-child-cleanup-1'), false);
-  assert.equal(adapter.assistantMessageStates.has('ses-child-cleanup-1'), false);
+  assert.equal(adapter.hasPartKindTrackingSession('ses-child-cleanup-1'), false);
+  assert.equal(adapter.hasAssistantMessageTrackingSession('ses-child-cleanup-1'), false);
 });
 
 test('provider adapter resolves ProviderRun.result() only after facts drain closes', async () => {
