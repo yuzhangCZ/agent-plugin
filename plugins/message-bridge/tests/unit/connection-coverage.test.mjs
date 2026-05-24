@@ -149,7 +149,7 @@ function createMessagePartUpdatedToolEventMessage({
 function createMessageUpdatedToolEventMessage({
   toolSessionId,
   messageId = 'msg-1',
-  finishReason,
+  finish,
 }) {
   return {
     type: 'tool_event',
@@ -162,7 +162,7 @@ function createMessageUpdatedToolEventMessage({
           sessionID: toolSessionId,
           role: 'assistant',
           time: { created: 1 },
-          ...(finishReason ? { finish: { reason: finishReason } } : {}),
+          ...(finish ? { finish } : {}),
         },
       },
     },
@@ -971,7 +971,7 @@ describe('DefaultGatewayConnection coverage', () => {
               sessionID: 'tool-large',
               role: 'assistant',
               time: { created: 1 },
-              finish: { reason: 'x'.repeat(1024 * 1024) },
+              finish: 'x'.repeat(1024 * 1024),
             },
           },
         },

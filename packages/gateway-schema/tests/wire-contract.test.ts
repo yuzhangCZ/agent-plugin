@@ -70,7 +70,7 @@ test('validateToolEvent projects message.updated to the wire contract', () => {
         role: 'user',
         time: {
           created: 123,
-          updated: 456,
+          completed: 456,
         },
         agent: 'should-be-removed',
         model: {
@@ -106,7 +106,12 @@ test('validateToolEvent projects message.updated to the wire contract', () => {
   assert.equal(info.sessionID, 'ses-1');
   assert.equal(info.role, 'user');
   assert.equal(info.time.created, 123);
+  assert.equal(info.time.completed, 456);
   assert.equal('agent' in info, false);
+  assert.deepStrictEqual(info.model, {
+    providerID: 'p-1',
+    modelID: 'm-1',
+  });
   assert.deepStrictEqual(info.summary, {
     additions: 2,
     deletions: 1,

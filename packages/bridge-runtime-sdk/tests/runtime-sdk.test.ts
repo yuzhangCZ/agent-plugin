@@ -267,6 +267,110 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   });
 });
 
+test('runtime projects subagent envelope fields from provider facts onto tool_event messages', async () => {
+  const connection = new FakeGatewayClient();
+  const provider: ThirdPartyAgentProvider = {
+    async health() {
+      return { online: true };
+    },
+    async createSession() {
+      return { toolSessionId: 'tool-parent-1' };
+    },
+    async runMessage() {
+      return createFakeRun(
+        [
+          {
+            type: 'message.start',
+            toolSessionId: 'tool-parent-1',
+            subagentSessionId: 'ses-child-1',
+            subagentName: 'research-agent',
+            messageId: 'msg-subagent-1',
+          },
+          {
+            type: 'text.done',
+            toolSessionId: 'tool-parent-1',
+            subagentSessionId: 'ses-child-1',
+            subagentName: 'research-agent',
+            messageId: 'msg-subagent-1',
+            partId: 'part-subagent-1',
+            content: 'hello from child',
+          },
+          {
+            type: 'message.done',
+            toolSessionId: 'tool-parent-1',
+            subagentSessionId: 'ses-child-1',
+            subagentName: 'research-agent',
+            messageId: 'msg-subagent-1',
+          },
+        ],
+        { outcome: 'completed' },
+      );
+    },
+    async replyQuestion() {
+      return { applied: true };
+    },
+    async replyPermission() {
+      return { applied: true };
+    },
+    async closeSession() {
+      return { applied: true };
+    },
+    async abortSession() {
+      return { applied: true };
+    },
+  };
+
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+  await runtime.start();
+
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-subagent-1',
+    payload: { toolSessionId: 'tool-parent-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const toolEvents = connection.sent.filter(
+    (message): message is Record<string, unknown> =>
+      typeof message === 'object' && message !== null && 'type' in message && message.type === 'tool_event',
+  );
+  assert.equal(toolEvents.length >= 2, true);
+  assert.equal(toolEvents.every((message) => message.subagentSessionId === 'ses-child-1'), true);
+  assert.equal(toolEvents.every((message) => message.subagentName === 'research-agent'), true);
+});
+
+test('start_request_run reuses session welinkSessionId when chat invoke omits it', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'create_session',
+    welinkSessionId: 'welink-1',
+    payload: { title: 'demo' },
+  });
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent[0], {
+    type: 'session_created',
+    welinkSessionId: 'welink-1',
+    toolSessionId: 'tool-1',
+    session: { sessionId: 'tool-1' },
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_done',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+  });
+});
+
 test('start_request_run passes typed invoke.chat context to provider runMessage', async () => {
   const connection = new FakeGatewayClient();
   let capturedInput: Record<string, unknown> | undefined;
@@ -306,12 +410,6 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     action: 'chat',
     welinkSessionId: 'welink-1',
     suppressReply: true,
-    extParameters: {
-      scene: 'workflow',
-      nested: {
-        enabled: true,
-      },
-    },
     payload: {
       toolSessionId: 'tool-1',
       text: 'hi',
@@ -319,6 +417,20 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
       assistantAccount: 'assistant-account',
       sendUserAccount: 'user-account',
       imGroupId: 'group-1',
+      extParameters: {
+        businessExtParam: {
+          scene: 'workflow',
+          nested: {
+            enabled: true,
+          },
+        },
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'session-1',
+          allowedSlashCommands: ['plan', 'run'],
+        },
+      },
     },
   });
   await flushEvents();
@@ -331,9 +443,17 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     text: 'hi',
     assistantId: 'assistant-1',
     extParameters: {
-      scene: 'workflow',
-      nested: {
-        enabled: true,
+      businessExtParam: {
+        scene: 'workflow',
+        nested: {
+          enabled: true,
+        },
+      },
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'session-1',
+        allowedSlashCommands: ['plan', 'run'],
       },
     },
     context: {
@@ -884,6 +1004,90 @@ test('permission.ask projects independent partId and toolCallId derived from per
     })),
     true,
   );
+});
+
+test('permission.ask remains valid without messageId and still registers reply target', async () => {
+  const connection = new FakeGatewayClient();
+  let replyCount = 0;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.ask',
+                toolSessionId: 'tool-1',
+                partId: 'permission-1',
+                permissionId: 'permission-1',
+                permissionType: 'file_write',
+                title: 'Allow file write',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          replyCount += 1;
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(
+    connection.sent.some((message) => JSON.stringify(message) === JSON.stringify({
+      type: 'tool_event',
+      toolSessionId: 'tool-1',
+      event: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          partId: 'permission-1',
+          toolCallId: 'permission-1',
+          permissionId: 'permission-1',
+          permType: 'file_write',
+          title: 'Allow file write',
+        },
+      },
+    })),
+    true,
+  );
+
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    payload: { permissionId: 'permission-1', response: 'once' },
+  });
+  await flushEvents();
+
+  assert.equal(replyCount, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
 });
 
 test('question.ask rejects globally duplicated questionId across sessions and clears current session pending interactions', async () => {

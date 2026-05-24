@@ -12,11 +12,15 @@ export class ChatUseCase {
   constructor(private readonly sessionScopedActionGatewayPort: SessionScopedActionGatewayPort) {}
 
   async execute(input: ChatUseCaseInput): Promise<ActionResult<void>> {
-    return this.sessionScopedActionGatewayPort.promptSession({
+    const result = await this.sessionScopedActionGatewayPort.promptSession({
       sessionId: input.payload.toolSessionId,
       text: input.payload.text,
       agent: input.payload.assistantId,
       ...(input.logger ? { logger: input.logger } : {}),
     });
+    if (!result.success) {
+      return result;
+    }
+    return { success: true };
   }
 }

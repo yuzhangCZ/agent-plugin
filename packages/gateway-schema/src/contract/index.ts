@@ -2,6 +2,7 @@ export * from './literals/downstream.ts';
 export * from './literals/tool-event.ts';
 export * from './literals/upstream.ts';
 export * from './errors/wire-errors.ts';
+export * from './types/ext-parameters.ts';
 export * from './schemas/downstream.ts';
 export * from './schemas/upstream.ts';
 export * from './schemas/wire-protocol.ts';

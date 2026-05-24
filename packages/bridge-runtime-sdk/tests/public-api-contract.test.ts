@@ -44,12 +44,16 @@ test('stable entry source exports updated interaction and fact contracts', async
 
 test('public contract source locks interaction ids and tool.update string boundaries', async () => {
   const source = await readFile(new URL('../src/domain/provider-contract.ts', import.meta.url), 'utf8');
-  const permissionAskBlock = source.match(/export interface PermissionAskFact \{[\s\S]*?\n\}/)?.[0] ?? '';
-  const questionAskBlock = source.match(/export interface QuestionAskFact \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const factBaseBlock = source.match(/export interface ProviderFactBase \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const permissionAskBlock = source.match(/export interface PermissionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  const questionAskBlock = source.match(/export interface QuestionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const questionReplyBlock = source.match(/export interface ProviderQuestionReplyInput \{[\s\S]*?\n\}/)?.[0] ?? '';
-  const toolUpdateBlock = source.match(/export interface ToolUpdateFact \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const toolUpdateBlock = source.match(/export interface ToolUpdateFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const errorSource = await readFile(new URL('../src/domain/errors.ts', import.meta.url), 'utf8');
 
+  assert.equal(factBaseBlock.includes('subagentSessionId?: string;'), true);
+  assert.equal(factBaseBlock.includes('subagentName?: string;'), true);
+  assert.equal(permissionAskBlock.includes('messageId?: string;'), true);
   assert.equal(permissionAskBlock.includes('partId: string;'), true);
   assert.equal(permissionAskBlock.includes('title?: string;'), true);
   assert.equal(permissionAskBlock.includes('toolCallId'), false);

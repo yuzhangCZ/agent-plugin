@@ -11,7 +11,7 @@ import type {
   PendingInteractionRegistry,
   SessionRuntimeRegistry,
 } from './registries.ts';
-import type { RuntimeTraceCollector } from './runtime-trace.ts';
+import type { RuntimeObservation } from './runtime-observation.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 const OUTBOUND_PROFILE: LifecycleProfile = { kind: 'outbound' };
@@ -21,11 +21,11 @@ const OUTBOUND_PROFILE: LifecycleProfile = { kind: 'outbound' };
  */
 export class InteractionCoordinator {
   private readonly registry: PendingInteractionRegistry;
-  private readonly trace: RuntimeTraceCollector;
+  private readonly observation: RuntimeObservation;
 
-  constructor(registry: PendingInteractionRegistry, trace: RuntimeTraceCollector) {
+  constructor(registry: PendingInteractionRegistry, observation: RuntimeObservation) {
     this.registry = registry;
-    this.trace = trace;
+    this.observation = observation;
   }
 
   registerFromFact(fact: ProviderFact): void {
@@ -40,6 +40,12 @@ export class InteractionCoordinator {
         if (result.reason === 'duplicate_same_session') {
           return;
         }
+        this.observation.interactionConflict(
+          'question',
+          fact.toolSessionId,
+          fact.questionId,
+          result.conflict.existing.toolSessionId,
+        );
         this.registry.clearSession(fact.toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
@@ -51,12 +57,7 @@ export class InteractionCoordinator {
           },
         );
       }
-      this.trace.recordInteraction({
-        action: 'register',
-        kind: 'question',
-        toolSessionId: fact.toolSessionId,
-        tokenId: fact.questionId,
-      });
+      this.observation.interactionRegistered('question', fact.toolSessionId, fact.questionId);
       return;
     }
 
@@ -71,6 +72,12 @@ export class InteractionCoordinator {
         if (result.reason === 'duplicate_same_session') {
           return;
         }
+        this.observation.interactionConflict(
+          'permission',
+          fact.toolSessionId,
+          fact.permissionId,
+          result.conflict.existing.toolSessionId,
+        );
         this.registry.clearSession(fact.toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
@@ -82,12 +89,7 @@ export class InteractionCoordinator {
           },
         );
       }
-      this.trace.recordInteraction({
-        action: 'register',
-        kind: 'permission',
-        toolSessionId: fact.toolSessionId,
-        tokenId: fact.permissionId,
-      });
+      this.observation.interactionRegistered('permission', fact.toolSessionId, fact.permissionId);
     }
   }
 
@@ -99,21 +101,13 @@ export class InteractionCoordinator {
       });
     }
 
-    this.trace.recordInteraction({
-      action: 'consume',
-      kind,
-      toolSessionId: interaction.toolSessionId,
-      tokenId,
-    });
+    this.observation.interactionConsumed(kind, interaction.toolSessionId, tokenId);
     return interaction.toolSessionId;
   }
 
   clearSession(toolSessionId: string): void {
     this.registry.clearSession(toolSessionId);
-    this.trace.recordInteraction({
-      action: 'clear',
-      toolSessionId,
-    });
+    this.observation.interactionCleared(toolSessionId);
   }
 }
 
@@ -121,7 +115,18 @@ interface EventPipeline {
   sink: GatewayOutboundSink;
   factProjector: FactToSkillEventProjector;
   eventProjector: SkillEventToGatewayMessageProjector;
-  trace: RuntimeTraceCollector;
+  observation: RuntimeObservation;
+}
+
+function toToolEventEnvelopeFields(fact: ProviderFact): { subagentSessionId?: string; subagentName?: string } | undefined {
+  if (!fact.subagentSessionId && !fact.subagentName) {
+    return undefined;
+  }
+
+  return {
+    ...(fact.subagentSessionId ? { subagentSessionId: fact.subagentSessionId } : {}),
+    ...(fact.subagentName ? { subagentName: fact.subagentName } : {}),
+  };
 }
 
 /**
@@ -159,7 +164,10 @@ export class RequestRunCoordinator {
     const state = this.validator.createState();
     const consumeFacts = this.consumeFacts(input.run.facts, input.toolSessionId, REQUEST_RUN_PROFILE, state);
     const waitTerminal = input.run.result().then((result) => {
-      this.pipeline.trace.recordTerminal(input.toolSessionId, result);
+      this.pipeline.observation.terminalReceived(input.toolSessionId, result, {
+        welinkSessionId: input.welinkSessionId,
+        runId: input.runId,
+      });
       return result;
     });
 
@@ -170,14 +178,17 @@ export class RequestRunCoordinator {
     if (terminalResult.status === 'rejected') {
       throw terminalResult.reason;
     }
-
-    await this.pipeline.sink.send(
-      this.terminalProjector.project({
-        toolSessionId: input.toolSessionId,
-        welinkSessionId: input.welinkSessionId,
-        result: terminalResult.value,
-      }),
-    );
+    const uplink = this.terminalProjector.project({
+      toolSessionId: input.toolSessionId,
+      welinkSessionId: input.welinkSessionId,
+      result: terminalResult.value,
+    });
+    this.pipeline.observation.terminalProjected(input.toolSessionId, terminalResult.value, {
+      welinkSessionId: input.welinkSessionId,
+      runId: input.runId,
+    });
+    this.pipeline.observation.uplinkEmitted(uplink);
+    await this.pipeline.sink.send(uplink);
   }
 
   private async consumeFacts(
@@ -187,15 +198,16 @@ export class RequestRunCoordinator {
     state: ReturnType<FactSequenceValidator['createState']>,
   ): Promise<void> {
     for await (const fact of facts) {
-      this.pipeline.trace.recordFact(fact);
+      this.pipeline.observation.factReceived(fact, profile.kind);
       const sessionLifecycle = this.sessionRegistry.get(toolSessionId)?.lifecycle ?? 'active';
       const validation = this.validator.consume(fact, state, profile, sessionLifecycle);
       this.interactionCoordinator.registerFromFact(fact);
+      const envelopeFields = toToolEventEnvelopeFields(fact);
 
       for (const derivedEvent of validation.derivedEvents) {
-        this.pipeline.trace.recordDerivedEvent(toolSessionId, derivedEvent);
-        const uplink = this.pipeline.eventProjector.project(toolSessionId, derivedEvent);
-        this.pipeline.trace.recordUplink(uplink);
+        this.pipeline.observation.derivedEventProjected(toolSessionId, fact.type, derivedEvent, profile.kind);
+        const uplink = this.pipeline.eventProjector.project(toolSessionId, derivedEvent, envelopeFields);
+        this.pipeline.observation.uplinkEmitted(uplink);
         await this.pipeline.sink.send(uplink);
       }
 
@@ -204,8 +216,9 @@ export class RequestRunCoordinator {
       }
 
       for (const event of this.pipeline.factProjector.project(fact)) {
-        const uplink = this.pipeline.eventProjector.project(toolSessionId, event);
-        this.pipeline.trace.recordUplink(uplink);
+        const uplink = this.pipeline.eventProjector.project(toolSessionId, event, envelopeFields);
+        this.pipeline.observation.uplinkProjected(toolSessionId, fact.type, uplink.type, profile.kind);
+        this.pipeline.observation.uplinkEmitted(uplink);
         await this.pipeline.sink.send(uplink);
       }
     }
@@ -249,15 +262,21 @@ export class OutboundCoordinator {
     const state = this.validator.createState();
     try {
       for await (const fact of input.facts) {
-        this.pipeline.trace.recordFact(fact);
+        this.pipeline.observation.factReceived(fact, OUTBOUND_PROFILE.kind);
         const sessionLifecycle = this.sessionRegistry.get(input.toolSessionId)?.lifecycle ?? 'active';
         const validation = this.validator.consume(fact, state, OUTBOUND_PROFILE, sessionLifecycle);
         this.interactionCoordinator.registerFromFact(fact);
+        const envelopeFields = toToolEventEnvelopeFields(fact);
 
         for (const derivedEvent of validation.derivedEvents) {
-          this.pipeline.trace.recordDerivedEvent(input.toolSessionId, derivedEvent);
-          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, derivedEvent);
-          this.pipeline.trace.recordUplink(uplink);
+          this.pipeline.observation.derivedEventProjected(
+            input.toolSessionId,
+            fact.type,
+            derivedEvent,
+            OUTBOUND_PROFILE.kind,
+          );
+          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, derivedEvent, envelopeFields);
+          this.pipeline.observation.uplinkEmitted(uplink);
           await this.pipeline.sink.send(uplink);
         }
 
@@ -266,8 +285,9 @@ export class OutboundCoordinator {
         }
 
         for (const event of this.pipeline.factProjector.project(fact)) {
-          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, event);
-          this.pipeline.trace.recordUplink(uplink);
+          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, event, envelopeFields);
+          this.pipeline.observation.uplinkProjected(input.toolSessionId, fact.type, uplink.type, OUTBOUND_PROFILE.kind);
+          this.pipeline.observation.uplinkEmitted(uplink);
           await this.pipeline.sink.send(uplink);
         }
       }

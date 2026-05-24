@@ -10,6 +10,11 @@ import type {
 
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
 
+type ToolEventEnvelopeFields = {
+  subagentSessionId?: string;
+  subagentName?: string;
+};
+
 function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return undefined;
@@ -36,7 +41,7 @@ export interface FactToSkillEventProjector {
  * `SkillProviderEvent -> GatewayUplinkBusinessMessage` 投影端口。
  */
 export interface SkillEventToGatewayMessageProjector {
-  project(toolSessionId: string, event: SkillProviderEvent): ToolEventMessage;
+  project(toolSessionId: string, event: SkillProviderEvent, envelope?: ToolEventEnvelopeFields): ToolEventMessage;
 }
 
 /**
@@ -130,10 +135,10 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
             protocol: 'cloud',
             type: 'permission.ask',
             properties: {
-              messageId: fact.messageId,
               partId: fact.partId,
               toolCallId: fact.permissionId,
               permissionId: fact.permissionId,
+              ...(fact.messageId ? { messageId: fact.messageId } : {}),
               ...(fact.permissionType ? { permType: fact.permissionType } : {}),
               ...(fact.title ? { title: fact.title } : {}),
               ...(fact.metadata ? { metadata: fact.metadata } : {}),
@@ -205,10 +210,12 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
  * 默认 skill event -> gateway tool_event projector。
  */
 export class DefaultSkillEventToGatewayMessageProjector implements SkillEventToGatewayMessageProjector {
-  project(toolSessionId: string, event: SkillProviderEvent): ToolEventMessage {
+  project(toolSessionId: string, event: SkillProviderEvent, envelope?: ToolEventEnvelopeFields): ToolEventMessage {
     return {
       type: 'tool_event',
       toolSessionId,
+      ...(envelope?.subagentSessionId ? { subagentSessionId: envelope.subagentSessionId } : {}),
+      ...(envelope?.subagentName ? { subagentName: envelope.subagentName } : {}),
       event,
     };
   }

@@ -1,3 +1,5 @@
+import type { ExtParameters } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
+
 /**
  * Runtime 向宿主输出 outbound 事实时的统一成功结果。
  */
@@ -108,9 +110,9 @@ export interface ProviderRunMessageInput {
   text: string;
   assistantId?: string;
   /**
-   * 服务端 chat 顶层字段透传，Runtime SDK 不处理其业务语义。
+   * personal chat payload 字段透传，Runtime SDK 不处理其业务语义。
    */
-  extParameters?: Record<string, unknown>;
+  extParameters?: ExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -176,6 +178,12 @@ export interface ProviderTerminalResult {
   error?: ProviderError;
 }
 
+export interface ProviderFactBase {
+  toolSessionId: string;
+  subagentSessionId?: string;
+  subagentName?: string;
+}
+
 /**
  * request run 的运行句柄。
  */
@@ -210,9 +218,8 @@ export type OutboundFact = ProviderFact;
 /**
  * 消息开始事实。
  */
-export interface MessageStartFact {
+export interface MessageStartFact extends ProviderFactBase {
   type: 'message.start';
-  toolSessionId: string;
   messageId: string;
   raw?: unknown;
 }
@@ -220,9 +227,8 @@ export interface MessageStartFact {
 /**
  * 文本增量事实。
  */
-export interface TextDeltaFact {
+export interface TextDeltaFact extends ProviderFactBase {
   type: 'text.delta';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -232,9 +238,8 @@ export interface TextDeltaFact {
 /**
  * 文本收口事实。
  */
-export interface TextDoneFact {
+export interface TextDoneFact extends ProviderFactBase {
   type: 'text.done';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -244,9 +249,8 @@ export interface TextDoneFact {
 /**
  * 思考增量事实。
  */
-export interface ThinkingDeltaFact {
+export interface ThinkingDeltaFact extends ProviderFactBase {
   type: 'thinking.delta';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -256,9 +260,8 @@ export interface ThinkingDeltaFact {
 /**
  * 思考收口事实。
  */
-export interface ThinkingDoneFact {
+export interface ThinkingDoneFact extends ProviderFactBase {
   type: 'thinking.done';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -268,9 +271,8 @@ export interface ThinkingDoneFact {
 /**
  * 工具调用更新事实。
  */
-export interface ToolUpdateFact {
+export interface ToolUpdateFact extends ProviderFactBase {
   type: 'tool.update';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   toolCallId: string;
@@ -297,9 +299,8 @@ export interface QuestionItem {
   multiSelect?: boolean;
 }
 
-export interface QuestionAskFact {
+export interface QuestionAskFact extends ProviderFactBase {
   type: 'question.ask';
-  toolSessionId: string;
   messageId: string;
   /**
    * 消息组成部分 ID；仅用于展示与 part 关联，不承担 direct reply target 语义。
@@ -329,10 +330,10 @@ export interface QuestionAskFact {
 /**
  * 权限挂起事实。
  */
-export interface PermissionAskFact {
+export interface PermissionAskFact extends ProviderFactBase {
   type: 'permission.ask';
-  toolSessionId: string;
-  messageId: string;
+  // permission 交互允许只按 session 归属；messageId 仅作为可选展示/诊断上下文透传。
+  messageId?: string;
   partId: string;
   /**
    * 全局唯一的 permission reply target。
@@ -348,9 +349,8 @@ export interface PermissionAskFact {
 /**
  * 权限回复事实。
  */
-export interface PermissionReplyFact {
+export interface PermissionReplyFact extends ProviderFactBase {
   type: 'permission.reply';
-  toolSessionId: string;
   permissionId: string;
   response: 'once' | 'always' | 'reject';
   messageId?: string;
@@ -362,9 +362,8 @@ export interface PermissionReplyFact {
 /**
  * 消息完成事实。
  */
-export interface MessageDoneFact {
+export interface MessageDoneFact extends ProviderFactBase {
   type: 'message.done';
-  toolSessionId: string;
   messageId: string;
   reason?: string;
   tokens?: unknown;
@@ -375,9 +374,8 @@ export interface MessageDoneFact {
 /**
  * 会话标题更新事实。
  */
-export interface SessionTitleFact {
+export interface SessionTitleFact extends ProviderFactBase {
   type: 'session.title';
-  toolSessionId: string;
   title: string;
   raw?: unknown;
 }
@@ -385,9 +383,8 @@ export interface SessionTitleFact {
 /**
  * 会话错误事实。
  */
-export interface SessionErrorFact {
+export interface SessionErrorFact extends ProviderFactBase {
   type: 'session.error';
-  toolSessionId: string;
   error: ProviderError;
   raw?: unknown;
 }

@@ -16,13 +16,15 @@ import { validateToolEvent } from '../src/index.ts';
 test('validateToolEvent projects message.updated with the canonical white-list shape', () => {
   const raw = structuredClone(createGatewayWireMessageUpdatedEvent());
   raw.properties.info.agent = 'remove-me';
-  raw.properties.info.time.updated = 456;
+  raw.properties.info.time.completed = 456;
+  raw.properties.info.model.providerID = 'provider-id';
+  raw.properties.info.model.modelID = 'model-id';
   raw.properties.info.model.thinkLevel = 'deep';
   raw.properties.info.summary.extra = 'drop-me';
   raw.properties.info.summary.diffs[0].before = { text: 'before' };
   raw.properties.info.summary.diffs[0].after = { text: 'after' };
   raw.properties.info.summary.diffs[0].note = 'drop-me';
-  raw.properties.info.finish = { reason: 'completed' };
+  raw.properties.info.finish = 'completed';
 
   const result = validateToolEvent(raw);
 
@@ -36,10 +38,12 @@ test('validateToolEvent projects message.updated with the canonical white-list s
     sessionID: 'tool-gateway-wire',
     role: 'assistant',
     created: 1234567890,
-    updated: 456,
+    completed: 456,
     model: {
       provider: 'openai',
       name: 'gpt-5',
+      providerID: 'provider-id',
+      modelID: 'model-id',
       thinkLevel: 'deep',
     },
     hasSummary: true,
@@ -47,13 +51,60 @@ test('validateToolEvent projects message.updated with the canonical white-list s
     deletions: 3,
     files: 2,
     diffCount: 1,
-    finishReason: 'completed',
+    finish: 'completed',
   });
   assert.equal('agent' in result.value.properties.info, false);
   assert.equal('extra' in result.value.properties.info.summary, false);
   assert.equal('before' in result.value.properties.info.summary.diffs[0], false);
   assert.equal('after' in result.value.properties.info.summary.diffs[0], false);
   assert.equal('note' in result.value.properties.info.summary.diffs[0], false);
+});
+
+test('validateToolEvent preserves message.updated error fields needed for lifecycle diagnostics', () => {
+  const raw = structuredClone(createGatewayWireMessageUpdatedEvent({
+    properties: {
+      info: {
+        id: 'msg-error',
+        sessionID: 'tool-error',
+        role: 'assistant',
+        time: {
+          created: 1234567890,
+          completed: 1234567999,
+        },
+        error: {
+          name: 'APIError',
+          message: 'model backend failed',
+          statusCode: 429,
+          retryable: true,
+          providerID: 'openai',
+          extra: 'drop-me',
+        },
+      },
+    },
+  }));
+
+  const result = validateToolEvent(raw);
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assertProjectedMessageUpdatedShape(result.value, {
+    id: 'msg-error',
+    sessionID: 'tool-error',
+    role: 'assistant',
+    created: 1234567890,
+    completed: 1234567999,
+    error: {
+      name: 'APIError',
+      message: 'model backend failed',
+      statusCode: 429,
+      retryable: true,
+      providerID: 'openai',
+    },
+  });
+  assert.equal('extra' in result.value.properties.info.error, false);
 });
 
 test('validateToolEvent rejects malformed message.updated payloads with a shared violation envelope', () => {
@@ -146,9 +197,7 @@ test('validateToolEvent accepts message.updated top-level sessionID and messageI
         time: {
           created: 1234567890,
         },
-        finish: {
-          reason: 'completed',
-        },
+        finish: 'completed',
       },
     },
   };
@@ -165,7 +214,7 @@ test('validateToolEvent accepts message.updated top-level sessionID and messageI
     sessionID: 'tool-top-level',
     role: 'assistant',
     created: 1234567890,
-    finishReason: 'completed',
+    finish: 'completed',
   });
 });
 

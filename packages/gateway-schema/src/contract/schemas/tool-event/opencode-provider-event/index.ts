@@ -5,6 +5,7 @@ import {
   type MessageUpdatedEventV1,
   type MessageUpdatedInfoV1,
   type MessageUpdatedModelV1,
+  type MessageUpdatedErrorV1,
   type MessageUpdatedSummaryDiffV1,
   type MessageUpdatedSummaryV1,
   type MessageUpdatedTimeV1,
@@ -81,6 +82,7 @@ export type OpencodeProviderEvent = z.output<typeof opencodeProviderEventSchema>
 export type MessageUpdatedEvent = MessageUpdatedEventV1;
 export type MessageUpdatedInfo = MessageUpdatedInfoV1;
 export type MessageUpdatedModel = MessageUpdatedModelV1;
+export type MessageUpdatedError = MessageUpdatedErrorV1;
 export type MessageUpdatedSummaryDiff = MessageUpdatedSummaryDiffV1;
 export type MessageUpdatedSummary = MessageUpdatedSummaryV1;
 export type MessageUpdatedTime = MessageUpdatedTimeV1;

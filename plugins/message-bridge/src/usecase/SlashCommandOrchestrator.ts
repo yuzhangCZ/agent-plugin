@@ -1,6 +1,5 @@
 import type {
   HostModelCatalogPort,
-  HostPromptExecutionPort,
   HostSessionCreationPort,
   HostSessionCreateContext,
   HostSessionQueryPort,
@@ -20,20 +19,31 @@ import type {
   OpencodeSessionOwnershipResolver,
 } from '../port/SlashCommandControlPlanePort.js';
 import type { BridgeLogger } from '../types/logger.js';
+import { SlashCommandExecutor } from './SlashCommandExecutor.js';
 
 /** 控制面 orchestrator：统一处理 slash 命令、副作用与完成态。 */
 export class DefaultSlashCommandOrchestrator {
+  private readonly slashCommandExecutor: SlashCommandExecutor;
+
   constructor(private readonly dependencies: {
     bindingStore: ToolSessionBindingStore;
     ownershipResolver: OpencodeSessionOwnershipResolver;
     modelOverrideStore: SessionModelOverrideStore;
     hostSessionCreationPort: HostSessionCreationPort;
     hostSessionQueryPort: HostSessionQueryPort;
-    hostPromptExecutionPort: HostPromptExecutionPort;
     hostModelCatalogPort: HostModelCatalogPort;
     replyPresenter: SlashCommandReplyPresenter;
     completionPort: SlashCommandCompletionPort;
-  }) {}
+  }) {
+    this.slashCommandExecutor = new SlashCommandExecutor({
+      bindingStore: dependencies.bindingStore,
+      ownershipResolver: dependencies.ownershipResolver,
+      modelOverrideStore: dependencies.modelOverrideStore,
+      hostSessionCreationPort: dependencies.hostSessionCreationPort,
+      hostSessionQueryPort: dependencies.hostSessionQueryPort,
+      hostModelCatalogPort: dependencies.hostModelCatalogPort,
+    });
+  }
 
   async execute(input: {
     command: SlashCommand;
@@ -43,7 +53,7 @@ export class DefaultSlashCommandOrchestrator {
     logger?: BridgeLogger;
   }): Promise<void> {
     try {
-      const result = await this.executeCommand(input.command, input.context, input.createContext);
+      const result = await this.slashCommandExecutor.execute(input.command, input.context, input.createContext);
       const text = this.dependencies.replyPresenter.presentSuccess(result);
       const deliveryResult = await this.dependencies.completionPort.completeSuccess({
         anchor: input.context.anchor,
@@ -75,7 +85,7 @@ export class DefaultSlashCommandOrchestrator {
     error: unknown;
     logger?: BridgeLogger;
   }): Promise<void> {
-    const failure = this.normalizeFailure(input.error);
+    const failure = this.slashCommandExecutor.normalizeFailure(input.error);
     const text = this.dependencies.replyPresenter.presentFailure(input.command, failure);
     const deliveryResult = await this.dependencies.completionPort.completeFailure({
       anchor: input.anchor,
@@ -89,127 +99,6 @@ export class DefaultSlashCommandOrchestrator {
       completionKind: 'failure',
       logger: input.logger,
     });
-  }
-
-  private async executeCommand(
-    command: SlashCommand,
-    context: SlashCommandContext,
-    createContext?: HostSessionCreateContext,
-  ) {
-    switch (command.kind) {
-      case 'new': {
-        const previousSessionId = context.activeOpencodeSessionId;
-        const session = await this.dependencies.hostSessionCreationPort.createSession(createContext);
-        this.rebind(context.anchor, previousSessionId, session.id);
-        return { kind: 'new' as const, session, previousSessionId };
-      }
-      case 'sessions': {
-        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(context.scope ?? {});
-        return {
-          kind: 'sessions' as const,
-          sessions,
-          activeSessionId: context.activeOpencodeSessionId,
-        };
-      }
-      case 'session': {
-        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(context.scope ?? {});
-        const target = sessions.find((session) => session.id === command.sessionId);
-        if (!target) {
-          throw this.asFailure('session_out_of_scope');
-        }
-        this.rebind(context.anchor, context.activeOpencodeSessionId, target.id);
-        return {
-          kind: 'session' as const,
-          session: target,
-          previousSessionId: context.activeOpencodeSessionId,
-        };
-      }
-      case 'models': {
-        const models = await this.dependencies.hostModelCatalogPort.listModels();
-        return { kind: 'models' as const, models };
-      }
-      case 'model': {
-        const sessionId = context.activeOpencodeSessionId;
-        if (!sessionId) {
-          throw this.asFailure('session_not_found');
-        }
-        const models = await this.dependencies.hostModelCatalogPort.listModels();
-        const exists = models.some((item) => item.providerId === command.providerId && item.modelId === command.modelId);
-        if (!exists) {
-          throw this.asFailure('model_not_found');
-        }
-        const override = {
-          providerId: command.providerId,
-          modelId: command.modelId,
-        };
-        this.dependencies.modelOverrideStore.set(sessionId, override);
-        return {
-          kind: 'model' as const,
-          sessionId,
-          modelOverride: override,
-        };
-      }
-      default:
-        throw this.asFailure('invalid_command');
-    }
-  }
-
-  private rebind(anchor: string, previousSessionId: string | undefined, nextSessionId: string): void {
-    if (previousSessionId && previousSessionId !== nextSessionId) {
-      this.dependencies.ownershipResolver.detach(previousSessionId);
-    }
-    this.dependencies.bindingStore.bind(anchor, nextSessionId);
-    this.dependencies.ownershipResolver.attach(nextSessionId, anchor);
-  }
-
-  private asFailure(code: SlashCommandFailureCode): SlashCommandFailure {
-    return { code };
-  }
-
-  private normalizeFailure(error: unknown): SlashCommandFailure {
-    const sourceErrorCode = this.extractSourceErrorCode(error);
-    if (sourceErrorCode === 'session_not_found') {
-      return { code: 'session_not_found' };
-    }
-
-    if (
-      typeof error === 'object'
-      && error !== null
-      && 'code' in error
-      && typeof (error as { code: unknown }).code === 'string'
-    ) {
-      const normalizedError = error as {
-        code: string;
-        reasonKey?: SlashCommandFailure['reasonKey'];
-      };
-      return {
-        code: this.isSlashCommandFailureCode(normalizedError.code) ? normalizedError.code : 'sdk_unreachable',
-        ...(typeof normalizedError.reasonKey === 'string' ? { reasonKey: normalizedError.reasonKey } : {}),
-      };
-    }
-
-    return {
-      code: 'sdk_unreachable',
-    };
-  }
-
-  private extractSourceErrorCode(error: unknown): string | undefined {
-    if (typeof error !== 'object' || error === null) {
-      return undefined;
-    }
-    const evidence = (error as {
-      errorEvidence?: { sourceErrorCode?: unknown };
-    }).errorEvidence;
-    return typeof evidence?.sourceErrorCode === 'string' ? evidence.sourceErrorCode : undefined;
-  }
-
-  private isSlashCommandFailureCode(code: string): code is SlashCommandFailureCode {
-    return code === 'session_not_found'
-      || code === 'session_out_of_scope'
-      || code === 'model_not_found'
-      || code === 'invalid_command'
-      || code === 'command_disabled_in_group_chat'
-      || code === 'sdk_unreachable';
   }
 
   private logSyntheticReplyDeliveryFailure(input: {

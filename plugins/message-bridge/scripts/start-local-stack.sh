@@ -368,6 +368,10 @@ if ! table_exists "${SKILL_DB}" "skill_message_part"; then
   echo "[db] Init ${SKILL_DB}.skill_message_part (V2)"
   "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V2__message_parts.sql"
 fi
+if ! table_exists "${SKILL_DB}" "sys_config"; then
+  echo "[db] Init ${SKILL_DB}.sys_config (V10)"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V10__create_sys_config.sql"
+fi
 
 if table_exists "${SKILL_DB}" "skill_session"; then
   echo "[db] Reconcile ${SKILL_DB}.skill_session schema"
@@ -409,6 +413,21 @@ if table_exists "${SKILL_DB}" "skill_session"; then
       run_sql_in_db "${SKILL_DB}" "ALTER TABLE skill_session MODIFY COLUMN user_id VARCHAR(128) NOT NULL;"
     fi
   fi
+fi
+
+if table_exists "${SKILL_DB}" "sys_config"; then
+  echo "[db] Reconcile ${SKILL_DB}.sys_config schema"
+
+  config_value_type="$(column_data_type "${SKILL_DB}" "sys_config" "config_value")"
+  if [[ "${config_value_type}" != "text" ]]; then
+    echo "[db] Align sys_config.config_value type to TEXT"
+    "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V13__alter_sys_config_value_text.sql"
+  fi
+
+  echo "[db] Seed ${SKILL_DB}.sys_config defaults"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V11__init_business_whitelist_config.sql"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V12__init_cloud_protocol_profile.sql"
+  "${MYSQL_CMD[@]}" "${SKILL_DB}" < "${SKILL_SERVER_DIR}/src/main/resources/db/migration/V14__seed_assistant_offline_defaults.sql"
 fi
 
 echo "[2/4] Start ai-gateway"

@@ -11,7 +11,7 @@ import type {
   ProviderRunMessageInput,
   ThirdPartyAgentProvider,
 } from '../domain/provider.ts';
-import type { RuntimeTraceCollector } from './runtime-trace.ts';
+import type { RuntimeObservation } from './runtime-observation.ts';
 
 export interface ProviderCommandHandlers {
   queryStatus(input: ProviderHealthInput): Promise<ProviderHealthResult>;
@@ -28,60 +28,138 @@ export interface ProviderCommandHandlers {
  */
 export class ProviderApiAdapter implements ProviderCommandHandlers {
   private readonly provider: ThirdPartyAgentProvider;
-  private readonly trace: RuntimeTraceCollector;
 
-  constructor(provider: ThirdPartyAgentProvider, trace: RuntimeTraceCollector) {
+  constructor(provider: ThirdPartyAgentProvider) {
     this.provider = provider;
-    this.trace = trace;
   }
 
   queryStatus(input: ProviderHealthInput): Promise<ProviderHealthResult> {
-    this.trace.recordProviderCall({ command: 'queryStatus' });
     return this.provider.health(input);
   }
 
   createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult> {
-    this.trace.recordProviderCall({ command: 'createSession' });
     return this.provider.createSession(input);
   }
 
   startRequestRun(input: ProviderRunMessageInput): Promise<ProviderRun> {
-    this.trace.recordProviderCall({
-      command: 'startRequestRun',
-      toolSessionId: input.toolSessionId,
-      runId: input.runId,
-    });
     return this.provider.runMessage(input);
   }
 
   replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
-    this.trace.recordProviderCall({
-      command: 'replyQuestion',
-    });
     return this.provider.replyQuestion(input);
   }
 
   replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }> {
-    this.trace.recordProviderCall({
-      command: 'replyPermission',
-    });
     return this.provider.replyPermission(input);
   }
 
   closeSession(input: ProviderCloseSessionInput): Promise<{ applied: true }> {
-    this.trace.recordProviderCall({
-      command: 'closeSession',
-      toolSessionId: input.toolSessionId,
-    });
     return this.provider.closeSession(input);
   }
 
   abortExecution(input: ProviderAbortSessionInput): Promise<{ applied: true }> {
-    this.trace.recordProviderCall({
-      command: 'abortExecution',
-      toolSessionId: input.toolSessionId,
-      runId: input.runId,
-    });
     return this.provider.abortSession(input);
+  }
+}
+
+/**
+ * provider handler 观测装饰器。
+ */
+export class ObservedProviderCommandHandlers implements ProviderCommandHandlers {
+  private readonly handlers: ProviderCommandHandlers;
+  private readonly observation: RuntimeObservation;
+
+  constructor(handlers: ProviderCommandHandlers, observation: RuntimeObservation) {
+    this.handlers = handlers;
+    this.observation = observation;
+  }
+
+  async queryStatus(input: ProviderHealthInput): Promise<ProviderHealthResult> {
+    this.observation.providerCallStarted('queryStatus', input.traceId);
+    try {
+      const result = await this.handlers.queryStatus(input);
+      this.observation.providerCallSucceeded('queryStatus', input.traceId);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('queryStatus', input.traceId, error);
+      throw error;
+    }
+  }
+
+  async createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult> {
+    this.observation.providerCallStarted('createSession', input.traceId);
+    try {
+      const result = await this.handlers.createSession(input);
+      this.observation.providerCallSucceeded('createSession', input.traceId, {
+        toolSessionId: result.toolSessionId,
+      });
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('createSession', input.traceId, error);
+      throw error;
+    }
+  }
+
+  async startRequestRun(input: ProviderRunMessageInput): Promise<ProviderRun> {
+    const context = { toolSessionId: input.toolSessionId, runId: input.runId };
+    this.observation.providerCallStarted('startRequestRun', input.traceId, context);
+    try {
+      const result = await this.handlers.startRequestRun(input);
+      this.observation.providerCallSucceeded('startRequestRun', input.traceId, context);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('startRequestRun', input.traceId, error, undefined, context);
+      throw error;
+    }
+  }
+
+  async replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
+    this.observation.providerCallStarted('replyQuestion', input.traceId);
+    try {
+      const result = await this.handlers.replyQuestion(input);
+      this.observation.providerCallSucceeded('replyQuestion', input.traceId);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('replyQuestion', input.traceId, error);
+      throw error;
+    }
+  }
+
+  async replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }> {
+    this.observation.providerCallStarted('replyPermission', input.traceId);
+    try {
+      const result = await this.handlers.replyPermission(input);
+      this.observation.providerCallSucceeded('replyPermission', input.traceId);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('replyPermission', input.traceId, error);
+      throw error;
+    }
+  }
+
+  async closeSession(input: ProviderCloseSessionInput): Promise<{ applied: true }> {
+    const context = { toolSessionId: input.toolSessionId };
+    this.observation.providerCallStarted('closeSession', input.traceId, context);
+    try {
+      const result = await this.handlers.closeSession(input);
+      this.observation.providerCallSucceeded('closeSession', input.traceId, context);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('closeSession', input.traceId, error, undefined, context);
+      throw error;
+    }
+  }
+
+  async abortExecution(input: ProviderAbortSessionInput): Promise<{ applied: true }> {
+    const context = { toolSessionId: input.toolSessionId, runId: input.runId };
+    this.observation.providerCallStarted('abortExecution', input.traceId, context);
+    try {
+      const result = await this.handlers.abortExecution(input);
+      this.observation.providerCallSucceeded('abortExecution', input.traceId, context);
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('abortExecution', input.traceId, error, undefined, context);
+      throw error;
+    }
   }
 }

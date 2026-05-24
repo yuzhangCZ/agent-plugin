@@ -256,9 +256,6 @@ export class BridgeRuntime {
         getSession: async (sessionId) => this.getControlPlaneSession(sessionId),
         listSessions: async (scope) => this.listControlPlaneSessions(scope),
       },
-      hostPromptExecutionPort: {
-        prompt: async (input) => this.promptControlPlaneSession(input),
-      },
       hostModelCatalogPort: {
         listModels: async () => this.listControlPlaneModels(),
       },

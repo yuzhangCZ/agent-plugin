@@ -8,14 +8,23 @@ import type {
 } from '../contracts/downstream-messages.js';
 import type { SessionModelOverride } from '../port/SlashCommandControlPlanePort.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
-import type { SessionScopedActionGatewayPort } from '../port/SessionScopedActionGatewayPort.js';
+import type {
+  PromptSessionAssistantError,
+  PromptSessionAssistantTokens,
+  PromptSessionMessagePart,
+  PromptSessionResultData,
+  PromptSessionTerminal,
+  SessionScopedActionGatewayPort,
+} from '../port/SessionScopedActionGatewayPort.js';
 import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import type { BridgeSdkClient } from '../types/sdk.js';
 import { hasError, safeExecute } from '../types/sdk.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type { BridgeLogger } from '../types/logger.js';
+import type { ToolErrorEvidence } from '../utils/error.js';
 import { getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
-import { SessionDirectoryResolver, type SessionDirectoryResolutionResult } from './SessionDirectoryResolver.js';
+import { SessionDirectoryResolver } from './SessionDirectoryResolver.js';
+import { SessionLookupResolver, type SessionLookupResult, type SessionLookupView } from './SessionLookupResolver.js';
 
 export interface SessionDirectoryPolicyContext {
   channel?: string;
@@ -46,19 +55,19 @@ function extractSessionObject(result: unknown): {
   return { session: {} };
 }
 
-function buildDirectoryResolutionFailure<TData>(
-  failurePrefix: string,
-  resolution: Extract<SessionDirectoryResolutionResult, { success: false }>,
-): ActionResult<TData> {
-  if (resolution.reason === 'missing_directory') {
-    return {
-      success: false,
-      errorCode: 'SDK_UNREACHABLE',
-      errorMessage: `${failurePrefix}: session.get returned without directory`,
-      errorEvidence: resolution.errorEvidence,
-    };
-  }
+function buildDirectoryResolutionFailure<TData>(failurePrefix: string): ActionResult<TData> {
+  return {
+    success: false,
+    errorCode: 'SDK_UNREACHABLE',
+    errorMessage: `${failurePrefix}: session.get returned without directory`,
+    errorEvidence: { sourceOperation: 'session.get' },
+  };
+}
 
+function buildPreflightFailure<TData>(
+  failurePrefix: string,
+  resolution: Extract<SessionLookupResult, { success: false }>,
+): ActionResult<TData> {
   return {
     success: false,
     errorCode: 'SDK_UNREACHABLE',
@@ -110,7 +119,220 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizePromptAssistantError(value: unknown): PromptSessionAssistantError | undefined {
+  const record = readRecord(value);
+  const name = readString(record?.name);
+  if (!name) {
+    return undefined;
+  }
+  const details = record
+    ? Object.fromEntries(
+      Object.entries(record).filter(([key]) => key !== 'name' && key !== 'message'),
+    )
+    : undefined;
+  return {
+    name,
+    ...(readString(record?.message) ? { message: readString(record?.message) } : {}),
+    ...(details && Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizePromptAssistantTokens(value: unknown): PromptSessionAssistantTokens | undefined {
+  const record = readRecord(value);
+  const cache = readRecord(record?.cache);
+  const input = readNumber(record?.input);
+  const output = readNumber(record?.output);
+  const reasoning = readNumber(record?.reasoning);
+  const read = readNumber(cache?.read);
+  const write = readNumber(cache?.write);
+  if (
+    input === undefined
+    || output === undefined
+    || reasoning === undefined
+    || read === undefined
+    || write === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(readNumber(record?.total) !== undefined ? { total: readNumber(record?.total) } : {}),
+    input,
+    output,
+    reasoning,
+    cache: {
+      read,
+      write,
+    },
+  };
+}
+
+function normalizePromptMessage(result: unknown): PromptSessionResultData['message'] | undefined {
+  const data = extractResultData<unknown>(result);
+  const root = readRecord(data);
+  const info = readRecord(root?.info);
+  const id = readString(info?.id);
+  const tokens = normalizePromptAssistantTokens(info?.tokens);
+  const cost = readNumber(info?.cost);
+  const parts = Array.isArray(root?.parts)
+    ? root.parts
+      .map((part) => readRecord(part))
+      .filter((part): part is Record<string, unknown> => Boolean(part))
+      .map((part): PromptSessionMessagePart | undefined => {
+        const id = readString(part.id);
+        const sessionID = readString(part.sessionID);
+        const messageID = readString(part.messageID);
+        const type = readString(part.type);
+        if (!id || !sessionID || !messageID || !type) {
+          return undefined;
+        }
+        const tool = readRecord(part.tool);
+        const state = readRecord(part.state);
+        return {
+          id,
+          sessionID,
+          messageID,
+          type,
+          ...(readString(part.text) ? { text: readString(part.text) } : {}),
+          ...(readString(part.reason) ? { reason: readString(part.reason) } : {}),
+          ...(normalizePromptAssistantTokens(part.tokens) ? { tokens: normalizePromptAssistantTokens(part.tokens) } : {}),
+          ...(readNumber(part.cost) !== undefined ? { cost: readNumber(part.cost) } : {}),
+          ...(tool
+            ? {
+                tool: {
+                  ...(readString(tool.callID) ? { callID: readString(tool.callID) } : {}),
+                  ...(readString(tool.name) ? { name: readString(tool.name) } : {}),
+                },
+              }
+            : {}),
+          ...(state
+            ? {
+                state: {
+                  status: (readString(state?.status) as NonNullable<PromptSessionMessagePart['state']>['status'] | undefined) ?? 'pending',
+                  ...(readRecord(state.input) ? { input: readRecord(state.input) } : {}),
+                  ...(readString(state.raw) ? { raw: readString(state.raw) } : {}),
+                  ...(readString(state.title) ? { title: readString(state.title) } : {}),
+                  ...(readString(state.output) ? { output: readString(state.output) } : {}),
+                  ...(readString(state.error) ? { error: readString(state.error) } : {}),
+                  ...(readRecord(state.metadata) ? { metadata: readRecord(state.metadata) } : {}),
+                },
+              }
+            : {}),
+        };
+      })
+      .filter((part): part is PromptSessionMessagePart => Boolean(part))
+    : [];
+  if (!id || !tokens || cost === undefined) {
+    return undefined;
+  }
+
+  return {
+    info: {
+      id,
+      ...(normalizePromptAssistantError(info?.error) ? { error: normalizePromptAssistantError(info?.error) } : {}),
+      ...(readString(info?.finish) ? { finish: readString(info?.finish) } : {}),
+      cost,
+      tokens,
+    },
+    parts,
+  };
+}
+
+function derivePromptTerminal(message: PromptSessionResultData['message']): PromptSessionTerminal {
+  if (!message.info.error) {
+    return { kind: 'completed' };
+  }
+  if (message.info.error.name === 'MessageAbortedError') {
+    return { kind: 'aborted' };
+  }
+
+  return {
+    kind: 'failed',
+    errorCode: 'internal_error',
+    errorMessage: formatPromptTerminalError(message.info.error),
+    errorDetails: buildPromptTerminalErrorDetails(message.info.error),
+  };
+}
+
+function buildPromptTerminalErrorDetails(error: PromptSessionAssistantError): Record<string, unknown> {
+  const details: Record<string, unknown> = {
+    name: error.name,
+  };
+  const statusCode = readNumber(error.details?.statusCode);
+  const retryable = readBoolean(error.details?.retryable);
+  const providerID = readString(error.details?.providerID);
+  if (statusCode !== undefined) {
+    details.statusCode = statusCode;
+  }
+  if (retryable !== undefined) {
+    details.retryable = retryable;
+  }
+  if (providerID) {
+    details.providerID = providerID;
+  }
+  return details;
+}
+
+function formatPromptTerminalError(error: PromptSessionAssistantError): string {
+  const base = error.message
+    ? `${error.name}: ${error.message}`
+    : error.name;
+
+  const detailEntries: Array<[string, string | number | boolean]> = [
+    ['statusCode', readNumber(error.details?.statusCode)],
+    ['retryable', readBoolean(error.details?.retryable)],
+    ['providerID', readString(error.details?.providerID)],
+  ].filter((entry) => entry[1] !== undefined) as Array<[string, string | number | boolean]>;
+
+  if (detailEntries.length === 0) {
+    return base;
+  }
+
+  return `${base} (${detailEntries.map(([key, value]) => `${key}=${value}`).join(', ')})`;
+}
+
+function buildPromptPayloadFailure(
+  failurePrefix: string,
+  sourceOperation: NonNullable<ToolErrorEvidence['sourceOperation']>,
+  result: unknown,
+): ActionResult<PromptSessionResultData> {
+  const message = normalizePromptMessage(result);
+  if (message) {
+    return {
+      success: true,
+      data: {
+        message,
+        terminal: derivePromptTerminal(message),
+      },
+    };
+  }
+
+  const errorField = result && typeof result === 'object' && 'error' in (result as Record<string, unknown>)
+    ? (result as { error: unknown }).error
+    : undefined;
+  const errorMessage = errorField !== undefined ? getErrorMessage(errorField) : 'Invalid prompt response';
+  return {
+    success: false,
+    errorCode: 'SDK_UNREACHABLE',
+    errorMessage: `${failurePrefix}: ${errorMessage}`,
+    errorEvidence: getToolErrorEvidence(errorField ?? result, sourceOperation) ?? { sourceOperation },
+  };
+}
+
+type PreparedPromptSessionContext = {
+  session: SessionLookupView;
+  directory?: string;
+};
+
 export class OpencodeSessionGatewayAdapter implements SessionCreationPort, SessionScopedActionGatewayPort {
+  private readonly sessionLookupResolver: SessionLookupResolver;
   private readonly sessionDirectoryResolver: SessionDirectoryResolver;
   private readonly getDirectoryPolicyContext: () => SessionDirectoryPolicyContext;
 
@@ -118,7 +340,8 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     private readonly getClient: () => BridgeSdkClient | null,
     getDirectoryPolicyContext?: () => SessionDirectoryPolicyContext,
   ) {
-    this.sessionDirectoryResolver = new SessionDirectoryResolver(getClient);
+    this.sessionLookupResolver = new SessionLookupResolver(getClient);
+    this.sessionDirectoryResolver = new SessionDirectoryResolver();
     this.getDirectoryPolicyContext = getDirectoryPolicyContext ?? (() => ({
       bridgeDirectoryConfigured: true,
     }));
@@ -137,6 +360,14 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     handler: (context: { client: BridgeSdkClient; directory?: string }) => Promise<ActionResult<TResult>>;
   }): Promise<ActionResult<TResult>> {
     const client = this.requireClient();
+    const lookup = await this.sessionLookupResolver.resolve({
+      sessionId: parameters.sessionId,
+      logger: parameters.logger,
+      logFields: parameters.logFields,
+    });
+    if (!lookup.success) {
+      return buildPreflightFailure(parameters.failurePrefix, lookup);
+    }
     if (this.shouldSkipDirectoryResolution()) {
       parameters.logger?.info('session_directory.policy.openx.directory_omitted', {
         toolSessionId: parameters.sessionId,
@@ -145,13 +376,14 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       return parameters.handler({ client });
     }
 
-    const resolution = await this.sessionDirectoryResolver.resolve({
+    const resolution = this.sessionDirectoryResolver.resolve({
       sessionId: parameters.sessionId,
+      session: lookup.session,
       logger: parameters.logger,
       logFields: parameters.logFields,
     });
     if (!resolution.success) {
-      return buildDirectoryResolutionFailure(parameters.failurePrefix, resolution);
+      return buildDirectoryResolutionFailure(parameters.failurePrefix);
     }
 
     return parameters.handler({
@@ -241,32 +473,119 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     agent?: string;
     modelOverride?: SessionModelOverride;
     logger?: BridgeLogger;
-  }): Promise<ActionResult<void>> {
-    return this.withResolvedDirectory({
+  }): Promise<ActionResult<PromptSessionResultData>> {
+    const preflight = await this.preparePromptPreflight({
       sessionId: parameters.sessionId,
-      failurePrefix: 'Failed to send message',
+      agent: parameters.agent,
+      logger: parameters.logger,
+    });
+    if (!preflight.success) {
+      return preflight;
+    }
+
+    const prepared = this.resolvePromptDirectoryPolicy({
+      sessionId: parameters.sessionId,
+      session: preflight.data.session,
+      agent: parameters.agent,
+      logger: parameters.logger,
+    });
+    if (!prepared.success) {
+      return prepared;
+    }
+
+    return this.executePreparedPromptSession(prepared.data, parameters);
+  }
+
+  async preparePromptPreflight(parameters: {
+    sessionId: string;
+    agent?: string;
+    logger?: BridgeLogger;
+  }): Promise<ActionResult<PreparedPromptSessionContext>> {
+    const lookup = await this.sessionLookupResolver.resolve({
+      sessionId: parameters.sessionId,
       logger: parameters.logger,
       logFields: { hasAgent: Boolean(parameters.agent) },
-      handler: ({ client, directory }) =>
-        this.executeSdkCall({
-          failurePrefix: 'Failed to send message',
-          sourceOperation: 'session.prompt',
-          promiseFactory: () => client.session.prompt({
-            sessionID: parameters.sessionId,
-            ...(directory ? { directory } : {}),
-            ...(parameters.modelOverride
-              ? {
-                  model: {
-                    providerID: parameters.modelOverride.providerId,
-                    modelID: parameters.modelOverride.modelId,
-                  },
-                }
-              : {}),
-            parts: [{ type: 'text', text: parameters.text }],
-            ...(parameters.agent ? { agent: parameters.agent } : {}),
-          }),
-          onSuccess: () => ({ success: true }),
-        }),
+    });
+    if (!lookup.success) {
+      return buildPreflightFailure('Failed to send message', lookup);
+    }
+
+    return {
+      success: true,
+      data: {
+        session: lookup.session,
+      },
+    };
+  }
+
+  resolvePromptDirectoryPolicy(parameters: {
+    sessionId: string;
+    session: SessionLookupView;
+    agent?: string;
+    logger?: BridgeLogger;
+  }): ActionResult<PreparedPromptSessionContext> {
+    const logFields = { hasAgent: Boolean(parameters.agent) };
+    if (this.shouldSkipDirectoryResolution()) {
+      parameters.logger?.info('session_directory.policy.openx.directory_omitted', {
+        toolSessionId: parameters.sessionId,
+        ...logFields,
+      });
+      return {
+        success: true,
+        data: {
+          session: parameters.session,
+        },
+      };
+    }
+
+    const resolution = this.sessionDirectoryResolver.resolve({
+      sessionId: parameters.sessionId,
+      session: parameters.session,
+      logger: parameters.logger,
+      logFields,
+    });
+    if (!resolution.success) {
+      return buildDirectoryResolutionFailure('Failed to send message');
+    }
+
+    return {
+      success: true,
+      data: {
+        session: parameters.session,
+        directory: resolution.directory,
+      },
+    };
+  }
+
+  async executePreparedPromptSession(
+    prepared: PreparedPromptSessionContext,
+    parameters: {
+      sessionId: string;
+      text: string;
+      agent?: string;
+      modelOverride?: SessionModelOverride;
+      logger?: BridgeLogger;
+    },
+  ): Promise<ActionResult<PromptSessionResultData>> {
+    const client = this.requireClient();
+    return this.executeSdkCall({
+      failurePrefix: 'Failed to send message',
+      sourceOperation: 'session.prompt',
+      promiseFactory: () => client.session.prompt({
+        sessionID: parameters.sessionId,
+        ...(prepared.directory ? { directory: prepared.directory } : {}),
+        ...(parameters.modelOverride
+          ? {
+              model: {
+                providerID: parameters.modelOverride.providerId,
+                modelID: parameters.modelOverride.modelId,
+              },
+            }
+          : {}),
+        parts: [{ type: 'text', text: parameters.text }],
+        ...(parameters.agent ? { agent: parameters.agent } : {}),
+      }),
+      onSuccess: (result) => buildPromptPayloadFailure('Failed to send message', 'session.prompt', result),
     });
   }
 

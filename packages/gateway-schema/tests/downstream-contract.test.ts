@@ -285,19 +285,15 @@ test('normalizeDownstream trims optional chat compat fields and preserves top-le
   });
 });
 
-test('normalizeDownstream preserves chat top-level extParameters object', () => {
+test('normalizeDownstream accepts null chat compat fields and omits them after normalization', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: {
-        scene: 'workflow',
-        nested: {
-          enabled: true,
-          level: 2,
-        },
-      },
       payload: {
-        toolSessionId: 'tool-chat-ext-parameters',
+        toolSessionId: 'tool-chat-null-compat',
         text: 'hello',
+        assistantAccount: null,
+        sendUserAccount: null,
+        imGroupId: null,
       },
     }),
   );
@@ -311,27 +307,38 @@ test('normalizeDownstream preserves chat top-level extParameters object', () => 
     type: 'invoke',
     welinkSessionId: 'wl-chat',
     action: 'chat',
-    extParameters: {
-      scene: 'workflow',
-      nested: {
-        enabled: true,
-        level: 2,
-      },
-    },
     payload: {
-      toolSessionId: 'tool-chat-ext-parameters',
+      toolSessionId: 'tool-chat-null-compat',
       text: 'hello',
     },
   });
 });
 
-test('normalizeDownstream preserves empty chat top-level extParameters object', () => {
+test('normalizeDownstream preserves chat payload extParameters object', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: {},
       payload: {
-        toolSessionId: 'tool-chat-empty-ext-parameters',
+        toolSessionId: 'tool-chat-ext-parameters',
         text: 'hello',
+        extParameters: {
+          extEnvelopeVersion: 2,
+          businessExtParam: {
+            scene: 'workflow',
+            nested: {
+              enabled: true,
+              level: 2,
+            },
+          },
+          platformExtParam: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'session-1',
+            allowedSlashCommands: ['plan', 'ask'],
+            futureField: {
+              rollout: true,
+            },
+          },
+        },
       },
     }),
   );
@@ -345,10 +352,56 @@ test('normalizeDownstream preserves empty chat top-level extParameters object', 
     type: 'invoke',
     welinkSessionId: 'wl-chat',
     action: 'chat',
-    extParameters: {},
+    payload: {
+      toolSessionId: 'tool-chat-ext-parameters',
+      text: 'hello',
+      extParameters: {
+        extEnvelopeVersion: 2,
+        businessExtParam: {
+          scene: 'workflow',
+          nested: {
+            enabled: true,
+            level: 2,
+          },
+        },
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'session-1',
+          allowedSlashCommands: ['plan', 'ask'],
+          futureField: {
+            rollout: true,
+          },
+        },
+      },
+    },
+  });
+});
+
+test('normalizeDownstream preserves empty chat payload extParameters object', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-empty-ext-parameters',
+        text: 'hello',
+        extParameters: {},
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value, {
+    type: 'invoke',
+    welinkSessionId: 'wl-chat',
+    action: 'chat',
     payload: {
       toolSessionId: 'tool-chat-empty-ext-parameters',
       text: 'hello',
+      extParameters: {},
     },
   });
 });
@@ -382,7 +435,7 @@ test('normalizeDownstream drops blank optional chat compat fields', () => {
   });
 });
 
-test('normalizeDownstream omits absent chat top-level extParameters', () => {
+test('normalizeDownstream omits absent chat payload extParameters', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
       payload: {
@@ -397,7 +450,7 @@ test('normalizeDownstream omits absent chat top-level extParameters', () => {
     return;
   }
 
-  assert.equal('extParameters' in result.value, false);
+  assert.equal('extParameters' in result.value.payload, false);
 });
 
 test('normalizeDownstream rejects non-boolean chat suppressReply', () => {
@@ -424,10 +477,10 @@ test('normalizeDownstream rejects non-boolean chat suppressReply', () => {
 test('normalizeDownstream rejects array chat extParameters', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: ['invalid-array'],
       payload: {
         toolSessionId: 'tool-chat-array-ext-parameters',
         text: 'hello',
+        extParameters: ['invalid-array'],
       },
     }),
   );
@@ -436,7 +489,7 @@ test('normalizeDownstream rejects array chat extParameters', () => {
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'extParameters',
+    field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
   });
@@ -445,10 +498,10 @@ test('normalizeDownstream rejects array chat extParameters', () => {
 test('normalizeDownstream rejects null chat extParameters', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: null,
       payload: {
         toolSessionId: 'tool-chat-null-ext-parameters',
         text: 'hello',
+        extParameters: null,
       },
     }),
   );
@@ -457,7 +510,7 @@ test('normalizeDownstream rejects null chat extParameters', () => {
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'extParameters',
+    field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
   });
@@ -466,10 +519,10 @@ test('normalizeDownstream rejects null chat extParameters', () => {
 test('normalizeDownstream rejects primitive chat extParameters', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: 'invalid-primitive',
       payload: {
         toolSessionId: 'tool-chat-primitive-ext-parameters',
         text: 'hello',
+        extParameters: 'invalid-primitive',
       },
     }),
   );
@@ -478,7 +531,7 @@ test('normalizeDownstream rejects primitive chat extParameters', () => {
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'extParameters',
+    field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
   });
@@ -487,10 +540,10 @@ test('normalizeDownstream rejects primitive chat extParameters', () => {
 test('normalizeDownstream rejects non-json-object chat extParameters like Date', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
-      extParameters: new Date('2026-05-19T00:00:00.000Z'),
       payload: {
         toolSessionId: 'tool-chat-date-ext-parameters',
         text: 'hello',
+        extParameters: new Date('2026-05-19T00:00:00.000Z'),
       },
     }),
   );
@@ -499,7 +552,62 @@ test('normalizeDownstream rejects non-json-object chat extParameters like Date',
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'extParameters',
+    field: 'payload.extParameters',
+    messageType: 'invoke',
+    action: 'chat',
+  });
+});
+
+test('normalizeDownstream omits null platformExtParam strings', () => {
+  const normalized = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-null-platform-fields',
+        text: 'hello',
+        extParameters: {
+          platformExtParam: {
+            businessSessionDomain: null,
+            businessSessionType: null,
+            businessSessionId: null,
+            allowedSlashCommands: ['plan'],
+          },
+        },
+      },
+    }),
+  );
+
+  assert.equal(normalized.ok, true);
+  if (!normalized.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(normalized.value.payload.extParameters, {
+    platformExtParam: {
+      allowedSlashCommands: ['plan'],
+    },
+  });
+});
+
+test('normalizeDownstream rejects invalid allowedSlashCommands entries', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-invalid-slash-commands',
+        text: 'hello',
+        extParameters: {
+          platformExtParam: {
+            allowedSlashCommands: ['plan', 1],
+          },
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.extParameters.platformExtParam.allowedSlashCommands[]',
     messageType: 'invoke',
     action: 'chat',
   });

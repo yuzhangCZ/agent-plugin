@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { RuntimeContractError } from '../domain/errors.ts';
 import type { RuntimeCommand } from '../domain/runtime-command.ts';
 import type { ProviderCommandHandlers } from './provider-api-adapter.ts';
 import type {
@@ -11,7 +12,7 @@ import type {
   SessionRuntimeRegistry,
 } from './registries.ts';
 import { InteractionCoordinator, RequestRunCoordinator } from './coordinators.ts';
-import type { RuntimeTraceCollector } from './runtime-trace.ts';
+import type { RuntimeObservation } from './runtime-observation.ts';
 
 export interface RuntimeUseCase {
   execute(command: RuntimeCommand): Promise<void>;
@@ -21,25 +22,32 @@ export class QueryStatusUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sink: GatewayOutboundSink;
   private readonly projector: GatewayCommandResultProjector;
-  private readonly trace: RuntimeTraceCollector;
+  private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sink: GatewayOutboundSink,
     projector: GatewayCommandResultProjector,
-    trace: RuntimeTraceCollector,
+    observation: RuntimeObservation,
   ) {
     this.handlers = handlers;
     this.sink = sink;
     this.projector = projector;
-    this.trace = trace;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'query_status' }>): Promise<void> {
-    const result = await this.handlers.queryStatus({ traceId: command.traceId });
-    const uplink = this.projector.projectStatus({ online: result.online });
-    this.trace.recordUplink(uplink);
-    await this.sink.send(uplink);
+    this.observation.usecaseStarted('query_status', command.traceId);
+    try {
+      const result = await this.handlers.queryStatus({ traceId: command.traceId });
+      const uplink = this.projector.projectStatus({ online: result.online });
+      this.observation.uplinkEmitted(uplink);
+      await this.sink.send(uplink);
+      this.observation.usecaseSucceeded('query_status', command.traceId);
+    } catch (error) {
+      this.observation.usecaseFailed('query_status', command.traceId, error);
+      throw error;
+    }
   }
 }
 
@@ -48,38 +56,51 @@ export class CreateSessionUseCase implements RuntimeUseCase {
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly sink: GatewayOutboundSink;
   private readonly projector: GatewayCommandResultProjector;
-  private readonly trace: RuntimeTraceCollector;
+  private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
     sink: GatewayOutboundSink,
     projector: GatewayCommandResultProjector,
-    trace: RuntimeTraceCollector,
+    observation: RuntimeObservation,
   ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
     this.sink = sink;
     this.projector = projector;
-    this.trace = trace;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'create_session' }>): Promise<void> {
-    const result = await this.handlers.createSession({
-      traceId: command.traceId,
-      title: command.source.payload.title,
-      assistantId: command.source.payload.assistantId,
-    });
-    this.sessionRegistry.ensure({
-      toolSessionId: result.toolSessionId,
+    const context = {
       welinkSessionId: command.source.welinkSessionId,
-    });
-    const uplink = this.projector.projectSessionCreated({
-      welinkSessionId: command.source.welinkSessionId,
-      toolSessionId: result.toolSessionId,
-    });
-    this.trace.recordUplink(uplink);
-    await this.sink.send(uplink);
+    };
+    this.observation.usecaseStarted('create_session', command.traceId, context);
+    try {
+      const result = await this.handlers.createSession({
+        traceId: command.traceId,
+        title: command.source.payload.title,
+        assistantId: command.source.payload.assistantId,
+      });
+      this.sessionRegistry.ensure({
+        toolSessionId: result.toolSessionId,
+        welinkSessionId: command.source.welinkSessionId,
+      });
+      const uplink = this.projector.projectSessionCreated({
+        welinkSessionId: command.source.welinkSessionId,
+        toolSessionId: result.toolSessionId,
+      });
+      this.observation.uplinkEmitted(uplink);
+      await this.sink.send(uplink);
+      this.observation.usecaseSucceeded('create_session', command.traceId, {
+        ...context,
+        toolSessionId: result.toolSessionId,
+      });
+    } catch (error) {
+      this.observation.usecaseFailed('create_session', command.traceId, error, undefined, context);
+      throw error;
+    }
   }
 }
 
@@ -87,26 +108,41 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly coordinator: RequestRunCoordinator;
+  private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
     coordinator: RequestRunCoordinator,
+    observation: RuntimeObservation,
   ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
     this.coordinator = coordinator;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'start_request_run' }>): Promise<void> {
     const runId = randomUUID();
     const toolSessionId = command.source.payload.toolSessionId;
+    const context = {
+      toolSessionId,
+      welinkSessionId: command.source.welinkSessionId,
+      runId,
+    };
+    this.observation.usecaseStarted('start_request_run', command.traceId, context);
     const acquired = this.sessionRegistry.acquireActiveRun(toolSessionId, runId);
     if (!acquired.ok) {
-      throw new Error(`toolSessionId already has an active request run: ${toolSessionId}`);
+      const error = new RuntimeContractError(
+        'run_already_active',
+        `toolSessionId already has an active request run: ${toolSessionId}`,
+        { toolSessionId, runId },
+      );
+      this.observation.usecaseConflict('start_request_run', command.traceId, error, error.code, context);
+      throw error;
     }
 
-    this.sessionRegistry.ensure({
+    const sessionRecord = this.sessionRegistry.ensure({
       toolSessionId,
       welinkSessionId: command.source.welinkSessionId,
     });
@@ -124,15 +160,35 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
         toolSessionId,
         text: command.source.payload.text,
         assistantId: command.source.payload.assistantId,
-        ...(command.source.extParameters !== undefined ? { extParameters: command.source.extParameters } : {}),
+        ...(command.source.payload.extParameters !== undefined
+          ? { extParameters: command.source.payload.extParameters }
+          : {}),
         ...(Object.keys(context).length > 0 ? { context } : {}),
       });
       await this.coordinator.executeRun({
         toolSessionId,
-        welinkSessionId: command.source.welinkSessionId,
+        welinkSessionId: command.source.welinkSessionId ?? sessionRecord.welinkSessionId,
         runId,
         run,
       });
+      this.observation.usecaseSucceeded('start_request_run', command.traceId, {
+        toolSessionId,
+        welinkSessionId: command.source.welinkSessionId ?? sessionRecord.welinkSessionId,
+        runId,
+      });
+    } catch (error) {
+      this.observation.usecaseFailed(
+        'start_request_run',
+        command.traceId,
+        error,
+        error instanceof RuntimeContractError ? error.code : undefined,
+        {
+          toolSessionId,
+          welinkSessionId: command.source.welinkSessionId ?? sessionRecord.welinkSessionId,
+          runId,
+        },
+      );
+      throw error;
     } finally {
       this.sessionRegistry.releaseActiveRun(toolSessionId, runId);
     }
@@ -142,38 +198,64 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
 export class ReplyQuestionUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly interactionCoordinator: InteractionCoordinator;
+  private readonly observation: RuntimeObservation;
 
-  constructor(handlers: ProviderCommandHandlers, interactionCoordinator: InteractionCoordinator) {
+  constructor(
+    handlers: ProviderCommandHandlers,
+    interactionCoordinator: InteractionCoordinator,
+    observation: RuntimeObservation,
+  ) {
     this.handlers = handlers;
     this.interactionCoordinator = interactionCoordinator;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'reply_question' }>): Promise<void> {
-    this.interactionCoordinator.consume('question', command.source.payload.questionId);
-    await this.handlers.replyQuestion({
-      traceId: command.traceId,
-      questionId: command.source.payload.questionId,
-      answers: [[command.source.payload.answer]],
-    });
+    this.observation.usecaseStarted('reply_question', command.traceId);
+    try {
+      this.interactionCoordinator.consume('question', command.source.payload.questionId);
+      await this.handlers.replyQuestion({
+        traceId: command.traceId,
+        questionId: command.source.payload.questionId,
+        answers: [[command.source.payload.answer]],
+      });
+      this.observation.usecaseSucceeded('reply_question', command.traceId);
+    } catch (error) {
+      this.observation.usecaseFailed('reply_question', command.traceId, error);
+      throw error;
+    }
   }
 }
 
 export class ReplyPermissionUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly interactionCoordinator: InteractionCoordinator;
+  private readonly observation: RuntimeObservation;
 
-  constructor(handlers: ProviderCommandHandlers, interactionCoordinator: InteractionCoordinator) {
+  constructor(
+    handlers: ProviderCommandHandlers,
+    interactionCoordinator: InteractionCoordinator,
+    observation: RuntimeObservation,
+  ) {
     this.handlers = handlers;
     this.interactionCoordinator = interactionCoordinator;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'reply_permission' }>): Promise<void> {
-    this.interactionCoordinator.consume('permission', command.source.payload.permissionId);
-    await this.handlers.replyPermission({
-      traceId: command.traceId,
-      permissionId: command.source.payload.permissionId,
-      reply: command.source.payload.response,
-    });
+    this.observation.usecaseStarted('reply_permission', command.traceId);
+    try {
+      this.interactionCoordinator.consume('permission', command.source.payload.permissionId);
+      await this.handlers.replyPermission({
+        traceId: command.traceId,
+        permissionId: command.source.payload.permissionId,
+        reply: command.source.payload.response,
+      });
+      this.observation.usecaseSucceeded('reply_permission', command.traceId);
+    } catch (error) {
+      this.observation.usecaseFailed('reply_permission', command.traceId, error);
+      throw error;
+    }
   }
 }
 
@@ -181,44 +263,72 @@ export class CloseSessionUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly interactionCoordinator: InteractionCoordinator;
+  private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
     interactionCoordinator: InteractionCoordinator,
+    observation: RuntimeObservation,
   ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
     this.interactionCoordinator = interactionCoordinator;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'close_session' }>): Promise<void> {
-    await this.handlers.closeSession({
-      traceId: command.traceId,
-      toolSessionId: command.source.payload.toolSessionId,
-    });
-    this.sessionRegistry.markClosed(command.source.payload.toolSessionId);
-    this.interactionCoordinator.clearSession(command.source.payload.toolSessionId);
-    this.sessionRegistry.delete(command.source.payload.toolSessionId);
+    const context = { toolSessionId: command.source.payload.toolSessionId };
+    this.observation.usecaseStarted('close_session', command.traceId, context);
+    try {
+      await this.handlers.closeSession({
+        traceId: command.traceId,
+        toolSessionId: command.source.payload.toolSessionId,
+      });
+      this.sessionRegistry.markClosed(command.source.payload.toolSessionId);
+      this.interactionCoordinator.clearSession(command.source.payload.toolSessionId);
+      this.sessionRegistry.delete(command.source.payload.toolSessionId);
+      this.observation.usecaseSucceeded('close_session', command.traceId, context);
+    } catch (error) {
+      this.observation.usecaseFailed('close_session', command.traceId, error, undefined, context);
+      throw error;
+    }
   }
 }
 
 export class AbortExecutionUseCase implements RuntimeUseCase {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
+  private readonly observation: RuntimeObservation;
 
-  constructor(handlers: ProviderCommandHandlers, sessionRegistry: SessionRuntimeRegistry) {
+  constructor(
+    handlers: ProviderCommandHandlers,
+    sessionRegistry: SessionRuntimeRegistry,
+    observation: RuntimeObservation,
+  ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
+    this.observation = observation;
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'abort_execution' }>): Promise<void> {
     const record = this.sessionRegistry.get(command.source.payload.toolSessionId);
-    await this.handlers.abortExecution({
-      traceId: command.traceId,
+    const context = {
       toolSessionId: command.source.payload.toolSessionId,
       runId: record?.activeRunId,
-    });
-    this.sessionRegistry.markAborting(command.source.payload.toolSessionId);
+    };
+    this.observation.usecaseStarted('abort_execution', command.traceId, context);
+    try {
+      await this.handlers.abortExecution({
+        traceId: command.traceId,
+        toolSessionId: command.source.payload.toolSessionId,
+        runId: record?.activeRunId,
+      });
+      this.sessionRegistry.markAborting(command.source.payload.toolSessionId);
+      this.observation.usecaseSucceeded('abort_execution', command.traceId, context);
+    } catch (error) {
+      this.observation.usecaseFailed('abort_execution', command.traceId, error, undefined, context);
+      throw error;
+    }
   }
 }

@@ -33,6 +33,15 @@ export interface ValidationResult {
   derivedEvents: SkillProviderEvent[];
 }
 
+function requiresOpenMessage(fact: ProviderFact): fact is Exclude<ProviderFact, { type: 'permission.ask' | 'permission.reply' | 'session.title' | 'session.error' | 'message.start' | 'message.done' }> | Extract<ProviderFact, { type: 'question.ask' }> {
+  return fact.type === 'text.delta'
+    || fact.type === 'text.done'
+    || fact.type === 'thinking.delta'
+    || fact.type === 'thinking.done'
+    || fact.type === 'tool.update'
+    || fact.type === 'question.ask';
+}
+
 /**
  * 事实流时序校验器。
  */
@@ -125,7 +134,7 @@ export class FactSequenceValidator {
       case 'tool.update':
       case 'question.ask':
       case 'permission.ask':
-        if (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId)) {
+        if (requiresOpenMessage(fact) && (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId))) {
           throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
             messageId: fact.messageId,
             factType: fact.type,

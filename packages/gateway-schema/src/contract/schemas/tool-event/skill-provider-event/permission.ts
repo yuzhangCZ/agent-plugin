@@ -6,7 +6,7 @@ import { withCloudProtocol } from '../shared-protocol.ts';
 const skillPermissionAskEventBaseSchema = z.object({
   type: z.literal('permission.ask'),
   properties: z.object({
-    messageId: requiredTrimmedString,
+    messageId: requiredTrimmedString.optional(),
     partId: requiredTrimmedString,
     toolCallId: requiredTrimmedString,
     permissionId: requiredTrimmedString,

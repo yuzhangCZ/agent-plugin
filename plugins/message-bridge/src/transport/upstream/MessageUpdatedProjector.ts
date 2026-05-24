@@ -63,6 +63,7 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
     model?: MessageUpdatedEvent['properties']['info']['model'];
     summary?: MessageUpdatedEvent['properties']['info']['summary'];
     finish?: MessageUpdatedEvent['properties']['info']['finish'];
+    error?: MessageUpdatedEvent['properties']['info']['error'];
   } = {};
   const id = asString(info.id);
   const sessionID = asString(info.sessionID);
@@ -70,7 +71,8 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
   const time = asRecord(info.time);
   const model = asRecord(info.model);
   const summary = asRecord(info.summary);
-  const finish = asRecord(info.finish);
+  const finish = asString(info.finish);
+  const error = asRecord(info.error);
 
   if (id !== undefined) {
     projectedInfo.id = id;
@@ -84,16 +86,24 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
   if (time !== null && typeof time.created === 'number') {
     projectedInfo.time = {
       created: time.created,
-      ...(typeof time.updated === 'number' ? { updated: time.updated } : {}),
+      ...(typeof time.completed === 'number' ? { completed: time.completed } : {}),
     };
   }
   if (model !== null) {
     const projectedModel = {
+      providerID: asString(model.providerID),
+      modelID: asString(model.modelID),
       provider: asString(model.provider),
       name: asString(model.name),
       thinkLevel: asString(model.thinkLevel),
     };
-    if (projectedModel.provider || projectedModel.name || projectedModel.thinkLevel) {
+    if (
+      projectedModel.providerID
+      || projectedModel.modelID
+      || projectedModel.provider
+      || projectedModel.name
+      || projectedModel.thinkLevel
+    ) {
       projectedInfo.model = projectedModel;
     }
   }
@@ -103,10 +113,19 @@ export function projectMessageUpdatedEvent(raw: BridgeEvent): GatewayProjectedEv
       projectedInfo.summary = projectedSummary;
     }
   }
-  if (finish) {
-    const reason = asString(finish.reason);
-    if (reason !== undefined) {
-      projectedInfo.finish = { reason };
+  if (finish !== undefined) {
+    projectedInfo.finish = finish;
+  }
+  if (error !== null) {
+    const name = asString(error.name);
+    if (name !== undefined) {
+      projectedInfo.error = {
+        name,
+        ...(asString(error.message) !== undefined ? { message: asString(error.message) } : {}),
+        ...(asNumber(error.statusCode) !== undefined ? { statusCode: asNumber(error.statusCode) } : {}),
+        ...(typeof error.retryable === 'boolean' ? { retryable: error.retryable } : {}),
+        ...(asString(error.providerID) !== undefined ? { providerID: asString(error.providerID) } : {}),
+      };
     }
   }
 

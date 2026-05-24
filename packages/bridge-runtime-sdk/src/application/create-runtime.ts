@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import {
-  type GatewayInboundFrame,
-} from '@agent-plugin/gateway-client';
+import { type GatewayInboundFrame } from '@agent-plugin/gateway-client';
 import {
   type GatewayDownstreamBusinessRequest,
   type ToolErrorMessage,
@@ -31,7 +29,11 @@ import {
 } from '../infrastructure/InMemoryRegistries.ts';
 import { FactSequenceValidator } from './fact-sequence-validator.ts';
 import { InteractionCoordinator, OutboundCoordinator, RequestRunCoordinator } from './coordinators.ts';
-import { ProviderApiAdapter } from './provider-api-adapter.ts';
+import {
+  ObservedProviderCommandHandlers,
+  ProviderApiAdapter,
+  type ProviderCommandHandlers,
+} from './provider-api-adapter.ts';
 import {
   createDefaultBridgeGatewayHostConnection,
   normalizeBridgeGatewayHostConfig,
@@ -52,14 +54,23 @@ import {
   ReplyQuestionUseCase,
   StartRequestRunUseCase,
 } from './usecases.ts';
-import { RuntimeTraceCollector } from './runtime-trace.ts';
+import {
+  BridgeGatewayLoggerObservationAdapter,
+} from './runtime-logger-observation.ts';
+import {
+  CompositeRuntimeObservationPort,
+  DefaultRuntimeObservation,
+  type RuntimeObservation,
+  type RuntimeObservationCommand,
+} from './runtime-observation.ts';
+import { RuntimeTraceCollectorAdapter } from './runtime-trace-observation.ts';
 import type { BridgeRuntime, BridgeRuntimeStatusSnapshot } from './runtime.ts';
 
 interface BridgeRuntimeCoreOptions {
   provider: ThirdPartyAgentProvider;
   sink: GatewayOutboundSink;
   traceIdFactory?: () => string;
-  trace?: RuntimeTraceCollector;
+  observation: RuntimeObservation;
   sessionRegistry?: SessionRuntimeRegistry;
   pendingInteractionRegistry?: PendingInteractionRegistry;
   factProjector?: FactToSkillEventProjector;
@@ -71,8 +82,7 @@ interface BridgeRuntimeCoreOptions {
 interface InternalBridgeRuntimeCore {
   start(): Promise<void>;
   stop(): Promise<void>;
-  handleDownstream(message: GatewayDownstreamBusinessRequest): Promise<void>;
-  getDiagnostics(): ReturnType<RuntimeTraceCollector['snapshot']>;
+  handleDownstream(message: GatewayDownstreamBusinessRequest): Promise<RuntimeObservationCommand>;
 }
 
 /**
@@ -100,10 +110,10 @@ type BridgeRuntimeInternalOptions = BridgeRuntimeOptions & {
 
 function normalizeErrorMessage(error: unknown): string {
   if (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof (error as { message?: unknown }).message === 'string'
+    typeof error === 'object'
+    && error !== null
+    && 'message' in error
+    && typeof (error as { message?: unknown }).message === 'string'
   ) {
     return (error as { message: string }).message;
   }
@@ -140,6 +150,19 @@ function buildInvalidInvokeToolError(code: string): string {
   return `gateway_invalid_invoke:${code}`;
 }
 
+function getDownstreamToolSessionId(message: GatewayDownstreamBusinessRequest): string | undefined {
+  if (
+    'payload' in message
+    && message.payload
+    && typeof message.payload === 'object'
+    && 'toolSessionId' in message.payload
+    && typeof (message.payload as { toolSessionId?: unknown }).toolSessionId === 'string'
+  ) {
+    return (message.payload as { toolSessionId: string }).toolSessionId;
+  }
+  return undefined;
+}
+
 type InvalidInvokeGatewayInboundFrame = Extract<GatewayInboundFrame, { kind: 'invalid' }> & {
   messageType: 'invoke';
 };
@@ -151,15 +174,15 @@ function shouldReplyToInvalidInvoke(frame: GatewayInboundFrame): frame is Invali
 function handleInvalidInvokeInboundFrame(
   frame: InvalidInvokeGatewayInboundFrame,
   client: BridgeGatewayHostConnection,
-  trace: RuntimeTraceCollector,
+  observation: RuntimeObservation,
   sink: GatewayOutboundSink,
 ): void {
-  trace.recordFailure({
-    kind: 'inbound_validation_failure',
-    phase: 'runtime',
-    message: frame.violation.violation.message,
-    code: frame.violation.violation.code,
-  });
+  observation.failureRecorded(
+    'inbound_validation_failure',
+    'runtime',
+    frame.violation.violation.message,
+    frame.violation.violation.code,
+  );
 
   if (!frame.welinkSessionId && !frame.toolSessionId) {
     return;
@@ -170,18 +193,22 @@ function handleInvalidInvokeInboundFrame(
     return;
   }
 
+  observation.invalidInvokeRejected({
+    toolSessionId: frame.toolSessionId,
+    welinkSessionId: frame.welinkSessionId,
+  }, frame.violation.violation.message, frame.violation.violation.code);
+
   const toolError: ToolErrorMessage = {
     type: 'tool_error',
     ...(frame.welinkSessionId ? { welinkSessionId: frame.welinkSessionId } : {}),
     ...(frame.toolSessionId ? { toolSessionId: frame.toolSessionId } : {}),
     error: buildInvalidInvokeToolError(frame.violation.violation.code),
   };
-  trace.recordUplink(toolError);
+  observation.uplinkEmitted(toolError);
   sink.send(toolError);
 }
 
 function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBridgeRuntimeCore {
-  const trace = options.trace ?? new RuntimeTraceCollector();
   const sessionRegistry = options.sessionRegistry ?? new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry =
     options.pendingInteractionRegistry ?? new InMemoryPendingInteractionRegistry();
@@ -190,8 +217,12 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
   const commandResultProjector = options.commandResultProjector ?? new DefaultGatewayCommandResultProjector();
   const terminalProjector = options.terminalProjector ?? new DefaultRunTerminalSignalProjector();
   const validator = new FactSequenceValidator();
-  const providerHandlers = new ProviderApiAdapter(options.provider, trace);
-  const interactionCoordinator = new InteractionCoordinator(pendingInteractionRegistry, trace);
+  const baseProviderHandlers = new ProviderApiAdapter(options.provider);
+  const providerHandlers: ProviderCommandHandlers = new ObservedProviderCommandHandlers(
+    baseProviderHandlers,
+    options.observation,
+  );
+  const interactionCoordinator = new InteractionCoordinator(pendingInteractionRegistry, options.observation);
   const requestRunCoordinator = new RequestRunCoordinator(
     sessionRegistry,
     interactionCoordinator,
@@ -200,7 +231,7 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
       sink: options.sink,
       factProjector,
       eventProjector,
-      trace,
+      observation: options.observation,
     },
     terminalProjector,
   );
@@ -212,25 +243,35 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
       sink: options.sink,
       factProjector,
       eventProjector,
-      trace,
+      observation: options.observation,
     },
   );
 
   const dispatcher = new RuntimeCommandDispatcher({
-    query_status: new QueryStatusUseCase(providerHandlers, options.sink, commandResultProjector, trace),
+    query_status: new QueryStatusUseCase(providerHandlers, options.sink, commandResultProjector, options.observation),
     create_session: new CreateSessionUseCase(
       providerHandlers,
       sessionRegistry,
       options.sink,
       commandResultProjector,
-      trace,
+      options.observation,
     ),
-    start_request_run: new StartRequestRunUseCase(providerHandlers, sessionRegistry, requestRunCoordinator),
-    reply_question: new ReplyQuestionUseCase(providerHandlers, interactionCoordinator),
-    reply_permission: new ReplyPermissionUseCase(providerHandlers, interactionCoordinator),
-    close_session: new CloseSessionUseCase(providerHandlers, sessionRegistry, interactionCoordinator),
-    abort_execution: new AbortExecutionUseCase(providerHandlers, sessionRegistry),
-  });
+    start_request_run: new StartRequestRunUseCase(
+      providerHandlers,
+      sessionRegistry,
+      requestRunCoordinator,
+      options.observation,
+    ),
+    reply_question: new ReplyQuestionUseCase(providerHandlers, interactionCoordinator, options.observation),
+    reply_permission: new ReplyPermissionUseCase(providerHandlers, interactionCoordinator, options.observation),
+    close_session: new CloseSessionUseCase(
+      providerHandlers,
+      sessionRegistry,
+      interactionCoordinator,
+      options.observation,
+    ),
+    abort_execution: new AbortExecutionUseCase(providerHandlers, sessionRegistry, options.observation),
+  }, options.observation);
 
   let initialized = false;
 
@@ -251,6 +292,7 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
         },
       });
       initialized = true;
+      options.observation.runtimeCoreStarted();
     },
     async stop(): Promise<void> {
       if (!initialized) {
@@ -258,21 +300,20 @@ function createBridgeRuntimeCore(options: BridgeRuntimeCoreOptions): InternalBri
       }
       await options.provider.dispose?.();
       initialized = false;
+      options.observation.runtimeCoreStopped();
     },
-    async handleDownstream(message: GatewayDownstreamBusinessRequest): Promise<void> {
+    async handleDownstream(message: GatewayDownstreamBusinessRequest): Promise<RuntimeObservationCommand> {
       const traceId = options.traceIdFactory?.() ?? randomUUID();
       const command = toRuntimeCommand(message, traceId);
       await dispatcher.dispatch(command);
-    },
-    getDiagnostics() {
-      return trace.snapshot();
+      return command.kind;
     },
   };
 }
 
 function attachGatewayClientObservers(
   client: BridgeGatewayHostConnection,
-  trace: RuntimeTraceCollector,
+  observation: RuntimeObservation,
   sink: GatewayOutboundSink,
   onGatewayStateChange: (state: BridgeGatewayHostState) => void,
   onBusinessMessage: (message: GatewayDownstreamBusinessRequest) => void,
@@ -280,26 +321,23 @@ function attachGatewayClientObservers(
   onTelemetryUpdated?: () => void,
 ): () => void {
   const stateChange = (state: BridgeGatewayHostState) => {
-    trace.recordGatewayState(state);
-    if (state === 'READY') {
-      trace.recordReadyAt(Date.now());
-    }
+    observation.gatewayStateChanged(state, Date.now());
     onGatewayStateChange(state);
     onTelemetryUpdated?.();
   };
   const inbound = (frame: GatewayInboundFrame) => {
-    trace.recordInboundAt(Date.now());
+    observation.gatewayInboundActivity(Date.now());
     if (shouldReplyToInvalidInvoke(frame)) {
-      handleInvalidInvokeInboundFrame(frame, client, trace, sink);
+      handleInvalidInvokeInboundFrame(frame, client, observation, sink);
     }
     onTelemetryUpdated?.();
   };
   const outbound = () => {
-    trace.recordOutboundAt(Date.now());
+    observation.gatewayOutboundActivity(Date.now());
     onTelemetryUpdated?.();
   };
   const heartbeat = () => {
-    trace.recordHeartbeatAt(Date.now());
+    observation.gatewayHeartbeatActivity(Date.now());
     onTelemetryUpdated?.();
   };
   const message = (payload: GatewayDownstreamBusinessRequest) => {
@@ -314,10 +352,10 @@ function attachGatewayClientObservers(
   };
 
   client.on('stateChange', stateChange);
-  client.on('inbound', inbound);
+  client.on('inbound', inbound as (frame: unknown) => void);
   client.on('outbound', outbound);
   client.on('heartbeat', heartbeat);
-  client.on('message', message);
+  client.on('message', message as (message: unknown) => void);
   client.on('error', error);
 
   return () => {
@@ -345,7 +383,12 @@ function attachGatewayClientObservers(
  */
 export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promise<BridgeRuntime> {
   const internalOptions = options as BridgeRuntimeInternalOptions;
-  const trace = new RuntimeTraceCollector();
+  const traceAdapter = new RuntimeTraceCollectorAdapter();
+  const observationPort = new CompositeRuntimeObservationPort([
+    traceAdapter,
+    new BridgeGatewayLoggerObservationAdapter(options.logger),
+  ]);
+  const observation = new DefaultRuntimeObservation(observationPort);
   const gatewayHost = normalizeBridgeGatewayHostConfig(options.gatewayHost, {
     logger: options.logger,
     debug: options.debug,
@@ -360,16 +403,24 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
   };
   const sink: GatewayOutboundSink = {
     send(message) {
+      observation.uplinkSending(message);
       const validation = validateGatewayUplinkBusinessMessage(message);
       if (!validation.ok) {
-        trace.recordFailure({
-          kind: 'outbound_validation_failure',
-          phase: 'runtime',
-          message: validation.error.violation.message,
-          code: validation.error.violation.code,
-        });
+        observation.uplinkValidationFailed(
+          message,
+          validation.error.violation.code,
+          validation.error.violation.field,
+          validation.error.violation.message,
+        );
+        observation.failureRecorded(
+          'outbound_validation_failure',
+          'runtime',
+          validation.error.violation.message,
+          validation.error.violation.code,
+        );
         return;
       }
+      observation.uplinkValidated(validation.value);
       ensureCurrentClient().send(validation.value);
     },
   };
@@ -377,7 +428,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     provider: options.provider,
     sink,
     traceIdFactory: options.traceIdFactory,
-    trace,
+    observation,
   });
 
   let status: BridgeRuntimeStatusSnapshot = {
@@ -400,7 +451,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     code?: string,
   ): string => {
     const message = normalizeErrorMessage(error);
-    trace.recordFailure({ kind, phase, message, code });
+    observation.failureRecorded(kind, phase, message, code);
     return message;
   };
 
@@ -427,7 +478,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     internalOptions.onGatewayConnectionCreated?.(client);
     detachGatewayObservers = attachGatewayClientObservers(
       client,
-      trace,
+      observation,
       sink,
       (gatewayState) => {
         if (status.state === 'idle' || status.state === 'stopping' || status.state === 'failed') {
@@ -450,10 +501,23 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         }
       },
       (message) => {
+        const summary = {
+          messageType: message.type,
+          action: 'action' in message ? message.action : undefined,
+          toolSessionId: getDownstreamToolSessionId(message),
+          welinkSessionId: 'welinkSessionId' in message ? message.welinkSessionId : undefined,
+        };
+        observation.downstreamReceived(summary);
         void (async () => {
           try {
-            await core.handleDownstream(message);
+            const command = await core.handleDownstream(message);
+            observation.downstreamHandled(summary, command);
           } catch (error) {
+            observation.downstreamFailed(
+              summary,
+              error,
+              error instanceof RuntimeContractError ? error.code : undefined,
+            );
             recordFailure(
               error instanceof Error && error.message.startsWith('Unsupported downstream action:')
                 ? 'inbound_validation_failure'
@@ -495,8 +559,6 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     detachClient();
   };
 
-  const diagnostics = () => core.getDiagnostics();
-
   return {
     async start(): Promise<void> {
       if (status.state === 'ready') {
@@ -506,6 +568,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         return startPromise;
       }
 
+      observation.runtimeStartRequested();
       status = {
         state: 'starting',
         failureReason: null,
@@ -523,10 +586,12 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
             state: 'ready',
             failureReason: null,
           };
+          observation.runtimeStartCompleted();
           options.onTelemetryUpdated?.();
         } catch (error) {
           disconnectCurrentClient();
           setFailed('startup_failure', 'start', error);
+          observation.runtimeStartFailed(error);
           options.onTelemetryUpdated?.();
           throw error;
         } finally {
@@ -547,6 +612,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
         return stopPromise;
       }
 
+      observation.runtimeStopRequested();
       status = {
         state: 'stopping',
         failureReason: null,
@@ -566,9 +632,11 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
             state: 'idle',
             failureReason: null,
           };
+          observation.runtimeStopCompleted();
           options.onTelemetryUpdated?.();
         } catch (error) {
           setFailed('gateway_runtime_failure', 'stop', error);
+          observation.runtimeStopFailed(error);
           options.onTelemetryUpdated?.();
           throw error;
         } finally {
@@ -636,7 +704,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
       return probePromise;
     },
     getDiagnostics() {
-      return diagnostics();
+      return traceAdapter.snapshot();
     },
   };
 }

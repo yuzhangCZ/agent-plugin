@@ -17,6 +17,28 @@ import {
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
+function createPromptResponse(overrides = {}) {
+  return {
+    data: {
+      info: {
+        id: 'msg-runtime-1',
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+        ...overrides.info,
+      },
+      parts: overrides.parts ?? [{ type: 'step-finish' }],
+    },
+  };
+}
+
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
@@ -31,7 +53,7 @@ function createRuntimeClient(overrides = {}) {
       list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
-      prompt: async () => ({}),
+      prompt: async () => createPromptResponse(),
     },
     config: {
       providers: async () => ({ data: { providers: [] } }),
@@ -1189,7 +1211,7 @@ describe('runtime protocol strictness', () => {
           }),
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -1228,7 +1250,7 @@ describe('runtime protocol strictness', () => {
         session: {
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -1311,7 +1333,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });
@@ -1353,7 +1375,7 @@ describe('runtime protocol strictness', () => {
         session: {
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -1396,7 +1418,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),
@@ -1435,7 +1457,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),
@@ -1467,7 +1489,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),
@@ -1505,7 +1527,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),
@@ -1536,7 +1558,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),
@@ -1760,7 +1782,7 @@ describe('runtime protocol strictness', () => {
               directory: '/session/default-directory',
             },
           }),
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });
@@ -1978,7 +2000,7 @@ describe('runtime protocol strictness', () => {
               directory: '/session/default-directory',
             },
           }),
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });
@@ -2012,7 +2034,7 @@ describe('runtime protocol strictness', () => {
     const runtime = new BridgeRuntime({
       client: createRuntimeClient({
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });
@@ -2058,7 +2080,7 @@ describe('runtime protocol strictness', () => {
           }),
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -2102,7 +2124,7 @@ describe('runtime protocol strictness', () => {
           prompt: async () => {
             resolvePromptStarted();
             await promptPromise;
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -2133,7 +2155,7 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 0);
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_event')).length, 1);
 
-    resolvePrompt({ data: { ok: true } });
+    resolvePrompt(createPromptResponse());
     await invokeTask;
 
     assert.strictEqual((sent.filter((entry) => entry.message.type === 'tool_done')).length, 1);
@@ -2148,7 +2170,7 @@ describe('runtime protocol strictness', () => {
             deleteCalls.push(options);
             return {};
           },
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });
@@ -2193,7 +2215,7 @@ describe('runtime protocol strictness', () => {
           },
           prompt: async (options) => {
             promptCalls.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -2780,7 +2802,7 @@ describe('runtime protocol strictness', () => {
           },
         },
         session: {
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
       }),
     });

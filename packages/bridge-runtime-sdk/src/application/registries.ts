@@ -14,7 +14,7 @@ export interface SessionRuntimeRecord {
 export interface PendingInteractionRecord {
   toolSessionId: string;
   kind: 'question' | 'permission';
-  messageId: string;
+  messageId?: string;
   tokenId: string;
 }
 
