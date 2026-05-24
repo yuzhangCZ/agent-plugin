@@ -1434,6 +1434,107 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
   ]);
 });
 
+test('provider adapter synthesizes question partId fallback without reusing questionId', async () => {
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-question-fallback', 'tool-question-fallback']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-question-fallback',
+    runId: 'run-question-fallback',
+    toolSessionId: 'tool-question-fallback',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-question-fallback',
+        id: 'msg-fallback-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'question.asked',
+    properties: {
+      sessionID: 'tool-question-fallback',
+      id: 'question-fallback-1',
+      tool: {
+        messageID: 'msg-fallback-1',
+        callID: 'call-question-fallback-1',
+      },
+      questions: [
+        {
+          question: 'Pick fallback',
+          options: [{ label: 'A' }],
+        },
+      ],
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.equal(facts.length, 2);
+  assert.deepEqual(facts[0], {
+    type: 'message.start',
+    messageId: 'msg-fallback-1',
+    raw: {
+      info: {
+        sessionID: 'tool-question-fallback',
+        id: 'msg-fallback-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  assert.deepEqual(
+    {
+      ...facts[1],
+      partId: '<generated>',
+    },
+    {
+      type: 'question.ask',
+      messageId: 'msg-fallback-1',
+      partId: '<generated>',
+      questionId: 'question-fallback-1',
+      questions: [
+        {
+          question: 'Pick fallback',
+          options: [{ label: 'A' }],
+        },
+      ],
+      toolCallId: 'call-question-fallback-1',
+      raw: {
+        sessionID: 'tool-question-fallback',
+        id: 'question-fallback-1',
+        tool: {
+          messageID: 'msg-fallback-1',
+          callID: 'call-question-fallback-1',
+        },
+        questions: [
+          {
+            question: 'Pick fallback',
+            options: [{ label: 'A' }],
+          },
+        ],
+      },
+    },
+  );
+  assert.match(facts[1].partId, /^prt_[0-9a-f]{32}$/);
+  assert.notEqual(facts[1].partId, 'question-fallback-1');
+});
+
 test('provider adapter drops orphan text part facts and records protocol diagnostics before runtime validation', async () => {
   const warnings = [];
   const logger = {

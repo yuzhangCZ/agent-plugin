@@ -35,7 +35,7 @@ function buildSyntheticPartId(): string {
 }
 
 function resolveGeneratedPartId(properties: Record<string, unknown> | undefined): string | undefined {
-  return asTrimmedString(properties?.partID) ?? asTrimmedString(properties?.partId);
+  return asTrimmedString(properties?.partID);
 }
 
 function buildFactRoutingFields(
@@ -397,7 +397,8 @@ export class QuestionAskedTranslator implements EventTranslator {
     }
 
     const toolCallId = asTrimmedString(tool?.callID) ?? undefined;
-    const partId = resolveGeneratedPartId(properties) ?? questionId;
+    // questionId 只承担 reply target 语义；缺少上游 part 主键时生成独立 partId，避免混淆展示节点身份。
+    const partId = resolveGeneratedPartId(properties) ?? buildSyntheticPartId();
     const fact: QuestionAskFact = {
       type: 'question.ask',
       ...factRoutingFields,
@@ -446,6 +447,7 @@ export class PermissionAskedTranslator implements EventTranslator {
     const factRoutingFields = buildFactRoutingFields(context);
     const tool = asObject(properties?.tool);
     const messageId = asTrimmedString(tool?.messageID) ?? asTrimmedString(properties?.messageID) ?? undefined;
+    // permissionId 只承担 reply target 语义；缺少上游 part 主键时生成独立 partId，避免混淆展示节点身份。
     const partId = resolveGeneratedPartId(properties) ?? buildSyntheticPartId();
     const fact: PermissionAskFact = {
       type: 'permission.ask',
