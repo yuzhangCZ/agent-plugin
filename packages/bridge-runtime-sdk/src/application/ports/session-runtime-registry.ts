@@ -1,70 +1,31 @@
 /**
- * 会话运行时租约作用域。
+ * session runtime 生命周期状态。
  */
-export type SessionRuntimeLeaseScope = 'run' | 'outbound';
+export type SessionLifecycleState = 'active' | 'aborting' | 'closed';
 
 /**
- * 会话运行时注册输入。
+ * runtime 对单个 toolSession 的协调视图。
  */
-export interface SessionRuntimeRegistryAcquireInput {
-  sessionId: string;
-  scope: SessionRuntimeLeaseScope;
-  leaseId: string;
+export interface SessionRuntimeRecord {
+  toolSessionId: string;
+  welinkSessionId?: string;
+  lifecycle: SessionLifecycleState;
+  activeRunId?: string;
+  activeOutboundMessageId?: string;
 }
 
 /**
- * 会话运行时释放输入。
- */
-export interface SessionRuntimeRegistryReleaseInput {
-  sessionId: string;
-  scope: SessionRuntimeLeaseScope;
-  leaseId: string;
-}
-
-/**
- * 会话运行时注册成功结果。
- */
-export interface SessionRuntimeRegistryAcquireOk {
-  ok: true;
-}
-
-/**
- * 会话运行时注册失败结果。
- */
-export interface SessionRuntimeRegistryAcquireConflict {
-  ok: false;
-  reason: 'missing_session' | 'occupied' | 'closed';
-}
-
-/**
- * 会话运行时注册结果。
- */
-export type SessionRuntimeRegistryAcquireResult = SessionRuntimeRegistryAcquireOk | SessionRuntimeRegistryAcquireConflict;
-
-/**
- * 会话运行时释放成功结果。
- */
-export interface SessionRuntimeRegistryReleaseOk {
-  ok: true;
-}
-
-/**
- * 会话运行时释放失败结果。
- */
-export interface SessionRuntimeRegistryReleaseConflict {
-  ok: false;
-  reason: 'missing_session' | 'lease_mismatch';
-}
-
-/**
- * 会话运行时释放结果。
- */
-export type SessionRuntimeRegistryReleaseResult = SessionRuntimeRegistryReleaseOk | SessionRuntimeRegistryReleaseConflict;
-
-/**
- * 会话运行时注册端口。
+ * request run / outbound 的局部状态注册表。
+ * @remarks 这是 application coordination port，不是通用 repository。
  */
 export interface SessionRuntimeRegistry {
-  acquire(input: SessionRuntimeRegistryAcquireInput): SessionRuntimeRegistryAcquireResult;
-  release(input: SessionRuntimeRegistryReleaseInput): SessionRuntimeRegistryReleaseResult;
+  ensure(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord;
+  get(toolSessionId: string): SessionRuntimeRecord | undefined;
+  delete(toolSessionId: string): void;
+  acquireActiveRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false };
+  releaseActiveRun(toolSessionId: string, runId: string): void;
+  acquireActiveOutbound(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false };
+  releaseActiveOutbound(toolSessionId: string, messageId: string): void;
+  markAborting(toolSessionId: string): SessionRuntimeRecord | undefined;
+  markClosed(toolSessionId: string): SessionRuntimeRecord | undefined;
 }

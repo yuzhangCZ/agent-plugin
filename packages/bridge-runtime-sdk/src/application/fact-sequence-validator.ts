@@ -2,7 +2,7 @@ import type { SkillProviderEvent } from '@agent-plugin/gateway-schema';
 
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
-import type { SessionLifecycleState } from './registries.ts';
+import type { SessionLifecycleState } from './ports/session-runtime-registry.ts';
 
 function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

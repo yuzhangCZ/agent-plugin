@@ -73,6 +73,27 @@ test('public contract source locks interaction ids and tool.update string bounda
   assert.equal(errorSource.includes("'pending_interaction_conflict'"), true);
 });
 
+test('application ports own runtime orchestration contracts without duplicate local interfaces', async () => {
+  const runtimeUsecaseSource = await readFile(new URL('../src/application/ports/runtime-usecase.ts', import.meta.url), 'utf8');
+  const usecasesSource = await readFile(new URL('../src/application/usecases.ts', import.meta.url), 'utf8');
+  const dispatcherSource = await readFile(new URL('../src/application/RuntimeCommandDispatcher.ts', import.meta.url), 'utf8');
+  const registriesSource = await readFile(new URL('../src/application/registries.ts', import.meta.url), 'utf8');
+  const infrastructureIndexSource = await readFile(new URL('../src/infrastructure/index.ts', import.meta.url), 'utf8');
+
+  assert.equal(runtimeUsecaseSource.includes('ProviderHealthResult'), false);
+  assert.equal(runtimeUsecaseSource.includes('ProviderRun'), false);
+  assert.equal(runtimeUsecaseSource.includes('ProviderCreateSessionResult'), false);
+  assert.equal(runtimeUsecaseSource.includes('RuntimeAppliedResult'), false);
+  assert.equal(runtimeUsecaseSource.includes('Promise<void>'), true);
+  assert.equal(usecasesSource.includes('export interface RuntimeUseCase'), false);
+  assert.equal(dispatcherSource.includes("from './usecases.ts'"), false);
+  assert.equal(dispatcherSource.includes("from './ports/runtime-usecase.ts'"), true);
+  assert.equal(registriesSource.includes('export interface SessionRuntimeRegistry'), false);
+  assert.equal(registriesSource.includes('export interface PendingInteractionRegistry'), false);
+  assert.equal(infrastructureIndexSource.includes("./registries/in-memory-session-runtime-registry.ts"), false);
+  assert.equal(infrastructureIndexSource.includes("./registries/in-memory-pending-interaction-registry.ts"), false);
+});
+
 test('package publish contract keeps gateway-client internal to the SDK facade', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 

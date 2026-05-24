@@ -1,15 +1,16 @@
 import type { RuntimeCommand } from '../domain/runtime-command.ts';
+import type { RuntimeCommandDispatcher as RuntimeCommandDispatcherPort } from './ports/runtime-command-dispatcher.ts';
+import type { RuntimeUseCaseMap } from './ports/runtime-usecase.ts';
 import type { RuntimeObservation } from './runtime-observation.ts';
-import type { RuntimeUseCase } from './usecases.ts';
 
 /**
  * runtime 命令分发器；仅负责路由与 use case 装配。
  */
-export class RuntimeCommandDispatcher {
-  private readonly useCases: Record<RuntimeCommand['kind'], RuntimeUseCase>;
+export class RuntimeCommandDispatcher implements RuntimeCommandDispatcherPort {
+  private readonly useCases: RuntimeUseCaseMap;
   private readonly observation: RuntimeObservation;
 
-  constructor(useCases: Record<RuntimeCommand['kind'], RuntimeUseCase>, observation: RuntimeObservation) {
+  constructor(useCases: RuntimeUseCaseMap, observation: RuntimeObservation) {
     this.useCases = useCases;
     this.observation = observation;
   }

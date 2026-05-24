@@ -7,10 +7,8 @@ import type {
   SkillEventToGatewayMessageProjector,
 } from './projectors.ts';
 import { FactSequenceValidator, type LifecycleProfile } from './fact-sequence-validator.ts';
-import type {
-  PendingInteractionRegistry,
-  SessionRuntimeRegistry,
-} from './registries.ts';
+import type { PendingInteractionRegistry } from './ports/pending-interaction-registry.ts';
+import type { SessionRuntimeRegistry } from './ports/session-runtime-registry.ts';
 import type { RuntimeObservation } from './runtime-observation.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };

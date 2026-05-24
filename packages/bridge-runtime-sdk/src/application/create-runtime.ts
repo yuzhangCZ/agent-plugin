@@ -10,7 +10,8 @@ import {
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ThirdPartyAgentProvider } from '../domain/provider.ts';
 import { toRuntimeCommand } from '../adapters/GatewayDownstreamCommandAdapter.ts';
-import type { PendingInteractionRegistry, SessionRuntimeRegistry } from './registries.ts';
+import type { PendingInteractionRegistry } from './ports/pending-interaction-registry.ts';
+import type { SessionRuntimeRegistry } from './ports/session-runtime-registry.ts';
 import {
   DefaultFactToSkillEventProjector,
   DefaultGatewayCommandResultProjector,

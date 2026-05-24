@@ -1,9 +1,11 @@
 import type {
   PendingInteractionRecord,
   PendingInteractionRegistry,
+} from '../application/ports/pending-interaction-registry.ts';
+import type {
   SessionRuntimeRecord,
   SessionRuntimeRegistry,
-} from '../application/registries.ts';
+} from '../application/ports/session-runtime-registry.ts';
 
 /**
  * 默认 in-memory session registry。

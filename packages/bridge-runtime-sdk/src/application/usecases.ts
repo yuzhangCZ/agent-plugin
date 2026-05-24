@@ -2,23 +2,26 @@ import { randomUUID } from 'node:crypto';
 
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { RuntimeCommand } from '../domain/runtime-command.ts';
+import type {
+  AbortExecutionUseCase as AbortExecutionUseCasePort,
+  CloseSessionUseCase as CloseSessionUseCasePort,
+  CreateSessionUseCase as CreateSessionUseCasePort,
+  QueryStatusUseCase as QueryStatusUseCasePort,
+  ReplyPermissionUseCase as ReplyPermissionUseCasePort,
+  ReplyQuestionUseCase as ReplyQuestionUseCasePort,
+  StartRequestRunUseCase as StartRequestRunUseCasePort,
+} from './ports/runtime-usecase.ts';
 import type { ProviderCommandHandlers } from './provider-api-adapter.ts';
 import type {
   GatewayCommandResultProjector,
   GatewayOutboundSink,
 } from './projectors.ts';
-import type {
-  PendingInteractionRegistry,
-  SessionRuntimeRegistry,
-} from './registries.ts';
+import type { PendingInteractionRegistry } from './ports/pending-interaction-registry.ts';
+import type { SessionRuntimeRegistry } from './ports/session-runtime-registry.ts';
 import { InteractionCoordinator, RequestRunCoordinator } from './coordinators.ts';
 import type { RuntimeObservation } from './runtime-observation.ts';
 
-export interface RuntimeUseCase {
-  execute(command: RuntimeCommand): Promise<void>;
-}
-
-export class QueryStatusUseCase implements RuntimeUseCase {
+export class QueryStatusUseCase implements QueryStatusUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sink: GatewayOutboundSink;
   private readonly projector: GatewayCommandResultProjector;
@@ -51,7 +54,7 @@ export class QueryStatusUseCase implements RuntimeUseCase {
   }
 }
 
-export class CreateSessionUseCase implements RuntimeUseCase {
+export class CreateSessionUseCase implements CreateSessionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly sink: GatewayOutboundSink;
@@ -104,7 +107,7 @@ export class CreateSessionUseCase implements RuntimeUseCase {
   }
 }
 
-export class StartRequestRunUseCase implements RuntimeUseCase {
+export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly coordinator: RequestRunCoordinator;
@@ -195,7 +198,7 @@ export class StartRequestRunUseCase implements RuntimeUseCase {
   }
 }
 
-export class ReplyQuestionUseCase implements RuntimeUseCase {
+export class ReplyQuestionUseCase implements ReplyQuestionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly interactionCoordinator: InteractionCoordinator;
   private readonly observation: RuntimeObservation;
@@ -227,7 +230,7 @@ export class ReplyQuestionUseCase implements RuntimeUseCase {
   }
 }
 
-export class ReplyPermissionUseCase implements RuntimeUseCase {
+export class ReplyPermissionUseCase implements ReplyPermissionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly interactionCoordinator: InteractionCoordinator;
   private readonly observation: RuntimeObservation;
@@ -259,7 +262,7 @@ export class ReplyPermissionUseCase implements RuntimeUseCase {
   }
 }
 
-export class CloseSessionUseCase implements RuntimeUseCase {
+export class CloseSessionUseCase implements CloseSessionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly interactionCoordinator: InteractionCoordinator;
@@ -296,7 +299,7 @@ export class CloseSessionUseCase implements RuntimeUseCase {
   }
 }
 
-export class AbortExecutionUseCase implements RuntimeUseCase {
+export class AbortExecutionUseCase implements AbortExecutionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly observation: RuntimeObservation;
