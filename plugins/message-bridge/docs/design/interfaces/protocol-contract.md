@@ -276,6 +276,8 @@ type StatusResponseMessage = {
 
 完成态行为：
 
+- SDK runtime 普通首次 `create_session` 成功时，`session_created.toolSessionId` 直接等于 OpenCode 真实 `sessionId`
+- stale / bootstrap / rebind 等恢复路径仍允许旧 `toolSessionId` 继续作为 anchor 使用
 - `chat` 成功时可能发送兼容层 `tool_done`
 - `session.idle` 继续作为 `tool_event` 向上游转发
 - 仅当该 `toolSessionId` 已进入 compat `chat` 生命周期、且尚未完成 compat 收口时，`session.idle` 才可能触发回退 `tool_done`

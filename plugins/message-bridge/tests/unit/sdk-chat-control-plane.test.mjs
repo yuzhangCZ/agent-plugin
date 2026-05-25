@@ -166,6 +166,50 @@ test('DefaultChatExecutionContextResolver carries session-scoped model override 
   });
 });
 
+test('DefaultChatExecutionContextResolver allows stale real sessionId to keep acting as anchor after rebind', async () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  bindingStore.bind('ses-initial', 'ses-initial');
+  ownershipResolver.attach('ses-initial', 'ses-initial');
+
+  const resolver = new DefaultChatExecutionContextResolver({
+    bindingStore,
+    ownershipResolver,
+    modelOverrideStore,
+    hostSessionCreationPort: { createSession: async () => ({ id: 'ses-created' }) },
+    hostSessionQueryPort: {
+      getSession: async (sessionId) => {
+        if (sessionId === 'ses-initial') {
+          const error = new Error('stale');
+          Object.assign(error, {
+            errorEvidence: { sourceOperation: 'session.get', sourceErrorCode: 'session_not_found' },
+          });
+          throw error;
+        }
+        return { id: sessionId };
+      },
+      listSessions: async () => [{ id: 'ses-rebound', directory: '/workspace/rebound' }],
+    },
+  });
+
+  const resolved = await resolver.resolveForChat('ses-initial', undefined, createLogger());
+
+  assert.deepEqual(resolved, {
+    opencodeSessionId: 'ses-rebound',
+    scope: { directory: '/workspace/rebound' },
+    modelOverride: undefined,
+    bootstrapSource: 'bootstrap_reused_recent_session',
+  });
+  assert.deepEqual(bindingStore.get('ses-initial'), {
+    anchor: 'ses-initial',
+    activeOpencodeSessionId: 'ses-rebound',
+    status: 'active',
+  });
+  assert.equal(ownershipResolver.resolveAttachedAnchor('ses-initial'), undefined);
+  assert.equal(ownershipResolver.resolveAttachedAnchor('ses-rebound'), 'ses-initial');
+});
+
 test('DefaultExecutionSessionInvalidationPort only invalidates stale binding evidence', () => {
   const bindingStore = new InMemoryToolSessionBindingStore();
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();

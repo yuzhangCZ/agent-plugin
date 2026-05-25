@@ -245,10 +245,11 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
     });
     const providerAdapter = getProviderAdapter(runtime);
     const contextResolver = getContextResolver(runtime);
-    const { toolSessionId: anchor } = await providerAdapter.createSession({ title: '绑定会话' });
+    const { toolSessionId: sessionId } = await providerAdapter.createSession({ title: '绑定会话' });
+    assert.equal(sessionId, 'ses-bound');
 
     await assert.rejects(
-      async () => contextResolver.resolveForChat(anchor),
+      async () => contextResolver.resolveForChat(sessionId),
       (error) => {
         assert.equal(error?.errorCode, 'SDK_UNREACHABLE');
         assert.equal(error?.errorMessage, 'Failed to send message');
@@ -258,12 +259,12 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
       },
     );
 
-    assert.deepStrictEqual(contextResolver.dependencies.bindingStore.get(anchor), {
-      anchor,
+    assert.deepStrictEqual(contextResolver.dependencies.bindingStore.get(sessionId), {
+      anchor: sessionId,
       activeOpencodeSessionId: 'ses-bound',
       status: 'active',
     });
-    assert.equal(contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-bound'), anchor);
+    assert.equal(contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-bound'), sessionId);
 
     runtime.stop();
   } finally {

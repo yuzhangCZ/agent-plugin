@@ -967,6 +967,9 @@ sequenceDiagram
 
 目标态补充：
 
+- SDK runtime 普通首次 `create_session` 成功时，`toolSessionId` 直接等于 OpenCode 返回的真实 `sessionId`
+- 该真实 `toolSessionId` 会在未发生 invalidation / bootstrap / rebind 的健康路径上继续用于后续 `chat`、reply 与上行 `tool_event`
+- slash / control-plane / stale 恢复路径内部仍可能保留独立 anchor；旧 `toolSessionId` 在重绑后仍可继续作为 anchor 使用
 - `directory` 不应只在 `create_session` 单点考虑
 - 当 `BRIDGE_DIRECTORY` 能力落地后，bridge 将先统一决策 `effectiveDirectory`
 - 相关下行 SDK 调用将复用同一目录上下文

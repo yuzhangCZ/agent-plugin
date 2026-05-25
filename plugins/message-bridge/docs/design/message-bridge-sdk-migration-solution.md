@@ -442,6 +442,8 @@ sequenceDiagram
 1. `directory/permission` 不进入 SDK contract。
 2. 只进入 `ProviderExecutionContext`。
 3. `ProviderExecutionContext` 通过插件私有装配层注入到 provider adapter，不通过 `ProviderCreateSessionInput` 传递。
+4. SDK runtime 普通首次 `create_session` 成功时，对外返回的 `toolSessionId` 直接使用 OpenCode 真实 `sessionId`。
+5. slash / control-plane / stale 恢复等特殊路径内部仍可保留 anchor 语义，但不改变普通首次 `create_session` 的对外 contract。
 
 ```mermaid
 sequenceDiagram

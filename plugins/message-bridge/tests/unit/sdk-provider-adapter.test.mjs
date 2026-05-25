@@ -275,6 +275,36 @@ function createAdapter(overrides = {}) {
   });
 }
 
+test('provider adapter createSession returns real OpenCode sessionId and establishes identity binding', async () => {
+  const adapter = createAdapter({
+    session: {
+      create: async () => ({
+        data: {
+          id: 'ses-created-identity',
+          title: 'Identity Session',
+          directory: '/workspace/identity',
+        },
+      }),
+    },
+  });
+
+  const result = await adapter.createSession({ title: 'Identity Session' });
+
+  assert.deepEqual(result, {
+    toolSessionId: 'ses-created-identity',
+    title: 'Identity Session',
+  });
+  assert.deepEqual(adapter.contextResolver.dependencies.bindingStore.get('ses-created-identity'), {
+    anchor: 'ses-created-identity',
+    activeOpencodeSessionId: 'ses-created-identity',
+    status: 'active',
+  });
+  assert.equal(
+    adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-identity'),
+    'ses-created-identity',
+  );
+});
+
 test('provider adapter returns synthetic ProviderRun for suppressReply deny path', async () => {
   const adapter = createAdapter();
 

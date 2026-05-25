@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type {
   ProviderError,
   ProviderHealthInput,
@@ -216,11 +214,10 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       throw new Error('create_session_missing_session_id');
     }
 
-    const anchor = `anchor_${randomUUID().replaceAll('-', '')}`;
-    this.createdSessionBindingPort.register(anchor, result.data.sessionId);
+    this.createdSessionBindingPort.register(result.data.sessionId, result.data.sessionId);
 
     return {
-      toolSessionId: anchor,
+      toolSessionId: result.data.sessionId,
       ...(input.title ? { title: input.title } : {}),
     };
   }
