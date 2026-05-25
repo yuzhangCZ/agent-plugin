@@ -8,10 +8,13 @@ import { InMemorySessionRuntimeRegistry } from '../../infrastructure/registries/
 import { InteractionCoordinator, OutboundCoordinator, RequestRunCoordinator } from '../coordinators/index.ts';
 import { FactSequenceValidator } from '../fact-sequence-validator.ts';
 import {
+  CommandFailureToolErrorProjector,
   DefaultFactToSkillEventProjector,
   DefaultGatewayCommandResultProjector,
+  RequestRunFailureToolErrorProjector,
   DefaultRunTerminalSignalProjector,
   DefaultSkillEventToGatewayMessageProjector,
+  ToolErrorMessageCatalog,
 } from '../projectors/index.ts';
 import { RuntimeCommandDispatcher } from '../RuntimeCommandDispatcher.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
@@ -34,6 +37,7 @@ export function createApplicationRuntimeSide(
   sink: GatewayOutboundSinkAdapter,
 ): {
   core: RuntimeCoreService;
+  commandFailureToolErrorProjector: CommandFailureToolErrorProjector;
 } {
   const sessionRegistry = new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry = new InMemoryPendingInteractionRegistry();
@@ -41,6 +45,9 @@ export function createApplicationRuntimeSide(
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
   const terminalProjector = new DefaultRunTerminalSignalProjector();
+  const toolErrorMessageCatalog = new ToolErrorMessageCatalog();
+  const commandFailureToolErrorProjector = new CommandFailureToolErrorProjector(toolErrorMessageCatalog);
+  const requestRunFailureToolErrorProjector = new RequestRunFailureToolErrorProjector(toolErrorMessageCatalog);
   const validator = new FactSequenceValidator();
   const baseProviderHandlers = new ProviderApiAdapter(options.provider);
   const providerHandlers: ProviderCommandHandlers = new ObservedProviderCommandHandlers(
@@ -59,6 +66,7 @@ export function createApplicationRuntimeSide(
       observation,
     },
     terminalProjector,
+    requestRunFailureToolErrorProjector,
   );
   const outboundCoordinator = new OutboundCoordinator(
     sessionRegistry,
@@ -105,5 +113,6 @@ export function createApplicationRuntimeSide(
       traceIdFactory: options.traceIdFactory,
       observation,
     }),
+    commandFailureToolErrorProjector,
   };
 }

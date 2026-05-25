@@ -3,8 +3,10 @@ import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
+import type { RequestRunFailureToolErrorProjector } from '../projectors/RequestRunFailureToolErrorProjector.ts';
 import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
+import { RuntimeContractError } from '../../domain/errors.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 
@@ -17,6 +19,7 @@ export class RequestRunCoordinator {
   private readonly validator: FactSequenceValidator;
   private readonly pipeline: EventPipeline;
   private readonly terminalProjector: RunTerminalSignalProjector;
+  private readonly requestRunFailureProjector: RequestRunFailureToolErrorProjector;
 
   constructor(
     sessionRegistry: SessionRuntimeRegistry,
@@ -24,12 +27,14 @@ export class RequestRunCoordinator {
     validator: FactSequenceValidator,
     pipeline: EventPipeline,
     terminalProjector: RunTerminalSignalProjector,
+    requestRunFailureProjector: RequestRunFailureToolErrorProjector,
   ) {
     this.sessionRegistry = sessionRegistry;
     this.interactionCoordinator = interactionCoordinator;
     this.validator = validator;
     this.pipeline = pipeline;
     this.terminalProjector = terminalProjector;
+    this.requestRunFailureProjector = requestRunFailureProjector;
   }
 
   async executeRun(
@@ -52,6 +57,14 @@ export class RequestRunCoordinator {
 
     const [factsResult, terminalResult] = await Promise.allSettled([consumeFacts, waitTerminal]);
     if (factsResult.status === 'rejected') {
+      if (this.shouldProjectLifecycleFailure(factsResult.reason)) {
+        const uplink = this.requestRunFailureProjector.project({
+          toolSessionId: input.toolSessionId,
+          welinkSessionId: input.welinkSessionId,
+        });
+        this.pipeline.observation.uplinkEmitted(uplink);
+        await this.pipeline.sink.send(uplink);
+      }
       throw factsResult.reason;
     }
     if (terminalResult.status === 'rejected') {
@@ -68,6 +81,11 @@ export class RequestRunCoordinator {
     });
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
+  }
+
+  private shouldProjectLifecycleFailure(error: unknown): error is RuntimeContractError {
+    return error instanceof RuntimeContractError
+      && (error.code === 'fact_sequence_invalid' || error.code === 'pending_interaction_conflict');
   }
 
   private async consumeFacts(

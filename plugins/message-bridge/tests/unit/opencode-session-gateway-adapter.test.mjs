@@ -273,6 +273,94 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     ]);
   });
 
+  test('keeps bare APIError terminal when assistant info.error only provides name', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-api-error-name-only',
+            directory: '/tmp/session-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'APIError',
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-api-error-name-only',
+      text: 'hello',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, {
+      success: true,
+      data: {
+        message: {
+          info: {
+            id: 'msg-assistant-1',
+            error: {
+              name: 'APIError',
+            },
+            cost: 0.12,
+            tokens: {
+              input: 10,
+              output: 20,
+              reasoning: 3,
+              cache: {
+                read: 0,
+                write: 0,
+              },
+            },
+          },
+          parts: [],
+        },
+        terminal: {
+          kind: 'failed',
+          errorCode: 'internal_error',
+          errorMessage: 'APIError',
+          errorDetails: {
+            name: 'APIError',
+          },
+        },
+      },
+    });
+    assert.deepStrictEqual(
+      entries.find((entry) => entry.message === 'session_prompt.assistant_error.normalized'),
+      {
+        level: 'debug',
+        message: 'session_prompt.assistant_error.normalized',
+        extra: {
+          toolSessionId: 'ses-api-error-name-only',
+          rawErrorName: 'APIError',
+          rawHasMessage: false,
+          rawStatusCode: undefined,
+          rawRetryable: undefined,
+          rawProviderID: undefined,
+          normalizedErrorName: 'APIError',
+          normalizedHasMessage: false,
+          normalizedStatusCode: undefined,
+          normalizedRetryable: undefined,
+          normalizedProviderID: undefined,
+        },
+      },
+    );
+  });
+
   test('returns failure when session.get error is not NotFoundError', async () => {
     const calls = { get: 0, prompt: 0 };
     const { logger, entries } = createLoggerSpy();

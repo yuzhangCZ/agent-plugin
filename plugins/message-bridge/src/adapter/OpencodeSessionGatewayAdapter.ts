@@ -245,6 +245,34 @@ function normalizePromptMessage(result: unknown): PromptSessionResultData['messa
   };
 }
 
+function readPromptRawAssistantError(result: unknown): Record<string, unknown> | undefined {
+  const data = extractResultData<Record<string, unknown>>(result);
+  const info = readRecord(data?.info);
+  return readRecord(info?.error);
+}
+
+function logPromptAssistantErrorDiagnostic(parameters: {
+  logger?: BridgeLogger;
+  sessionId: string;
+  result: unknown;
+  normalizedError: PromptSessionAssistantError;
+}): void {
+  const rawError = readPromptRawAssistantError(parameters.result);
+  parameters.logger?.debug('session_prompt.assistant_error.normalized', {
+    toolSessionId: parameters.sessionId,
+    rawErrorName: readString(rawError?.name),
+    rawHasMessage: Boolean(readString(rawError?.message)),
+    rawStatusCode: readNumber(rawError?.statusCode),
+    rawRetryable: readBoolean(rawError?.retryable),
+    rawProviderID: readString(rawError?.providerID),
+    normalizedErrorName: parameters.normalizedError.name,
+    normalizedHasMessage: Boolean(parameters.normalizedError.message),
+    normalizedStatusCode: readNumber(parameters.normalizedError.details?.statusCode),
+    normalizedRetryable: readBoolean(parameters.normalizedError.details?.retryable),
+    normalizedProviderID: readString(parameters.normalizedError.details?.providerID),
+  });
+}
+
 function derivePromptTerminal(message: PromptSessionResultData['message']): PromptSessionTerminal {
   if (!message.info.error) {
     return { kind: 'completed' };
@@ -585,7 +613,18 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
         parts: [{ type: 'text', text: parameters.text }],
         ...(parameters.agent ? { agent: parameters.agent } : {}),
       }),
-      onSuccess: (result) => buildPromptPayloadFailure('Failed to send message', 'session.prompt', result),
+      onSuccess: (result) => {
+        const promptResult = buildPromptPayloadFailure('Failed to send message', 'session.prompt', result);
+        if (promptResult.success && promptResult.data.message.info.error) {
+          logPromptAssistantErrorDiagnostic({
+            logger: parameters.logger,
+            sessionId: parameters.sessionId,
+            result,
+            normalizedError: promptResult.data.message.info.error,
+          });
+        }
+        return promptResult;
+      },
     });
   }
 

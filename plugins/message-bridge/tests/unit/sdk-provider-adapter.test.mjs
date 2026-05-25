@@ -1582,6 +1582,66 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
   });
 });
 
+test('provider adapter keeps bare APIError when prompt terminal only receives assistant error name', async () => {
+  const infos = [];
+  const logger = {
+    ...createLogger(),
+    info: (message, extra) => infos.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-api-error-name-only', 'tool-api-error-name-only']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-api-error-name-only',
+    runId: 'run-api-error-name-only',
+    toolSessionId: 'tool-api-error-name-only',
+    text: 'hello',
+  });
+
+  promptDeferred.resolve(createPromptResponse({
+    info: {
+      error: {
+        name: 'APIError',
+      },
+    },
+  }));
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'APIError',
+      details: {
+        name: 'APIError',
+      },
+    },
+  });
+  assert.deepEqual(
+    infos.find((entry) => entry.message === 'provider_adapter.prompt.completed'),
+    {
+      message: 'provider_adapter.prompt.completed',
+      extra: {
+        toolSessionId: 'tool-api-error-name-only',
+        opencodeSessionId: 'tool-api-error-name-only',
+        runId: 'run-api-error-name-only',
+        durationMs: infos.find((entry) => entry.message === 'provider_adapter.prompt.completed').extra.durationMs,
+        terminalKind: 'failed',
+        terminalErrorCode: 'internal_error',
+        terminalErrorMessage: 'APIError',
+        terminalErrorDetails: {
+          name: 'APIError',
+        },
+      },
+    },
+  );
+});
+
 test('provider adapter keeps draining after prompt terminal and closes on the last terminal candidate', async () => {
   const promptDeferred = createDeferred();
   const adapter = createAdapter({

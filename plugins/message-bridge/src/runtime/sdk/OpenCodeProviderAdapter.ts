@@ -398,6 +398,13 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         runId: activeRun.runId,
         durationMs: Math.max(0, Date.now() - startedAt),
         terminalKind: promptResult.data.terminal.kind,
+        ...(promptResult.data.terminal.kind === 'failed'
+          ? {
+              terminalErrorCode: promptResult.data.terminal.errorCode,
+              terminalErrorMessage: promptResult.data.terminal.errorMessage,
+              terminalErrorDetails: promptResult.data.terminal.errorDetails,
+            }
+          : {}),
       });
       activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
     } catch (error) {

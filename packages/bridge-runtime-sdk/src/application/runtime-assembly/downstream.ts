@@ -5,8 +5,10 @@ import type { GatewayRuntimeDriver } from '../../adapters/gateway/GatewayRuntime
 import { RuntimeContractError } from '../../domain/errors.ts';
 import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { RuntimeLifecycleService } from '../lifecycle/RuntimeLifecycleService.ts';
+import type { CommandFailureToolErrorProjector } from '../projectors/CommandFailureToolErrorProjector.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
 import type { RuntimeCoreService } from '../runtime/RuntimeCoreService.ts';
+import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
 
 export function attachRuntimeDriverHandlers(input: {
   driver: GatewayRuntimeDriver;
@@ -14,6 +16,8 @@ export function attachRuntimeDriverHandlers(input: {
   lifecycle: RuntimeLifecycleService;
   observation: DefaultRuntimeObservation;
   traceIdFactory: () => string;
+  commandFailureToolErrorProjector: CommandFailureToolErrorProjector;
+  sink: GatewayOutboundSinkAdapter;
 }): void {
   input.driver.attach({
     onGatewayStateChanged: (state) => {
@@ -42,6 +46,11 @@ export function attachRuntimeDriverHandlers(input: {
             error,
             error instanceof RuntimeContractError ? error.code : undefined,
           );
+          const toolError = input.commandFailureToolErrorProjector.project({ summary, error });
+          if (toolError) {
+            input.observation.uplinkEmitted(toolError);
+            input.sink.send(toolError);
+          }
         }
       })();
     },

@@ -37,6 +37,16 @@ function createFakeRun(facts: ProviderFact[], result: ProviderTerminalResult): P
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
   state: BridgeGatewayHostState = 'DISCONNECTED';
@@ -1235,6 +1245,12 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
 
   assert.equal(replyCount, 1);
   assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-2',
+    welinkSessionId: 'welink-2',
+    error: '当前请求处理失败，请重试',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'outbound_validation_failure',
     phase: 'runtime',
@@ -1327,6 +1343,12 @@ test('permission.ask rejects globally duplicated permissionId across sessions an
 
   assert.equal(replyCount, 1);
   assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-2',
+    welinkSessionId: 'welink-2',
+    error: '当前请求处理失败，请重试',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'outbound_validation_failure',
     phase: 'runtime',
@@ -1504,6 +1526,12 @@ test('request-level command failures stay ready and record command_execution_fai
   await flushEvents();
 
   assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: 'run_failed',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'command_execution_failure',
     phase: 'runtime',
@@ -1511,6 +1539,155 @@ test('request-level command failures stay ready and record command_execution_fai
     code: undefined,
   });
   assert.equal(runtime.getStatus().failureReason, null);
+});
+
+test('create_session command failure with routable welinkSessionId projects tool_error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          throw new Error('create_session_failed');
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'create_session',
+    welinkSessionId: 'welink-create-1',
+    payload: { title: 'demo' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    welinkSessionId: 'welink-create-1',
+    error: 'create_session_failed',
+  });
+});
+
+test('question_reply missing pending interaction projects tool_error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    welinkSessionId: 'welink-question-missing-1',
+    payload: { questionId: 'question-missing-1', answer: 'A' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    welinkSessionId: 'welink-question-missing-1',
+    error: '当前交互已失效，请刷新后重试',
+  });
+});
+
+test('permission_reply missing pending interaction projects tool_error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    welinkSessionId: 'welink-permission-missing-1',
+    payload: { permissionId: 'permission-missing-1', response: 'once' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    welinkSessionId: 'welink-permission-missing-1',
+    error: '当前交互已失效，请刷新后重试',
+  });
+});
+
+test('run_already_active projects routable tool_error while preserving active request run lock', async () => {
+  const connection = new FakeGatewayClient();
+  const firstRunResult = createDeferred<ProviderTerminalResult>();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return {
+            runId: 'run-hanging-1',
+            facts: createAsyncFacts([]),
+            result: async () => firstRunResult.promise,
+          };
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-run-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-run-2',
+    payload: { toolSessionId: 'tool-1', text: 'second' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-run-2',
+    error: '当前会话正在处理中，请稍后再试',
+  });
+  firstRunResult.resolve({ outcome: 'completed' });
+  await flushEvents();
 });
 
 test('invalid downstream messages stay ready and record inbound_validation_failure', async () => {
@@ -1805,6 +1982,12 @@ test('invalid outbound messages stay ready and record outbound_validation_failur
   await flushEvents();
 
   assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: '当前请求处理失败，请重试',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'outbound_validation_failure',
     phase: 'runtime',
@@ -1869,6 +2052,12 @@ test('tool.update with non-string output fails closed before uplink projection',
   await flushEvents();
 
   assert.equal(runtime.getStatus().state, 'ready');
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: '当前请求处理失败，请重试',
+  });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'outbound_validation_failure',
     phase: 'runtime',
