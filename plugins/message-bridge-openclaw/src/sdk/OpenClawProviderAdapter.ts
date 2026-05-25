@@ -481,16 +481,31 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     const activeRun = this.activeRunsBySessionKey.get(record.sessionKey);
+    const abortRunId = activeRun?.runId ?? input.runId;
     if (activeRun) {
-      activeRun.abortRequested = true;
+      this.abortActiveRun(activeRun);
     }
     this.approvalRegistry.clearSession(input.toolSessionId);
 
     const replyRuntime = this.options.runtime.channel?.reply ?? {};
-    const runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
-      sessionKey: record.sessionKey,
-      runId: input.runId,
-    });
+    let runtimeHandled = false;
+    try {
+      runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
+        sessionKey: record.sessionKey,
+        runId: abortRunId,
+      });
+    } catch (error) {
+      if (!activeRun) {
+        throw error;
+      }
+      this.options.logger.warn("runtime.abort_session.host_abort_failed", {
+        toolSessionId: input.toolSessionId,
+        sessionKey: record.sessionKey,
+        runId: abortRunId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      runtimeHandled = true;
+    }
     if (!runtimeHandled) {
       const subagent = this.options.getSubagentRuntime();
       if (subagent?.deleteSession) {
@@ -649,6 +664,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     payload: Record<string, unknown>,
     info: { kind: "tool" | "block" | "final" },
   ): Promise<void> {
+    if (state.abortRequested || state.completed) {
+      return;
+    }
+
     if (info.kind === "tool") {
       const toolCallId = state.pendingToolResultTarget;
       if (!toolCallId) {
@@ -948,6 +967,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private handleToolAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
+    if (state.abortRequested || state.completed) {
+      return;
+    }
+
     this.ensureMessageStarted(state);
     const toolCallId = asTrimmedString(payload.toolCallId) ?? `tool_${randomUUID()}`;
     const toolName = asTrimmedString(payload.name) ?? "tool";
@@ -1000,6 +1023,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private handleAssistantAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
+    if (state.abortRequested || state.completed) {
+      return;
+    }
+
     const fullText = typeof payload.text === "string" ? payload.text : "";
     let deltaText = typeof payload.delta === "string" ? payload.delta : "";
 
@@ -1036,6 +1063,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private handleReasoningAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
+    if (state.abortRequested || state.completed) {
+      return;
+    }
+
     const phase = asTrimmedString(payload.phase) ?? "delta";
     const deltaText = typeof payload.delta === "string"
       ? payload.delta
@@ -1073,6 +1104,21 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     state.completed = true;
     this.activeRunsBySessionKey.delete(state.sessionKey);
     this.sessionKeyByRunId.delete(state.runId);
+  }
+
+  /**
+   * abort_session 的本地收口入口。
+   * @remarks OpenClaw 的宿主取消能力是 best-effort；这里必须先关闭本地输出边界，
+   * 确保 SDK 能投影 `tool_done`，并抑制宿主晚到的流式输出。
+   */
+  private abortActiveRun(state: ActiveRunState): void {
+    if (state.completed) {
+      return;
+    }
+    state.abortRequested = true;
+    state.queue.close();
+    state.result.resolve({ outcome: "aborted" });
+    this.finalizeRun(state);
   }
 
   private logChatRawEvent(params: {
