@@ -6,6 +6,7 @@ import type {
   PermissionAskFact,
   ProviderError,
   SessionErrorFact,
+  SessionTitleFact,
   ThinkingDeltaFact,
   ThinkingDoneFact,
   TextDeltaFact,
@@ -173,6 +174,19 @@ export function buildSessionErrorFact(input: {
   return {
     type: "session.error",
     error: input.error,
+    ...(input.raw !== undefined ? { raw: input.raw } : {}),
+  };
+}
+
+export function buildSessionTitleFact(input: {
+  toolSessionId: string;
+  title: string;
+  raw?: unknown;
+}): SessionTitleFact {
+  return {
+    type: "session.title",
+    toolSessionId: input.toolSessionId,
+    title: input.title,
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };
 }

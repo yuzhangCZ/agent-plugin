@@ -347,6 +347,89 @@ test('runtime projects subagent envelope fields from provider facts onto tool_ev
   assert.equal(toolEvents.every((message) => message.subagentName === 'research-agent'), true);
 });
 
+test('abort_session forwards active run id and sends tool_done when run resolves aborted', async () => {
+  const connection = new FakeGatewayClient();
+  let finishFacts: (() => void) | undefined;
+  let resolveTerminal: ((result: ProviderTerminalResult) => void) | undefined;
+  let capturedAbortInput: Record<string, unknown> | undefined;
+  let capturedRunId: string | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          capturedRunId = input.runId;
+          const facts = {
+            async *[Symbol.asyncIterator]() {
+              await new Promise<void>((resolve) => {
+                finishFacts = resolve;
+              });
+            },
+          };
+          return {
+            runId: input.runId,
+            facts,
+            result() {
+              return new Promise<ProviderTerminalResult>((resolve) => {
+                resolveTerminal = resolve;
+              });
+            },
+          };
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession(input) {
+          capturedAbortInput = input as unknown as Record<string, unknown>;
+          finishFacts?.();
+          resolveTerminal?.({ outcome: 'aborted' });
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'abort_session',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await flushEvents();
+
+  assert.ok(capturedRunId);
+  assert.deepEqual(capturedAbortInput, {
+    traceId: 'trace-fixed',
+    toolSessionId: 'tool-1',
+    runId: capturedRunId,
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_done',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+  });
+});
+
 test('start_request_run reuses session welinkSessionId when chat invoke omits it', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
