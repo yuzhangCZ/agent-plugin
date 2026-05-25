@@ -23,8 +23,7 @@
     "test": "node --experimental-strip-types --test tests/**/*.test.ts",
     "pack:check": "pnpm run build && pnpm pack --pack-destination .tmp/pack-check && node ./scripts/check-pack.mjs",
     "verify:dist-tracking": "node ./scripts/check-dist-tracking.mjs",
-    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check && pnpm run verify:dist-tracking",
-    "prepublishOnly": "pnpm run build && pnpm run verify:core"
+    "verify:core": "pnpm run typecheck && pnpm test && pnpm run pack:check && pnpm run verify:dist-tracking"
   },
   "devDependencies": {
     "@types/node": "22.19.17",

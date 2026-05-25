@@ -11,7 +11,6 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   createBridgeRuntime,
   type BridgeGatewayHostConfig,
-  type BridgeGatewayHostConnection,
   type BridgeRuntime,
   type ThirdPartyAgentProvider,
 } from "@wecode/bridge-runtime-sdk";
@@ -30,6 +29,10 @@ import type {
   MessageBridgeStatusSnapshot,
 } from "./types.js";
 import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
+import {
+  type BridgeRuntimeConnectionFactory,
+  withOptionalConnectionFactory,
+} from "./runtime/bridgeRuntimeConnectionFactory.js";
 import { beginProbeConnect, finishProbeConnect, getConnectionCoord } from "./runtime/ConnectionCoordinator.js";
 import { asRecord } from "./utils/type-guards.js";
 import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./gateway-host.js";
@@ -61,22 +64,36 @@ const probeProvider: ThirdPartyAgentProvider = {
     };
   },
   async replyQuestion() {
-    return { applied: false };
+    return { applied: true };
   },
   async replyPermission() {
-    return { applied: false };
+    return { applied: true };
   },
   async closeSession() {
-    return { applied: false };
+    return { applied: true };
   },
   async abortSession() {
-    return { applied: false };
+    return { applied: true };
   },
 };
 
-type ProbeConnectionFactory = (gatewayHost: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+type ProbeConnectionFactory = BridgeRuntimeConnectionFactory;
 
 type ProbeRuntimeFactory = typeof createBridgeRuntime;
+
+type MessageBridgeRuntimeSnapshotLike = Pick<
+  MessageBridgeStatusSnapshot,
+  | "connected"
+  | "routeResolverAvailable"
+  | "replyRuntimeAvailable"
+  | "streamingPathHealthy"
+  | "streamingPathReason"
+  | "lastInboundAt"
+  | "lastOutboundAt"
+  | "lastReadyAt"
+  | "lastHeartbeatAt"
+  | "lastProbeAt"
+>;
 
 export type MessageBridgeAccountSnapshot = ChannelAccountSnapshot & {
   connected: boolean;
@@ -161,10 +178,13 @@ export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSna
   return createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID, {
     connected: false,
     runtimePhase: "idle" as const,
+    lastStartAt: null,
+    lastStopAt: null,
+    lastError: null,
     routeResolverAvailable: false,
     replyRuntimeAvailable: false,
     streamingPathHealthy: false,
-    streamingPathReason: "missing_route_resolver",
+    streamingPathReason: "missing_route_resolver" as const,
     lastReadyAt: null,
     lastInboundAt: null,
     lastOutboundAt: null,
@@ -321,13 +341,13 @@ export async function probeMessageBridgeAccount(
   };
   abortController.signal.addEventListener("abort", abortProbe, { once: true });
   try {
-    probeRuntime = await createRuntime({
+    const runtimeOptions = withOptionalConnectionFactory({
       provider: probeProvider,
       gatewayHost: buildBridgeGatewayHostConfig(params.account, registerMetadata),
       logger,
       debug: params.account.debug,
-      connectionFactory: deps.connectionFactory,
-    });
+    }, deps.connectionFactory);
+    probeRuntime = await createRuntime(runtimeOptions as Parameters<typeof createRuntime>[0]);
     if (abortController.signal.aborted) {
       await probeRuntime.stop().catch((error) => {
         logger.warn("probe.cancel_teardown_failed", {
@@ -355,7 +375,7 @@ export async function probeMessageBridgeAccount(
 export function buildMessageBridgeAccountSnapshot(params: {
   account: MessageBridgeResolvedAccount;
   cfg: OpenClawConfig;
-  runtime?: MessageBridgeStatusSnapshot | ChannelAccountSnapshot;
+  runtime?: MessageBridgeStatusSnapshot | ChannelAccountSnapshot | Partial<MessageBridgeRuntimeSnapshotLike>;
   probe?: unknown;
   registerMetadata?: RegisterMetadata;
 }): MessageBridgeAccountSnapshot {

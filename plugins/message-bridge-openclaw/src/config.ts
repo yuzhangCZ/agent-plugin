@@ -72,8 +72,9 @@ function stripLegacyAccounts(section: Record<string, unknown> | undefined): Reco
   }
 
   const { accounts: _accounts, gateway, ...rest } = section;
-  const nextGateway = asRecord(gateway)
-    ? Object.fromEntries(Object.entries(gateway).filter(([key]) => !DEPRECATED_GATEWAY_FIELDS.has(key)))
+  const gatewayRecord = asRecord(gateway);
+  const nextGateway = gatewayRecord
+    ? Object.fromEntries(Object.entries(gatewayRecord).filter(([key]) => !DEPRECATED_GATEWAY_FIELDS.has(key)))
     : gateway;
   return {
     ...rest,

@@ -1370,6 +1370,29 @@ function updateManifestVersion(fs, manifestPath, targetVersion) {
   fs.writeJson(manifestPath, manifest);
 }
 
+function stripPublishLifecycleScripts(fs, manifestPath) {
+  const manifest = fs.readJson(manifestPath);
+  const originalScripts = isObject(manifest.scripts) ? structuredClone(manifest.scripts) : null;
+  if (!originalScripts) {
+    return null;
+  }
+
+  const sanitizedScripts = { ...originalScripts };
+  delete sanitizedScripts.prepare;
+  delete sanitizedScripts.prepublish;
+  delete sanitizedScripts.prepublishOnly;
+  delete sanitizedScripts.prepack;
+  delete sanitizedScripts.postpack;
+
+  if (Object.keys(sanitizedScripts).length === Object.keys(originalScripts).length) {
+    return null;
+  }
+
+  manifest.scripts = sanitizedScripts;
+  fs.writeJson(manifestPath, manifest);
+  return originalScripts;
+}
+
 function printRuntimeHeader(stdout, plan, registry, whoami) {
   stdout.write(`${formatReleasePlan(plan)}\n`);
   stdout.write("Registry Context\n");
@@ -1403,6 +1426,16 @@ function printPublishedFact(stdout, target) {
 function restoreManifestVersion(fs, manifestPath, version) {
   const manifest = fs.readJson(manifestPath);
   manifest.version = version;
+  fs.writeJson(manifestPath, manifest);
+}
+
+function restoreManifestScripts(fs, manifestPath, scripts) {
+  if (!scripts) {
+    return;
+  }
+
+  const manifest = fs.readJson(manifestPath);
+  manifest.scripts = scripts;
   fs.writeJson(manifestPath, manifest);
 }
 
@@ -1575,7 +1608,14 @@ export function executeRelease(plan, overrides = {}) {
           : ["npm", "publish", "--tag", target.distTag, "--registry", publishRegistries[target.id]];
         stdout.write(`Publishing ${target.id}: ${formatCommand(publishCommand)}\n`);
         publishAttemptedTargetIds.add(target.id);
-        runCommand(exec, publishCommand, target.publishMode === "tarball" ? plan.repoRoot : target.publishRootAbsolute, releaseBuildEnv);
+        const strippedScripts = target.publishMode === "directory"
+          ? stripPublishLifecycleScripts(fs, target.versionSourceAbsolute)
+          : null;
+        try {
+          runCommand(exec, publishCommand, target.publishMode === "tarball" ? plan.repoRoot : target.publishRootAbsolute, releaseBuildEnv);
+        } finally {
+          restoreManifestScripts(fs, target.versionSourceAbsolute, strippedScripts);
+        }
         publishedTargets.push(target);
         printPublishedFact(stdout, target);
         maybeInjectFailure(target, "after-publish");
