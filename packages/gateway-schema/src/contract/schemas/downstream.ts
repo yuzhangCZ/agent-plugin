@@ -130,11 +130,22 @@ export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchem
 
 export const questionReplyPayloadSchema = z
   .object({
-    questionId: requiredTrimmedString,
+    questionId: optionalStrictTrimmedString,
+    toolCallId: optionalStrictTrimmedString,
     answer: requiredTrimmedString,
   })
+  .superRefine((payload, context) => {
+    if (payload.questionId || payload.toolCallId) {
+      return;
+    }
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'question_reply requires questionId or toolCallId',
+      path: ['questionId'],
+    });
+  })
   .transform((payload) => ({
-    questionId: payload.questionId,
+    questionId: payload.questionId ?? payload.toolCallId!,
     answer: payload.answer,
   }));
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;

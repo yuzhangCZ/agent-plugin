@@ -89,7 +89,8 @@ export interface QuestionAskFact extends ProviderFactBase {
   questionId: string;
   // questions[] 是问题事实的唯一真源；兼容展示字段由 projector 或下游自行从 questions[0] 读取。
   questions: QuestionItem[];
-  // 可选 toolCallId 仅用于关联原始 tool call；未传时 projector 会回填为 questionId 兼容旧下游。
+  // 可选 toolCallId 仅用于关联原始 tool call；未传时 projector 会回填为 questionId 兼容旧下游字段读取口径，
+  // 但不会改变 runtime 内部仍以 questionId 作为 reply target 的语义。
   toolCallId?: string;
   status?: string;
   // 这里保留 unknown：extParam 是 cloud event 透传上下文，不属于稳定业务字段。

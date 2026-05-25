@@ -79,7 +79,7 @@ type AbortSessionPayload = {
 };
 
 type QuestionReplyPayload = {
-  toolSessionId: string;
+  questionId?: string;
   answer: string;
   toolCallId?: string;
 };
@@ -92,10 +92,12 @@ type QuestionReplyPayload = {
 - `close_session` 调用 `session.delete()`
 - `abort_session` 调用 `session.abort()`
 - `question_reply` 通过原始 question API 链路完成待答复问题
+- `question_reply` 正式 reply target 字段是 `questionId`；历史端侧仍可通过 `toolCallId` 兼容回传
+- 当 `questionId` 与 `toolCallId` 同时存在时，归一化优先使用 `questionId`
 - `assistantId` 在 `chat` 和 `create_session` 中均为可选字段
 - 当最终解析后的 `gateway.channel === 'uniassistant'` 时，`create_session` 可先基于 `assistantId` 解析目录，再回退到 `effectiveDirectory`
 - `chat` 在存在 `assistantId` 时，会把它透传到 SDK 的 `session.prompt(...).agent`
-- `assistantId` 仅接受字符串；`null` 视为无效 payload
+- `assistantId` 仅接受字符串输入；`null` 视为未提供并在归一化后被省略
 - 旧字段 `assiantId` 已废弃；当前会被当作未知字段静默忽略，不会触发 `agent` 透传，也不会触发目录映射
 
 ### 2.1.1 `create_session.payload` 收敛结论
@@ -176,6 +178,13 @@ type QuestionReplyPayload = {
 - `question.asked`
 
 默认 allowlist 与上述列表完全一致。
+
+补充口径：
+
+- `question.asked` 的正式 reply target 字段是 `questionId`
+- `question.asked.toolCallId` 仅作为历史端侧兼容字段保留
+- `question.ask` 上行投影会优先透传真实 `toolCallId`；缺失时回填 `questionId`
+- `permission.asked` / `permission.ask` 不再复用 `toolCallId` 命名，正式标识仅为 `permissionId`
 
 ### 3.1 上行数据模型
 

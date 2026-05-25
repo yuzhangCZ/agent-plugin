@@ -93,6 +93,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         messageId: fact.messageId,
         partId: fact.partId,
         questionId: fact.questionId,
+        // 旧下游仍可能以 toolCallId 读取 question reply target；这里仅做兼容回填，不改变内部主键语义。
         toolCallId: fact.toolCallId ?? fact.questionId,
         ...(fact.status ? { status: fact.status } : {}),
         ...(fact.extParam !== undefined ? { extParam: fact.extParam } : {}),
@@ -122,7 +123,6 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       type: 'permission.ask',
       properties: {
         partId: fact.partId,
-        toolCallId: fact.permissionId,
         permissionId: fact.permissionId,
         ...(fact.messageId ? { messageId: fact.messageId } : {}),
         ...(fact.permissionType ? { permType: fact.permissionType } : {}),

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { EventFilter } from '../../src/event/EventFilter.ts';
+import { normalizeDownstreamMessage } from '../../src/gateway-wire/downstream.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
@@ -241,6 +242,99 @@ describe('protocol question-roundtrip', () => {
       {
         url: '/question/{requestID}/reply',
         path: { requestID: 'question-child-1' },
+        body: { answers: [['Vite']] },
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ]);
+  });
+
+  test('routes question_reply normalized from legacy toolCallId alias', async () => {
+    const postCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              return { data: { healthy: true, version: '9.9.9' } };
+            }
+            return { data: [] };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
+        },
+      }),
+    });
+    runtime.gatewayConnection = {
+      send() {},
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const normalized = normalizeDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-question-legacy-1',
+      action: 'question_reply',
+      payload: {
+        toolCallId: 'question-legacy-1',
+        answer: 'Vite',
+      },
+    });
+    assert.strictEqual(normalized.ok, true);
+
+    await runtime.handleDownstreamMessage(normalized.value);
+
+    assert.deepStrictEqual(postCalls, [
+      {
+        url: '/question/{requestID}/reply',
+        path: { requestID: 'question-legacy-1' },
+        body: { answers: [['Vite']] },
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ]);
+  });
+
+  test('routes question_reply using questionId when both questionId and toolCallId exist', async () => {
+    const postCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        _client: {
+          get: async (options) => {
+            if (options?.url === '/global/health') {
+              return { data: { healthy: true, version: '9.9.9' } };
+            }
+            return { data: [] };
+          },
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
+        },
+      }),
+    });
+    runtime.gatewayConnection = {
+      send() {},
+    };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const normalized = normalizeDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'wl-question-dual-1',
+      action: 'question_reply',
+      payload: {
+        questionId: 'question-primary-1',
+        toolCallId: 'question-shadow-1',
+        answer: 'Vite',
+      },
+    });
+    assert.strictEqual(normalized.ok, true);
+
+    await runtime.handleDownstreamMessage(normalized.value);
+
+    assert.deepStrictEqual(postCalls, [
+      {
+        url: '/question/{requestID}/reply',
+        path: { requestID: 'question-primary-1' },
         body: { answers: [['Vite']] },
         headers: { 'Content-Type': 'application/json' },
       },

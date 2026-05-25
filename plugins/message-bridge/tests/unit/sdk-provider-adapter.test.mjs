@@ -1409,7 +1409,6 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
           ],
         },
       ],
-      toolCallId: 'call-question-1',
       raw: {
         sessionID: 'tool-question',
         id: 'question-1',
@@ -1514,7 +1513,6 @@ test('provider adapter synthesizes question partId fallback without reusing ques
           options: [{ label: 'A' }],
         },
       ],
-      toolCallId: 'call-question-fallback-1',
       raw: {
         sessionID: 'tool-question-fallback',
         id: 'question-fallback-1',

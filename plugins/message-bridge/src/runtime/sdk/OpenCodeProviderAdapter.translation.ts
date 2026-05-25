@@ -396,7 +396,6 @@ export class QuestionAskedTranslator implements EventTranslator {
       };
     }
 
-    const toolCallId = asTrimmedString(tool?.callID) ?? undefined;
     // questionId 只承担 reply target 语义；缺少上游 part 主键时生成独立 partId，避免混淆展示节点身份。
     const partId = resolveGeneratedPartId(properties) ?? buildSyntheticPartId();
     const fact: QuestionAskFact = {
@@ -423,7 +422,6 @@ export class QuestionAskedTranslator implements EventTranslator {
             : {}),
           ...(typeof item.multiple === 'boolean' ? { multiSelect: item.multiple } : {}),
         })),
-      ...(toolCallId ? { toolCallId } : {}),
       raw: properties,
     };
 

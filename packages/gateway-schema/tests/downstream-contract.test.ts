@@ -633,3 +633,65 @@ test('normalizeDownstream accepts question_reply without welinkSessionId through
     },
   });
 });
+
+test('normalizeDownstream accepts question_reply using legacy toolCallId alias', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      toolCallId: 'question-legacy-1',
+      answer: 'ok',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-legacy-1',
+      answer: 'ok',
+    },
+  });
+});
+
+test('normalizeDownstream prefers questionId over toolCallId for question_reply', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-primary-1',
+      toolCallId: 'question-legacy-shadow-1',
+      answer: 'ok',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-primary-1',
+      answer: 'ok',
+    },
+  });
+});
+
+test('normalizeDownstream rejects question_reply when both questionId and toolCallId are missing', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      answer: 'ok',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.questionId',
+    messageType: 'invoke',
+    action: 'question_reply',
+  });
+});

@@ -111,7 +111,7 @@ flowchart LR
 | `toolSessionId` | `OpenCode SDK` | `B4` | `message-bridge`、`ai-gateway`、`skill-server` | 否 | OpenCode 会话标识 |
 | `messageId` | `ai-gateway` | `B3` | `message-bridge` | 否 | 当前实现只用于 trace/log，上游可选下发 |
 | `permissionId` | `OpenCode` 事件 | `B4` 上行 | `message-bridge`、后续 `permission_reply` | 否 | 权限请求标识 |
-| `toolCallId` | `OpenCode` 事件 | `B4` 上行 | `question_reply` | 否 | 工具调用标识 |
+| `toolCallId` | `OpenCode` 事件 | `B4` 上行 | `question.asked` 兼容展示、`question_reply` 兼容回传 | 否 | 问题链路历史兼容字段；正式 reply target 仍是 `questionId` |
 | `requestId` | `OpenCode question API` | `B4` 内部 | `message-bridge` | 否 | 仅 bridge 内部解析，不对外暴露 |
 | `opencode messageID` | `OpenCode` 事件 | `B4` 上行 | `message-bridge` | 否 | 仅用于日志与追踪 |
 | `opencode partID` | `OpenCode` 事件 | `B4` 上行 | `message-bridge` | 否 | 仅用于日志与追踪 |
@@ -123,7 +123,7 @@ flowchart LR
 | `welinkSessionId` | `B2` | `B3`、回包路径 | `message-bridge`、`OpenCode SDK` |
 | `toolSessionId` | `B4` | 回到 `B3/B2/B1` | `ai-gateway`、`skill-server` |
 | `messageId` | `B3` | 仅 trace 上下文 | `message-bridge` 不重新生成替代上游值 |
-| `permissionId/toolCallId` | `B4` 上行事件 | `B3`、`B2` 业务处理 | `skill-server`、`ai-gateway` |
+| `permissionId/questionId/toolCallId` | `B4` 上行事件 | `B3`、`B2` 业务处理 | `skill-server`、`ai-gateway` |
 
 ## 3. 接口边界 B1: `ui-client <-> skill-server`
 
@@ -442,7 +442,7 @@ type NormalizedDownstreamMessage =
 | `close_session` | `{ toolSessionId: string }` |
 | `abort_session` | `{ toolSessionId: string }` |
 | `permission_reply` | `{ permissionId: string, toolSessionId: string, response: 'once' | 'always' | 'reject' }` |
-| `question_reply` | `{ toolSessionId: string, answer: string, toolCallId?: string }` |
+| `question_reply` | `{ questionId?: string, answer: string, toolCallId?: string }` |
 
 #### 5.3.3 输出数据：bridge 回给网关的业务报文
 
@@ -601,7 +601,7 @@ type NormalizedUpstreamEvent = {
 | `close_session` | `{ toolSessionId }` |
 | `abort_session` | `{ toolSessionId }` |
 | `permission_reply` | `{ permissionId, toolSessionId, response }` |
-| `question_reply` | `{ toolSessionId, answer, toolCallId? }` |
+| `question_reply` | `{ questionId?, answer, toolCallId? }` |
 | `status_query` | `{}` |
 
 #### 6.3.2 内部数据：SDK 请求体
@@ -727,7 +727,7 @@ type NormalizedUpstreamEvent = {
 | `payload.toolSessionId` | `path.id` | `properties.sessionID` 或同义路径 | `toolSessionId` |
 | `payload.text` | `body.parts[0].text` | 不适用 | 后续通过 `message.*` 事件体现 |
 | `payload.permissionId` | `path.permissionID` | `permission.asked.properties.id` | 后续 `permission_reply` 用 |
-| `payload.toolCallId` | 不直接发给 SDK | `question.asked.properties.tool.callID` | 用于匹配 `requestId` |
+| `payload.toolCallId` | 不直接发给 SDK | 历史端侧兼容回传字段 | bridge 内部归一时仅作为 `questionId` 缺失场景的 legacy alias |
 
 ### 6.6 OpenCode Event 到 B2/B1 消费字段映射
 
@@ -744,7 +744,7 @@ type NormalizedUpstreamEvent = {
 | `session.status` | `tool_event` | `{ welinkSessionId, toolSessionId, type:'session_status', status }` | `{ uiSessionId, type:'session.status', status }` |
 | `session.idle` | `tool_event` | `{ welinkSessionId, toolSessionId, type:'session_idle' }` | `{ uiSessionId, type:'session.idle' }` |
 | `permission.asked` | `tool_event` | `{ welinkSessionId, toolSessionId, type:'permission.asked', permissionId, title, metadata }` | `{ uiSessionId, type:'permission.request', permissionId, title, metadata }` |
-| `question.asked` | `tool_event` | `{ welinkSessionId, toolSessionId, type:'question.asked', questions, toolCallId }` | `{ uiSessionId, type:'question.request', questions, toolCallId }` |
+| `question.asked` | `tool_event` | `{ welinkSessionId, toolSessionId, type:'question.asked', questions, questionId, toolCallId? }` | `{ uiSessionId, type:'question.request', questions, questionId, toolCallId? }` |
 
 #### 6.6.2 `message.part.delta` 完整映射样例
 
@@ -840,6 +840,7 @@ type NormalizedUpstreamEvent = {
   "welinkSessionId": "skill-42",
   "toolSessionId": "tool-42",
   "type": "question.asked",
+  "questionId": "question-1",
   "toolCallId": "call-42",
   "questions": [
     {
@@ -860,6 +861,7 @@ type NormalizedUpstreamEvent = {
 {
   "uiSessionId": "ui-42",
   "type": "question.request",
+  "questionId": "question-1",
   "toolCallId": "call-42",
   "questions": [
     {
@@ -900,7 +902,7 @@ type NormalizedUpstreamEvent = {
 | `permission.updated` | `properties.sessionID` | `tool_event` | `type:'permission.updated'` `welinkSessionId` `toolSessionId` `event` | `type:'permission.updated'` |
 | `permission.asked` | `properties.sessionID` `properties.id` `properties.title` `properties.metadata` | `tool_event` | `type:'permission.asked'` `welinkSessionId` `toolSessionId` `permissionId` `title` `metadata` | `type:'permission.request'` `permissionId` `title` `metadata` |
 | `permission.replied` | `properties.sessionID` `properties.requestID` `properties.reply` | `tool_event` | `type:'permission.replied'` `toolSessionId` `event` | `type:'permission.replied'` `requestID` `reply` |
-| `question.asked` | `properties.sessionID` `properties.questions` `properties.tool.callID` | `tool_event` | `type:'question.asked'` `welinkSessionId` `toolSessionId` `questions` `toolCallId` | `type:'question.request'` `questions` `toolCallId` |
+| `question.asked` | `properties.sessionID` `properties.questions` `properties.id` `properties.tool.callID?` | `tool_event` | `type:'question.asked'` `welinkSessionId` `toolSessionId` `questions` `questionId` `toolCallId?` | `type:'question.request'` `questions` `questionId` `toolCallId?` |
 
 #### 6.6.6 推荐 UI 消费语义
 
@@ -1007,19 +1009,17 @@ sequenceDiagram
   participant SKILL as skill-server
   participant UI as ui-client
 
-  SDK-->>BRIDGE: B4 上行源事件\nquestion.asked { sessionID, tool.callID, questions }
+  SDK-->>BRIDGE: B4 上行源事件\nquestion.asked { sessionID, id, questions }
   BRIDGE->>BRIDGE: B4 内部封装\nNormalizedUpstreamEvent
   BRIDGE->>GW: B3 上行输出\ntool_event { toolSessionId, event: question.asked }
   GW->>SKILL: B2 上行事件\nquestion.asked + welinkSessionId 路由
   SKILL->>UI: B1 展示问题\n{ uiSessionId, type:'question.asked', options }
 
-  UI->>SKILL: B1 下行源数据\n{ uiSessionId, type:'question_reply', answer, toolCallId }
-  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'question_reply', payload:{ toolSessionId, answer, toolCallId } }
+  UI->>SKILL: B1 下行源数据\n{ uiSessionId, type:'question_reply', answer, questionId? / toolCallId? }
+  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'question_reply', payload:{ questionId?, answer, toolCallId? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { welinkSessionId, action:'question_reply', payload }
   BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
-  BRIDGE->>SDK: B4 下行输出\nGET /question
-  SDK-->>BRIDGE: 待回复问题列表
-  BRIDGE->>BRIDGE: B4 内部解析\n按 sessionID + toolCallId 定位 requestId
+  BRIDGE->>BRIDGE: B3 内部归一\n优先取 questionId，缺失时回退 toolCallId
   BRIDGE->>SDK: B4 下行输出\nPOST /question/{requestID}/reply { answers:[[answer]] }
   SDK-->>BRIDGE: reply success
   Note over BRIDGE,GW: 当前实现成功后无独立 success 回执\n后续以 OpenCode 事件继续驱动上行

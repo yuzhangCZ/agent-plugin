@@ -236,7 +236,7 @@ describe('downstream message normalizer', () => {
     assert.strictEqual(result.error.field, 'payload.assistantId');
   });
 
-  test('rejects null assistantId payload values', () => {
+  test('accepts null assistantId payload values and omits assistantId after normalization', () => {
     const { logger } = createLogger();
     const result = normalizeDownstreamMessage(
       {
@@ -251,9 +251,15 @@ describe('downstream message normalizer', () => {
       logger,
     );
 
-    assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.error.code, 'invalid_field_type');
-    assert.strictEqual(result.error.field, 'payload.assistantId');
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value, {
+      type: 'invoke',
+      welinkSessionId: 'skill-assistant-null',
+      action: 'create_session',
+      payload: {
+        title: 'nullable',
+      },
+    });
   });
 
   test('rejects invoke/status_query compatibility shape', () => {
@@ -412,6 +418,84 @@ describe('downstream message normalizer', () => {
         questionId: 'question-7',
         answer: 'approved',
       },
+      welinkSessionId: undefined,
+    });
+  });
+
+  test('normalizes invoke/question_reply payload using legacy toolCallId alias', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          toolCallId: 'question-legacy-7',
+          answer: 'approved',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value, {
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: 'question-legacy-7',
+        answer: 'approved',
+      },
+      welinkSessionId: undefined,
+    });
+  });
+
+  test('normalizes invoke/question_reply payload preferring questionId over toolCallId', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          questionId: 'question-primary-7',
+          toolCallId: 'question-shadow-7',
+          answer: 'approved',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value, {
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: 'question-primary-7',
+        answer: 'approved',
+      },
+      welinkSessionId: undefined,
+    });
+  });
+
+  test('rejects invoke/question_reply payload when both questionId and toolCallId are missing', () => {
+    const { logger } = createLogger();
+    const result = normalizeDownstreamMessage(
+      {
+        type: 'invoke',
+        action: 'question_reply',
+        payload: {
+          answer: 'approved',
+        },
+      },
+      logger,
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.deepStrictEqual(result.error, {
+      stage: 'payload',
+      code: 'invalid_field_type',
+      field: 'payload.questionId',
+      message: 'question_reply requires questionId or toolCallId',
+      messageType: 'invoke',
+      action: 'question_reply',
       welinkSessionId: undefined,
     });
   });

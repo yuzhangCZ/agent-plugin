@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
+import {
+  __resetMessageBridgeStatusForTests,
+  getMessageBridgeStatus,
+  publishMessageBridgeStatus,
+} from '../../src/runtime/MessageBridgeStatusStore.ts';
 
 function createSdkRuntimeClient(overrides = {}) {
   const base = {
@@ -137,6 +142,52 @@ function getContextResolver(runtime) {
 function getSlashCommandExecutor(runtime) {
   return getProviderAdapter(runtime).chatPreprocessor.dependencies.slashExecutionUseCase.dependencies.slashCommandExecutor;
 }
+
+test('sdk runtime telemetry refresh does not republish READY when public status is already ready', () => {
+  __resetMessageBridgeStatusForTests();
+  publishMessageBridgeStatus({
+    connected: true,
+    phase: 'ready',
+    unavailableReason: null,
+    willReconnect: null,
+    lastError: null,
+    updatedAt: 100,
+    lastReadyAt: 100,
+  });
+
+  const runtime = new SdkBridgeRuntime({
+    client: createSdkRuntimeClient(),
+  });
+  let readyPublishCount = 0;
+  runtime.sdkRuntime = {
+    getStatus: () => ({ state: 'ready' }),
+  };
+  runtime.statusAdapter = {
+    publishConnecting() {},
+    publishDisabled() {},
+    publishConfigInvalid() {},
+    publishPluginFailure() {},
+    publishGatewayState(state) {
+      if (state === 'READY') {
+        readyPublishCount += 1;
+      }
+    },
+    publishGatewayError() {},
+  };
+
+  runtime.syncSdkStatus();
+
+  assert.equal(readyPublishCount, 0);
+  assert.deepEqual(getMessageBridgeStatus(), {
+    connected: true,
+    phase: 'ready',
+    unavailableReason: null,
+    willReconnect: null,
+    lastError: null,
+    updatedAt: 100,
+    lastReadyAt: 100,
+  });
+});
 
 test('sdk runtime register falls back to pluginVersion when sdkVersion is unavailable', async () => {
   const originalSdkPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;

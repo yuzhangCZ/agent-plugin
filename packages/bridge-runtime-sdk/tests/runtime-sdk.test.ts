@@ -920,7 +920,80 @@ test('question.ask duplicate registration in the same session is idempotent', as
   });
 });
 
-test('permission.ask projects independent partId and toolCallId derived from permissionId', async () => {
+test('question.ask backfills toolCallId from questionId when fact omits legacy field', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                messageId: 'msg-1',
+                partId: 'part-question-2',
+                questionId: 'question-2',
+                questions: [{ question: 'Proceed?' }],
+              },
+              { type: 'message.done', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(
+    connection.sent.some((message) => JSON.stringify(message) === JSON.stringify({
+      type: 'tool_event',
+      toolSessionId: 'tool-1',
+      event: {
+        protocol: 'cloud',
+        type: 'question',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-question-2',
+          questionId: 'question-2',
+          toolCallId: 'question-2',
+          questions: [{ question: 'Proceed?' }],
+        },
+      },
+    })),
+    true,
+  );
+});
+
+test('permission.ask projects independent partId and permissionId only', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -984,7 +1057,6 @@ test('permission.ask projects independent partId and toolCallId derived from per
         properties: {
           messageId: 'msg-1',
           partId: 'part-permission-1',
-          toolCallId: 'permission-1',
           permissionId: 'permission-1',
           permType: 'file_write',
           title: 'Allow file write',
@@ -1057,7 +1129,6 @@ test('permission.ask remains valid without messageId and still registers reply t
         type: 'permission.ask',
         properties: {
           partId: 'permission-1',
-          toolCallId: 'permission-1',
           permissionId: 'permission-1',
           permType: 'file_write',
           title: 'Allow file write',

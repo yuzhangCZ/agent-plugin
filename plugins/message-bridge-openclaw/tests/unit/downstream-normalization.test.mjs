@@ -122,6 +122,41 @@ test("question_reply rejects blank toolCallId when provided", () => {
   assert.equal(result.error.action, "question_reply");
 });
 
+test("question_reply accepts legacy toolCallId alias", () => {
+  const result = normalizeDownstreamMessage({
+    type: "invoke",
+    action: "question_reply",
+    payload: {
+      toolCallId: "question_legacy_1",
+      answer: "ok",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.payload, {
+    questionId: "question_legacy_1",
+    answer: "ok",
+  });
+});
+
+test("question_reply prefers questionId when questionId and toolCallId both exist", () => {
+  const result = normalizeDownstreamMessage({
+    type: "invoke",
+    action: "question_reply",
+    payload: {
+      questionId: "question_primary_1",
+      toolCallId: "question_shadow_1",
+      answer: "ok",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.payload, {
+    questionId: "question_primary_1",
+    answer: "ok",
+  });
+});
+
 test("logs downstream.normalization_failed with stage and field", () => {
   const warns = [];
   const result = normalizeDownstreamMessage(

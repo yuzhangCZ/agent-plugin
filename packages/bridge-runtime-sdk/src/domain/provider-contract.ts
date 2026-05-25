@@ -318,7 +318,8 @@ export interface QuestionAskFact extends ProviderFactBase {
   questions: QuestionItem[];
   /**
    * 可选 tool call 关联字段。
-   * 未传时 cloud projector 会回填 `toolCallId = questionId` 以兼容旧下游回复目标读取口径。
+   * 未传时 cloud projector 会回填 `toolCallId = questionId` 以兼容旧下游字段读取口径，
+   * 但 runtime 内部 reply target 仍只认 `questionId`。
    */
   toolCallId?: string;
   status?: string;

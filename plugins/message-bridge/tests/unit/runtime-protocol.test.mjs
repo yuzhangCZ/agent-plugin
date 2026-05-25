@@ -8,6 +8,7 @@ import {
   createInvalidInvokeInboundFrame,
 } from '@agent-plugin/test-support/assertions';
 
+import { normalizeDownstreamMessage } from '../../src/gateway-wire/downstream.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import {
   __resetMessageBridgeStatusForTests,
@@ -1481,6 +1482,48 @@ describe('runtime protocol strictness', () => {
     });
 
     assert.strictEqual((postCalls).length, 1);
+    assert.strictEqual((sent).length, 0);
+  });
+
+  test('accepts question_reply payloads normalized from legacy toolCallId alias', async () => {
+    const postCalls = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        session: {
+          prompt: async () => createPromptResponse(),
+        },
+        _client: {
+          get: async () => ({}),
+          post: async (options) => {
+            postCalls.push(options);
+            return { data: undefined };
+          },
+        },
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+
+    const normalized = normalizeDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 'q-44',
+      action: 'question_reply',
+      payload: { toolCallId: 'question-request-legacy-44', answer: 'Vite' },
+    });
+    assert.strictEqual(normalized.ok, true);
+
+    await runtime.handleDownstreamMessage(normalized.value);
+
+    assert.deepStrictEqual(postCalls, [
+      {
+        url: '/question/{requestID}/reply',
+        path: { requestID: 'question-request-legacy-44' },
+        body: { answers: [['Vite']] },
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ]);
     assert.strictEqual((sent).length, 0);
   });
 

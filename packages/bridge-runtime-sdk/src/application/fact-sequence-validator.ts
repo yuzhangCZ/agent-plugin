@@ -102,13 +102,27 @@ export class FactSequenceValidator {
       case 'thinking.done':
       case 'tool.update':
       case 'question.ask':
-      case 'permission.ask':
         if (
           classifyFact(fact.type).requiresOpenMessage
           && (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId))
         ) {
           throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
             messageId: fact.messageId,
+            factType: fact.type,
+          });
+        }
+        break;
+      case 'permission.ask':
+        if (
+          classifyFact(fact.type).requiresOpenMessage
+          && (
+            !fact.messageId
+            || !state.openMessages.has(fact.messageId)
+            || state.closedMessages.has(fact.messageId)
+          )
+        ) {
+          throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
+            ...(fact.messageId ? { messageId: fact.messageId } : {}),
             factType: fact.type,
           });
         }

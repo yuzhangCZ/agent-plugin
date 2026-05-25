@@ -27,6 +27,28 @@ describe('gateway business message adapter', () => {
     });
   });
 
+  test('keeps normalized question_reply payload narrowed to questionId and answer', () => {
+    const result = adaptGatewayBusinessMessage({
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: 'question-legacy-1',
+        answer: 'approved',
+      },
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.value, {
+      type: 'invoke',
+      action: 'question_reply',
+      welinkSessionId: undefined,
+      payload: {
+        questionId: 'question-legacy-1',
+        answer: 'approved',
+      },
+    });
+  });
+
   test('backfills optional welinkSessionId for typed facade chat message', () => {
     const result = adaptGatewayBusinessMessage({
       type: 'invoke',

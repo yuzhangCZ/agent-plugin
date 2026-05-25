@@ -30,7 +30,7 @@ import { EventFilter } from '../event/EventFilter.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
-import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
+import { getMessageBridgeStatus, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { isBridgeStartupError, validateBridgeStartup } from './Startup.js';
@@ -433,6 +433,10 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     }
 
     if (status.state === 'ready') {
+      const publicStatus = getMessageBridgeStatus();
+      if (publicStatus.phase === 'ready' && publicStatus.connected) {
+        return;
+      }
       this.statusAdapter.publishGatewayState('READY');
       return;
     }
