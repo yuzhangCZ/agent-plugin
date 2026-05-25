@@ -625,7 +625,9 @@ test('provider adapter maps aborted prompt terminal to ProviderRun.result()', as
     info: {
       error: {
         name: 'MessageAbortedError',
-        message: 'User aborted',
+        data: {
+          message: 'User aborted',
+        },
       },
     },
   }));
@@ -1547,10 +1549,12 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
     info: {
       error: {
         name: 'APIError',
-        message: 'model backend failed',
-        statusCode: 429,
-        retryable: true,
-        providerID: 'openai',
+        data: {
+          message: 'model backend failed',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: 'Too many requests',
+        },
       },
     },
   }));
@@ -1571,9 +1575,72 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
     outcome: 'failed',
     error: {
       code: 'internal_error',
-      message: 'APIError: model backend failed (statusCode=429, retryable=true, providerID=openai)',
+      message: 'APIError: model backend failed statusCode=429',
       details: {
         name: 'APIError',
+        message: 'model backend failed',
+        statusCode: 429,
+        isRetryable: true,
+        responseBody: 'Too many requests',
+      },
+    },
+  });
+});
+
+test('provider adapter keeps legacy top-level assistant error fields compatible', async () => {
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-failed-legacy', 'tool-failed-legacy']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-failed-legacy',
+    toolSessionId: 'tool-failed-legacy',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'tool-failed-legacy',
+      error: 'legacy backend failed',
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse({
+    info: {
+      error: {
+        name: 'APIError',
+        message: 'legacy backend failed',
+        statusCode: 429,
+        retryable: true,
+        providerID: 'openai',
+      },
+    },
+  }));
+
+  const facts = await collect(run.facts);
+  assert.deepEqual(facts, [{
+    type: 'session.error',
+    error: {
+      code: 'internal_error',
+      message: 'legacy backend failed',
+    },
+    raw: {
+      sessionID: 'tool-failed-legacy',
+      error: 'legacy backend failed',
+    },
+  }]);
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'APIError: legacy backend failed statusCode=429',
+      details: {
+        name: 'APIError',
+        message: 'legacy backend failed',
         statusCode: 429,
         retryable: true,
         providerID: 'openai',

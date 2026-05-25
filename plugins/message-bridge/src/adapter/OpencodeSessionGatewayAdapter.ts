@@ -123,20 +123,32 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function resolvePromptAssistantErrorDetails(record: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!record) {
+    return undefined;
+  }
+  const nestedDetails = readRecord(record.data);
+  const legacyDetails = Object.fromEntries(
+    Object.entries(record).filter(([key]) => key !== 'name' && key !== 'data'),
+  );
+  const merged = {
+    ...legacyDetails,
+    ...(nestedDetails ?? {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function normalizePromptAssistantError(value: unknown): PromptSessionAssistantError | undefined {
   const record = readRecord(value);
   const name = readString(record?.name);
   if (!name) {
     return undefined;
   }
-  const details = record
-    ? Object.fromEntries(
-      Object.entries(record).filter(([key]) => key !== 'name' && key !== 'message'),
-    )
-    : undefined;
+  const details = resolvePromptAssistantErrorDetails(record);
+  const message = readString(details?.message);
   return {
     name,
-    ...(readString(record?.message) ? { message: readString(record?.message) } : {}),
+    ...(message ? { message } : {}),
     ...(details && Object.keys(details).length > 0 ? { details } : {}),
   };
 }
@@ -258,18 +270,18 @@ function logPromptAssistantErrorDiagnostic(parameters: {
   normalizedError: PromptSessionAssistantError;
 }): void {
   const rawError = readPromptRawAssistantError(parameters.result);
+  const rawDetails = resolvePromptAssistantErrorDetails(rawError);
   parameters.logger?.debug('session_prompt.assistant_error.normalized', {
     toolSessionId: parameters.sessionId,
     rawErrorName: readString(rawError?.name),
-    rawHasMessage: Boolean(readString(rawError?.message)),
-    rawStatusCode: readNumber(rawError?.statusCode),
-    rawRetryable: readBoolean(rawError?.retryable),
-    rawProviderID: readString(rawError?.providerID),
+    rawDataHasMessage: Boolean(readString(rawDetails?.message)),
+    rawDataStatusCode: readNumber(rawDetails?.statusCode),
+    rawDataIsRetryable: readBoolean(rawDetails?.isRetryable) ?? readBoolean(rawDetails?.retryable),
     normalizedErrorName: parameters.normalizedError.name,
     normalizedHasMessage: Boolean(parameters.normalizedError.message),
     normalizedStatusCode: readNumber(parameters.normalizedError.details?.statusCode),
-    normalizedRetryable: readBoolean(parameters.normalizedError.details?.retryable),
-    normalizedProviderID: readString(parameters.normalizedError.details?.providerID),
+    normalizedIsRetryable: readBoolean(parameters.normalizedError.details?.isRetryable)
+      ?? readBoolean(parameters.normalizedError.details?.retryable),
   });
 }
 
@@ -290,22 +302,10 @@ function derivePromptTerminal(message: PromptSessionResultData['message']): Prom
 }
 
 function buildPromptTerminalErrorDetails(error: PromptSessionAssistantError): Record<string, unknown> {
-  const details: Record<string, unknown> = {
+  return {
     name: error.name,
+    ...(error.details ?? {}),
   };
-  const statusCode = readNumber(error.details?.statusCode);
-  const retryable = readBoolean(error.details?.retryable);
-  const providerID = readString(error.details?.providerID);
-  if (statusCode !== undefined) {
-    details.statusCode = statusCode;
-  }
-  if (retryable !== undefined) {
-    details.retryable = retryable;
-  }
-  if (providerID) {
-    details.providerID = providerID;
-  }
-  return details;
 }
 
 function formatPromptTerminalError(error: PromptSessionAssistantError): string {
@@ -313,17 +313,12 @@ function formatPromptTerminalError(error: PromptSessionAssistantError): string {
     ? `${error.name}: ${error.message}`
     : error.name;
 
-  const detailEntries: Array<[string, string | number | boolean]> = [
-    ['statusCode', readNumber(error.details?.statusCode)],
-    ['retryable', readBoolean(error.details?.retryable)],
-    ['providerID', readString(error.details?.providerID)],
-  ].filter((entry) => entry[1] !== undefined) as Array<[string, string | number | boolean]>;
-
-  if (detailEntries.length === 0) {
+  const statusCode = readNumber(error.details?.statusCode);
+  if (statusCode === undefined) {
     return base;
   }
 
-  return `${base} (${detailEntries.map(([key, value]) => `${key}=${value}`).join(', ')})`;
+  return `${base} statusCode=${statusCode}`;
 }
 
 function buildPromptPayloadFailure(

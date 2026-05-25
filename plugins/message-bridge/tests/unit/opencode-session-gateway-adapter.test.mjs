@@ -347,15 +347,13 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
         extra: {
           toolSessionId: 'ses-api-error-name-only',
           rawErrorName: 'APIError',
-          rawHasMessage: false,
-          rawStatusCode: undefined,
-          rawRetryable: undefined,
-          rawProviderID: undefined,
+          rawDataHasMessage: false,
+          rawDataStatusCode: undefined,
+          rawDataIsRetryable: undefined,
           normalizedErrorName: 'APIError',
           normalizedHasMessage: false,
           normalizedStatusCode: undefined,
-          normalizedRetryable: undefined,
-          normalizedProviderID: undefined,
+          normalizedIsRetryable: undefined,
         },
       },
     );
@@ -630,7 +628,9 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
           info: {
             error: {
               name: 'MessageAbortedError',
-              message: 'User aborted',
+              data: {
+                message: 'User aborted',
+              },
             },
           },
         }),
@@ -667,11 +667,12 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
           info: {
             error: {
               name: 'APIError',
-              message: 'model backend failed',
-              statusCode: 429,
-              retryable: true,
-              providerID: 'openai',
-              ignoredDetail: 'ignored',
+              data: {
+                message: 'model backend failed',
+                statusCode: 429,
+                isRetryable: true,
+                responseBody: 'Too many requests',
+              },
             },
           },
         }),
@@ -692,12 +693,160 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(result.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'APIError: model backend failed (statusCode=429, retryable=true, providerID=openai)',
+      errorMessage: 'APIError: model backend failed statusCode=429',
       errorDetails: {
         name: 'APIError',
+        message: 'model backend failed',
+        statusCode: 429,
+        isRetryable: true,
+        responseBody: 'Too many requests',
+      },
+    });
+  });
+
+  test('keeps legacy top-level assistant error fields compatible in prompt response', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-failed-legacy-error',
+            directory: '/tmp/failed-legacy-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'APIError',
+              message: 'legacy backend failed',
+              statusCode: 429,
+              retryable: true,
+              providerID: 'openai',
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-failed-legacy-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'APIError: legacy backend failed statusCode=429',
+      errorDetails: {
+        name: 'APIError',
+        message: 'legacy backend failed',
         statusCode: 429,
         retryable: true,
         providerID: 'openai',
+      },
+    });
+  });
+
+  test('maps StructuredOutputError data.message in prompt response to failed terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-structured-error',
+            directory: '/tmp/structured-error-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'StructuredOutputError',
+              data: {
+                message: 'json schema validation failed',
+                retries: 2,
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-structured-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'StructuredOutputError: json schema validation failed',
+      errorDetails: {
+        name: 'StructuredOutputError',
+        message: 'json schema validation failed',
+        retries: 2,
+      },
+    });
+  });
+
+  test('maps UnknownError data.message in prompt response to failed terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-unknown-error',
+            directory: '/tmp/unknown-error-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'UnknownError',
+              data: {
+                message: 'temporary failure',
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-unknown-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'UnknownError: temporary failure',
+      errorDetails: {
+        name: 'UnknownError',
+        message: 'temporary failure',
       },
     });
   });
