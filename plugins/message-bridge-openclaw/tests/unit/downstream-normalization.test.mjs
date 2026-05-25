@@ -120,6 +120,7 @@ test("question_reply rejects blank toolCallId when provided", () => {
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "invalid_payload");
   assert.equal(result.error.action, "question_reply");
+  assert.equal(result.error.field, "payload.questionId");
 });
 
 test("question_reply accepts legacy toolCallId alias", () => {

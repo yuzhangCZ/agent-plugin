@@ -20,35 +20,29 @@ test("createToolSessionId generates ses_ prefixed ids", () => {
   assert.match(toolSessionId, /^ses_/);
 });
 
-test("session fact builders keep stable ids on toolSessionId", () => {
-  const toolSessionId = "ses_tool_1";
-  const messageStart = buildMessageStartFact({ toolSessionId, messageId: "msg_1" });
+test("session fact builders keep fact payloads free of session ownership fields", () => {
+  const messageStart = buildMessageStartFact({ messageId: "msg_1" });
   const textDelta = buildTextDeltaFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "part_1",
     content: "he",
   });
   const textDone = buildTextDoneFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "part_1",
     content: "hello",
   });
   const thinkingDelta = buildThinkingDeltaFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "think_1",
     content: "thinking",
   });
   const thinkingDone = buildThinkingDoneFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "think_1",
     content: "thinking",
   });
   const toolUpdate = buildToolUpdateFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "tool_1",
     toolCallId: "call_1",
@@ -59,7 +53,6 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     },
   });
   const permissionAsk = buildPermissionAskFact({
-    toolSessionId,
     messageId: "msg_1",
     partId: "part_perm_1",
     permissionId: "perm_1",
@@ -69,9 +62,8 @@ test("session fact builders keep stable ids on toolSessionId", () => {
       command: "echo hi",
     },
   });
-  const messageDone = buildMessageDoneFact({ toolSessionId, messageId: "msg_1" });
+  const messageDone = buildMessageDoneFact({ messageId: "msg_1" });
   const sessionError = buildSessionErrorFact({
-    toolSessionId,
     error: {
       code: "internal_error",
       message: "boom",
@@ -89,7 +81,7 @@ test("session fact builders keep stable ids on toolSessionId", () => {
     messageDone,
     sessionError,
   ]) {
-    assert.equal(fact.toolSessionId, toolSessionId);
+    assert.equal("toolSessionId" in fact, false);
     assert.equal("sessionKey" in fact, false);
   }
 
