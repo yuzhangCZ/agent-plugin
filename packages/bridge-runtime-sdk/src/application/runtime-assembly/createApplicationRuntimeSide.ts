@@ -4,7 +4,9 @@ import {
   type ProviderCommandHandlers,
 } from '../../adapters/provider/provider-api-adapter.ts';
 import { InMemoryPendingInteractionRegistry } from '../../infrastructure/registries/InMemoryPendingInteractionRegistry.ts';
+import { InMemoryPermissionPresentationRegistry } from '../../infrastructure/registries/InMemoryPermissionPresentationRegistry.ts';
 import { InMemorySessionRuntimeRegistry } from '../../infrastructure/registries/InMemorySessionRuntimeRegistry.ts';
+import { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
 import { InteractionCoordinator, OutboundCoordinator, RequestRunCoordinator } from '../coordinators/index.ts';
 import { FactSequenceValidator } from '../fact-sequence-validator.ts';
 import {
@@ -41,6 +43,8 @@ export function createApplicationRuntimeSide(
 } {
   const sessionRegistry = new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry = new InMemoryPendingInteractionRegistry();
+  const permissionPresentationRegistry = new InMemoryPermissionPresentationRegistry();
+  const factEnricher = new ProviderFactEnricher(permissionPresentationRegistry);
   const factProjector = new DefaultFactToSkillEventProjector();
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
@@ -65,6 +69,7 @@ export function createApplicationRuntimeSide(
       eventProjector,
       observation,
     },
+    factEnricher,
     terminalProjector,
     requestRunFailureToolErrorProjector,
   );
@@ -78,6 +83,7 @@ export function createApplicationRuntimeSide(
       eventProjector,
       observation,
     },
+    factEnricher,
   );
   const dispatcher = new RuntimeCommandDispatcher({
     query_status: new QueryStatusUseCase(providerHandlers, sink, commandResultProjector, observation),
@@ -100,9 +106,10 @@ export function createApplicationRuntimeSide(
       providerHandlers,
       sessionRegistry,
       interactionCoordinator,
+      factEnricher,
       observation,
     ),
-    abort_execution: new AbortExecutionUseCase(providerHandlers, sessionRegistry, observation),
+    abort_execution: new AbortExecutionUseCase(providerHandlers, sessionRegistry, factEnricher, observation),
   }, observation);
 
   return {

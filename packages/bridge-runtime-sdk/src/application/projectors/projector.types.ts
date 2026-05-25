@@ -9,6 +9,7 @@ import type {
 
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { OutboundSink } from '../ports/outbound-sink.ts';
+import type { ProjectableProviderFact } from './projectable-provider-fact.ts';
 
 export type ToolEventEnvelopeFields = {
   subagentSessionId?: string;
@@ -21,7 +22,7 @@ export type GatewayOutboundSink = OutboundSink;
  * `ProviderFact -> SkillProviderEvent` 投影端口。
  */
 export interface FactToSkillEventProjector {
-  project(fact: ProviderFact): SkillProviderEvent[];
+  project(fact: ProjectableProviderFact): SkillProviderEvent[];
 }
 
 /**

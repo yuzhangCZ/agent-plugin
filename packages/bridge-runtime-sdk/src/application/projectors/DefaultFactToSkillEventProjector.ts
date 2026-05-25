@@ -5,7 +5,6 @@ import type {
   MessageDoneFact,
   MessageStartFact,
   PermissionAskFact,
-  PermissionReplyFact,
   ProviderFact,
   QuestionAskFact,
   SessionErrorFact,
@@ -17,13 +16,14 @@ import type {
   ToolUpdateFact,
 } from '../../domain/provider.ts';
 import type { FactToSkillEventProjector } from './projector.types.ts';
+import type { ProjectablePermissionReplyFact, ProjectableProviderFact } from './projectable-provider-fact.ts';
 import { toOptionalNumericRecord } from './projector.utils.ts';
 
 /**
  * cloud/skill provider 默认 fact projector。
  */
 export class DefaultFactToSkillEventProjector implements FactToSkillEventProjector {
-  project(fact: ProviderFact): SkillProviderEvent[] {
+  project(fact: ProjectableProviderFact): SkillProviderEvent[] {
     switch (fact.type) {
       case 'text.delta':
       case 'text.done':
@@ -132,7 +132,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
     });
   }
 
-  private projectPermissionReplyFact(fact: PermissionReplyFact): SkillProviderEvent[] {
+  private projectPermissionReplyFact(fact: ProjectablePermissionReplyFact): SkillProviderEvent[] {
     return this.toSingleEvent({
       protocol: SKILL_EVENT_PROTOCOL.cloud,
       type: 'permission.reply',

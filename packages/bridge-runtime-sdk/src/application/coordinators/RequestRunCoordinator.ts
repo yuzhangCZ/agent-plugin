@@ -1,4 +1,5 @@
 import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
+import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
@@ -7,6 +8,7 @@ import type { RequestRunFailureToolErrorProjector } from '../projectors/RequestR
 import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
+import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 
@@ -20,12 +22,14 @@ export class RequestRunCoordinator {
   private readonly pipeline: EventPipeline;
   private readonly terminalProjector: RunTerminalSignalProjector;
   private readonly requestRunFailureProjector: RequestRunFailureToolErrorProjector;
+  private readonly factEnricher: ProviderFactEnricher;
 
   constructor(
     sessionRegistry: SessionRuntimeRegistry,
     interactionCoordinator: InteractionCoordinator,
     validator: FactSequenceValidator,
     pipeline: EventPipeline,
+    factEnricher: ProviderFactEnricher,
     terminalProjector: RunTerminalSignalProjector,
     requestRunFailureProjector: RequestRunFailureToolErrorProjector,
   ) {
@@ -33,6 +37,7 @@ export class RequestRunCoordinator {
     this.interactionCoordinator = interactionCoordinator;
     this.validator = validator;
     this.pipeline = pipeline;
+    this.factEnricher = factEnricher;
     this.terminalProjector = terminalProjector;
     this.requestRunFailureProjector = requestRunFailureProjector;
   }
@@ -96,12 +101,22 @@ export class RequestRunCoordinator {
   ): Promise<void> {
     for await (const fact of facts) {
       this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
+      const enriched = this.factEnricher.enrich(toolSessionId, fact);
+      if (!enriched.ok) {
+        this.pipeline.observation.failureRecorded(
+          RUNTIME_FAILURE_KIND.outboundValidation,
+          RUNTIME_FAILURE_PHASE.runtime,
+          enriched.reason,
+          enriched.reason,
+        );
+        continue;
+      }
       const sessionLifecycle = this.sessionRegistry.get(toolSessionId)?.lifecycle ?? 'active';
       const classification = classifyFact(fact.type);
       this.validator.consume(toolSessionId, fact, state, profile, sessionLifecycle);
       this.interactionCoordinator.registerFromFact(toolSessionId, fact);
       const envelopeFields = this.toToolEventEnvelopeFields(fact);
-      const events = this.pipeline.factProjector.project(fact);
+      const events = this.pipeline.factProjector.project(enriched.fact);
 
       for (const event of events) {
         const uplink = this.pipeline.eventProjector.project(toolSessionId, event, envelopeFields);

@@ -779,11 +779,17 @@ test('permission.reply and session.title facts project to gateway tool_event upl
           return createFakeRun(
             [
               {
+                type: 'permission.ask',
+                permissionId: 'permission-1',
+                partId: 'part-1',
+                messageId: 'msg-1',
+                permissionType: 'file_write',
+              },
+              {
                 type: 'permission.reply',
                 permissionId: 'permission-1',
                 response: 'once',
-                messageId: 'msg-1',
-                partId: 'part-1',
+                permissionType: 'file_write',
               },
               {
                 type: 'session.title',
@@ -829,6 +835,7 @@ test('permission.reply and session.title facts project to gateway tool_event upl
         properties: {
           permissionId: 'permission-1',
           response: 'once',
+          permType: 'file_write',
           messageId: 'msg-1',
           partId: 'part-1',
         },
@@ -849,6 +856,71 @@ test('permission.reply and session.title facts project to gateway tool_event upl
       },
     })),
     true,
+  );
+});
+
+test('permission.reply without ask presentation context does not emit permission reply tool_event', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.reply',
+                permissionId: 'permission-missing-1',
+                response: 'once',
+                permissionType: 'file_write',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.equal(
+    connection.sent.some((message) =>
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_event'
+      && 'event' in message
+      && typeof message.event === 'object'
+      && message.event !== null
+      && 'type' in message.event
+      && message.event.type === 'permission.reply'),
+    false,
   );
 });
 

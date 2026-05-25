@@ -122,8 +122,6 @@ export interface PermissionReplyFact extends ProviderFactBase {
   type: 'permission.reply';
   permissionId: string;
   response: 'once' | 'always' | 'reject';
-  messageId?: string;
-  partId?: string;
   permissionType?: string;
   raw?: unknown;
 }

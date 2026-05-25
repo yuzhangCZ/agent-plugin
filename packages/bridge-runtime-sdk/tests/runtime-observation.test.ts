@@ -27,6 +27,8 @@ import {
 import { InteractionCoordinator } from '../src/application/coordinators/index.ts';
 import type { PendingInteractionRegistry } from '../src/application/ports/pending-interaction-registry.ts';
 import type { SessionRuntimeRegistry } from '../src/application/ports/session-runtime-registry.ts';
+import { ProviderFactEnricher } from '../src/application/ProviderFactEnricher.ts';
+import { InMemoryPermissionPresentationRegistry } from '../src/infrastructure/registries/InMemoryPermissionPresentationRegistry.ts';
 
 class StubSessionRuntimeRegistry implements SessionRuntimeRegistry {
   ensure(input: { toolSessionId: string; welinkSessionId?: string }) {
@@ -580,6 +582,7 @@ test('usecases emit failed observation events for non request-run failures', asy
 
   const replyPermissionPort = new RecordingObservationPort();
   const replyPermissionObservation = new DefaultRuntimeObservation(replyPermissionPort);
+  const factEnricher = new ProviderFactEnricher(new InMemoryPermissionPresentationRegistry());
   const replyPermissionUseCase = new ReplyPermissionUseCase(
     {
       async queryStatus() {
@@ -665,6 +668,7 @@ test('usecases emit failed observation events for non request-run failures', asy
     },
     new StubSessionRuntimeRegistry(),
     interactionCoordinator,
+    factEnricher,
     closeObservation,
   );
 
@@ -726,6 +730,7 @@ test('usecases emit failed observation events for non request-run failures', asy
       },
     },
     new StubSessionRuntimeRegistry(),
+    factEnricher,
     abortObservation,
   );
 

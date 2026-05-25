@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { InMemoryPendingInteractionRegistry } from '../src/infrastructure/registries/InMemoryPendingInteractionRegistry.ts';
+import { InMemoryPermissionPresentationRegistry } from '../src/infrastructure/registries/InMemoryPermissionPresentationRegistry.ts';
 import { InMemorySessionRuntimeRegistry } from '../src/infrastructure/registries/InMemorySessionRuntimeRegistry.ts';
+import { ProviderFactEnricher } from '../src/application/ProviderFactEnricher.ts';
 import { OutboundCoordinator, InteractionCoordinator } from '../src/application/coordinators/index.ts';
 import { classifyFact } from '../src/application/fact-semantics.ts';
 import { FactSequenceValidator } from '../src/application/fact-sequence-validator.ts';
@@ -144,6 +146,7 @@ test('OutboundCoordinator keeps derived event and uplink projection observation 
   const port = new RecordingObservationPort();
   const observation = new DefaultRuntimeObservation(port);
   const sinkMessages: Array<{ type: string; toolSessionId: string }> = [];
+  const factEnricher = new ProviderFactEnricher(new InMemoryPermissionPresentationRegistry());
   const coordinator = new OutboundCoordinator(
     new InMemorySessionRuntimeRegistry(),
     new InteractionCoordinator(new InMemoryPendingInteractionRegistry(), observation),
@@ -158,6 +161,7 @@ test('OutboundCoordinator keeps derived event and uplink projection observation 
       eventProjector: new DefaultSkillEventToGatewayMessageProjector(),
       observation,
     },
+    factEnricher,
   );
 
   await coordinator.emitOutbound({
