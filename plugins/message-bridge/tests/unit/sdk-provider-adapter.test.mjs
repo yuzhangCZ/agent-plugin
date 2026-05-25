@@ -291,7 +291,7 @@ test('provider adapter returns synthetic ProviderRun for suppressReply deny path
   const facts = await collect(run.facts);
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ['message.start', 'text.done', 'message.done'],
+    ['message.start', 'text.delta', 'text.done', 'message.done'],
   );
   assert.deepEqual(await run.result(), { outcome: 'completed' });
 });
@@ -319,8 +319,9 @@ test('provider adapter returns synthetic ProviderRun for slash command without c
 
   const facts = await collect(run.facts);
   assert.strictEqual(promptCalled, false);
-  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'text.done', 'message.done']);
+  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'text.delta', 'text.done', 'message.done']);
   assert.match(facts[1].content, /可切换会话列表/);
+  assert.match(facts[2].content, /可切换会话列表/);
   assert.deepEqual(await run.result(), { outcome: 'completed' });
 });
 

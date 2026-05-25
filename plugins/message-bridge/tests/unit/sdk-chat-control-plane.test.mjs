@@ -117,8 +117,9 @@ test('SdkSlashExecutionUseCase returns synthetic success run for /model and pres
   for await (const fact of run.facts) {
     facts.push(fact);
   }
-  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'text.done', 'message.done']);
+  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'text.delta', 'text.done', 'message.done']);
   assert.equal(facts[1].content, '后续请求将使用该模型 openai/gpt-5.4');
+  assert.equal(facts[2].content, '后续请求将使用该模型 openai/gpt-5.4');
   assert.deepEqual(await run.result(), { outcome: 'completed' });
 });
 

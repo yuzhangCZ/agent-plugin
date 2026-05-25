@@ -6,6 +6,7 @@ import type {
   ProviderFact,
   ProviderRun,
   ProviderRunMessageInput,
+  TextDeltaFact,
   TextDoneFact,
 } from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
 import type {
@@ -47,6 +48,12 @@ function buildSyntheticRun(toolSessionId: string, text: string): ProviderRun {
       type: 'message.start',
       messageId,
     } satisfies MessageStartFact,
+    {
+      type: 'text.delta',
+      messageId,
+      partId,
+      content: text,
+    } satisfies TextDeltaFact,
     {
       type: 'text.done',
       messageId,
