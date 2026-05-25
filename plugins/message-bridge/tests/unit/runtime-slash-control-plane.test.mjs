@@ -5,6 +5,28 @@ import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { EventFilter } from '../../src/event/EventFilter.ts';
 import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
+function createPromptResponse(overrides = {}) {
+  return {
+    data: {
+      info: {
+        id: 'msg-slash-1',
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+        ...overrides.info,
+      },
+      parts: overrides.parts ?? [{ type: 'step-finish' }],
+    },
+  };
+}
+
 function assertSyntheticAssistantReply(sent, index, toolSessionId, expectedText) {
   assert.strictEqual(sent[index].type, 'tool_event');
   assert.strictEqual(sent[index].toolSessionId, toolSessionId);
@@ -51,7 +73,7 @@ function createRuntimeClient(overrides = {}) {
       list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
-      prompt: async () => ({ data: { ok: true } }),
+      prompt: async () => createPromptResponse(),
     },
     config: {
       providers: async () => ({ data: { providers: [] } }),
@@ -360,7 +382,7 @@ describe('runtime slash control-plane', () => {
         session: {
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
         _client: {
@@ -476,7 +498,7 @@ describe('runtime slash control-plane', () => {
           }),
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -531,7 +553,7 @@ describe('runtime slash control-plane', () => {
           }),
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -590,7 +612,7 @@ describe('runtime slash control-plane', () => {
           }),
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -869,7 +891,7 @@ describe('runtime slash control-plane', () => {
           },
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
         _client: {
@@ -962,7 +984,7 @@ describe('runtime slash control-plane', () => {
           },
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
         _client: {
@@ -1216,7 +1238,7 @@ describe('runtime slash control-plane', () => {
           },
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
         _client: {
@@ -1331,7 +1353,7 @@ describe('runtime slash control-plane', () => {
               directory: options?.path?.id === 'ses-question-2' ? '/tmp/question-2' : '/tmp/question-1',
             },
           }),
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async (options) => {
@@ -1438,7 +1460,7 @@ describe('runtime slash control-plane', () => {
           },
           prompt: async (options) => {
             prompts.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -1599,7 +1621,7 @@ describe('runtime slash control-plane', () => {
               directory: options?.path?.id === 'ses-permission-2' ? '/tmp/permission-2' : '/tmp/permission-1',
             },
           }),
-          prompt: async () => ({ data: { ok: true } }),
+          prompt: async () => createPromptResponse(),
         },
         _client: {
           get: async () => ({}),

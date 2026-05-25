@@ -15,7 +15,6 @@ import type {
 } from "@wecode/bridge-runtime-sdk";
 
 export interface ToolUpdateFactInput {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   toolCallId: string;
@@ -29,7 +28,6 @@ export interface ToolUpdateFactInput {
 }
 
 export interface PermissionAskFactInput {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   permissionId: string;
@@ -57,20 +55,17 @@ export function createToolSessionId(): string {
 }
 
 export function buildMessageStartFact(input: {
-  toolSessionId: string;
   messageId: string;
   raw?: unknown;
 }): MessageStartFact {
   return {
     type: "message.start",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };
 }
 
 export function buildTextDeltaFact(input: {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -78,7 +73,6 @@ export function buildTextDeltaFact(input: {
 }): TextDeltaFact {
   return {
     type: "text.delta",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     content: input.content,
@@ -87,7 +81,6 @@ export function buildTextDeltaFact(input: {
 }
 
 export function buildTextDoneFact(input: {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -95,7 +88,6 @@ export function buildTextDoneFact(input: {
 }): TextDoneFact {
   return {
     type: "text.done",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     content: input.content,
@@ -104,7 +96,6 @@ export function buildTextDoneFact(input: {
 }
 
 export function buildThinkingDeltaFact(input: {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -112,7 +103,6 @@ export function buildThinkingDeltaFact(input: {
 }): ThinkingDeltaFact {
   return {
     type: "thinking.delta",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     content: input.content,
@@ -121,7 +111,6 @@ export function buildThinkingDeltaFact(input: {
 }
 
 export function buildThinkingDoneFact(input: {
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
@@ -129,7 +118,6 @@ export function buildThinkingDoneFact(input: {
 }): ThinkingDoneFact {
   return {
     type: "thinking.done",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     content: input.content,
@@ -138,14 +126,12 @@ export function buildThinkingDoneFact(input: {
 }
 
 export function buildMessageDoneFact(input: {
-  toolSessionId: string;
   messageId: string;
   reason?: string;
   raw?: unknown;
 }): MessageDoneFact {
   return {
     type: "message.done",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     ...(input.reason !== undefined ? { reason: input.reason } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
@@ -155,7 +141,6 @@ export function buildMessageDoneFact(input: {
 export function buildToolUpdateFact(input: ToolUpdateFactInput): ToolUpdateFact {
   return {
     type: "tool.update",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     toolCallId: input.toolCallId,
@@ -172,7 +157,6 @@ export function buildToolUpdateFact(input: ToolUpdateFactInput): ToolUpdateFact 
 export function buildPermissionAskFact(input: PermissionAskFactInput): PermissionAskFact {
   return {
     type: "permission.ask",
-    toolSessionId: input.toolSessionId,
     messageId: input.messageId,
     partId: input.partId,
     permissionId: input.permissionId,
@@ -184,13 +168,11 @@ export function buildPermissionAskFact(input: PermissionAskFactInput): Permissio
 }
 
 export function buildSessionErrorFact(input: {
-  toolSessionId: string;
   error: ProviderError;
   raw?: unknown;
 }): SessionErrorFact {
   return {
     type: "session.error",
-    toolSessionId: input.toolSessionId,
     error: input.error,
     ...(input.raw !== undefined ? { raw: input.raw } : {}),
   };

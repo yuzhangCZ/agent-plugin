@@ -1,4 +1,5 @@
 import type { ProviderCommandError, ProviderError } from './domain/errors.ts';
+import type { RuntimeFailureKind, RuntimeFailurePhase } from './application/constants/runtime.ts';
 import type {
   EmitOutboundMessageInput,
   MessageDoneFact,
@@ -245,13 +246,8 @@ export interface RuntimeTraceInteraction {
 }
 
 export interface RuntimeTraceFailure {
-  kind:
-    | 'startup_failure'
-    | 'gateway_runtime_failure'
-    | 'command_execution_failure'
-    | 'inbound_validation_failure'
-    | 'outbound_validation_failure';
-  phase: 'start' | 'runtime' | 'stop';
+  kind: RuntimeFailureKind;
+  phase: RuntimeFailurePhase;
   message: string;
   code?: string;
 }

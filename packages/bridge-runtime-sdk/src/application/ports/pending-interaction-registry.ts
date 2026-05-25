@@ -4,72 +4,40 @@
 export type PendingInteractionKind = 'question' | 'permission';
 
 /**
- * 挂起交互注册输入。
+ * runtime 挂起交互记录。
  */
-export interface PendingInteractionRegistryRegisterInput {
-  sessionId: string;
+export interface PendingInteractionRecord {
+  toolSessionId: string;
   kind: PendingInteractionKind;
-  interactionId: string;
-  toolCallId?: string;
+  messageId?: string;
+  tokenId: string;
 }
 
 /**
- * 挂起交互消费输入。
+ * 跨 session 冲突详情。
  */
-export interface PendingInteractionRegistryConsumeInput {
-  sessionId: string;
-  kind: PendingInteractionKind;
-  interactionId: string;
-}
-
-/**
- * 挂起交互注册成功结果。
- */
-export interface PendingInteractionRegistryRegisterOk {
-  ok: true;
-}
-
-/**
- * 挂起交互注册失败结果。
- */
-export interface PendingInteractionRegistryRegisterConflict {
-  ok: false;
-  reason: 'occupied' | 'duplicate';
+export interface PendingInteractionConflict {
+  current: PendingInteractionRecord;
+  existing: PendingInteractionRecord;
 }
 
 /**
  * 挂起交互注册结果。
  */
-export type PendingInteractionRegistryRegisterResult =
-  | PendingInteractionRegistryRegisterOk
-  | PendingInteractionRegistryRegisterConflict;
-
-/**
- * 挂起交互消费成功结果。
- */
-export interface PendingInteractionRegistryConsumeOk {
-  ok: true;
-}
-
-/**
- * 挂起交互消费失败结果。
- */
-export interface PendingInteractionRegistryConsumeConflict {
-  ok: false;
-  reason: 'missing' | 'kind_mismatch' | 'interaction_mismatch';
-}
-
-/**
- * 挂起交互消费结果。
- */
-export type PendingInteractionRegistryConsumeResult =
-  | PendingInteractionRegistryConsumeOk
-  | PendingInteractionRegistryConsumeConflict;
+export type PendingInteractionRegisterResult =
+  | { ok: true }
+  | { ok: false; reason: 'duplicate_same_session' }
+  | { ok: false; reason: 'conflict_cross_session'; conflict: PendingInteractionConflict };
 
 /**
  * 挂起交互注册端口。
+ * @remarks 这是 application coordination port，负责全局 reply token 的协调。
  */
 export interface PendingInteractionRegistry {
-  register(input: PendingInteractionRegistryRegisterInput): PendingInteractionRegistryRegisterResult;
-  consume(input: PendingInteractionRegistryConsumeInput): PendingInteractionRegistryConsumeResult;
+  register(record: PendingInteractionRecord): PendingInteractionRegisterResult;
+  consume(input: {
+    kind: PendingInteractionRecord['kind'];
+    tokenId: string;
+  }): PendingInteractionRecord | undefined;
+  clearSession(toolSessionId: string): void;
 }

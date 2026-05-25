@@ -37,10 +37,13 @@ export const optionalLooseTrimmedStringPreservingEmpty = z
   )
   .optional();
 
-export const optionalStrictTrimmedString = z
-  .string()
-  .optional()
-  .transform((value) => {
-    const trimmed = value?.trim();
-    return trimmed ? trimmed : undefined;
-  });
+export const optionalStrictTrimmedString = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
+);

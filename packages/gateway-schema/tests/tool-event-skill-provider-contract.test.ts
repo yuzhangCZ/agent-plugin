@@ -47,7 +47,6 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       properties: {
         messageId: 'msg-1',
         partId: 'part-5',
-        toolCallId: 'perm-1',
         permissionId: 'perm-1',
         permType: 'file_write',
         title: '允许写文件',
@@ -252,7 +251,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       },
     },
     {
-      name: 'permission.ask missing toolCallId',
+      name: 'permission.ask rejects legacy toolCallId field',
       eventType: 'permission.ask',
       input: {
         protocol: 'cloud',
@@ -260,20 +259,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
         properties: {
           messageId: 'msg-1',
           partId: 'part-5',
-          permissionId: 'perm-1',
-        },
-      },
-    },
-    {
-      name: 'permission.ask toolCallId must equal permissionId',
-      eventType: 'permission.ask',
-      input: {
-        protocol: 'cloud',
-        type: 'permission.ask',
-        properties: {
-          messageId: 'msg-1',
-          partId: 'part-5',
-          toolCallId: 'perm-2',
+          toolCallId: 'perm-1',
           permissionId: 'perm-1',
         },
       },

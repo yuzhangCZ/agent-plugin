@@ -224,7 +224,8 @@ flowchart LR
 5. **异步事实回流**
    - 若 resolved 不属于当前 `runMessage().facts` 流，必须通过 `ProviderRuntimeContext.outbound.emitOutboundMessage()` 回流。
    - 若 `permission.reply` 仍属于原 `runMessage().facts` 流，可以继续沿用该消息流既有的 `messageId`。
-   - 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并保证它在当前 `toolSessionId` 内唯一；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
+   - 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并对该 `messageId` 的批次唯一性负责；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
+   - 当前 SDK runtime 只负责消费 provider 提供的 outbound `messageId`，并保证单个 `toolSessionId` 不存在并发 active outbound；不负责替 provider 建立历史 `messageId` 去重账本。
    - outbound continuation 场景下，provider 不得以 `permissionId` 直接代替 `messageId`；`permissionId` 继续只承担 reply target 语义。
    - 原始 `permission.ask` 关联的 `messageId` 只作为回放锚点、诊断线索或宿主侧上下文引用，不再作为 outbound continuation 的强制消息标识。
 6. **拒答快路径**
@@ -441,6 +442,8 @@ sequenceDiagram
 1. `directory/permission` 不进入 SDK contract。
 2. 只进入 `ProviderExecutionContext`。
 3. `ProviderExecutionContext` 通过插件私有装配层注入到 provider adapter，不通过 `ProviderCreateSessionInput` 传递。
+4. SDK runtime 普通首次 `create_session` 成功时，对外返回的 `toolSessionId` 直接使用 OpenCode 真实 `sessionId`。
+5. slash / control-plane / stale 恢复等特殊路径内部仍可保留 anchor 语义，但不改变普通首次 `create_session` 的对外 contract。
 
 ```mermaid
 sequenceDiagram
@@ -471,6 +474,7 @@ sequenceDiagram
 
 1. SDK runtime consume pending interaction 并调 `replyQuestion`
 2. provider adapter 调 OpenCode reply API
+3. gateway 下行若携带 `toolCallId`，仅作为 `questionId` 的兼容别名先归一后再进入 runtime
 
 ```mermaid
 sequenceDiagram
@@ -480,7 +484,8 @@ sequenceDiagram
   participant OCSDK as OpenCode SDK/API
   participant OC as OpenCode
 
-  GW->>MBRT: invoke.question_reply
+  GW->>MBRT: invoke.question_reply(questionId? / toolCallId?)
+  MBRT->>MBRT: normalize reply target\n优先 questionId，缺失时回退 toolCallId
   MBRT->>MBRT: consume pending question interaction
   MBRT->>MBPROV: replyQuestion(input)
   MBPROV->>OCSDK: reply API
@@ -730,9 +735,21 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 1. `permission.ask -> permission.reply` 的关联主键是真实 `permissionId`。
 2. `question.ask -> question_reply` 的关联主键是真实 question/request 标识。
 3. `permissionId` 与 question/request 标识在 runtime reply target 语义上都按全局唯一处理，不依赖 `toolSessionId` 二次定位。
-4. `toolSessionId` 只用于 tracing、冲突诊断、session 清理与宿主侧局部上下文关联，不参与 reply target 主键判定。
-5. 策略层与 adapter 若需保存插件私有辅助上下文，可以围绕 `toolSessionId + interaction id` 建立局部索引，但该局部索引不得覆盖或降级 SDK 已定义的全局 reply target 语义。
-6. `messageId` 只作为投影/回放关联字段，不作为唯一业务主键。
+4. 上述“reply target 主键”结论只约束 SDK runtime 内部交互消费语义，不自动等价于 gateway 下行报文是否保留 `toolSessionId` 字段。
+5. 在 `message-bridge` 对外协议层，`toolSessionId` 仍可作为路由字段、兼容字段或诊断字段存在；是否保留、是否必填，必须以当前 `gateway-schema` 与插件 PRD 的对外契约为准。
+6. 策略层与 adapter 若需保存插件私有辅助上下文，可以围绕 `toolSessionId + interaction id` 建立局部索引，但该局部索引不得覆盖或降级 SDK 已定义的全局 reply target 语义。
+7. `messageId` 只作为投影/回放关联字段，不作为唯一业务主键。
+
+#### 7.8.2.1 当前外部契约差异登记
+
+当前仓库存在以下必须显式认知的差异：
+
+1. SDK runtime 内部已按 `permissionId/questionId` 作为 reply target 主键建模。
+2. `plugins/message-bridge/docs/product/prd.md` 当前仍写明 `permission_reply.toolSessionId` 必填。
+3. gateway 下行 `question_reply` 当前已兼容 `toolCallId` 作为 `questionId` 的 legacy alias，但 runtime 内部 reply target 仍只认 `questionId`。
+4. 因此，本文不得把“兼容接受 legacy alias”表述为“runtime 内部重新降级为依赖 tool call 标识回复”。
+5. 因此，在 PRD 或 `gateway-schema` 完成正式收敛前，本文不得把“内部 reply target 主键变化”直接表述为“外部 gateway 契约已移除 `toolSessionId` 要求”。
+6. 若后续决定同步调整外部协议，必须先显式更新 PRD、相关 schema 与兼容说明，再移除该差异登记。
 
 #### 7.8.3 continuation 回流规则
 
@@ -741,9 +758,10 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 3. 若不属于原 facts 流，则统一走 SDK `emitOutboundMessage(...)`。
 4. SDK 不自动合成 `permission.reply` resolved fact；resolved 事实仍由 provider 真源产出。
 5. 若 `permission.reply` 作为原 facts 流内事件回流，可以继续复用该消息流已存在的 `messageId`。
-6. 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并保证它在当前 `toolSessionId` 内唯一；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
+6. 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并对该 `messageId` 的批次唯一性负责；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
 7. outbound continuation 场景下，provider 不得以 `permissionId` 直接代替 `messageId`；`permissionId` 继续只承担 reply target 语义。
 8. 原始 `permission.ask` 关联的 `messageId` 只作为回放锚点、诊断线索或宿主侧上下文引用，不再作为 outbound continuation 的强制消息标识。
+9. 当前 SDK runtime 可验证的是“单个 active outbound 不并发”与“单批 facts 的 `messageId` 一致性”；若需要验证历史批次不复用 `messageId`，必须由 provider 或额外诊断设施承担。
 
 ### 7.9 `suppressReply` 与 `session.get` 约束
 
@@ -793,8 +811,9 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 
 1. `status_response`
 2. `session_created`
-3. `tool_error.reason='session_not_found'`
-4. `question_reply` / `permission_reply` 的生效语义
+3. `tool_done`
+4. `tool_error.reason='session_not_found'`
+5. `question_reply` / `permission_reply` 的生效语义
 
 允许收敛到 SDK 语义、不要求与 legacy 逐项等价的行为：
 
@@ -809,7 +828,7 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 本轮必须明确以下内容不变：
 
 1. 不新增 `bridge-runtime-sdk` public API。
-2. 不新增 `gateway-schema` 上下行字段。
+2. 不新增 `gateway-schema` 归一后的稳定输出字段；`question_reply.toolCallId` 仅作为下行兼容 alias 输入被接受。
 3. 不改 `tool_event` / `tool_done` / `tool_error` / `session_created` / `status_response` 既有扁平协议形状。
 4. 不把 `directory`、permission 注入上下文、session probe 暴露为 SDK public type。
 
@@ -819,16 +838,17 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 
 1. `invoke.chat` 标准路径：前置策略完成，provider 启动 run，SDK 输出正式 uplink。
 2. `invoke.chat` + `suppressReply=true`：真实宿主不启动，仅走 synthetic run。
-3. `permission.ask -> permission_reply -> permission.reply`：主键绑定正确；原 facts 流内回流时沿用原消息 `messageId`；outbound continuation 时使用新的唯一 `messageId`；回流路径正确。
+3. `permission.ask -> permission_reply -> permission.reply`：主键绑定正确；原 facts 流内回流时沿用原消息 `messageId`；outbound continuation 时由 provider 生成新的批次 `messageId`，且同批 facts 与 `EmitOutboundMessageInput.messageId` 保持一致；回流路径正确。
 4. `question.ask -> question_reply`：挂起交互命中、消费与继续执行路径正确。
 5. `session.get` 成功与失败：插件策略层行为清晰，不污染 provider fact 语义层。
 6. raw event 缺字段或无法翻译：adapter 诊断与 fail-closed 边界明确。
 7. `status_query`：仍只走健康查询路径并输出 `status_response`。
 8. `create_session`：目录上下文仍由插件策略层决定，不进入 SDK public contract。
-9. `permission_reply`：与当前 `gateway-schema` 扁平字段契约保持一致。
-10. `close_session`：走 SDK session-control 路径，正确清理 session 生命周期与挂起 interaction 状态。
-11. `abort_session`：走 SDK session-control / active run 协调路径，正确触发中止语义与终态收口。
-12. 迁移期双轨并存：只有主轨可发送正式上行业务消息。
+9. `permission_reply` / `question_reply`：分别校验“SDK 内部 reply target 主键语义”与“当前 gateway 下行字段契约”没有被混写；若两者未完成统一，必须显式记录差异。
+10. `tool_done`：覆盖正常 chat 完成、synthetic deny 完成与 abort 后完成态，验证主轨输出与 legacy 对外协议等价。
+11. `close_session`：走 SDK session-control 路径，正确清理 session 生命周期与挂起 interaction 状态。
+12. `abort_session`：走 SDK session-control / active run 协调路径，正确触发中止语义与终态收口。
+13. 迁移期双轨并存：只有主轨可发送正式上行业务消息。
 
 ### 9.3 协议一致性检查
 
@@ -837,7 +857,8 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 1. 与 `plugins/message-bridge/docs/product/prd.md` 的 action / event / fast-fail 结论一致。
 2. 与 `docs/design/interfaces/bridge-runtime-sdk-integration.md` 的 Provider SPI 与 outbound 语义一致。
 3. 与 `packages/gateway-schema/src/contract/schemas/upstream*.ts` 的上行扁平消息字段一致。
-4. 若发现实现与本文或 PRD 存在冲突，必须显式登记差异，不得静默改写结论。
+4. 与 `packages/gateway-schema/src/contract/schemas/downstream*.ts` 的下行字段约束一致，尤其是 `permission_reply/question_reply` 的 payload 形状。
+5. 若发现实现与本文或 PRD 存在冲突，必须显式登记差异，不得静默改写结论。
 
 建议验证命令：
 

@@ -375,7 +375,7 @@ export function createGatewayWireQuestionEvent(overrides = {}) {
       messageId: 'msg-skill-wire',
       partId: 'part-skill-question',
       questionId: 'question-skill-wire',
-      toolCallId: 'question-skill-wire',
+      toolCallId: 'call-skill-wire-question',
       questions: [
         {
           question: 'Proceed?',
@@ -393,7 +393,6 @@ export function createGatewayWirePermissionAskEvent(overrides = {}) {
     properties: {
       messageId: 'msg-skill-wire',
       partId: 'part-skill-permission',
-      toolCallId: 'perm-skill-wire',
       permissionId: 'perm-skill-wire',
       permType: 'shell',
       metadata: {

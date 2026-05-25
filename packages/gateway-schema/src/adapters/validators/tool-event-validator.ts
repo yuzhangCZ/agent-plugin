@@ -42,6 +42,7 @@ import {
   readArray,
   readEnumValue,
   readLooseTrimmedStringPreservingEmpty,
+  readBoolean,
   readNumber,
   readPlainObject,
   readString,
@@ -112,18 +113,47 @@ function readOptionalModel(raw: UnknownBoundaryInput): MessageUpdatedEvent['prop
     return undefined;
   }
 
+  const providerID = readTrimmedString(model.providerID);
+  const modelID = readTrimmedString(model.modelID);
   const provider = readTrimmedString(model.provider);
   const name = readTrimmedString(model.name);
   const thinkLevel = readTrimmedString(model.thinkLevel);
 
-  if (!provider && !name && !thinkLevel) {
+  if (!providerID && !modelID && !provider && !name && !thinkLevel) {
     return undefined;
   }
 
   return {
+    ...(providerID ? { providerID } : {}),
+    ...(modelID ? { modelID } : {}),
     ...(provider ? { provider } : {}),
     ...(name ? { name } : {}),
     ...(thinkLevel ? { thinkLevel } : {}),
+  };
+}
+
+function readOptionalError(raw: UnknownBoundaryInput): MessageUpdatedEvent['properties']['info']['error'] | undefined {
+  const error = readPlainObject(raw);
+  if (!error) {
+    return undefined;
+  }
+
+  const name = readTrimmedString(error.name);
+  if (!name) {
+    return undefined;
+  }
+
+  const message = readLooseTrimmedStringPreservingEmpty(error.message);
+  const statusCode = readNumber(error.statusCode);
+  const retryable = readBoolean(error.retryable);
+  const providerID = readTrimmedString(error.providerID);
+
+  return {
+    name,
+    ...(message !== undefined ? { message } : {}),
+    ...(statusCode !== undefined ? { statusCode } : {}),
+    ...(retryable !== undefined ? { retryable } : {}),
+    ...(providerID ? { providerID } : {}),
   };
 }
 
@@ -262,11 +292,11 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
     });
   }
 
-  const updated = readNumber(time.value.updated);
+  const completed = readNumber(time.value.completed);
   const model = readOptionalModel(info.value.model);
   const summary = readSummary(info.value.summary);
-  const finish = readPlainObject(info.value.finish);
-  const finishReason = finish ? readLooseTrimmedStringPreservingEmpty(finish.reason) : undefined;
+  const finish = readLooseTrimmedStringPreservingEmpty(info.value.finish);
+  const error = readOptionalError(info.value.error);
 
   return ok({
     type: eventType,
@@ -277,11 +307,12 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
         role,
         time: {
           created,
-          ...(updated !== undefined ? { updated } : {}),
+          ...(completed !== undefined ? { completed } : {}),
         },
         ...(model ? { model } : {}),
         ...(summary ? { summary } : {}),
-        ...(finishReason !== undefined ? { finish: { reason: finishReason } } : {}),
+        ...(finish !== undefined ? { finish } : {}),
+        ...(error ? { error } : {}),
       },
     },
   });

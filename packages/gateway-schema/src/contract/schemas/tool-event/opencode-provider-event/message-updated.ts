@@ -8,11 +8,15 @@ import {
 
 export const messageUpdatedModelSchema = z
   .object({
+    providerID: requiredTrimmedString.optional(),
+    modelID: requiredTrimmedString.optional(),
     provider: requiredTrimmedString.optional(),
     name: requiredTrimmedString.optional(),
     thinkLevel: requiredTrimmedString.optional(),
   })
   .transform((model) => ({
+    ...(model.providerID ? { providerID: model.providerID } : {}),
+    ...(model.modelID ? { modelID: model.modelID } : {}),
     ...(model.provider ? { provider: model.provider } : {}),
     ...(model.name ? { name: model.name } : {}),
     ...(model.thinkLevel ? { thinkLevel: model.thinkLevel } : {}),
@@ -51,16 +55,29 @@ export type MessageUpdatedSummaryV1 = z.output<typeof messageUpdatedSummarySchem
 
 export const messageUpdatedTimeSchema = z.object({
   created: z.number(),
-  updated: z.number().optional(),
+  completed: z.number().optional(),
 });
 export type MessageUpdatedTimeV1 = z.output<typeof messageUpdatedTimeSchema>;
 
-export const messageUpdatedFinishSchema = z
-  .object({
-    reason: optionalLooseTrimmedStringPreservingEmpty,
-  })
-  .transform((finish) => (finish.reason !== undefined ? { reason: finish.reason } : undefined));
+export const messageUpdatedFinishSchema = optionalLooseTrimmedStringPreservingEmpty;
 export type MessageUpdatedFinishV1 = NonNullable<z.output<typeof messageUpdatedFinishSchema>>;
+
+export const messageUpdatedErrorSchema = z
+  .object({
+    name: requiredTrimmedString,
+    message: optionalLooseTrimmedStringPreservingEmpty,
+    statusCode: z.number().optional(),
+    retryable: z.boolean().optional(),
+    providerID: requiredTrimmedString.optional(),
+  })
+  .transform((error) => ({
+    name: error.name,
+    ...(error.message !== undefined ? { message: error.message } : {}),
+    ...(error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+    ...(error.retryable !== undefined ? { retryable: error.retryable } : {}),
+    ...(error.providerID ? { providerID: error.providerID } : {}),
+  }));
+export type MessageUpdatedErrorV1 = z.output<typeof messageUpdatedErrorSchema>;
 
 export const messageUpdatedInfoSchema = z
   .object({
@@ -71,6 +88,7 @@ export const messageUpdatedInfoSchema = z
     model: messageUpdatedModelSchema.optional(),
     summary: messageUpdatedSummarySchema.optional(),
     finish: messageUpdatedFinishSchema.optional(),
+    error: messageUpdatedErrorSchema.optional(),
   })
   .transform((info) => ({
     id: info.id,
@@ -78,11 +96,12 @@ export const messageUpdatedInfoSchema = z
     role: info.role,
     time: {
       created: info.time.created,
-      ...(info.time.updated !== undefined ? { updated: info.time.updated } : {}),
+      ...(info.time.completed !== undefined ? { completed: info.time.completed } : {}),
     },
     ...(info.model && Object.keys(info.model).length > 0 ? { model: info.model } : {}),
     ...(info.summary && Object.keys(info.summary).length > 0 ? { summary: info.summary } : {}),
-    ...(info.finish ? { finish: info.finish } : {}),
+    ...(info.finish !== undefined ? { finish: info.finish } : {}),
+    ...(info.error ? { error: info.error } : {}),
   }));
 export type MessageUpdatedInfoV1 = z.output<typeof messageUpdatedInfoSchema>;
 
@@ -94,6 +113,7 @@ const messageUpdatedInputInfoSchema = z.object({
   model: messageUpdatedModelSchema.optional(),
   summary: messageUpdatedSummarySchema.optional(),
   finish: messageUpdatedFinishSchema.optional(),
+  error: messageUpdatedErrorSchema.optional(),
 });
 
 export const messageUpdatedEventSchema = z
@@ -140,7 +160,8 @@ export const messageUpdatedEventSchema = z
           ...(event.properties.info.summary && Object.keys(event.properties.info.summary).length > 0
             ? { summary: event.properties.info.summary }
             : {}),
-          ...(event.properties.info.finish ? { finish: event.properties.info.finish } : {}),
+          ...(event.properties.info.finish !== undefined ? { finish: event.properties.info.finish } : {}),
+          ...(event.properties.info.error ? { error: event.properties.info.error } : {}),
         },
       },
     };

@@ -12,7 +12,15 @@ describe('upstream transport projection', () => {
   test('projects message.updated into a lightweight transport shape', () => {
     const projector = createProjector();
     const raw = createLargeMessageUpdatedEvent();
-    raw.properties.info.finish = { reason: 'completed' };
+    raw.properties.info.finish = 'completed';
+    raw.properties.info.error = {
+      name: 'APIError',
+      message: 'model backend failed',
+      statusCode: 429,
+      retryable: true,
+      providerID: 'openai',
+      extra: 'drop-me',
+    };
     const projected = projector.project({
       common: {
         eventType: 'message.updated',
@@ -51,8 +59,13 @@ describe('upstream transport projection', () => {
     assert.ok(!('after' in projected.properties.info.summary.diffs[0]));
     assert.ok(!('before' in projected.properties.info.summary.diffs[1]));
     assert.ok(!('after' in projected.properties.info.summary.diffs[1]));
-    assert.deepStrictEqual(projected.properties.info.finish, {
-      reason: 'completed',
+    assert.strictEqual(projected.properties.info.finish, 'completed');
+    assert.deepStrictEqual(projected.properties.info.error, {
+      name: 'APIError',
+      message: 'model backend failed',
+      statusCode: 429,
+      retryable: true,
+      providerID: 'openai',
     });
   });
 

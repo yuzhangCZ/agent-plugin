@@ -537,7 +537,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       state.queue.push(buildSessionErrorFact({
-        toolSessionId: state.toolSessionId,
         error: {
           code: "internal_error",
           message,
@@ -691,7 +690,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       toolState.output = output;
       this.ensureMessageStarted(state);
       state.queue.push(buildToolUpdateFact({
-        toolSessionId: state.toolSessionId,
         messageId: state.messageId,
         partId: toolState.partId,
         toolCallId: toolState.toolCallId,
@@ -722,7 +720,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     state.accumulatedText += text;
     state.textDeltaCount += 1;
     state.queue.push(buildTextDeltaFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: text,
@@ -761,13 +758,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     this.ensureMessageStarted(state);
     state.accumulatedText = finalText;
     state.queue.push(buildTextDoneFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: finalText,
     }));
     state.queue.push(buildMessageDoneFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
     }));
     state.queue.close();
@@ -783,14 +778,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const finalText = reconciliation.finalText || state.accumulatedText || "(empty response)";
     state.accumulatedText = finalText;
     state.queue.push(buildTextDoneFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: state.textPartId,
       content: finalText,
       raw: state.pendingFinalText,
     }));
     state.queue.push(buildMessageDoneFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
     }));
     state.queue.close();
@@ -809,7 +802,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       }));
     }
     state.queue.push(buildMessageStartFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
     }));
   }
@@ -875,9 +867,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       messageId,
       trigger: eventName,
       facts: [
-        buildMessageStartFact({ toolSessionId, messageId, raw: payload }),
+        buildMessageStartFact({ messageId, raw: payload }),
         buildPermissionAskFact({
-          toolSessionId,
           messageId,
           partId: `part_${randomUUID()}`,
           permissionId,
@@ -891,7 +882,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
           },
           raw: payload,
         }),
-        buildMessageDoneFact({ toolSessionId, messageId }),
+        buildMessageDoneFact({ messageId }),
       ],
     });
   }
@@ -1026,7 +1017,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     state.queue.push(buildToolUpdateFact({
-      toolSessionId: state.toolSessionId,
       messageId: state.messageId,
       partId: toolState.partId,
       toolCallId,
@@ -1071,11 +1061,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     this.ensureMessageStarted(state);
     state.textDeltaCount += 1;
-    state.queue.push(buildTextDeltaFact({
-      toolSessionId: state.toolSessionId,
-      messageId: state.messageId,
-      partId: state.textPartId,
-      content: deltaText,
+      state.queue.push(buildTextDeltaFact({
+        messageId: state.messageId,
+        partId: state.textPartId,
+        content: deltaText,
       raw: payload,
     }));
   }
@@ -1098,7 +1087,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       state.accumulatedThinking += deltaText;
       this.ensureMessageStarted(state);
       state.queue.push(buildThinkingDeltaFact({
-        toolSessionId: state.toolSessionId,
         messageId: state.messageId,
         partId: state.thinkingPartId,
         content: deltaText,
@@ -1109,7 +1097,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     if (phase === "finish" || phase === "result") {
       this.ensureMessageStarted(state);
       state.queue.push(buildThinkingDoneFact({
-        toolSessionId: state.toolSessionId,
         messageId: state.messageId,
         partId: state.thinkingPartId,
         content: state.accumulatedThinking,

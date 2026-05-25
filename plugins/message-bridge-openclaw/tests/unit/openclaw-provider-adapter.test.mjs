@@ -32,6 +32,15 @@ function createAdapter(overrides = {}) {
   });
 }
 
+function assertFactsOmitToolSessionId(facts) {
+  for (const fact of facts) {
+    if (fact.type === "session.title") {
+      continue;
+    }
+    assert.equal("toolSessionId" in fact, false);
+  }
+}
+
 function flushEvents() {
   return new Promise((resolve) => {
     setImmediate(resolve);
@@ -71,6 +80,7 @@ test("provider adapter fallback emits ordered facts and completed result", async
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
@@ -311,6 +321,7 @@ test("provider adapter serializes tool input and output from runtime events", as
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   const toolFacts = facts.filter((fact) => fact.type === "tool.update");
   assert.deepEqual(
@@ -392,6 +403,7 @@ test("provider adapter maps runtime assistant events to text delta facts", async
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
@@ -462,6 +474,7 @@ test("provider adapter maps runtime reasoning events to thinking facts", async (
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
@@ -528,6 +541,7 @@ test("provider adapter suppresses assistant deltas when account streaming is dis
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
@@ -582,6 +596,7 @@ test("provider adapter suppresses runtime reply block deltas when config streami
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
@@ -640,8 +655,8 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
     emitted[0].facts.map((fact) => fact.type),
     ["message.start", "permission.ask", "message.done"],
   );
+  assertFactsOmitToolSessionId(emitted[0].facts);
   const permissionFact = emitted[0].facts.find((fact) => fact.type === "permission.ask");
-  assert.equal(permissionFact.toolSessionId, "ses_gateway_permission_1");
   assert.equal(permissionFact.permissionId, "approval-1");
   assert.equal(permissionFact.permissionType, "exec");
   assert.match(permissionFact.partId, /^part_/);
@@ -789,6 +804,7 @@ test("provider adapter ignores question and permission runtime streams", async (
   for await (const fact of run.facts) {
     facts.push(fact);
   }
+  assertFactsOmitToolSessionId(facts);
 
   assert.equal(facts.some((fact) => fact.type === "question.ask"), false);
   assert.equal(

@@ -3,6 +3,28 @@ import assert from 'node:assert/strict';
 
 import { OpencodeSessionGatewayAdapter } from '../../src/adapter/OpencodeSessionGatewayAdapter.ts';
 
+function createPromptResponse(overrides = {}) {
+  return {
+    data: {
+      info: {
+        id: 'msg-assistant-1',
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+        ...overrides.info,
+      },
+      parts: overrides.parts ?? [{ type: 'step-finish' }],
+    },
+  };
+}
+
 function createLoggerSpy() {
   const entries = [];
   return {
@@ -80,7 +102,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
         },
         prompt: async (options) => {
           calls.push({ type: 'prompt', options });
-          return { data: { ok: true } };
+          return createPromptResponse();
         },
       },
       postSessionIdPermissionsPermissionId: async () => ({}),
@@ -98,6 +120,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     });
 
     assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, { kind: 'completed' });
     assert.deepStrictEqual(calls, [
       {
         type: 'get',
@@ -115,15 +138,26 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
         },
       },
     ]);
-    assert.deepStrictEqual(entries[0], {
-      level: 'debug',
-      message: 'session_directory.session_get.directory_resolved',
-      extra: {
-        toolSessionId: 'ses-ok',
-        directory: '/tmp/session-dir',
-        hasAgent: true,
+    assert.deepStrictEqual(entries, [
+      {
+        level: 'debug',
+        message: 'session_lookup.session_get.succeeded',
+        extra: {
+          toolSessionId: 'ses-ok',
+          hasDirectory: true,
+          hasAgent: true,
+        },
       },
-    });
+      {
+        level: 'debug',
+        message: 'session_directory.session_view.directory_resolved',
+        extra: {
+          toolSessionId: 'ses-ok',
+          directory: '/tmp/session-dir',
+          hasAgent: true,
+        },
+      },
+    ]);
   });
 
   test('returns session_not_found evidence when session.get reports NotFoundError', async () => {
@@ -168,11 +202,12 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.strictEqual(calls.prompt, 0);
     assert.deepStrictEqual(entries[0], {
       level: 'warn',
-      message: 'session_directory.session_get.not_found',
+      message: 'session_lookup.session_get.not_found',
       extra: {
         toolSessionId: 'ses-missing',
         errorDetail: '{"name":"NotFoundError","data":{"message":"Session not found: ses-missing"}}',
         errorName: 'NotFoundError',
+        hasAgent: false,
         rawType: 'Object',
       },
     });
@@ -217,14 +252,111 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.strictEqual(result.errorEvidence?.sourceOperation, 'session.get');
     assert.strictEqual(calls.get, 1);
     assert.strictEqual(calls.prompt, 0);
-    assert.deepStrictEqual(entries[0], {
-      level: 'warn',
-      message: 'session_directory.session_get.directory_missing',
-      extra: {
-        toolSessionId: 'ses-no-dir',
-        hasAgent: false,
+    assert.deepStrictEqual(entries, [
+      {
+        level: 'debug',
+        message: 'session_lookup.session_get.succeeded',
+        extra: {
+          toolSessionId: 'ses-no-dir',
+          hasDirectory: false,
+          hasAgent: false,
+        },
+      },
+      {
+        level: 'warn',
+        message: 'session_directory.session_view.directory_missing',
+        extra: {
+          toolSessionId: 'ses-no-dir',
+          hasAgent: false,
+        },
+      },
+    ]);
+  });
+
+  test('keeps bare APIError terminal when assistant info.error only provides name', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-api-error-name-only',
+            directory: '/tmp/session-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'APIError',
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-api-error-name-only',
+      text: 'hello',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, {
+      success: true,
+      data: {
+        message: {
+          info: {
+            id: 'msg-assistant-1',
+            error: {
+              name: 'APIError',
+            },
+            cost: 0.12,
+            tokens: {
+              input: 10,
+              output: 20,
+              reasoning: 3,
+              cache: {
+                read: 0,
+                write: 0,
+              },
+            },
+          },
+          parts: [],
+        },
+        terminal: {
+          kind: 'failed',
+          errorCode: 'internal_error',
+          errorMessage: 'APIError',
+          errorDetails: {
+            name: 'APIError',
+          },
+        },
       },
     });
+    assert.deepStrictEqual(
+      entries.find((entry) => entry.message === 'session_prompt.assistant_error.normalized'),
+      {
+        level: 'debug',
+        message: 'session_prompt.assistant_error.normalized',
+        extra: {
+          toolSessionId: 'ses-api-error-name-only',
+          rawErrorName: 'APIError',
+          rawDataHasMessage: false,
+          rawDataStatusCode: undefined,
+          rawDataIsRetryable: undefined,
+          normalizedErrorName: 'APIError',
+          normalizedHasMessage: false,
+          normalizedStatusCode: undefined,
+          normalizedIsRetryable: undefined,
+        },
+      },
+    );
   });
 
   test('returns failure when session.get error is not NotFoundError', async () => {
@@ -269,11 +401,12 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.strictEqual(calls.prompt, 0);
     assert.deepStrictEqual(entries[0], {
       level: 'warn',
-      message: 'session_directory.session_get.failed',
+      message: 'session_lookup.session_get.failed',
       extra: {
         toolSessionId: 'ses-any',
         errorDetail: '{"name":"UnknownError","data":{"message":"temporary failure"}}',
         errorName: 'UnknownError',
+        hasAgent: false,
         rawType: 'Object',
       },
     });
@@ -319,11 +452,12 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.strictEqual(calls.prompt, 0);
     assert.deepStrictEqual(entries[0], {
       level: 'warn',
-      message: 'session_directory.session_get.not_found',
+      message: 'session_lookup.session_get.not_found',
       extra: {
         toolSessionId: 'ses-throw',
         errorDetail: '{"name":"NotFoundError","data":{"message":"Session not found: ses-throw"}}',
         errorName: 'NotFoundError',
+        hasAgent: false,
         rawType: 'Object',
       },
     });
@@ -373,12 +507,13 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.strictEqual(calls.prompt, 0);
     assert.deepStrictEqual(entries[0], {
       level: 'warn',
-      message: 'session_directory.session_get.failed',
+      message: 'session_lookup.session_get.failed',
       extra: {
         toolSessionId: 'ses-any',
         errorDetail: 'session lookup timed out',
         errorName: 'Error',
         errorType: 'Error',
+        hasAgent: false,
         rawType: 'Error',
       },
     });
@@ -416,15 +551,26 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
 
     assert.strictEqual(result.success, false);
     assert.strictEqual(result.errorMessage, 'Failed to send message: prompt transport down');
-    assert.deepStrictEqual(entries[0], {
-      level: 'debug',
-      message: 'session_directory.session_get.directory_resolved',
-      extra: {
-        toolSessionId: 'ses-prompt-fail',
-        directory: '/tmp/prompt-fail',
-        hasAgent: false,
+    assert.deepStrictEqual(entries, [
+      {
+        level: 'debug',
+        message: 'session_lookup.session_get.succeeded',
+        extra: {
+          toolSessionId: 'ses-prompt-fail',
+          hasDirectory: true,
+          hasAgent: false,
+        },
       },
-    });
+      {
+        level: 'debug',
+        message: 'session_directory.session_view.directory_resolved',
+        extra: {
+          toolSessionId: 'ses-prompt-fail',
+          directory: '/tmp/prompt-fail',
+          hasAgent: false,
+        },
+      },
+    ]);
   });
 
   test('returns payload failure with session.prompt sourceOperation', async () => {
@@ -465,10 +611,249 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     );
     assert.strictEqual(result.errorEvidence?.sourceOperation, 'session.prompt');
   });
+
+  test('maps MessageAbortedError in prompt response to aborted terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-aborted',
+            directory: '/tmp/aborted-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'MessageAbortedError',
+              data: {
+                message: 'User aborted',
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-aborted',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, { kind: 'aborted' });
+  });
+
+  test('maps assistant info.error in prompt response to failed terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-failed',
+            directory: '/tmp/failed-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'APIError',
+              data: {
+                message: 'model backend failed',
+                statusCode: 429,
+                isRetryable: true,
+                responseBody: 'Too many requests',
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-failed',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'APIError: model backend failed statusCode=429',
+      errorDetails: {
+        name: 'APIError',
+        message: 'model backend failed',
+        statusCode: 429,
+        isRetryable: true,
+        responseBody: 'Too many requests',
+      },
+    });
+  });
+
+  test('keeps legacy top-level assistant error fields compatible in prompt response', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-failed-legacy-error',
+            directory: '/tmp/failed-legacy-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'APIError',
+              message: 'legacy backend failed',
+              statusCode: 429,
+              retryable: true,
+              providerID: 'openai',
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-failed-legacy-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'APIError: legacy backend failed statusCode=429',
+      errorDetails: {
+        name: 'APIError',
+        message: 'legacy backend failed',
+        statusCode: 429,
+        retryable: true,
+        providerID: 'openai',
+      },
+    });
+  });
+
+  test('maps StructuredOutputError data.message in prompt response to failed terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-structured-error',
+            directory: '/tmp/structured-error-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'StructuredOutputError',
+              data: {
+                message: 'json schema validation failed',
+                retries: 2,
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-structured-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'StructuredOutputError: json schema validation failed',
+      errorDetails: {
+        name: 'StructuredOutputError',
+        message: 'json schema validation failed',
+        retries: 2,
+      },
+    });
+  });
+
+  test('maps UnknownError data.message in prompt response to failed terminal', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({
+          data: {
+            id: 'ses-unknown-error',
+            directory: '/tmp/unknown-error-dir',
+          },
+        }),
+        prompt: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'UnknownError',
+              data: {
+                message: 'temporary failure',
+              },
+            },
+          },
+        }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.promptSession({
+      sessionId: 'ses-unknown-error',
+      text: 'hello',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'UnknownError: temporary failure',
+      errorDetails: {
+        name: 'UnknownError',
+        message: 'temporary failure',
+      },
+    });
+  });
 });
 
 describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
-  test('openx without bridgeDirectory skips session.get and omits directory in promptSession', async () => {
+  test('openx without bridgeDirectory still preflights session.get and omits directory in promptSession', async () => {
     const calls = [];
     const { logger, entries } = createLoggerSpy();
     const adapter = new OpencodeSessionGatewayAdapter(
@@ -479,10 +864,10 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
             calls.push({ type: 'get' });
             return { data: { id: 'ses-openx', directory: '/tmp/should-not-use' } };
           },
-          prompt: async (options) => {
-            calls.push({ type: 'prompt', options });
-            return { data: { ok: true } };
-          },
+        prompt: async (options) => {
+          calls.push({ type: 'prompt', options });
+          return createPromptResponse();
+        },
           abort: async () => ({}),
           delete: async () => ({}),
         },
@@ -502,7 +887,11 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     });
 
     assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, { kind: 'completed' });
     assert.deepStrictEqual(calls, [
+      {
+        type: 'get',
+      },
       {
         type: 'prompt',
         options: {
@@ -511,14 +900,25 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         },
       },
     ]);
-    assert.deepStrictEqual(entries[0], {
-      level: 'info',
-      message: 'session_directory.policy.openx.directory_omitted',
-      extra: {
-        toolSessionId: 'ses-openx',
-        hasAgent: false,
+    assert.deepStrictEqual(entries, [
+      {
+        level: 'debug',
+        message: 'session_lookup.session_get.succeeded',
+        extra: {
+          toolSessionId: 'ses-openx',
+          hasDirectory: true,
+          hasAgent: false,
+        },
       },
-    });
+      {
+        level: 'info',
+        message: 'session_directory.policy.openx.directory_omitted',
+        extra: {
+          toolSessionId: 'ses-openx',
+          hasAgent: false,
+        },
+      },
+    ]);
   });
 
   test('openx without bridgeDirectory omits directory in direct question reply', async () => {

@@ -76,6 +76,23 @@ describe('subagent session mapper', () => {
     ]);
   });
 
+  test('does not synthesize placeholder agentName when lazy lookup lacks session title', async () => {
+    const mapper = new SubagentSessionMapper(createClient(async () => ({
+      data: {
+        id: 'ses_child_no_title',
+        parentID: 'ses_parent_no_title',
+      },
+    })));
+
+    assert.deepStrictEqual(await mapper.resolve('ses_child_no_title'), {
+      status: 'mapped',
+      mapping: {
+        childSessionId: 'ses_child_no_title',
+        parentSessionId: 'ses_parent_no_title',
+      },
+    });
+  });
+
   test('negative-caches main sessions to avoid repeated session.get calls', async () => {
     const getCalls = [];
     const mapper = new SubagentSessionMapper(createClient(async (options) => {

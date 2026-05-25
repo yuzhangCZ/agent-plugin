@@ -23,7 +23,7 @@ import { validateToolEvent } from '../src/index.ts';
 test('validateToolEvent accepts every supported tool_event event type with an exact canonical shape', () => {
   const messageUpdatedInput = structuredClone(createGatewayWireMessageUpdatedEvent());
   messageUpdatedInput.properties.info.agent = 'remove-me';
-  messageUpdatedInput.properties.info.time.updated = 456;
+  messageUpdatedInput.properties.info.time.completed = 456;
   messageUpdatedInput.properties.info.summary.extra = 'drop-me';
   messageUpdatedInput.properties.info.summary.diffs[0].before = { text: 'before' };
   messageUpdatedInput.properties.info.summary.diffs[0].after = { text: 'after' };
@@ -266,7 +266,7 @@ test('validateToolEvent strips message.updated fields that are not part of the w
   const raw = structuredClone(createGatewayWireMessageUpdatedEvent());
   raw.properties.info.summary.diffs[0].before = { text: 'before' };
   raw.properties.info.summary.diffs[0].after = { text: 'after' };
-  raw.properties.info.finish = { reason: 'completed' };
+  raw.properties.info.finish = 'completed';
 
   const result = validateToolEvent(raw);
 
@@ -277,7 +277,7 @@ test('validateToolEvent strips message.updated fields that are not part of the w
     deletions: 3,
     files: 2,
     diffCount: 1,
-    finishReason: 'completed',
+    finish: 'completed',
   });
   assert.equal('before' in result.value.properties.info.summary.diffs[0], false);
   assert.equal('after' in result.value.properties.info.summary.diffs[0], false);

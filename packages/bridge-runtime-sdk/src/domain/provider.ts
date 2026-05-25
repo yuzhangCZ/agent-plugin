@@ -10,53 +10,53 @@ export interface ProviderTerminalResult {
   error?: ProviderError;
 }
 
-export interface MessageStartFact {
+export interface ProviderFactBase {
+  // 仅透传 provider 提供的子代理 envelope 提示，不承担 runtime session ownership 语义。
+  subagentSessionId?: string;
+  subagentName?: string;
+}
+
+export interface MessageStartFact extends ProviderFactBase {
   type: 'message.start';
-  toolSessionId: string;
   messageId: string;
   // 这里保留 unknown：raw 只用于 trace/诊断，不进入稳定 runtime 语义。
   raw?: unknown;
 }
 
-export interface TextDeltaFact {
+export interface TextDeltaFact extends ProviderFactBase {
   type: 'text.delta';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
   raw?: unknown;
 }
 
-export interface TextDoneFact {
+export interface TextDoneFact extends ProviderFactBase {
   type: 'text.done';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
   raw?: unknown;
 }
 
-export interface ThinkingDeltaFact {
+export interface ThinkingDeltaFact extends ProviderFactBase {
   type: 'thinking.delta';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
   raw?: unknown;
 }
 
-export interface ThinkingDoneFact {
+export interface ThinkingDoneFact extends ProviderFactBase {
   type: 'thinking.done';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   content: string;
   raw?: unknown;
 }
 
-export interface ToolUpdateFact {
+export interface ToolUpdateFact extends ProviderFactBase {
   type: 'tool.update';
-  toolSessionId: string;
   messageId: string;
   partId: string;
   toolCallId: string;
@@ -80,9 +80,8 @@ export interface QuestionItem {
   multiSelect?: boolean;
 }
 
-export interface QuestionAskFact {
+export interface QuestionAskFact extends ProviderFactBase {
   type: 'question.ask';
-  toolSessionId: string;
   messageId: string;
   // partId 只表示消息组成部分 ID，不承担 direct reply target 语义。
   partId: string;
@@ -90,7 +89,8 @@ export interface QuestionAskFact {
   questionId: string;
   // questions[] 是问题事实的唯一真源；兼容展示字段由 projector 或下游自行从 questions[0] 读取。
   questions: QuestionItem[];
-  // 可选 toolCallId 仅用于关联原始 tool call；未传时 projector 会回填为 questionId 兼容旧下游。
+  // 可选 toolCallId 仅用于关联原始 tool call；未传时 projector 会回填为 questionId 兼容旧下游字段读取口径，
+  // 但不会改变 runtime 内部仍以 questionId 作为 reply target 的语义。
   toolCallId?: string;
   status?: string;
   // 这里保留 unknown：extParam 是 cloud event 透传上下文，不属于稳定业务字段。
@@ -100,10 +100,14 @@ export interface QuestionAskFact {
   raw?: unknown;
 }
 
-export interface PermissionAskFact {
+export interface PermissionAskFact extends ProviderFactBase {
   type: 'permission.ask';
-  toolSessionId: string;
-  messageId: string;
+  /**
+   * 可选消息归属上下文。
+   * permission 交互在 provider 现实中不总是天然 message-scoped，
+   * 因此 runtime 只把它当作可透传的诊断/展示上下文。
+   */
+  messageId?: string;
   partId: string;
   // permissionId 是全局唯一的 permission reply target，不依赖 toolSessionId 二次定位。
   permissionId: string;
@@ -114,20 +118,16 @@ export interface PermissionAskFact {
   raw?: unknown;
 }
 
-export interface PermissionReplyFact {
+export interface PermissionReplyFact extends ProviderFactBase {
   type: 'permission.reply';
-  toolSessionId: string;
   permissionId: string;
   response: 'once' | 'always' | 'reject';
-  messageId?: string;
-  partId?: string;
   permissionType?: string;
   raw?: unknown;
 }
 
-export interface MessageDoneFact {
+export interface MessageDoneFact extends ProviderFactBase {
   type: 'message.done';
-  toolSessionId: string;
   messageId: string;
   reason?: string;
   tokens?: unknown;
@@ -135,16 +135,14 @@ export interface MessageDoneFact {
   raw?: unknown;
 }
 
-export interface SessionTitleFact {
+export interface SessionTitleFact extends ProviderFactBase {
   type: 'session.title';
-  toolSessionId: string;
   title: string;
   raw?: unknown;
 }
 
-export interface SessionErrorFact {
+export interface SessionErrorFact extends ProviderFactBase {
   type: 'session.error';
-  toolSessionId: string;
   error: ProviderError;
   raw?: unknown;
 }
@@ -180,6 +178,8 @@ export interface ProviderRun {
   result(): Promise<ProviderTerminalResult>;
 }
 
+import type { ExtParameters } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
+
 export interface ProviderHealthInput {
   traceId: string;
 }
@@ -205,8 +205,8 @@ export interface ProviderRunMessageInput {
   toolSessionId: string;
   text: string;
   assistantId?: string;
-  // extParameters 来自服务端 chat 顶层字段，SDK 仅透传，不参与业务语义处理。
-  extParameters?: Record<string, unknown>;
+  // extParameters 来自 personal chat payload，SDK 仅透传，不参与业务语义处理。
+  extParameters?: ExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;

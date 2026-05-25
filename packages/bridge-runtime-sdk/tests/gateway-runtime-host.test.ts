@@ -8,7 +8,7 @@ import {
   normalizeBridgeGatewayHostConfig,
   type BridgeGatewayHostConnection,
   type BridgeGatewayHostState,
-} from '../src/application/gateway-host.ts';
+} from '../src/infrastructure/gateway/gateway-host.ts';
 import { resolvePackageVersion } from '../src/packageVersion.ts';
 
 class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {

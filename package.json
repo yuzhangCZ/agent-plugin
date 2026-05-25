@@ -33,6 +33,7 @@
     "test:qrcode-auth": "pnpm --dir packages/skill-qrcode-auth test",
     "test:skill-plugin-cli": "pnpm --dir packages/skill-plugin-cli test",
     "test:bridge-runtime-sdk": "pnpm --dir packages/bridge-runtime-sdk test",
+    "test:bridge:sdk-runtime": "pnpm --dir plugins/message-bridge run test:sdk-runtime",
     "test:bridge": "pnpm --dir plugins/message-bridge test",
     "test:openclaw": "pnpm --dir plugins/message-bridge-openclaw test",
     "test:release-local": "node --test ./scripts/release-local.test.mjs",

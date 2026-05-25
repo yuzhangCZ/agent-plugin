@@ -5,7 +5,7 @@ import { hasError } from '../types/sdk.js';
 export interface SubagentSessionMapping {
   childSessionId: string;
   parentSessionId: string;
-  agentName: string;
+  agentName?: string;
 }
 
 /** subagent 映射解析结果；lookup 失败时调用方应按原 session fail-open 转发。 */
@@ -25,7 +25,7 @@ export type SubagentSessionResolution =
 interface SessionCreatedRecord {
   childSessionId: string;
   parentSessionId?: string;
-  agentName: string;
+  agentName?: string;
 }
 
 type SessionLookupClient = Pick<BridgeSdkClient, 'session'>;
@@ -58,7 +58,7 @@ export class SubagentSessionMapper {
       this.childToParent.set(record.childSessionId, {
         childSessionId: record.childSessionId,
         parentSessionId: record.parentSessionId,
-        agentName: record.agentName,
+        ...(record.agentName ? { agentName: record.agentName } : {}),
       });
       this.rootSessions.delete(record.childSessionId);
       return;
@@ -113,7 +113,7 @@ export class SubagentSessionMapper {
       const mapping = {
         childSessionId: sessionId,
         parentSessionId,
-        agentName: asNonEmptyString(session.title) ?? 'subagent',
+        ...(asNonEmptyString(session.title) ? { agentName: asNonEmptyString(session.title) } : {}),
       } satisfies SubagentSessionMapping;
       this.childToParent.set(sessionId, mapping);
       this.rootSessions.delete(sessionId);

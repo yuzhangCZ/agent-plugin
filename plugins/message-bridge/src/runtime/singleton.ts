@@ -1,13 +1,15 @@
 import { randomUUID } from 'crypto';
 import { BridgeRuntime } from './BridgeRuntime.js';
+import { SdkBridgeRuntime } from './SdkBridgeRuntime.js';
+import type { ManagedRuntime } from './ManagedRuntime.js';
 import type { BridgeEvent, PluginInput } from './types.js';
 import { AppLogger } from './AppLogger.js';
 import { buildClientShapeSummary } from './clientShapeSummary.js';
 import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 
-let runtime: BridgeRuntime | null = null;
-let initializing: Promise<BridgeRuntime> | null = null;
+let runtime: ManagedRuntime | null = null;
+let initializing: Promise<ManagedRuntime> | null = null;
 let lifecycleAbortController: AbortController | null = null;
 let generation = 0;
 type RuntimeInitState = 'never' | 'initializing' | 'succeeded' | 'failed_latched';
@@ -80,7 +82,11 @@ function stopRuntimeInternal(options: { lock: boolean }): void {
   clearCurrentRuntimeTraceId();
 }
 
-function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit'): Promise<BridgeRuntime> {
+function resolveRuntimeMode(): 'sdk' | 'legacy' {
+  return process.env.MESSAGE_BRIDGE_RUNTIME_MODE?.trim() === 'legacy' ? 'legacy' : 'sdk';
+}
+
+function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit'): Promise<ManagedRuntime> {
   if (!runtime && !initializing && initState === 'never') {
     ensureCurrentRuntimeTraceId();
   }
@@ -97,12 +103,20 @@ function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit
   logger.info(attemptMessage);
   logger.info('runtime.singleton.client_shape', buildClientShapeSummary(input.client));
 
-  const candidate = new BridgeRuntime({
-    workspacePath: input.worktree || input.directory,
-    hostDirectory: input.worktree || input.directory,
-    client: input.client,
-    runtimeTraceId: ensureCurrentRuntimeTraceId(),
-  });
+  const runtimeMode = resolveRuntimeMode();
+  const candidate: ManagedRuntime = runtimeMode === 'legacy'
+    ? new BridgeRuntime({
+        workspacePath: input.worktree || input.directory,
+        hostDirectory: input.worktree || input.directory,
+        client: input.client,
+        runtimeTraceId: ensureCurrentRuntimeTraceId(),
+      })
+    : new SdkBridgeRuntime({
+        workspacePath: input.worktree || input.directory,
+        hostDirectory: input.worktree || input.directory,
+        client: input.client,
+        runtimeTraceId: ensureCurrentRuntimeTraceId(),
+      });
   const token = ++generation;
   lifecycleAbortController = new AbortController();
   initState = 'initializing';
@@ -119,7 +133,7 @@ function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit
       initState = 'succeeded';
       latchedInitError = null;
       explicitStopLocked = false;
-      logger.info('runtime.singleton.initialized');
+      logger.info('runtime.singleton.initialized', { runtimeMode });
       return candidate;
     })
     .catch((error) => {
@@ -149,7 +163,7 @@ export function cacheLoadedPluginInput(input: PluginInput): void {
   loadedPluginInput = input;
 }
 
-export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRuntime | null> {
+export async function getOrCreateRuntime(input: PluginInput): Promise<ManagedRuntime | null> {
   const logger = new AppLogger(
     input.client,
     { component: 'singleton' },
@@ -183,7 +197,7 @@ export async function getOrCreateRuntime(input: PluginInput): Promise<BridgeRunt
   return beginRuntimeInitialization(input, 'auto');
 }
 
-export function getRuntime(): BridgeRuntime | null {
+export function getRuntime(): ManagedRuntime | null {
   return runtime;
 }
 

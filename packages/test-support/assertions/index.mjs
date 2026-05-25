@@ -131,9 +131,10 @@ export function assertProjectedMessageUpdatedShape(message, expected = {}) {
   if ('sessionID' in expected) assert.strictEqual(info.sessionID, expected.sessionID);
   if ('role' in expected) assert.strictEqual(info.role, expected.role);
   if ('created' in expected) assert.strictEqual(info.time.created, expected.created);
-  if ('updated' in expected) assert.strictEqual(info.time.updated, expected.updated);
+  if ('completed' in expected) assert.strictEqual(info.time.completed, expected.completed);
   if ('model' in expected) assert.deepStrictEqual(info.model, expected.model);
-  if ('finishReason' in expected) assert.strictEqual(info.finish?.reason, expected.finishReason);
+  if ('finish' in expected) assert.strictEqual(info.finish, expected.finish);
+  if ('error' in expected) assert.deepStrictEqual(info.error, expected.error);
 
   const summary = message.properties?.info?.summary;
   if ('hasSummary' in expected) {

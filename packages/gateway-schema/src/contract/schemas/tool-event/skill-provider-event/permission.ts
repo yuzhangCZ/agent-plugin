@@ -3,25 +3,37 @@ import { z } from 'zod';
 import { requiredTrimmedString } from '../../shared.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
-const skillPermissionAskEventBaseSchema = z.object({
-  type: z.literal('permission.ask'),
-  properties: z.object({
-    messageId: requiredTrimmedString,
+const skillPermissionAskEventPropertiesSchema = z
+  .object({
+    messageId: requiredTrimmedString.optional(),
     partId: requiredTrimmedString,
-    toolCallId: requiredTrimmedString,
     permissionId: requiredTrimmedString,
     permType: requiredTrimmedString.optional(),
     title: requiredTrimmedString.optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
-  }).superRefine((value, ctx) => {
-    if (value.toolCallId !== value.permissionId) {
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (Object.prototype.hasOwnProperty.call(value, 'toolCallId')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['toolCallId'],
-        message: 'toolCallId must equal permissionId in cloud permission.ask properties',
+        message: 'toolCallId is not supported in cloud permission.ask properties',
       });
     }
-  }),
+  })
+  .transform(({ messageId, partId, permissionId, permType, title, metadata }) => ({
+    ...(messageId === undefined ? {} : { messageId }),
+    partId,
+    permissionId,
+    ...(permType === undefined ? {} : { permType }),
+    ...(title === undefined ? {} : { title }),
+    ...(metadata === undefined ? {} : { metadata }),
+  }));
+
+const skillPermissionAskEventBaseSchema = z.object({
+  type: z.literal('permission.ask'),
+  properties: skillPermissionAskEventPropertiesSchema,
 });
 
 const skillPermissionReplyEventBaseSchema = z.object({

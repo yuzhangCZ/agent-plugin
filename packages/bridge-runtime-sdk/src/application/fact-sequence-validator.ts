@@ -1,16 +1,7 @@
-import type { SkillProviderEvent } from '@agent-plugin/gateway-schema';
-
+import { classifyFact } from './fact-semantics.ts';
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
-import type { SessionLifecycleState } from './registries.ts';
-
-function toOptionalNumericRecord(value: unknown): Record<string, number> | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-  const entries = Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number');
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
+import type { SessionLifecycleState } from './ports/session-runtime-registry.ts';
 
 export type LifecycleProfileKind = 'request_run' | 'outbound';
 
@@ -25,12 +16,6 @@ export interface ValidationSessionState {
   openTextParts: Set<string>;
   openThinkingParts: Set<string>;
   knownToolCallIds: Set<string>;
-}
-
-export interface ValidationResult {
-  accepted: true;
-  projectFact: boolean;
-  derivedEvents: SkillProviderEvent[];
 }
 
 /**
@@ -53,22 +38,18 @@ export class FactSequenceValidator {
   }
 
   consume(
+    toolSessionId: string,
     fact: ProviderFact,
     state: ValidationSessionState,
     profile: LifecycleProfile,
     sessionLifecycle: SessionLifecycleState,
-  ): ValidationResult {
-    this.assertSessionLifecycle(fact, state, sessionLifecycle);
+  ): void {
+    this.assertSessionLifecycle(toolSessionId, fact, state, sessionLifecycle);
     this.assertFactOrder(fact, state, profile);
-
-    return {
-      accepted: true,
-      projectFact: fact.type !== 'message.start' && fact.type !== 'message.done',
-      derivedEvents: this.deriveEvents(fact),
-    };
   }
 
   private assertSessionLifecycle(
+    toolSessionId: string,
     fact: ProviderFact,
     state: ValidationSessionState,
     sessionLifecycle: SessionLifecycleState,
@@ -76,7 +57,7 @@ export class FactSequenceValidator {
     if (sessionLifecycle === 'closed') {
       throw new RuntimeContractError('fact_sequence_invalid', 'closed session must reject all facts', {
         factType: fact.type,
-        toolSessionId: fact.toolSessionId,
+        toolSessionId,
       });
     }
 
@@ -90,12 +71,9 @@ export class FactSequenceValidator {
       return;
     }
 
-    if (
-      fact.type === 'message.start'
-      || fact.type === 'question.ask'
-      || fact.type === 'permission.ask'
-      || fact.type === 'session.title'
-    ) {
+    const classification = classifyFact(fact.type);
+
+    if (classification.rejectInAbortingSession) {
       throw new RuntimeContractError('fact_sequence_invalid', 'aborting session rejects new activity facts', {
         factType: fact.type,
       });
@@ -124,10 +102,27 @@ export class FactSequenceValidator {
       case 'thinking.done':
       case 'tool.update':
       case 'question.ask':
-      case 'permission.ask':
-        if (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId)) {
+        if (
+          classifyFact(fact.type).requiresOpenMessage
+          && (!state.openMessages.has(fact.messageId) || state.closedMessages.has(fact.messageId))
+        ) {
           throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
             messageId: fact.messageId,
+            factType: fact.type,
+          });
+        }
+        break;
+      case 'permission.ask':
+        if (
+          classifyFact(fact.type).requiresOpenMessage
+          && (
+            !fact.messageId
+            || !state.openMessages.has(fact.messageId)
+            || state.closedMessages.has(fact.messageId)
+          )
+        ) {
+          throw new RuntimeContractError('fact_sequence_invalid', `${fact.type} requires an open message`, {
+            ...(fact.messageId ? { messageId: fact.messageId } : {}),
             factType: fact.type,
           });
         }
@@ -140,7 +135,7 @@ export class FactSequenceValidator {
         }
         state.openMessages.delete(fact.messageId);
         state.closedMessages.add(fact.messageId);
-        if (profile.kind === 'outbound') {
+        if (profile.kind === 'outbound' && classifyFact(fact.type).marksOutboundTerminal) {
           state.terminalReached = true;
         }
         return;
@@ -190,36 +185,5 @@ export class FactSequenceValidator {
     if (fact.type === 'question.ask') {
       return;
     }
-  }
-
-  private deriveEvents(fact: ProviderFact): SkillProviderEvent[] {
-    if (fact.type === 'message.start') {
-      return [
-        {
-          protocol: 'cloud',
-          type: 'step.start',
-          properties: {
-            messageId: fact.messageId,
-          },
-        },
-      ];
-    }
-
-    if (fact.type === 'message.done') {
-      return [
-        {
-          protocol: 'cloud',
-          type: 'step.done',
-          properties: {
-            messageId: fact.messageId,
-            ...(toOptionalNumericRecord(fact.tokens) ? { tokens: toOptionalNumericRecord(fact.tokens) } : {}),
-            ...(fact.cost !== undefined ? { cost: fact.cost } : {}),
-            ...(fact.reason ? { reason: fact.reason } : {}),
-          },
-        },
-      ];
-    }
-
-    return [];
   }
 }

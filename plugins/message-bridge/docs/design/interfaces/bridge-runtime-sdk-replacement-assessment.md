@@ -209,7 +209,7 @@ OpenCode `Question.Answer = string[]`，`Question.Reply = { answers: QuestionAns
 | `permission.asked` | `properties.sessionID` | `PermissionAskFact.toolSessionId` | `SDK 已满足` | 权限请求会话归属已有 fact 字段承载 |
 | `permission.asked` | `properties.partID/partId` | `PermissionAskFact.partId` | `SDK 已满足` | `partId` 已独立进入 fact；只表示消息组成部分的稳定分片 ID |
 | `permission.asked` | `properties.id` | `PermissionAskFact.permissionId` | `SDK 已满足` | 当前 gateway-schema 使用 `id`，进入 SDK fact 时统一命名为 `permissionId` |
-| `permission.asked` | `properties.toolCallId` | cloud `permission.ask.properties.toolCallId` | `SDK 已满足` | projector 固定输出 `toolCallId = permissionId`，并通过 schema 约束两者相等 |
+| `permission.asked` | `properties.toolCallId` | 无 | `不纳入` | `permission.ask` 共享 contract 已移除 `toolCallId`；正式标识仅保留 `permissionId` |
 | `permission.asked` | `properties.messageID` | `PermissionAskFact.messageId` | `SDK 已满足` | 用于关联触发权限请求的消息 |
 | `permission.asked` | `properties.type` | `PermissionAskFact.permissionType` | `SDK 已满足` | gateway-schema `type` 可映射到现有 `permissionType` |
 | `permission.asked` | `properties.title` | `PermissionAskFact.title` | `SDK 已满足` | title 已提升为 typed 展示字段，不再依赖 `metadata.title` |

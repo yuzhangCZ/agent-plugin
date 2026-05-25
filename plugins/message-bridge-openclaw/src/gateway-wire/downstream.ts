@@ -7,7 +7,7 @@ import {
 
 import type { BridgeLogger } from "../types.js";
 import type { DownstreamMessage } from "../contracts/downstream.js";
-import { asRecord, asTrimmedString, hasOwn, type PlainObject } from "../utils/type-guards.js";
+import { asRecord, asTrimmedString, type PlainObject } from "../utils/type-guards.js";
 
 export * from "../contracts/downstream.js";
 
@@ -47,33 +47,6 @@ function buildMessagePreview(raw: unknown): PlainObject {
     type: asTrimmedString(message.type),
     keys: Object.keys(message).slice(0, 8),
   };
-}
-
-function prevalidateCompatibility(raw: unknown): DownstreamNormalizationError | null {
-  const message = asRecord(raw);
-  if (
-    !message ||
-    message.type !== DOWNSTREAM_MESSAGE_TYPE.INVOKE ||
-    message.action !== INVOKE_ACTION.QUESTION_REPLY ||
-    !asRecord(message.payload)
-  ) {
-    return null;
-  }
-
-  const payload = asRecord(message.payload)!;
-  if (hasOwn(payload, "toolCallId") && typeof payload.toolCallId === "string" && !payload.toolCallId.trim()) {
-    return {
-      code: "invalid_payload",
-      message: "question_reply toolCallId must be a non-empty string when provided",
-      stage: "payload",
-      field: "payload.toolCallId",
-      messageType: DOWNSTREAM_MESSAGE_TYPE.INVOKE,
-      action: INVOKE_ACTION.QUESTION_REPLY,
-      welinkSessionId: asTrimmedString(message.welinkSessionId),
-    };
-  }
-
-  return null;
 }
 
 function toNormalizationError(error: WireContractViolation): DownstreamNormalizationError {
@@ -118,12 +91,6 @@ export function normalizeDownstreamMessage(
   raw: unknown,
   logger?: BridgeLogger,
 ): NormalizeResult<DownstreamMessage> {
-  const compatibilityError = prevalidateCompatibility(raw);
-  if (compatibilityError) {
-    logDownstreamNormalizationFailure(logger, raw, compatibilityError);
-    return { ok: false, error: compatibilityError };
-  }
-
   const result = normalizeSharedDownstream(raw);
   if (!result.ok) {
     const error = toNormalizationError(result.error);
