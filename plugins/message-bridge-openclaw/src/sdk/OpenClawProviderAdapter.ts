@@ -118,6 +118,7 @@ interface ActiveRunState {
   pendingFinalText: string | null;
   pendingToolResultTarget: string | null;
   streamingEnabled: boolean;
+  titleEmitted: boolean;
   toolStates: Map<string, ActiveToolState>;
 }
 
@@ -161,15 +162,6 @@ function pickToolPayload(value: Record<string, unknown>, keys: string[]): unknow
     }
   }
   return undefined;
-}
-
-function scheduleOutboundAfterCreateSession(callback: () => void): void {
-  if (typeof setImmediate === "function") {
-    setImmediate(callback);
-    return;
-  }
-
-  setTimeout(callback, 0);
 }
 
 function createDeferred<T>() {
@@ -388,9 +380,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     assistantId?: string;
   }): Promise<{ toolSessionId: string }> {
     const toolSessionId = createToolSessionId();
-    // OpenClaw 无独立会话标题事件，建会后使用 session_id 作为对 gateway 的稳定标题。
     this.options.sessionRegistry.ensure(toolSessionId);
-    this.emitCreatedSessionTitleSoon(toolSessionId);
     return { toolSessionId };
   }
 
@@ -422,6 +412,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       pendingFinalText: null,
       pendingToolResultTarget: null,
       streamingEnabled: this.options.account.streaming !== false,
+      titleEmitted: false,
       toolStates: new Map(),
     };
 
@@ -810,6 +801,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     state.started = true;
+    if (!state.titleEmitted) {
+      state.titleEmitted = true;
+      state.queue.push(buildSessionTitleFact({
+        toolSessionId: state.toolSessionId,
+        title: state.toolSessionId,
+      }));
+    }
     state.queue.push(buildMessageStartFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
@@ -904,28 +902,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     this.approvalRegistry.markResolved(permissionId);
-  }
-
-  private emitCreatedSessionTitleSoon(toolSessionId: string): void {
-    // createSession 返回后 SDK 会先发 session_created；title outbound 延后一轮，避免抢在建会回包前。
-    scheduleOutboundAfterCreateSession(() => {
-      this.emitRuntimeOutboundFacts({
-        toolSessionId,
-        messageId: `msg_${randomUUID()}`,
-        trigger: "create_session.title",
-        facts: [
-          buildSessionTitleFact({
-            toolSessionId,
-            title: toolSessionId,
-          }),
-        ],
-      }).catch((error) => {
-        this.options.logger.warn("runtime.session_title_emit.failed", {
-          toolSessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    });
   }
 
   private async emitRuntimeOutboundFacts(input: {
