@@ -74,9 +74,14 @@ test("provider adapter fallback emits ordered facts and completed result", async
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
-  assert.equal(facts[1].content, "hello from subagent");
+  assert.deepEqual(facts[0], {
+    type: "session.title",
+    toolSessionId: "tool-1",
+    title: "tool-1",
+  });
+  assert.equal(facts[2].content, "hello from subagent");
   await assert.doesNotReject(run.result());
   assert.deepEqual(await run.result(), { outcome: "completed" });
 });
@@ -147,12 +152,33 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   ]);
 });
 
-test("provider adapter createSession generates ses_ prefixed ids", async () => {
-  const provider = createAdapter();
+test("provider adapter createSession waits for runtime response before emitting title fact", async () => {
+  const emitted = [];
+  const sessionRegistry = new SessionRegistry("agent:acct");
+  const provider = createAdapter({ sessionRegistry });
 
-  const created = await provider.createSession();
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage(input) {
+        const facts = [];
+        for await (const fact of input.facts) {
+          facts.push(fact);
+        }
+        emitted.push({ input, facts });
+        return { applied: true };
+      },
+    },
+  });
+
+  const created = await provider.createSession({
+    traceId: "trace-1",
+    title: "Requested Title",
+  });
+  await flushEvents();
 
   assert.match(created.toolSessionId, /^ses_/);
+  assert.equal(sessionRegistry.get(created.toolSessionId).title, created.toolSessionId);
+  assert.deepEqual(emitted, []);
 });
 
 test("provider adapter rejects question replies as unsupported", async () => {
@@ -369,7 +395,7 @@ test("provider adapter maps runtime assistant events to text delta facts", async
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.delta", "text.delta", "text.done", "message.done"],
+    ["session.title", "message.start", "text.delta", "text.delta", "text.done", "message.done"],
   );
   assert.deepEqual(
     facts.filter((fact) => fact.type === "text.delta").map((fact) => fact.content),
@@ -439,7 +465,7 @@ test("provider adapter maps runtime reasoning events to thinking facts", async (
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "thinking.delta", "thinking.done", "text.done", "message.done"],
+    ["session.title", "message.start", "thinking.delta", "thinking.done", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "thinking.delta").content, "thinking");
   assert.equal(facts.find((fact) => fact.type === "thinking.done").content, "thinking");
@@ -505,7 +531,7 @@ test("provider adapter suppresses assistant deltas when account streaming is dis
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "final answer");
 });
@@ -559,7 +585,7 @@ test("provider adapter suppresses runtime reply block deltas when config streami
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "partial final");
 });

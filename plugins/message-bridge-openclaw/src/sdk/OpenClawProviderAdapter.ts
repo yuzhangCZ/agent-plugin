@@ -23,6 +23,7 @@ import {
   buildMessageStartFact,
   buildPermissionAskFact,
   buildSessionErrorFact,
+  buildSessionTitleFact,
   buildThinkingDeltaFact,
   buildThinkingDoneFact,
   buildTextDeltaFact,
@@ -117,6 +118,7 @@ interface ActiveRunState {
   pendingFinalText: string | null;
   pendingToolResultTarget: string | null;
   streamingEnabled: boolean;
+  titleEmitted: boolean;
   toolStates: Map<string, ActiveToolState>;
 }
 
@@ -372,7 +374,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { online: this.options.isOnline() };
   }
 
-  async createSession(): Promise<{ toolSessionId: string }> {
+  async createSession(input: {
+    traceId: string;
+    title?: string;
+    assistantId?: string;
+  }): Promise<{ toolSessionId: string }> {
     const toolSessionId = createToolSessionId();
     this.options.sessionRegistry.ensure(toolSessionId);
     return { toolSessionId };
@@ -406,6 +412,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       pendingFinalText: null,
       pendingToolResultTarget: null,
       streamingEnabled: this.options.account.streaming !== false,
+      titleEmitted: false,
       toolStates: new Map(),
     };
 
@@ -794,6 +801,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     state.started = true;
+    if (!state.titleEmitted) {
+      state.titleEmitted = true;
+      state.queue.push(buildSessionTitleFact({
+        toolSessionId: state.toolSessionId,
+        title: state.toolSessionId,
+      }));
+    }
     state.queue.push(buildMessageStartFact({
       toolSessionId: state.toolSessionId,
       messageId: state.messageId,
@@ -894,7 +908,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     toolSessionId: string;
     messageId: string;
     trigger: string;
-    facts: ProviderFact[];
+    facts: ProviderFact[] | AsyncIterable<ProviderFact>;
   }): Promise<void> {
     if (!this.outbound) {
       return;
@@ -903,7 +917,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       toolSessionId: input.toolSessionId,
       messageId: input.messageId,
       trigger: input.trigger,
-      facts: this.iterateFacts(input.facts),
+      facts: Array.isArray(input.facts) ? this.iterateFacts(input.facts) : input.facts,
     });
   }
 
@@ -915,11 +929,15 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private extractToolSessionIdFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
     const metadata = pickRecord(payload, "metadata");
+    const info = pickRecord(payload, "info");
+    const session = pickRecord(payload, "session");
     const tool = pickRecord(payload, "tool");
     return (
       asTrimmedString(payload.toolSessionId) ??
       asTrimmedString(payload.sessionID) ??
       asTrimmedString(payload.sessionId) ??
+      asTrimmedString(info?.id) ??
+      asTrimmedString(session?.id) ??
       asTrimmedString(metadata?.toolSessionId) ??
       asTrimmedString(metadata?.sessionID) ??
       asTrimmedString(tool?.sessionID)
