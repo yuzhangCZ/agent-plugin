@@ -842,7 +842,7 @@ test('provider adapter reuses legacy subagent mapping to route child facts into 
   );
 });
 
-test('provider adapter writes subagent envelope fields for outbound child events after session.created prewarm', async () => {
+test('provider adapter does not emit detached child permission.asked after session.created prewarm', async () => {
   const outboundMessages = [];
   const adapter = createAdapter({
     bindings: [['ses-parent-outbound-1', 'ses-parent-outbound-1']],
@@ -869,7 +869,7 @@ test('provider adapter writes subagent envelope fields for outbound child events
       },
     },
   });
-  await adapter.handleEvent({
+  const handled = await adapter.handleEvent({
     type: 'permission.asked',
     properties: {
       sessionID: 'ses-child-outbound-1',
@@ -883,46 +883,11 @@ test('provider adapter writes subagent envelope fields for outbound child events
     },
   });
 
-  assert.deepEqual(
-    outboundMessages.map((message) => ({
-      ...message,
-      facts: message.facts.map((fact) => ({
-        ...fact,
-        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
-      })),
-    })),
-    [
-    {
-      toolSessionId: 'ses-parent-outbound-1',
-      facts: [
-        {
-          type: 'permission.ask',
-          subagentSessionId: 'ses-child-outbound-1',
-          subagentName: 'planner-agent',
-          messageId: 'msg-perm-1',
-          partId: '<generated>',
-          permissionId: 'perm-1',
-          permissionType: 'shell',
-          title: 'Need permission',
-          raw: {
-            sessionID: 'ses-child-outbound-1',
-            id: 'perm-1',
-            type: 'shell',
-            title: 'Need permission',
-            tool: {
-              messageID: 'msg-perm-1',
-              callID: 'call-perm-1',
-            },
-          },
-        },
-      ],
-    },
-    ],
-  );
-  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
+  assert.equal(handled, false);
+  assert.deepEqual(outboundMessages, []);
 });
 
-test('provider adapter omits subagentName when mapper only knows child parent relation without reliable title', async () => {
+test('provider adapter does not emit detached child permission.asked when subagent title is unavailable', async () => {
   const outboundMessages = [];
   const adapter = createAdapter({
     bindings: [['ses-parent-no-name-1', 'ses-parent-no-name-1']],
@@ -948,7 +913,7 @@ test('provider adapter omits subagentName when mapper only knows child parent re
       },
     },
   });
-  await adapter.handleEvent({
+  const handled = await adapter.handleEvent({
     type: 'permission.asked',
     properties: {
       sessionID: 'ses-child-no-name-1',
@@ -960,41 +925,11 @@ test('provider adapter omits subagentName when mapper only knows child parent re
     },
   });
 
-  assert.deepEqual(
-    outboundMessages.map((message) => ({
-      ...message,
-      facts: message.facts.map((fact) => ({
-        ...fact,
-        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
-      })),
-    })),
-    [
-    {
-      toolSessionId: 'ses-parent-no-name-1',
-      facts: [
-        {
-          type: 'permission.ask',
-          subagentSessionId: 'ses-child-no-name-1',
-          messageId: 'msg-no-name-1',
-          partId: '<generated>',
-          permissionId: 'perm-no-name-1',
-          raw: {
-            sessionID: 'ses-child-no-name-1',
-            id: 'perm-no-name-1',
-            tool: {
-              messageID: 'msg-no-name-1',
-              callID: 'call-no-name-1',
-            },
-          },
-        },
-      ],
-    },
-    ],
-  );
-  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
+  assert.equal(handled, false);
+  assert.deepEqual(outboundMessages, []);
 });
 
-test('provider adapter fail-opens outbound child events on subagent lookup failure when raw session is directly owned', async () => {
+test('provider adapter fail-closes detached child permission.asked on subagent lookup failure when raw session is directly owned', async () => {
   const warnings = [];
   const logger = {
     ...createLogger(),
@@ -1035,38 +970,8 @@ test('provider adapter fail-opens outbound child events on subagent lookup failu
     },
   });
 
-  assert.equal(handled, true);
-  assert.deepEqual(
-    outboundMessages.map((message) => ({
-      ...message,
-      facts: message.facts.map((fact) => ({
-        ...fact,
-        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
-      })),
-    })),
-    [
-    {
-      toolSessionId: 'ses-child-fail-open-1',
-      facts: [
-        {
-          type: 'permission.ask',
-          messageId: 'msg-fail-open-1',
-          partId: '<generated>',
-          permissionId: 'perm-fail-open-1',
-          raw: {
-            sessionID: 'ses-child-fail-open-1',
-            id: 'perm-fail-open-1',
-            tool: {
-              messageID: 'msg-fail-open-1',
-              callID: 'call-fail-open-1',
-            },
-          },
-        },
-      ],
-    },
-    ],
-  );
-  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
+  assert.equal(handled, false);
+  assert.deepEqual(outboundMessages, []);
   assert.deepEqual(warnings, [
     {
       message: 'provider_adapter.subagent_lookup_failed',
@@ -1078,7 +983,7 @@ test('provider adapter fail-opens outbound child events on subagent lookup failu
   ]);
 });
 
-test('provider adapter records root session.created so later events avoid lazy subagent lookup', async () => {
+test('provider adapter records root session.created even when detached permission.asked is no longer emitted', async () => {
   let sessionGetCalls = 0;
   const outboundMessages = [];
   const adapter = createAdapter({
@@ -1129,39 +1034,9 @@ test('provider adapter records root session.created so later events avoid lazy s
     },
   });
 
-  assert.equal(handled, true);
+  assert.equal(handled, false);
   assert.equal(sessionGetCalls, 0);
-  assert.deepEqual(
-    outboundMessages.map((message) => ({
-      ...message,
-      facts: message.facts.map((fact) => ({
-        ...fact,
-        ...(fact.type === 'permission.ask' ? { partId: '<generated>' } : {}),
-      })),
-    })),
-    [
-    {
-      toolSessionId: 'ses-root-created-1',
-      facts: [
-        {
-          type: 'permission.ask',
-          messageId: 'msg-root-created-1',
-          partId: '<generated>',
-          permissionId: 'perm-root-created-1',
-          raw: {
-            sessionID: 'ses-root-created-1',
-            id: 'perm-root-created-1',
-            tool: {
-              messageID: 'msg-root-created-1',
-              callID: 'call-root-created-1',
-            },
-          },
-        },
-      ],
-    },
-    ],
-  );
-  assert.match(outboundMessages[0]?.facts[0]?.partId ?? '', /^prt_[0-9a-f]{32}$/);
+  assert.deepEqual(outboundMessages, []);
 });
 
 test('provider adapter cleans child tracking state after subagent run completes', async () => {
@@ -1894,7 +1769,7 @@ test('provider adapter records diagnostic when assistant completed arrives witho
   }]);
 });
 
-test('provider adapter emits permission.reply through outbound continuation when no active run owns the event', async () => {
+test('provider adapter ignores detached permission.replied when no active run owns the event', async () => {
   const outboundCalls = [];
   const adapter = createAdapter({
     bindings: [['tool-outbound', 'tool-outbound']],
@@ -1922,20 +1797,8 @@ test('provider adapter emits permission.reply through outbound continuation when
     },
   });
 
-  assert.strictEqual(handled, true);
-  assert.strictEqual(outboundCalls.length, 1);
-  assert.strictEqual(outboundCalls[0].toolSessionId, 'tool-outbound');
-  assert.strictEqual(outboundCalls[0].facts.length, 1);
-  assert.deepEqual(outboundCalls[0].facts[0], {
-    type: 'permission.reply',
-    permissionId: 'permission-1',
-    response: 'always',
-    raw: {
-      sessionID: 'tool-outbound',
-      requestID: 'permission-1',
-      reply: 'always',
-    },
-  });
+  assert.strictEqual(handled, false);
+  assert.deepEqual(outboundCalls, []);
 });
 
 test('provider adapter records received upstream event routing diagnostics', async () => {
@@ -1969,11 +1832,11 @@ test('provider adapter records received upstream event routing diagnostics', asy
     },
   });
 
-  assert.equal(handled, true);
-  assert.equal(outboundCalls.length, 1);
+  assert.equal(handled, false);
+  assert.equal(outboundCalls.length, 0);
   assert.deepEqual(
     debugs.map((entry) => entry.message),
-    ['provider_adapter.event.received', 'provider_adapter.event.routed_to_outbound'],
+    ['provider_adapter.event.received'],
   );
   assert.deepEqual(debugs[0].extra, {
     eventType: 'session.updated',
@@ -1983,16 +1846,9 @@ test('provider adapter records received upstream event routing diagnostics', asy
     hasActiveRun: false,
     hasRuntimeContext: true,
   });
-  assert.deepEqual(debugs[1].extra, {
-    eventType: 'session.updated',
-    factTypes: ['session.title'],
-    toolSessionId: 'tool-session-42',
-    messageId: debugs[1].extra.messageId,
-  });
-  assert.equal(typeof debugs[1].extra.messageId, 'string');
 });
 
-test('provider adapter emits session.title from session.updated outbound continuation', async () => {
+test('provider adapter ignores detached session.updated title continuation', async () => {
   const outboundCalls = [];
   const adapter = createAdapter({
     bindings: [['tool-session-42', 'tool-session-42']],
@@ -2017,22 +1873,11 @@ test('provider adapter emits session.title from session.updated outbound continu
     },
   });
 
-  assert.strictEqual(handled, true);
-  assert.strictEqual(outboundCalls.length, 1);
-  assert.strictEqual(outboundCalls[0].input.toolSessionId, 'tool-session-42');
-  assert.deepEqual(outboundCalls[0].facts, [{
-    type: 'session.title',
-    title: '讨论项目架构',
-    raw: {
-      info: {
-        id: 'tool-session-42',
-        title: '讨论项目架构',
-      },
-    },
-  }]);
+  assert.strictEqual(handled, false);
+  assert.deepEqual(outboundCalls, []);
 });
 
-test('provider adapter ignores session.updated without info.title and records diagnostics', async () => {
+test('provider adapter ignores detached session.updated without title silently', async () => {
   const warnings = [];
   const logger = {
     ...createLogger(),
@@ -2061,12 +1906,7 @@ test('provider adapter ignores session.updated without info.title and records di
   });
 
   assert.strictEqual(handled, false);
-  assert.deepEqual(warnings, [{
-    message: 'provider_adapter.session_updated_ignored',
-    extra: {
-      reason: 'missing_title',
-    },
-  }]);
+  assert.deepEqual(warnings, []);
 });
 
 test('provider adapter ignores message.updated when no active run owns it', async () => {
