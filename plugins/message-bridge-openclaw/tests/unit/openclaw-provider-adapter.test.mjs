@@ -104,7 +104,11 @@ test("provider adapter abort closes active run and suppresses late runtime reply
       channel: {
         routing: {
           resolveAgentRoute() {
-            return { accountId: "acct", agentId: "agent" };
+            return {
+              accountId: "acct",
+              agentId: "agent",
+              sessionKey: "agent:agent:message-bridge:direct:ses_abort_active_1",
+            };
           },
         },
         reply: {
@@ -156,7 +160,7 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   assert.deepEqual(calls, [
     {
       kind: "abort",
-      sessionKey: "agent:acct:ses_abort_active_1",
+      sessionKey: "agent:agent:message-bridge:direct:ses_abort_active_1",
       runId: "host-run-1",
     },
   ]);
@@ -563,7 +567,11 @@ test("provider adapter suppresses runtime reply block deltas when config streami
       channel: {
         routing: {
           resolveAgentRoute() {
-            return { accountId: "acct", agentId: "agent" };
+            return {
+              accountId: "acct",
+              agentId: "agent",
+              sessionKey: "agent:agent:message-bridge:direct:ses_stream_disabled_1",
+            };
           },
         },
         reply: {
@@ -603,6 +611,310 @@ test("provider adapter suppresses runtime reply block deltas when config streami
     ["session.title", "message.start", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "partial final");
+});
+
+test("provider adapter uses OpenClaw route session key for runtime reply context and active run mapping", async () => {
+  let capturedCtx;
+  let capturedRunSessionKey;
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return {
+              accountId: "acct",
+              agentId: "main",
+              sessionKey: "agent:main:message-bridge:direct:ses_route_1",
+              mainSessionKey: "agent:main:main",
+              lastRoutePolicy: "session",
+            };
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            capturedCtx = input;
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ ctx, dispatcherOptions, replyOptions }) {
+            capturedRunSessionKey = ctx.SessionKey;
+            replyOptions.onAgentRunStart("host-run-route-1");
+            await dispatcherOptions.deliver({ text: "hello" }, { kind: "final" });
+          },
+        },
+      },
+    },
+  });
+
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-route-1",
+    toolSessionId: "ses_route_1",
+    text: "hi",
+  });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.equal(capturedCtx.SessionKey, "agent:main:message-bridge:direct:ses_route_1");
+  assert.equal(capturedRunSessionKey, "agent:main:message-bridge:direct:ses_route_1");
+  assert.equal(facts.find((fact) => fact.type === "text.done").content, "hello");
+});
+
+test("provider adapter records inbound session before runtime reply dispatch", async () => {
+  const calls = [];
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return {
+              accountId: "acct",
+              agentId: "main",
+              sessionKey: "agent:main:message-bridge:direct:ses_record_1",
+              mainSessionKey: "agent:main:main",
+              lastRoutePolicy: "session",
+            };
+          },
+        },
+        session: {
+          resolveStorePath(_store, opts) {
+            calls.push({ kind: "resolveStorePath", agentId: opts.agentId });
+            return "/tmp/openclaw-session-store.json";
+          },
+          async recordInboundSession(input) {
+            calls.push({
+              kind: "recordInboundSession",
+              sessionKey: input.sessionKey,
+              provider: input.ctx.Provider,
+              body: input.ctx.BodyForAgent,
+            });
+          },
+          readSessionUpdatedAt() {
+            return undefined;
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ ctx, dispatcherOptions }) {
+            calls.push({ kind: "dispatch", sessionKey: ctx.SessionKey });
+            await dispatcherOptions.deliver({ text: "recorded" }, { kind: "final" });
+          },
+        },
+      },
+    },
+  });
+
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-record-1",
+    toolSessionId: "ses_record_1",
+    text: "hi dashboard",
+  });
+
+  for await (const _fact of run.facts) {
+    // drain facts
+  }
+
+  assert.deepEqual(calls, [
+    { kind: "resolveStorePath", agentId: "main" },
+    {
+      kind: "recordInboundSession",
+      sessionKey: "agent:main:message-bridge:direct:ses_record_1",
+      provider: "message-bridge",
+      body: "hi dashboard",
+    },
+    { kind: "dispatch", sessionKey: "agent:main:message-bridge:direct:ses_record_1" },
+  ]);
+});
+
+test("provider adapter resolves inbound session store from effective config", async () => {
+  const calls = [];
+  const provider = createAdapter({
+    config: {
+      session: {
+        store: "/tmp/custom-openclaw-sessions-{agentId}.json",
+      },
+    },
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return {
+              accountId: "acct",
+              agentId: "worker",
+              sessionKey: "agent:worker:message-bridge:direct:ses_store_1",
+            };
+          },
+        },
+        session: {
+          resolveStorePath(store, opts) {
+            calls.push({ kind: "resolveStorePath", store, agentId: opts.agentId });
+            return "/tmp/custom-openclaw-sessions-worker.json";
+          },
+          async recordInboundSession(input) {
+            calls.push({ kind: "recordInboundSession", storePath: input.storePath });
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }) {
+            await dispatcherOptions.deliver({ text: "stored" }, { kind: "final" });
+          },
+        },
+      },
+    },
+  });
+
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-store-1",
+    toolSessionId: "ses_store_1",
+    text: "hi store",
+  });
+
+  for await (const _fact of run.facts) {
+    // drain facts
+  }
+
+  assert.deepEqual(calls, [
+    {
+      kind: "resolveStorePath",
+      store: "/tmp/custom-openclaw-sessions-{agentId}.json",
+      agentId: "worker",
+    },
+    { kind: "recordInboundSession", storePath: "/tmp/custom-openclaw-sessions-worker.json" },
+  ]);
+});
+
+test("provider adapter fails runtime reply when route resolver does not return a session key", async () => {
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { accountId: "acct", agentId: "main" };
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher() {
+            throw new Error("dispatch_should_not_run");
+          },
+        },
+      },
+    },
+  });
+
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-route-missing-session-1",
+    toolSessionId: "ses_missing_route_session_1",
+    text: "hi missing route",
+  });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.deepEqual(
+    facts.map((fact) => fact.type),
+    ["session.error"],
+  );
+  assert.equal(facts[0].error.message, "openclaw_route_session_key_unavailable");
+  assert.deepEqual(await run.result(), {
+    outcome: "failed",
+    error: {
+      code: "internal_error",
+      message: "openclaw_route_session_key_unavailable",
+    },
+  });
+});
+
+test("provider adapter fallback passes canonical session key to subagent runtime when route resolver exists", async () => {
+  const calls = [];
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return {
+              accountId: "acct",
+              agentId: "main",
+              sessionKey: "agent:main:message-bridge:direct:ses_fallback_route_1",
+              mainSessionKey: "agent:main:main",
+              lastRoutePolicy: "session",
+            };
+          },
+        },
+      },
+    },
+    getSubagentRuntime: () => ({
+      async run(input) {
+        calls.push({ kind: "run", sessionKey: input.sessionKey, message: input.message });
+        return { runId: "sub-route-1" };
+      },
+      async waitForRun() {
+        return { status: "ok" };
+      },
+      async getSessionMessages(input) {
+        calls.push({ kind: "get", sessionKey: input.sessionKey });
+        return { messages: [{ role: "assistant", content: "fallback routed" }] };
+      },
+    }),
+  });
+
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-fallback-route-1",
+    toolSessionId: "ses_fallback_route_1",
+    text: "hi fallback",
+  });
+
+  for await (const _fact of run.facts) {
+    // drain facts
+  }
+
+  assert.deepEqual(calls, [
+    {
+      kind: "run",
+      sessionKey: "agent:main:message-bridge:direct:ses_fallback_route_1",
+      message: "hi fallback",
+    },
+    { kind: "get", sessionKey: "agent:main:message-bridge:direct:ses_fallback_route_1" },
+  ]);
 });
 
 test("provider adapter maps runtime approval gateway events and resolves permissions", async () => {
@@ -831,7 +1143,11 @@ test("provider adapter debug logs raw runtime agent and reply dispatcher events"
       channel: {
         routing: {
           resolveAgentRoute() {
-            return { accountId: "acct", agentId: "agent" };
+            return {
+              accountId: "acct",
+              agentId: "agent",
+              sessionKey: "agent:agent:message-bridge:direct:ses_raw_1",
+            };
           },
         },
         reply: {
@@ -894,7 +1210,7 @@ test("provider adapter debug logs raw runtime agent and reply dispatcher events"
         toolSessionId: "ses_raw_1",
         payload: {
           stream: "assistant",
-          sessionKey: "agent:acct:ses_raw_1",
+          sessionKey: "agent:agent:message-bridge:direct:ses_raw_1",
           data: {
             text: "hello",
             delta: "hello",

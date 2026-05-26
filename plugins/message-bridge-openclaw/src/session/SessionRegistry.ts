@@ -40,6 +40,13 @@ export class SessionRegistry {
     return this.byToolSessionId.get(toolSessionId);
   }
 
+  bindSessionKey(toolSessionId: string, sessionKey: string): MessageBridgeSessionRecord {
+    const record = this.ensure(toolSessionId);
+    record.sessionKey = sessionKey;
+    record.updatedAt = Date.now();
+    return record;
+  }
+
   delete(toolSessionId: string): MessageBridgeSessionRecord | undefined {
     const existing = this.byToolSessionId.get(toolSessionId);
     this.byToolSessionId.delete(toolSessionId);
