@@ -30,7 +30,7 @@ import { EventFilter } from '../event/EventFilter.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
-import { getMessageBridgeStatus, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
+import { readMessageBridgeStatusSnapshot, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { isBridgeStartupError, validateBridgeStartup } from './Startup.js';
@@ -222,10 +222,16 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       logger: this.logger.child({ component: 'session_isolation' }),
     });
     const runtimeAnchorRegistry = new RuntimeAnchorRegistry();
+    const sessionIsolationStorePath = new AkScopedEntrySessionStorePathResolver({
+      ...(this.sessionIsolationDataDir ? { dataDir: this.sessionIsolationDataDir } : {}),
+    }).resolve({ authAk: config.auth.ak });
+    this.logger.info('session_isolation.store.configured', {
+      filePath: sessionIsolationStorePath,
+      pathMode: 'unix_user_local_share',
+      hasOverrideDataDir: Boolean(this.sessionIsolationDataDir),
+    });
     const ownedSessionRepository = new FileOwnedSessionRepository({
-      filePath: new AkScopedEntrySessionStorePathResolver({
-        ...(this.sessionIsolationDataDir ? { dataDir: this.sessionIsolationDataDir } : {}),
-      }).resolve({ authAk: config.auth.ak }),
+      filePath: sessionIsolationStorePath,
       diagnostics: sessionIsolationDiagnostics,
     });
     const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
@@ -513,7 +519,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     }
 
     if (status.state === 'ready') {
-      const publicStatus = getMessageBridgeStatus();
+      const publicStatus = readMessageBridgeStatusSnapshot();
       if (publicStatus.phase === 'ready' && publicStatus.connected) {
         return;
       }

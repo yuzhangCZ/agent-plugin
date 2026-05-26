@@ -130,6 +130,18 @@ function buildImmediateFailedRun(
   };
 }
 
+function hasPlatformBusinessSessionId(extParameters: unknown): boolean {
+  if (typeof extParameters !== 'object' || extParameters === null || Array.isArray(extParameters)) {
+    return false;
+  }
+  const platformExtParam = (extParameters as Record<string, unknown>).platformExtParam;
+  if (typeof platformExtParam !== 'object' || platformExtParam === null || Array.isArray(platformExtParam)) {
+    return false;
+  }
+  const businessSessionId = (platformExtParam as Record<string, unknown>).businessSessionId;
+  return typeof businessSessionId === 'string' && businessSessionId.trim().length > 0;
+}
+
 /**
  * OpenCode provider adapter。
  * @remarks
@@ -240,6 +252,12 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         ...(input.assistantId ? { assistantId: input.assistantId } : {}),
         ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),
         ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+      });
+      this.logger.info('runtime_sdk.provider.createSession.session_isolation_resolved', {
+        resultKind: result.kind,
+        toolSessionId: result.toolSessionId,
+        hasExtParameters: input.extParameters !== undefined,
+        hasPlatformBusinessSessionId: hasPlatformBusinessSessionId(input.extParameters),
       });
       return {
         toolSessionId: result.toolSessionId,

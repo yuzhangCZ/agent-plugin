@@ -6,6 +6,7 @@ import {
 import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
+  readMessageBridgeStatusSnapshot,
 } from './MessageBridgeStatusStore.js';
 import {
   createConnectingStatus,
@@ -44,7 +45,7 @@ export function createBridgeRuntimeStatusAdapter(
 ): BridgeRuntimeStatusAdapter {
   const now = deps.now ?? Date.now;
   const publish = deps.publish ?? publishMessageBridgeStatus;
-  const read = deps.read ?? getMessageBridgeStatus;
+  const read = deps.read ?? readMessageBridgeStatusSnapshot;
 
   return {
     publishConnecting() {

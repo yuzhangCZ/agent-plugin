@@ -6,6 +6,7 @@ import {
   configureMessageBridgeStatusLogger,
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
+  readMessageBridgeStatusSnapshot,
   resetMessageBridgeStatus,
   subscribeMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
@@ -97,6 +98,18 @@ describe('message bridge status store', () => {
     assert.strictEqual(queryLogs[0].extra.unavailableReason, snapshot.unavailableReason);
     assert.strictEqual(queryLogs[0].extra.willReconnect, snapshot.willReconnect);
     assert.strictEqual(queryLogs[0].extra.updatedAt, snapshot.updatedAt);
+    assert.strictEqual(queryLogs[0].extra.querySource, 'runtime_api');
+  });
+
+  test('internal status snapshot read does not log query noise', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+
+    const snapshot = readMessageBridgeStatusSnapshot();
+    await flushLogs();
+
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(logs.filter((entry) => entry?.message === 'status_api.query').length, 0);
   });
 
   test('logs subscribe and unsubscribe with listener count', async () => {

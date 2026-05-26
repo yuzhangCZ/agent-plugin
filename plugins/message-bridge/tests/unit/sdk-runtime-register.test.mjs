@@ -281,6 +281,34 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
   }
 });
 
+test('sdk runtime logs session-isolation store file path during startup', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const logs = [];
+
+  try {
+    const runtime = await startSdkRuntime({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const storeLogs = logs.filter((entry) => entry?.message === 'session_isolation.store.configured');
+    assert.equal(storeLogs.length, 1);
+    assert.equal(storeLogs[0].level, 'info');
+    assert.equal(storeLogs[0].extra.pathMode, 'unix_user_local_share');
+    assert.equal(storeLogs[0].extra.hasOverrideDataDir, true);
+    assert.match(storeLogs[0].extra.filePath, /entry-session-store\.json$/u);
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
 test('sdk runtime keeps non-not-found session.get failures aligned with legacy control-plane semantics', async () => {
   const { restore } = installRegisterCaptureWebSocket();
 

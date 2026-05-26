@@ -74,6 +74,20 @@ function createLogger() {
   };
 }
 
+function createCapturingLogger(logs) {
+  const write = (level) => (message, extra) => {
+    logs.push({ level, message, extra });
+  };
+  return {
+    debug: write('debug'),
+    info: write('info'),
+    warn: write('warn'),
+    error: write('error'),
+    child: () => createCapturingLogger(logs),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 function createSdkClient(overrides = {}) {
   return {
     session: {
@@ -587,7 +601,9 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
 
 test('provider adapter createSession delegates creation and ownership to session-isolation command port', async () => {
   const calls = [];
+  const logs = [];
   const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
     hostDirectory: '/workspace/formal-create',
     createSessionCommandPort: {
       execute: async (input) => {
@@ -619,6 +635,55 @@ test('provider adapter createSession delegates creation and ownership to session
     assistantId: 'assistant-formal',
     directory: '/workspace/formal-create',
     extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
+  }]);
+  assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{
+    level: 'info',
+    message: 'runtime_sdk.provider.createSession.session_isolation_resolved',
+    extra: {
+      resultKind: 'entry_owned',
+      toolSessionId: 'ses-formal-create',
+      hasExtParameters: true,
+      hasPlatformBusinessSessionId: true,
+    },
+  }]);
+});
+
+test('provider adapter createSession logs anchor-only session-isolation result when business id is absent', async () => {
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    createSessionCommandPort: {
+      execute: async () => ({
+        kind: 'anchor_only',
+        toolSessionId: 'tool-anchor-only',
+      }),
+    },
+  });
+
+  const result = await adapter.createSession({
+    traceId: 'trace-create-anchor-only',
+    welinkSessionId: 'welink-create-anchor-only',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'miniapp',
+        businessSessionType: 'direct',
+        businessSessionId: null,
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    toolSessionId: 'tool-anchor-only',
+  });
+  assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{
+    level: 'info',
+    message: 'runtime_sdk.provider.createSession.session_isolation_resolved',
+    extra: {
+      resultKind: 'anchor_only',
+      toolSessionId: 'tool-anchor-only',
+      hasExtParameters: true,
+      hasPlatformBusinessSessionId: false,
+    },
   }]);
 });
 

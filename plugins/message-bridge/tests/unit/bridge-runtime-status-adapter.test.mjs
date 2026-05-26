@@ -6,8 +6,24 @@ import {
 } from '../../src/runtime/BridgeRuntimeStatusAdapter.ts';
 import {
   __resetMessageBridgeStatusForTests,
+  configureMessageBridgeStatusLogger,
   getMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
+
+function createLoggingClient(logs) {
+  return {
+    app: {
+      log: async (options) => {
+        logs.push(options?.body);
+        return true;
+      },
+    },
+  };
+}
+
+async function flushLogs() {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
 
 describe('bridge runtime status adapter', () => {
   beforeEach(() => {
@@ -191,5 +207,17 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(snapshot.phase, 'unavailable');
     assert.strictEqual(snapshot.unavailableReason, 'config_invalid');
     assert.strictEqual(snapshot.lastError, 'invalid auth config');
+  });
+
+  test('publishing status through adapter does not log status api query noise', async () => {
+    const logs = [];
+    configureMessageBridgeStatusLogger(createLoggingClient(logs));
+    const adapter = createBridgeRuntimeStatusAdapter();
+
+    adapter.publishConnecting();
+    adapter.publishGatewayState('READY');
+    await flushLogs();
+
+    assert.strictEqual(logs.filter((entry) => entry?.message === 'status_api.query').length, 0);
   });
 });
