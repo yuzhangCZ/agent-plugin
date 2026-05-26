@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 
 import type { OwnedSessionRepository } from '../../../port/session-isolation/index.js';
 import type { OwnedSessionRecord } from '../../../port/session-isolation/dto/records/index.js';
+import type { SessionIsolationDiagnosticsPort } from '../../../port/session-isolation/outbound/index.js';
 
 type PersistedSessionRecord = {
   origin: 'welink-entry-owned';
@@ -41,6 +42,7 @@ export class FileOwnedSessionRepository implements OwnedSessionRepository {
     onCorruptBackup?: (backupPath: string) => void;
     onCorruptBackupFailed?: (error: unknown) => void;
     onInvalidRecord?: (sessionId: string) => void;
+    diagnostics?: SessionIsolationDiagnosticsPort;
   }) {}
 
   async findByEntryKey(input: { akScopeKey: string; entryKey: string }): Promise<OwnedSessionRecord[]> {
@@ -116,6 +118,12 @@ export class FileOwnedSessionRepository implements OwnedSessionRepository {
         };
       }
       this.options.onCorruptStore?.(error);
+      this.options.diagnostics?.record({
+        kind: 'owned_session_store_corrupt',
+        severity: 'warn',
+        filePath: this.options.filePath,
+        errorMessage: this.toErrorMessage(error),
+      });
       return {
         corrupted: true,
         state: this.emptyState(),
@@ -153,6 +161,12 @@ export class FileOwnedSessionRepository implements OwnedSessionRepository {
         continue;
       }
       this.options.onInvalidRecord?.(sessionId);
+      this.options.diagnostics?.record({
+        kind: 'owned_session_store_invalid_record',
+        severity: 'warn',
+        filePath: this.options.filePath,
+        sessionId,
+      });
     }
     return validSessions;
   }
@@ -181,8 +195,20 @@ export class FileOwnedSessionRepository implements OwnedSessionRepository {
     try {
       await copyFile(this.options.filePath, backupPath);
       this.options.onCorruptBackup?.(backupPath);
+      this.options.diagnostics?.record({
+        kind: 'owned_session_store_backup_created',
+        severity: 'warn',
+        filePath: this.options.filePath,
+        backupPath,
+      });
     } catch (error) {
       this.options.onCorruptBackupFailed?.(error);
+      this.options.diagnostics?.record({
+        kind: 'owned_session_store_backup_failed',
+        severity: 'error',
+        filePath: this.options.filePath,
+        errorMessage: this.toErrorMessage(error),
+      });
       // 损坏备份不应掩盖本次正式写入；写入失败本身会向上抛出。
     }
   }
@@ -210,5 +236,9 @@ export class FileOwnedSessionRepository implements OwnedSessionRepository {
 
   private now(): number {
     return this.options.now?.() ?? Date.now();
+  }
+
+  private toErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 }

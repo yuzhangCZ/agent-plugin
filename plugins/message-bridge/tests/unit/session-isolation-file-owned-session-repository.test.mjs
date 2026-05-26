@@ -9,6 +9,7 @@ import {
   AkScopedEntrySessionStorePathResolver,
   FileOwnedSessionRepository,
 } from '../../src/adapter/session-isolation/repository/index.ts';
+import { SessionIsolationDiagnostics } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'mb-owned-sessions-'));
@@ -241,6 +242,126 @@ describe('FileOwnedSessionRepository', () => {
         })).map((record) => record.sessionId).sort(),
         ['ses-concurrent-second', 'ses-owned'],
       );
+    });
+  });
+
+  test('records structured diagnostics for corrupt stores, invalid records, and backup failures', async () => {
+    await withTempDir(async (dir) => {
+      const diagnostics = new SessionIsolationDiagnostics();
+      const filePath = join(dir, 'entry-session-store.json');
+      await writeFile(filePath, JSON.stringify({
+        schemaVersion: 1,
+        sessions: {
+          invalid: {
+            origin: 'welink-entry-owned',
+            entryKey: 'im:group:group-a',
+            controlled: true,
+            permissionProfile: 'invalid-profile',
+            createdAt: 100,
+          },
+        },
+      }), 'utf8');
+
+      const repository = new FileOwnedSessionRepository({
+        filePath,
+        diagnostics,
+      });
+      await repository.findByEntryKey({ akScopeKey: 'ak-test', entryKey: 'im:group:group-a' });
+
+      assert.equal(diagnostics.getSnapshot().counters.owned_session_store_invalid_record, 1);
+      assert.deepStrictEqual(diagnostics.getSnapshot().lastEvent, {
+        kind: 'owned_session_store_invalid_record',
+        severity: 'warn',
+        filePath,
+        sessionId: 'invalid',
+      });
+
+      await writeFile(filePath, '{ broken json', 'utf8');
+      await repository.findByEntryKey({ akScopeKey: 'ak-test', entryKey: 'im:group:group-a' });
+
+      assert.equal(diagnostics.getSnapshot().counters.owned_session_store_corrupt, 1);
+    });
+  });
+
+  test('records backup failure diagnostics without hiding the original write failure', async () => {
+    await withTempDir(async (dir) => {
+      const diagnostics = new SessionIsolationDiagnostics();
+      const repository = new FileOwnedSessionRepository({
+        filePath: dir,
+        diagnostics,
+      });
+
+      await assert.rejects(
+        () => repository.upsert(ownedRecord),
+        /EISDIR|ENOTDIR|EEXIST/u,
+      );
+
+      assert.equal(diagnostics.getSnapshot().counters.owned_session_store_corrupt, 1);
+      assert.equal(diagnostics.getSnapshot().counters.owned_session_store_backup_failed, 1);
+      assert.equal(diagnostics.getSnapshot().lastEvent.kind, 'owned_session_store_backup_failed');
+    });
+  });
+
+  test('writes structured diagnostics to logger according to severity', () => {
+    const calls = [];
+    const logger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: (message, extra) => calls.push({ level: 'warn', message, extra }),
+      error: (message, extra) => calls.push({ level: 'error', message, extra }),
+      child: () => logger,
+      getTraceId: () => 'trace-test',
+    };
+    const diagnostics = new SessionIsolationDiagnostics({
+      logger,
+      now: () => 1234,
+    });
+
+    diagnostics.record({
+      kind: 'owned_session_store_invalid_record',
+      severity: 'warn',
+      filePath: '/tmp/store.json',
+      sessionId: 'ses-invalid',
+    });
+    diagnostics.record({
+      kind: 'ownership_mutation_failed',
+      severity: 'error',
+      operation: 'bindOwnedSession',
+      toolSessionId: 'tool-1',
+      sessionId: 'ses-1',
+      errorMessage: 'boom',
+    });
+
+    assert.deepStrictEqual(calls.map((call) => ({
+      level: call.level,
+      message: call.message,
+      diagnosticKind: call.extra.diagnosticKind,
+    })), [
+      {
+        level: 'warn',
+        message: 'session_isolation.diagnostic',
+        diagnosticKind: 'owned_session_store_invalid_record',
+      },
+      {
+        level: 'error',
+        message: 'session_isolation.diagnostic',
+        diagnosticKind: 'ownership_mutation_failed',
+      },
+    ]);
+    assert.deepStrictEqual(diagnostics.getSnapshot(), {
+      counters: {
+        owned_session_store_invalid_record: 1,
+        ownership_mutation_failed: 1,
+      },
+      lastEvent: {
+        kind: 'ownership_mutation_failed',
+        severity: 'error',
+        operation: 'bindOwnedSession',
+        toolSessionId: 'tool-1',
+        sessionId: 'ses-1',
+        errorMessage: 'boom',
+      },
+      updatedAt: 1234,
     });
   });
 });

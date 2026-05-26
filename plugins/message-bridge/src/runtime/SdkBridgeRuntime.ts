@@ -54,6 +54,7 @@ import {
   EntryAwareChatSessionResolver,
   RuntimeAnchorRegistry,
   RuntimePendingInteractionRegistry,
+  SessionIsolationDiagnostics,
   createSessionIsolationControlPlane,
 } from './sdk/session-isolation/index.js';
 import {
@@ -217,11 +218,15 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       businessEntryKeyResolver,
       businessEntryPolicyResolver,
     });
+    const sessionIsolationDiagnostics = new SessionIsolationDiagnostics({
+      logger: this.logger.child({ component: 'session_isolation' }),
+    });
     const runtimeAnchorRegistry = new RuntimeAnchorRegistry();
     const ownedSessionRepository = new FileOwnedSessionRepository({
       filePath: new AkScopedEntrySessionStorePathResolver({
         ...(this.sessionIsolationDataDir ? { dataDir: this.sessionIsolationDataDir } : {}),
       }).resolve({ authAk: config.auth.ak }),
+      diagnostics: sessionIsolationDiagnostics,
     });
     const sessionIsolationControlPlane = createSessionIsolationControlPlane({
       akScopeKey: config.auth.ak,
@@ -229,6 +234,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       ownershipResolver,
       businessEntryKeyResolver,
       ownedSessionRepository,
+      diagnostics: sessionIsolationDiagnostics,
       hostSessionQueryPort,
       sessionCreationPort,
       sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,

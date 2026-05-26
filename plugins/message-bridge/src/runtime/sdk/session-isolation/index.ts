@@ -1,5 +1,6 @@
 export * from './RuntimeSessionIsolationFacade.js';
 export * from './SessionIsolationControlPlaneFactory.js';
+export * from './SessionIsolationDiagnostics.js';
 export * from './DefaultBusinessEntryKeyResolver.js';
 export * from './RuntimePendingInteractionRegistry.js';
 export * from './RuntimeAnchorRegistry.js';

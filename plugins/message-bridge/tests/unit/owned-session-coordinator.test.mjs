@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { DefaultEntryKeyCodec } from '../../src/domain/session-isolation/EntryKeyCodec.ts';
 import { DefaultOwnedSessionCoordinator } from '../../src/usecase/session-isolation/OwnedSessionCoordinator.ts';
+import { SessionIsolationDiagnostics } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 class MemoryOwnedSessionRepository {
   records = new Map();
@@ -182,5 +183,47 @@ describe('DefaultOwnedSessionCoordinator', () => {
     assert.strictEqual(await anchorBindingRepository.get('tool-b'), undefined);
     assert.strictEqual(await attachOwnerRepository.get('ses-deleted'), undefined);
     assert.deepStrictEqual([...ownedSessionRepository.records.values()], []);
+  });
+
+  test('records ownership mutation failure diagnostics before rethrowing', async () => {
+    const diagnostics = new SessionIsolationDiagnostics();
+    const error = new Error('owned store unavailable');
+    const coordinator = new DefaultOwnedSessionCoordinator({
+      akScopeKey: 'ak-test',
+      entryKeyCodec: new DefaultEntryKeyCodec(),
+      ownedSessionRepository: {
+        upsert: async () => {
+          throw error;
+        },
+        deleteBySessionId: async () => undefined,
+        findByEntryKey: async () => [],
+        findBySessionId: async () => undefined,
+      },
+      anchorBindingRepository: new MemoryAnchorBindingRepository(),
+      attachOwnerRepository: new MemoryAttachOwnerRepository(),
+      diagnostics,
+    });
+
+    await assert.rejects(
+      () => coordinator.bindOwnedSession({
+        toolSessionId: 'tool-failed',
+        sessionId: 'ses-failed',
+        entryKey: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-failed',
+        },
+      }),
+      /owned store unavailable/u,
+    );
+
+    assert.deepStrictEqual(diagnostics.getSnapshot().lastEvent, {
+      kind: 'ownership_mutation_failed',
+      severity: 'error',
+      operation: 'bindOwnedSession',
+      toolSessionId: 'tool-failed',
+      sessionId: 'ses-failed',
+      errorMessage: 'owned store unavailable',
+    });
   });
 });

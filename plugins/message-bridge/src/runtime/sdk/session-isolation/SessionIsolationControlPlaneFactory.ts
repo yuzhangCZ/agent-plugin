@@ -37,6 +37,7 @@ import {
   DefaultSessionDeletedEventHandler,
 } from '../../../adapter/session-isolation/event/index.js';
 import type {
+  SessionIsolationDiagnosticsPort,
   OwnedHostEventForwarder,
   OwnedSessionRepository,
 } from '../../../port/session-isolation/outbound/index.js';
@@ -58,6 +59,7 @@ export interface SessionIsolationControlPlaneDependencies {
   pendingInteractionRegistry: RuntimePendingInteractionRegistry;
   ownedHostEventForwarder: OwnedHostEventForwarder;
   ownedSessionRepository?: OwnedSessionRepository;
+  diagnostics?: SessionIsolationDiagnosticsPort;
   runtimeAnchorRepository?: RuntimeAnchorRepository;
   toolSessionIdFactory?: () => string;
   legacyQuestionListPort?: LegacyQuestionListPort;
@@ -98,6 +100,7 @@ export function createSessionIsolationControlPlane(
     ownedSessionRepository,
     anchorBindingRepository,
     attachOwnerRepository,
+    ...(dependencies.diagnostics ? { diagnostics: dependencies.diagnostics } : {}),
   });
   const resolveEntrySessionContextUseCase = new DefaultResolveEntrySessionContextUseCase({
     akScopeKey: dependencies.akScopeKey,

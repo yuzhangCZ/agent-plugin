@@ -5,3 +5,4 @@ export * from './InteractionLookupBridge.js';
 export * from './OwnedHostEventForwarder.js';
 export * from './OwnedSessionRepository.js';
 export * from './SdkExecutionBridge.js';
+export * from './SessionIsolationDiagnosticsPort.js';
