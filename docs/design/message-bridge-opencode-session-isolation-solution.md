@@ -61,7 +61,7 @@
 - 旧 `create_session` 在无法形成合法 `entryKey` 时，不创建 host session，只创建一个 `anchor-only runtime anchor` 并分配 `toolSessionId`。
 - `close_session` 删除当前 `toolSessionId` 绑定到的 host `sessionId`；删除成功后按 `sessionId` 粒度立即清理 ownership、attach owner 和全部相关 binding。
 - request run 的正式归属锚点是 `toolSessionId`；`abort_session` 不得跨锚点中断共享 host session 上的其他 run。
-- `question_reply` / `permission_reply` 的 pending interaction 属于进程内运行时状态，插件重启后不恢复，映射缺失时统一 fail-closed。
+- `question_reply` / `permission_reply` 的 pending interaction 属于进程内运行时状态，插件重启后不恢复；映射缺失、当前 binding 缺失或当前 binding 已切换到其他 host `sessionId` 时统一 fail-closed。
 
 为便于阅读，全文后续内容围绕四个核心问题展开：
 
@@ -126,6 +126,7 @@ payload.extParameters.platformExtParam.businessSessionId
 - 历史字段只在显式字段缺失时用于补全。
 - `title` 保留为建会话时传给宿主的 prompt/展示型入参，不参与 `BusinessEntryKey` 解析。
 - `close_session`、`abort_session`、`question_reply`、`permission_reply` 不基于 `extParameters` 做目标选择、删除判定、回复恢复或业务入口路由。
+- `question_reply` / `permission_reply` 只允许使用 interaction 注册时记录的 `hostSessionId` 做一致性校验；不得在 reply 阶段基于 host `sessionId` 扫描或恢复旧 interaction。
 
 对 `chat`，若三元组缺失，则执行补全：
 
@@ -162,8 +163,8 @@ payload.extParameters.platformExtParam.businessSessionId
 | `create_session` | `payload.extParameters.platformExtParam.businessSessionDomain/type/id` | 无正式 entry 补全；缺合法 `entryKey` 时走 `anchor-only` 兼容路径；`title` 不参与隔离语义 | 正式参与 `BusinessEntryKey` 解析；与 `chat` 复用同一 `ExtParameters` 契约 | 有合法 `entryKey` 时按正式建会话路径处理；否则仅创建 `anchor-only` runtime anchor，不调用 `session.create` |
 | `close_session` | 无 | `payload.toolSessionId` 命中 runtime binding | 即使存在也不参与目标解析 | `toolSessionId` 未绑定或已失效时按幂等失败处理 |
 | `abort_session` | 无 | `payload.toolSessionId` 命中 active run | 即使存在也不参与目标解析 | 当前 `toolSessionId` 无活跃 run 时按幂等失败处理 |
-| `question_reply` | 无 | `payload.questionId` 命中 pending interaction | 即使存在也不参与恢复 | 映射缺失时 fail-closed |
-| `permission_reply` | 无 | `payload.permissionId` 命中 pending interaction | 即使存在也不参与恢复 | 映射缺失时 fail-closed |
+| `question_reply` | 无 | `payload.questionId` 命中 pending interaction | 即使存在也不参与恢复 | 映射缺失，或映射的 `toolSessionId + hostSessionId` 与当前 binding 不一致时 fail-closed |
+| `permission_reply` | 无 | `payload.permissionId` 命中 pending interaction | 即使存在也不参与恢复 | 映射缺失，或映射的 `toolSessionId + hostSessionId` 与当前 binding 不一致时 fail-closed |
 
 ### 3.3 双层锚点模型
 
@@ -338,8 +339,10 @@ interface AnchorOnlyRuntimeAnchorRecord {
 - `abort_session` 只能中断当前 `toolSessionId` 的活跃 run。
 - `anchor-only runtime anchor` 也可以承载 runtime 路由语义，但在首次合法 `chat` 前不承载 host session 生命周期语义。
 - pending question / permission interaction 映射属于 process-local runtime state。
+- pending interaction 映射必须记录 `tokenId -> toolSessionId + hostSessionId`，其中 `tokenId` 是 `questionId` 或 `permissionId`。
+- `question_reply` / `permission_reply` 执行前必须校验当前 `toolSessionId` 仍绑定到最初产生该 interaction 的同一个 host `sessionId`。
 - 插件重启后不恢复 pending interaction 映射。
-- `question_reply` / `permission_reply` 在映射缺失时统一 fail-closed。
+- `question_reply` / `permission_reply` 在映射缺失、当前 binding 缺失、当前 binding 已切换到其他 host `sessionId` 时统一 fail-closed。
 - 不允许基于 `extParameters`、业务入口或 host `sessionId` 反推旧 interaction 进行恢复。
 - 当前版本不为 `anchor-only runtime anchor` 引入空闲超时自动回收。
 - `anchor-only runtime anchor` 仅在以下情况消失：
@@ -347,6 +350,45 @@ interface AnchorOnlyRuntimeAnchorRecord {
   - 首次合法 `chat` 成功完成 bootstrap 并转入 bound 状态
   - 进程重启导致 process-local 状态整体丢失
 - 当前版本允许同一旧客户端多次 `create_session` 生成多个 `anchor-only runtime anchor`；数量治理不属于本轮正式语义。
+
+pending interaction 的注册与回复校验时序如下：
+
+```mermaid
+sequenceDiagram
+  participant Host as OpenCode Host
+  participant Provider as SDK Provider
+  participant Router as Event Router
+  participant Registry as PendingInteractionRegistry
+  participant Gateway as Gateway
+  participant User as 用户
+  participant Reply as Reply Command
+  participant Binding as AnchorBindingRepository
+  participant OpenCode as OpenCode Reply API
+
+  Host->>Provider: question.asked / permission.asked(sessionId, tokenId)
+  Provider->>Router: handleEvent(event)
+  Router->>Router: sessionId -> toolSessionId(anchor) + attached hostSessionId
+  Router->>Registry: register(tokenId, toolSessionId, hostSessionId=attached hostSessionId)
+  Router->>Gateway: 发送 question.ask / permission.ask
+  Gateway->>User: 展示交互卡片
+
+  User->>Gateway: question_reply / permission_reply(tokenId)
+  Gateway->>Provider: reply(tokenId, answer/response)
+  Provider->>Reply: execute(tokenId, answer/response)
+  Reply->>Registry: consume(tokenId)
+  Registry-->>Reply: toolSessionId + hostSessionId
+  Reply->>Binding: get(toolSessionId)
+  Binding-->>Reply: current hostSessionId
+
+  alt current hostSessionId matches registered hostSessionId
+    Reply->>OpenCode: reply(tokenId, answer/response)
+    OpenCode-->>Reply: 已应用
+  else missing or switched binding
+    Reply-->>Provider: fail-closed
+  end
+```
+
+该校验不改变 OpenCode reply API 的入参。host `sessionId` 只作为会话隔离安全校验，不作为 `question_reply` / `permission_reply` 的路由主键。subagent 事件的 raw `sessionId` 是 child session，注册 pending interaction 时必须记录其归属 anchor 当前绑定的 parent host `sessionId`，否则后续回复会被误判为 binding 已切换。
 
 ### 3.6 ownership 与可见性分层
 

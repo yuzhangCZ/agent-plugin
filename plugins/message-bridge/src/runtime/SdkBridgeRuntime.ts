@@ -228,6 +228,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       }).resolve({ authAk: config.auth.ak }),
       diagnostics: sessionIsolationDiagnostics,
     });
+    const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
     const sessionIsolationControlPlane = createSessionIsolationControlPlane({
       akScopeKey: config.auth.ak,
       bindingStore,
@@ -238,7 +239,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       hostSessionQueryPort,
       sessionCreationPort,
       sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,
-      pendingInteractionRegistry: new RuntimePendingInteractionRegistry(),
+      pendingInteractionRegistry,
       runtimeAnchorRepository: runtimeAnchorRegistry,
       toolSessionIdFactory: () => randomUUID(),
       ownedHostEventForwarder: {
@@ -293,6 +294,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       questionReplyCommandPort: sessionIsolationControlPlane.questionReplyCommandPort,
       permissionReplyCommandPort: sessionIsolationControlPlane.permissionReplyCommandPort,
       hostEventPort: sessionIsolationControlPlane.hostEventPort,
+      pendingInteractionRecorder: pendingInteractionRegistry,
       effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
       directoryMappingEnabled: directoryMappingPort.isConfigured(),
       opencodeSessionGatewayAdapter,

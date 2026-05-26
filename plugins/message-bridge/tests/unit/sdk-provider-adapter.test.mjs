@@ -261,6 +261,7 @@ function createAdapter(overrides = {}) {
     ...(overrides.questionReplyCommandPort ? { questionReplyCommandPort: overrides.questionReplyCommandPort } : {}),
     ...(overrides.permissionReplyCommandPort ? { permissionReplyCommandPort: overrides.permissionReplyCommandPort } : {}),
     ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
+    ...(overrides.pendingInteractionRecorder ? { pendingInteractionRecorder: overrides.pendingInteractionRecorder } : {}),
     effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
     directoryMappingEnabled: false,
     opencodeSessionGatewayAdapter,
@@ -1209,6 +1210,61 @@ test('provider adapter reuses legacy subagent mapping to route child facts into 
   );
 });
 
+test('provider adapter records subagent pending interactions against parent host session', async () => {
+  const promptDeferred = createDeferred();
+  const pendingInteractions = [];
+  const adapter = createAdapter({
+    bindings: [['ses-parent-pending-1', 'ses-parent-pending-1']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-subagent-pending',
+    runId: 'run-subagent-pending',
+    toolSessionId: 'ses-parent-pending-1',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'session.created',
+    properties: {
+      info: {
+        id: 'ses-child-pending-1',
+        parentID: 'ses-parent-pending-1',
+        title: 'research-agent',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'ses-child-pending-1',
+      id: 'perm-child-pending-1',
+      type: 'shell',
+      title: 'Need permission',
+      tool: {
+        messageID: 'msg-child-permission-1',
+        callID: 'call-child-permission-1',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.equal(facts.some((fact) => fact.type === 'permission.ask'), true);
+  assert.deepEqual(pendingInteractions, [{
+    kind: 'permission',
+    tokenId: 'perm-child-pending-1',
+    toolSessionId: 'ses-parent-pending-1',
+    hostSessionId: 'ses-parent-pending-1',
+  }]);
+});
+
 test('provider adapter does not emit detached child permission.asked after session.created prewarm', async () => {
   const outboundMessages = [];
   const adapter = createAdapter({
@@ -1508,8 +1564,12 @@ test('provider adapter resolves ProviderRun.result() only after facts drain clos
 
 test('provider adapter maps permission.asked tool context and synthesizes compatible partId fallback', async () => {
   const promptDeferred = createDeferred();
+  const pendingInteractions = [];
   const adapter = createAdapter({
     bindings: [['tool-permission', 'tool-permission']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
     session: {
       prompt: async () => promptDeferred.promise,
     },
@@ -1594,12 +1654,30 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     },
   );
   assert.match(facts[1].partId, /^prt_[0-9a-f]{32}$/);
+  assert.deepEqual(pendingInteractions, [
+    {
+      kind: 'permission',
+      tokenId: 'perm-1',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-2',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+  ]);
 });
 
 test('provider adapter maps question.asked multiple to question.ask multiSelect', async () => {
   const promptDeferred = createDeferred();
+  const pendingInteractions = [];
   const adapter = createAdapter({
     bindings: [['tool-question', 'tool-question']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
     session: {
       prompt: async () => promptDeferred.promise,
     },
@@ -1704,6 +1782,12 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
       },
     },
   ]);
+  assert.deepEqual(pendingInteractions, [{
+    kind: 'question',
+    tokenId: 'question-1',
+    toolSessionId: 'tool-question',
+    hostSessionId: 'tool-question',
+  }]);
 });
 
 test('provider adapter synthesizes question partId fallback without reusing questionId', async () => {

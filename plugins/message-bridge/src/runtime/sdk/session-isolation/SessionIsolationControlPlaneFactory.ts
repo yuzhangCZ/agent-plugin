@@ -45,10 +45,6 @@ import type { RuntimePendingInteractionRegistry } from './RuntimePendingInteract
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
 import { SessionIsolationSlashCommandExecutor } from './SessionIsolationSlashCommandExecutor.js';
 
-type LegacyQuestionListPort = {
-  listQuestions(): Promise<unknown[]>;
-};
-
 export interface SessionIsolationControlPlaneDependencies {
   akScopeKey: string;
   bindingStore: ToolSessionBindingStore;
@@ -63,7 +59,6 @@ export interface SessionIsolationControlPlaneDependencies {
   diagnostics?: SessionIsolationDiagnosticsPort;
   runtimeAnchorRepository?: RuntimeAnchorRepository;
   toolSessionIdFactory?: () => string;
-  legacyQuestionListPort?: LegacyQuestionListPort;
 }
 
 export interface SessionIsolationControlPlane {
@@ -141,9 +136,6 @@ export function createSessionIsolationControlPlane(
   const interactionLookupBridge = new PendingInteractionLookupBridge({
     pendingInteractionRegistry: dependencies.pendingInteractionRegistry,
     anchorBindingRepository,
-    ...(dependencies.legacyQuestionListPort
-      ? { legacyQuestionListPort: dependencies.legacyQuestionListPort }
-      : {}),
   });
   const questionReplyCommandPort = new DefaultQuestionReplyCommandUseCase({
     interactionLookupBridge,

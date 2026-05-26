@@ -36,6 +36,7 @@ import type {
   ExecutionSessionInvalidationPort,
   SdkChatPreprocessor,
 } from './SdkChatControlPlane.js';
+import type { PendingInteractionRecorderPort } from './OpenCodeProviderAdapter.types.js';
 import {
   ActiveRunRegistry,
   ActiveProviderRunHandle,
@@ -82,6 +83,7 @@ type ProviderAdapterOptions = {
   createdSessionBindingPort: CreatedSessionBindingPort;
   subagentSessionMapper: SubagentSessionMapper;
   hostEventPort?: HostEventPort;
+  pendingInteractionRecorder?: PendingInteractionRecorderPort;
 };
 
 function fromFacts<T>(facts: T[]): AsyncIterable<T> {
@@ -207,6 +209,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       activeRunTranslatorRegistry,
       outboundTranslatorRegistry,
       ...(options.hostEventPort ? { sessionIsolationHostEventPort: options.hostEventPort } : {}),
+      ...(options.pendingInteractionRecorder ? { pendingInteractionRecorder: options.pendingInteractionRecorder } : {}),
       getRuntimeContext: () => this.runtimeContext,
     });
   }

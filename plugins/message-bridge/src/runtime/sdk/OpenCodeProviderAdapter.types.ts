@@ -22,6 +22,7 @@ export type SessionIdentityResolution =
       rawSessionId: string;
       anchorSessionId: string;
       trackingSessionId: string;
+      hostSessionId: string;
       subagentSessionId?: string;
       subagentName?: string;
     }
@@ -30,6 +31,7 @@ export type SessionIdentityResolution =
       rawSessionId: string;
       anchorSessionId: string;
       trackingSessionId: string;
+      hostSessionId: string;
       lookupFailedCause: unknown;
     }
   | {
@@ -51,6 +53,15 @@ export interface ProtocolDiagnosticPort {
 
 export interface TranslationObservationPort {
   sessionUpdatedIgnored(reason: 'missing_session_id' | 'missing_title'): void;
+}
+
+export interface PendingInteractionRecorderPort {
+  record(input: {
+    kind: 'question' | 'permission';
+    tokenId: string;
+    toolSessionId: string;
+    hostSessionId: string;
+  }): void;
 }
 
 export interface AssistantMessageStateStorePort {

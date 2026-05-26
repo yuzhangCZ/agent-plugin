@@ -2,6 +2,7 @@ type PendingInteractionKind = 'question' | 'permission';
 
 export interface PendingInteractionRecord {
   toolSessionId: string;
+  hostSessionId: string;
   kind: PendingInteractionKind;
   tokenId: string;
 }
@@ -15,6 +16,10 @@ export class RuntimePendingInteractionRegistry {
 
   register(record: PendingInteractionRecord): void {
     this.records.set(this.key(record.kind, record.tokenId), record);
+  }
+
+  record(record: PendingInteractionRecord): void {
+    this.register(record);
   }
 
   consume(input: { kind: PendingInteractionKind; tokenId: string }): PendingInteractionRecord | undefined {

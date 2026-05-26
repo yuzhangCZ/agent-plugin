@@ -10,6 +10,7 @@ import type { BridgeEvent } from '../types.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type {
   FactSessionContext,
+  PendingInteractionRecorderPort,
   ProtocolDiagnosticPort,
   SessionIdentityResolution,
   TranslationObservationPort,
@@ -104,6 +105,7 @@ export class EventSessionIdentityResolver {
         rawSessionId,
         anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
+        hostSessionId: resolution.mapping.parentSessionId,
         subagentSessionId: resolution.mapping.childSessionId,
         ...(resolution.mapping.agentName ? { subagentName: resolution.mapping.agentName } : {}),
       };
@@ -123,6 +125,7 @@ export class EventSessionIdentityResolver {
         rawSessionId,
         anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
+        hostSessionId: rawSessionId,
         lookupFailedCause: resolution.error,
       };
     }
@@ -139,6 +142,7 @@ export class EventSessionIdentityResolver {
       rawSessionId,
       anchorSessionId: anchorResolution.anchor,
       trackingSessionId: rawSessionId,
+      hostSessionId: rawSessionId,
     };
   }
 }
@@ -198,6 +202,7 @@ export class ProviderEventCoordinator {
     activeRunTranslatorRegistry: EventTranslatorRegistry;
     outboundTranslatorRegistry: EventTranslatorRegistry;
     sessionIsolationHostEventPort?: HostEventPort;
+    pendingInteractionRecorder?: PendingInteractionRecorderPort;
     getRuntimeContext: () => ProviderRuntimeContext | null;
   }) {}
 
@@ -264,6 +269,7 @@ export class ProviderEventCoordinator {
       activeRun.observeTrackingSession(factSessionContext.trackingSessionId);
       const translation = this.dependencies.activeRunTranslatorRegistry.translate(translationContext);
       if (translation.recognized) {
+        this.recordPendingInteractions(translation.facts, factSessionContext, resolution.hostSessionId);
         activeRun.pushFacts(translation);
         this.dependencies.logger.debug?.('provider_adapter.event.routed_to_active_run', {
           eventType: event.type,
@@ -315,6 +321,41 @@ export class ProviderEventCoordinator {
         eventType: event.type,
         error: getErrorMessage(error),
       });
+    }
+  }
+
+  private recordPendingInteractions(
+    facts: { type: string }[],
+    factSessionContext: FactSessionContext,
+    hostSessionId: string,
+  ): void {
+    const recorder = this.dependencies.pendingInteractionRecorder;
+    if (!recorder) {
+      return;
+    }
+    for (const fact of facts) {
+      if (fact.type === 'question.ask') {
+        const questionId = (fact as { questionId?: unknown }).questionId;
+        if (typeof questionId === 'string' && questionId.trim().length > 0) {
+          recorder.record({
+            kind: 'question',
+            tokenId: questionId,
+            toolSessionId: factSessionContext.anchorSessionId,
+            hostSessionId,
+          });
+        }
+      }
+      if (fact.type === 'permission.ask') {
+        const permissionId = (fact as { permissionId?: unknown }).permissionId;
+        if (typeof permissionId === 'string' && permissionId.trim().length > 0) {
+          recorder.record({
+            kind: 'permission',
+            tokenId: permissionId,
+            toolSessionId: factSessionContext.anchorSessionId,
+            hostSessionId,
+          });
+        }
+      }
     }
   }
 }
