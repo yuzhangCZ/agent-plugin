@@ -13,7 +13,26 @@ class MemoryPendingInteractionRegistry {
   }
 
   consume(input) {
+    const key = `${input.kind}:${input.tokenId}`;
+    const record = this.records.get(key);
+    if (record) {
+      this.records.delete(key);
+    }
+    return record;
+  }
+
+  peek(input) {
     return this.records.get(`${input.kind}:${input.tokenId}`);
+  }
+
+  consumeIfMatch(record) {
+    const key = `${record.kind}:${record.tokenId}`;
+    const current = this.records.get(key);
+    if (!current || JSON.stringify(current) !== JSON.stringify(record)) {
+      return undefined;
+    }
+    this.records.delete(key);
+    return current;
   }
 
   clearSession(toolSessionId) {
@@ -144,7 +163,7 @@ describe('PendingInteractionLookupBridge', () => {
   });
 
   test('returns missing when interaction mapping is absent or no attached binding exists', async () => {
-    const { bridge, pendingInteractionRegistry } = createBridge();
+    const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'question',
       tokenId: 'q-without-binding',
@@ -154,9 +173,19 @@ describe('PendingInteractionLookupBridge', () => {
 
     assert.deepStrictEqual(await bridge.findQuestion('q-missing'), { kind: 'missing' });
     assert.deepStrictEqual(await bridge.findQuestion('q-without-binding'), { kind: 'missing' });
+    await anchorBindingRepository.upsert({
+      toolSessionId: 'tool-missing-binding',
+      sessionId: 'ses-missing-binding',
+      state: 'attached',
+    });
+    assert.deepStrictEqual(await bridge.findQuestion('q-without-binding'), {
+      kind: 'found',
+      toolSessionId: 'tool-missing-binding',
+      sessionId: 'ses-missing-binding',
+    });
   });
 
-  test('returns missing when the anchor has switched to a different host session after interaction registration', async () => {
+  test('does not consume pending interaction when the anchor has switched to a different host session', async () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'permission',
@@ -171,6 +200,16 @@ describe('PendingInteractionLookupBridge', () => {
     });
 
     assert.deepStrictEqual(await bridge.findPermission('p-switched'), { kind: 'missing' });
+    await anchorBindingRepository.upsert({
+      toolSessionId: 'tool-switched',
+      sessionId: 'ses-original',
+      state: 'attached',
+    });
+    assert.deepStrictEqual(await bridge.findPermission('p-switched'), {
+      kind: 'found',
+      toolSessionId: 'tool-switched',
+      sessionId: 'ses-original',
+    });
   });
 
   test('does not fall back to legacy question list when registered question binding has switched', async () => {
@@ -221,5 +260,63 @@ describe('PendingInteractionLookupBridge', () => {
       sessionId: 'ses-once',
     });
     assert.deepStrictEqual(await bridge.findQuestion('q-once'), { kind: 'missing' });
+  });
+
+  test('returns missing when pending record changes between peek and consumeIfMatch', async () => {
+    const original = {
+      kind: 'question',
+      tokenId: 'q-race',
+      toolSessionId: 'tool-race-original',
+      hostSessionId: 'ses-race-original',
+    };
+    const calls = [];
+    const anchorBindingRepository = new MemoryAnchorBindingRepository();
+    const bridge = new PendingInteractionLookupBridge({
+      pendingInteractionRegistry: {
+        peek: (input) => {
+          calls.push({ method: 'peek', input });
+          return original;
+        },
+        consumeIfMatch: (record) => {
+          calls.push({ method: 'consumeIfMatch', record });
+          return undefined;
+        },
+      },
+      anchorBindingRepository,
+    });
+    await anchorBindingRepository.upsert({
+      toolSessionId: 'tool-race-original',
+      sessionId: 'ses-race-original',
+      state: 'attached',
+    });
+
+    assert.deepStrictEqual(await bridge.findQuestion('q-race'), { kind: 'missing' });
+    assert.deepStrictEqual(calls, [
+      { method: 'peek', input: { kind: 'question', tokenId: 'q-race' } },
+      { method: 'consumeIfMatch', record: original },
+    ]);
+  });
+
+  test('runtime registry peek does not consume and consumeIfMatch protects newer records', () => {
+    const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
+    const original = {
+      kind: 'question',
+      tokenId: 'q-match',
+      toolSessionId: 'tool-original',
+      hostSessionId: 'ses-original',
+    };
+    const replacement = {
+      ...original,
+      toolSessionId: 'tool-replacement',
+      hostSessionId: 'ses-replacement',
+    };
+
+    pendingInteractionRegistry.register(original);
+    assert.deepStrictEqual(pendingInteractionRegistry.peek({ kind: 'question', tokenId: 'q-match' }), original);
+    assert.deepStrictEqual(pendingInteractionRegistry.peek({ kind: 'question', tokenId: 'q-match' }), original);
+    pendingInteractionRegistry.register(replacement);
+    assert.equal(pendingInteractionRegistry.consumeIfMatch(original), undefined);
+    assert.deepStrictEqual(pendingInteractionRegistry.consumeIfMatch(replacement), replacement);
+    assert.equal(pendingInteractionRegistry.peek({ kind: 'question', tokenId: 'q-match' }), undefined);
   });
 });

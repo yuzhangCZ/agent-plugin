@@ -39,6 +39,7 @@ export class SessionScopedSdkExecutionBridge implements SdkExecutionBridge {
   }
 
   async replyQuestion(input: QuestionReplyCommandInput): Promise<RuntimeAppliedResult> {
+    // OpenCode reply token 全局唯一；sessionId 已在 lookup 阶段用于隔离校验，这里不再参与 SDK 调用。
     const result = await this.dependencies.gatewayPort.replyQuestion({
       questionId: input.questionId,
       answer: input.answer,
@@ -48,6 +49,7 @@ export class SessionScopedSdkExecutionBridge implements SdkExecutionBridge {
   }
 
   async replyPermission(input: PermissionReplyCommandInput): Promise<RuntimeAppliedResult> {
+    // OpenCode reply token 全局唯一；sessionId 已在 lookup 阶段用于隔离校验，这里不再参与 SDK 调用。
     const result = await this.dependencies.gatewayPort.replyPermission({
       permissionId: input.permissionId,
       response: input.response,

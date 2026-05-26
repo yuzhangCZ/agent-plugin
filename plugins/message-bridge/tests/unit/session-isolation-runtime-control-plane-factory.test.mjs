@@ -13,6 +13,33 @@ const entryKey = {
   businessSessionId: 'group-a',
 };
 
+function createPendingInteractionRegistry() {
+  const records = new Map();
+  const key = (record) => `${record.kind}:${record.tokenId}`;
+
+  return {
+    register: (record) => {
+      records.set(key(record), record);
+    },
+    peek: (input) => records.get(`${input.kind}:${input.tokenId}`),
+    consumeIfMatch: (record) => {
+      const recordKey = key(record);
+      const current = records.get(recordKey);
+      if (
+        !current
+        || current.kind !== record.kind
+        || current.tokenId !== record.tokenId
+        || current.toolSessionId !== record.toolSessionId
+        || current.hostSessionId !== record.hostSessionId
+      ) {
+        return undefined;
+      }
+      records.delete(recordKey);
+      return current;
+    },
+  };
+}
+
 describe('createSessionIsolationControlPlane', () => {
   test('wires formal chat command path through host adapter and ownership repositories', async () => {
     const bindingStore = new InMemoryToolSessionBindingStore();
@@ -48,10 +75,7 @@ describe('createSessionIsolationControlPlane', () => {
         replyPermission: async () => ({ success: true, data: { replied: true } }),
         replyQuestion: async () => ({ success: true, data: { replied: true } }),
       },
-      pendingInteractionRegistry: {
-        consume: () => undefined,
-        register: () => {},
-      },
+      pendingInteractionRegistry: createPendingInteractionRegistry(),
       ownedHostEventForwarder: {
         forward: async (input) => {
           calls.push({ method: 'forwardHostEvent', input });

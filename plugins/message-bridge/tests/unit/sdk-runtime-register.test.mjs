@@ -63,6 +63,16 @@ function createSdkRuntimeClient(overrides = {}) {
   };
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function createResolvedConfig() {
   return {
     config_version: 1,
@@ -78,6 +88,27 @@ function createResolvedConfig() {
     },
     events: {
       allowlist: ['message.updated'],
+    },
+  };
+}
+
+function createPromptResponse() {
+  return {
+    data: {
+      info: {
+        id: 'msg-prompt-1',
+      },
+      parts: [{ type: 'step-finish' }],
+    },
+  };
+}
+
+function createDirectEntryExtParameters(id = 'user-sdk-reply#bot-sdk-reply') {
+  return {
+    platformExtParam: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: id,
     },
   };
 }
@@ -351,6 +382,107 @@ test('sdk runtime slash session keeps legacy scope filtering and rejects out-of-
       status: 'active',
     });
 
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
+test('sdk runtime question reply fails closed after slash switches the anchor to another host session', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const promptDeferred = createDeferred();
+  const questionReplyCalls = [];
+  let createCount = 0;
+
+  try {
+    const runtime = await startSdkRuntime({
+      session: {
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: createCount === 1 ? 'ses-sdk-question-1' : 'ses-sdk-question-2',
+              directory: createCount === 1 ? '/workspace/question-1' : '/workspace/question-2',
+            },
+          };
+        },
+        get: async (options) => ({
+          data: {
+            id: options?.path?.id ?? options?.sessionID ?? 'session-default',
+            directory: options?.path?.id === 'ses-sdk-question-2'
+              ? '/workspace/question-2'
+              : '/workspace/question-1',
+          },
+        }),
+        prompt: async () => promptDeferred.promise,
+      },
+      _client: {
+        post: async (options) => {
+          questionReplyCalls.push(options);
+          return { data: true };
+        },
+      },
+    });
+    const providerAdapter = getProviderAdapter(runtime);
+    const extParameters = createDirectEntryExtParameters();
+
+    const run = await providerAdapter.runMessage({
+      traceId: 'trace-sdk-question-run',
+      runId: 'run-sdk-question',
+      toolSessionId: 'tool-sdk-question',
+      text: 'hello',
+      extParameters,
+    });
+
+    await providerAdapter.handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'ses-sdk-question-1',
+          id: 'msg-sdk-question-1',
+          role: 'assistant',
+          time: {
+            created: '2026-05-26T10:00:00.000Z',
+          },
+        },
+      },
+    });
+    await providerAdapter.handleEvent({
+      type: 'question.asked',
+      properties: {
+        sessionID: 'ses-sdk-question-1',
+        id: 'question-sdk-1',
+        tool: {
+          messageID: 'msg-sdk-question-1',
+        },
+        questions: [{
+          question: '确认？',
+          options: [{ label: '是' }],
+        }],
+      },
+    });
+
+    const slashRun = await providerAdapter.runMessage({
+      traceId: 'trace-sdk-question-slash',
+      runId: 'run-sdk-question-slash',
+      toolSessionId: 'tool-sdk-question',
+      text: '/new',
+      extParameters,
+    });
+    await slashRun.result();
+
+    await assert.rejects(
+      () => providerAdapter.replyQuestion({
+        traceId: 'trace-sdk-question-reply',
+        questionId: 'question-sdk-1',
+        answers: [['是']],
+      }),
+      /question interaction not found/u,
+    );
+    assert.deepStrictEqual(questionReplyCalls, []);
+
+    promptDeferred.resolve(createPromptResponse());
+    await run.result();
     runtime.stop();
   } finally {
     restore();

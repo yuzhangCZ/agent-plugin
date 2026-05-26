@@ -12,7 +12,8 @@ type PendingInteractionRecord = {
 };
 
 type PendingInteractionLookupRegistry = {
-  consume(input: { kind: 'question' | 'permission'; tokenId: string }): PendingInteractionRecord | undefined;
+  peek(input: { kind: 'question' | 'permission'; tokenId: string }): PendingInteractionRecord | undefined;
+  consumeIfMatch(record: PendingInteractionRecord): PendingInteractionRecord | undefined;
 };
 
 type InternalInteractionLookupResult =
@@ -40,7 +41,8 @@ export class PendingInteractionLookupBridge implements InteractionLookupBridge {
   }
 
   private async find(kind: 'question' | 'permission', tokenId: string): Promise<InternalInteractionLookupResult> {
-    const interaction = this.dependencies.pendingInteractionRegistry.consume({ kind, tokenId });
+    // 先做非破坏性校验；只有成功领取同一条记录后才消费，避免临时 binding 异常丢失 pending token。
+    const interaction = this.dependencies.pendingInteractionRegistry.peek({ kind, tokenId });
     if (!interaction) {
       return { kind: 'missing' };
     }
@@ -54,9 +56,14 @@ export class PendingInteractionLookupBridge implements InteractionLookupBridge {
       return { kind: 'invalid' };
     }
 
+    const consumed = this.dependencies.pendingInteractionRegistry.consumeIfMatch(interaction);
+    if (!consumed) {
+      return { kind: 'missing' };
+    }
+
     return {
       kind: 'found',
-      toolSessionId: interaction.toolSessionId,
+      toolSessionId: consumed.toolSessionId,
       sessionId: binding.sessionId,
     };
   }
