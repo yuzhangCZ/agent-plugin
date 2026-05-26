@@ -42,6 +42,16 @@ export class InMemoryToolSessionBindingStore implements ToolSessionBindingStore 
       status: 'invalid',
     });
   }
+
+  findBySessionId(opencodeSessionId: string): ToolSessionBinding[] {
+    return [...this.bindings.values()].filter(
+      (binding) => binding.activeOpencodeSessionId === opencodeSessionId,
+    );
+  }
+
+  delete(anchor: ExternalConversationAnchor): void {
+    this.bindings.delete(anchor);
+  }
 }
 
 /**

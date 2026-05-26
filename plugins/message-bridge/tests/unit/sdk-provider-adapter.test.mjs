@@ -227,7 +227,7 @@ function createAdapter(overrides = {}) {
     hostSessionCreationPort,
     hostSessionQueryPort,
   });
-  const chatPreprocessor = new SdkChatPreprocessor({
+  const chatPreprocessor = overrides.chatPreprocessor ?? new SdkChatPreprocessor({
     chatEntryPolicy: new ChatEntryPolicy({
       slashCommandParser: new SimpleSlashCommandParser(),
       slashCapabilityProvider: new StaticSlashCapabilityProvider(),
@@ -255,6 +255,8 @@ function createAdapter(overrides = {}) {
     rawClient: createRawClient(),
     logger,
     createSessionUseCase,
+    ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
+    ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
     effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
     directoryMappingEnabled: false,
     opencodeSessionGatewayAdapter,
@@ -288,7 +290,11 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
     },
   });
 
-  const result = await adapter.createSession({ title: 'Identity Session' });
+  const result = await adapter.createSession({
+    traceId: 'trace-identity-session',
+    welinkSessionId: 'welink-identity-session',
+    title: 'Identity Session',
+  });
 
   assert.deepEqual(result, {
     toolSessionId: 'ses-created-identity',
@@ -303,6 +309,92 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
     adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-identity'),
     'ses-created-identity',
   );
+});
+
+test('provider adapter createSession delegates creation and ownership to session-isolation command port', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    hostDirectory: '/workspace/formal-create',
+    createSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return {
+          kind: 'entry_owned',
+          toolSessionId: 'ses-formal-create',
+          session: { id: 'ses-formal-create', title: 'Formal Session' },
+        };
+      },
+    },
+  });
+
+  const result = await adapter.createSession({
+    traceId: 'trace-create-formal',
+    welinkSessionId: 'welink-create-formal',
+    title: 'Formal Session',
+    assistantId: 'assistant-formal',
+    extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
+  });
+
+  assert.deepEqual(result, {
+    toolSessionId: 'ses-formal-create',
+    title: 'Formal Session',
+  });
+  assert.deepEqual(calls, [{
+    welinkSessionId: 'welink-create-formal',
+    title: 'Formal Session',
+    assistantId: 'assistant-formal',
+    directory: '/workspace/formal-create',
+    extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
+  }]);
+});
+
+test('provider adapter closeSession delegates cleanup to session-isolation command port', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    closeSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { kind: 'closed', sessionId: 'ses-close-formal' };
+      },
+    },
+    session: {
+      delete: async () => {
+        throw new Error('legacy_close_should_not_be_called');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.closeSession({
+    traceId: 'trace-close-formal',
+    toolSessionId: 'tool-close-formal',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ toolSessionId: 'tool-close-formal' }]);
+});
+
+test('provider adapter maps missing business entry to invalid_input failed run', async () => {
+  const adapter = createAdapter({
+    chatPreprocessor: {
+      preprocess: async () => {
+        throw new Error('business_entry_key_required');
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-missing-entry',
+    runId: 'run-missing-entry',
+    toolSessionId: 'tool-missing-entry',
+    text: 'hello',
+    extParameters: {},
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'invalid_input',
+      message: 'business_entry_key_required',
+    },
+  });
 });
 
 test('provider adapter returns synthetic ProviderRun for suppressReply deny path', async () => {

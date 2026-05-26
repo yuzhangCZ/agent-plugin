@@ -2,6 +2,7 @@ import type {
   ProviderError,
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderCreateSessionInput,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRun,
@@ -19,6 +20,10 @@ import { CreateSessionRequestNormalizer } from '../../usecase/CreateSessionReque
 import { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
 import { getErrorMessage } from '../../utils/error.js';
 import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js';
+import type {
+  CloseSessionCommandPort,
+  CreateSessionCommandPort,
+} from '../../port/session-isolation/inbound/index.js';
 import type {
   ChatExecutionContext,
   ChatExecutionContextResolver,
@@ -58,6 +63,8 @@ type ProviderAdapterOptions = {
   rawClient: HostClientLike;
   logger: BridgeLogger;
   createSessionUseCase: CreateSessionUseCase;
+  createSessionCommandPort?: CreateSessionCommandPort;
+  closeSessionCommandPort?: CloseSessionCommandPort;
   effectiveDirectory?: string;
   directoryMappingEnabled: boolean;
   opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
@@ -124,6 +131,8 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly rawClient: HostClientLike;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly createSessionUseCase: CreateSessionUseCase;
+  private readonly createSessionCommandPort?: CreateSessionCommandPort;
+  private readonly closeSessionCommandPort?: CloseSessionCommandPort;
   private readonly effectiveDirectory?: string;
   private readonly directoryMappingEnabled: boolean;
   private readonly createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
@@ -144,6 +153,8 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     this.rawClient = options.rawClient;
     this.opencodeSessionGatewayAdapter = options.opencodeSessionGatewayAdapter;
     this.createSessionUseCase = options.createSessionUseCase;
+    this.createSessionCommandPort = options.createSessionCommandPort;
+    this.closeSessionCommandPort = options.closeSessionCommandPort;
     this.effectiveDirectory = options.effectiveDirectory;
     this.directoryMappingEnabled = options.directoryMappingEnabled;
     this.chatPreprocessor = options.chatPreprocessor;
@@ -194,7 +205,30 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     return { online: Boolean(health?.healthy) };
   }
 
-  async createSession(input: { title?: string; assistantId?: string }): Promise<{ toolSessionId: string; title?: string }> {
+  async createSession(input: ProviderCreateSessionInput): Promise<{ toolSessionId: string; title?: string }> {
+    if (this.createSessionCommandPort) {
+      const normalized = this.createSessionRequestNormalizer.fromChatContext({
+        assistantId: input.assistantId,
+      });
+      const prepared = await this.createSessionUseCase.resolveCreateSession({
+        ...normalized,
+        title: input.title,
+        effectiveDirectory: this.effectiveDirectory,
+        directoryMappingEnabled: this.directoryMappingEnabled,
+      });
+      const result = await this.createSessionCommandPort.execute({
+        welinkSessionId: input.welinkSessionId ?? input.traceId,
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.assistantId ? { assistantId: input.assistantId } : {}),
+        ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),
+        ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+      });
+      return {
+        toolSessionId: result.toolSessionId,
+        ...(input.title ? { title: input.title } : {}),
+      };
+    }
+
     const normalized = this.createSessionRequestNormalizer.fromChatContext({
       assistantId: input.assistantId,
     });
@@ -224,6 +258,12 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     try {
       preprocessed = await this.chatPreprocessor.preprocess(input, this.logger);
     } catch (error) {
+      if (error instanceof Error && error.message === 'business_entry_key_required') {
+        return buildImmediateFailedRun(input.toolSessionId, {
+          code: 'invalid_input',
+          message: 'business_entry_key_required',
+        });
+      }
       return buildImmediateFailedRun(input.toolSessionId, {
         code: 'provider_unavailable',
         message: getErrorMessage(error),
@@ -279,6 +319,11 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async closeSession(input: { toolSessionId: string }): Promise<{ applied: true }> {
+    if (this.closeSessionCommandPort) {
+      await this.closeSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
+      return { applied: true };
+    }
+
     const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
     const result = await this.opencodeSessionGatewayAdapter.closeSession({
       sessionId: context.opencodeSessionId,

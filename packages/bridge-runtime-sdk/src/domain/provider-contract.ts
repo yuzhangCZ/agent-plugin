@@ -88,8 +88,10 @@ export interface ProviderHealthResult {
  */
 export interface ProviderCreateSessionInput {
   traceId: string;
+  welinkSessionId?: string;
   title?: string;
   assistantId?: string;
+  extParameters?: ExtParameters;
 }
 
 /**

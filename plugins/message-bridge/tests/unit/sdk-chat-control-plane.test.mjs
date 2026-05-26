@@ -12,9 +12,17 @@ import {
   ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
   DefaultExecutionSessionInvalidationPort,
+  SdkChatPreprocessor,
   SdkSlashExecutionUseCase,
   StaticSlashCapabilityProvider,
 } from '../../src/runtime/sdk/SdkChatControlPlane.ts';
+import {
+  BusinessEntryContextResolver,
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+  EntryAwareChatSessionResolver,
+  RuntimeAnchorRegistry,
+} from '../../src/runtime/sdk/session-isolation/index.ts';
 
 function createLogger() {
   const noop = () => undefined;
@@ -56,17 +64,55 @@ test('ChatEntryPolicy disables group-only forbidden slash commands', () => {
   });
 
   assert.deepEqual(
-    policy.decide({
-      traceId: 'trace-2',
-      runId: 'run-2',
-      toolSessionId: 'anchor-2',
-      text: '@bot /sessions',
-      context: { imGroupId: 'group-1' },
-    }),
+    policy.decide(
+      {
+        traceId: 'trace-2',
+        runId: 'run-2',
+        toolSessionId: 'anchor-2',
+        text: '@bot /sessions',
+        context: { imGroupId: 'group-1' },
+      },
+      {
+        entryKey: 'im:group:group-1',
+        controlled: true,
+        allowOpencodeNativeSessions: false,
+        allowedSlashCommands: ['new'],
+      },
+    ),
     {
       kind: 'slash',
       descriptor: { kind: 'sessions' },
       disabledInEntry: true,
+    },
+  );
+});
+
+test('ChatEntryPolicy allows group slash commands when policy includes command', () => {
+  const policy = new ChatEntryPolicy({
+    slashCommandParser: new SimpleSlashCommandParser(),
+    slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+  });
+
+  assert.deepEqual(
+    policy.decide(
+      {
+        traceId: 'trace-group-allow',
+        runId: 'run-group-allow',
+        toolSessionId: 'anchor-group-allow',
+        text: '@bot /sessions',
+        context: { imGroupId: 'group-1' },
+      },
+      {
+        entryKey: 'im:group:group-1',
+        controlled: true,
+        allowOpencodeNativeSessions: false,
+        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      },
+    ),
+    {
+      kind: 'slash',
+      descriptor: { kind: 'sessions' },
+      command: { kind: 'sessions' },
     },
   );
 });
@@ -164,6 +210,371 @@ test('DefaultChatExecutionContextResolver carries session-scoped model override 
     activeOpencodeSessionId: 'ses-fresh',
     status: 'active',
   });
+});
+
+test('DefaultChatExecutionContextResolver delegates recent-session attachment to session-isolation port', async () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  const attachmentCalls = [];
+
+  const resolver = new DefaultChatExecutionContextResolver({
+    bindingStore,
+    ownershipResolver,
+    modelOverrideStore,
+    hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
+    hostSessionQueryPort: {
+      getSession: async (sessionId) => ({ id: sessionId }),
+      listSessions: async () => [{ id: 'ses-recent-formal', directory: '/workspace/formal' }],
+    },
+    sessionAttachmentPort: {
+      switchAttachedSession: async (input) => {
+        attachmentCalls.push(input);
+        bindingStore.bind(input.toolSessionId, input.sessionId);
+        ownershipResolver.attach(input.sessionId, input.toolSessionId);
+        return { applied: true };
+      },
+    },
+  });
+
+  const resolved = await resolver.resolveForChat('anchor-formal', undefined, createLogger());
+
+  assert.deepEqual(resolved, {
+    opencodeSessionId: 'ses-recent-formal',
+    scope: { directory: '/workspace/formal' },
+    modelOverride: undefined,
+    bootstrapSource: 'bootstrap_reused_recent_session',
+  });
+  assert.deepEqual(attachmentCalls, [{ toolSessionId: 'anchor-formal', sessionId: 'ses-recent-formal' }]);
+});
+
+test('DefaultChatExecutionContextResolver delegates newly-created session attachment to session-isolation port', async () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  const attachmentCalls = [];
+
+  const resolver = new DefaultChatExecutionContextResolver({
+    bindingStore,
+    ownershipResolver,
+    modelOverrideStore,
+    hostSessionCreationPort: { createSession: async () => ({ id: 'ses-created-formal', directory: '/workspace/created' }) },
+    hostSessionQueryPort: {
+      getSession: async (sessionId) => ({ id: sessionId }),
+      listSessions: async () => [],
+    },
+    sessionAttachmentPort: {
+      switchAttachedSession: async (input) => {
+        attachmentCalls.push(input);
+        bindingStore.bind(input.toolSessionId, input.sessionId);
+        ownershipResolver.attach(input.sessionId, input.toolSessionId);
+        return { applied: true };
+      },
+    },
+  });
+
+  const resolved = await resolver.resolveForChat('anchor-created-formal', undefined, createLogger());
+
+  assert.deepEqual(resolved, {
+    opencodeSessionId: 'ses-created-formal',
+    scope: { directory: '/workspace/created' },
+    bootstrapSource: 'bootstrap_created',
+  });
+  assert.deepEqual(attachmentCalls, [{ toolSessionId: 'anchor-created-formal', sessionId: 'ses-created-formal' }]);
+});
+
+test('EntryAwareChatSessionResolver reuses visible session for the same business entry only', async () => {
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  const switchCalls = [];
+  const createCalls = [];
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async (input) => {
+        if (input.entryKey.businessSessionId === 'group-a') {
+          return {
+            toolSessionId: input.toolSessionId,
+            visibleSessions: [{ id: 'ses-group-a', directory: '/workspace/a' }],
+          };
+        }
+        return {
+          toolSessionId: input.toolSessionId,
+          visibleSessions: [],
+        };
+      },
+    },
+    switchAttachedSessionUseCase: {
+      execute: async (input) => {
+        switchCalls.push(input);
+        return { applied: true };
+      },
+    },
+    createOwnedSessionUseCase: {
+      execute: async (input) => {
+        createCalls.push(input);
+        return { session: { id: 'ses-created-b', directory: '/workspace/b' } };
+      },
+    },
+    runtimeAnchorRepository: new RuntimeAnchorRegistry(),
+    modelOverrideStore,
+  });
+
+  const reused = await resolver.resolve({
+    message: {
+      traceId: 'trace-a',
+      runId: 'run-a',
+      toolSessionId: 'tool-a',
+      text: 'hello',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-a',
+        },
+      },
+    },
+  });
+  const created = await resolver.resolve({
+    message: {
+      traceId: 'trace-b',
+      runId: 'run-b',
+      toolSessionId: 'tool-b',
+      text: 'hello',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-b',
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(reused, {
+    opencodeSessionId: 'ses-group-a',
+    scope: { directory: '/workspace/a' },
+    modelOverride: undefined,
+    bootstrapSource: 'bootstrap_reused_recent_session',
+  });
+  assert.deepEqual(created, {
+    opencodeSessionId: 'ses-created-b',
+    scope: { directory: '/workspace/b' },
+    modelOverride: undefined,
+    bootstrapSource: 'bootstrap_created',
+  });
+  assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
+  assert.equal(createCalls[0].toolSessionId, 'tool-b');
+  assert.equal(createCalls[0].entryKey.businessSessionId, 'group-b');
+});
+
+test('EntryAwareChatSessionResolver fails closed when chat business key cannot be completed', async () => {
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_resolve_entry_context');
+      },
+    },
+    switchAttachedSessionUseCase: {
+      execute: async () => ({ applied: true }),
+    },
+    createOwnedSessionUseCase: {
+      execute: async () => ({ session: { id: 'unexpected-create' } }),
+    },
+    runtimeAnchorRepository: new RuntimeAnchorRegistry(),
+    modelOverrideStore: new InMemorySessionModelOverrideStore(),
+  });
+
+  await assert.rejects(
+    () => resolver.resolve({
+      message: {
+        traceId: 'trace-missing',
+        runId: 'run-missing',
+        toolSessionId: 'tool-missing',
+        text: 'hello',
+        extParameters: {},
+      },
+    }),
+    /business_entry_key_required/,
+  );
+});
+
+test('EntryAwareChatSessionResolver clears anchor-only state after first legal chat bootstrap', async () => {
+  const runtimeAnchorRepository = new RuntimeAnchorRegistry();
+  await runtimeAnchorRepository.createAnchorOnly({ toolSessionId: 'tool-anchor-only' });
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async (input) => ({
+        toolSessionId: input.toolSessionId,
+        visibleSessions: [],
+      }),
+    },
+    switchAttachedSessionUseCase: {
+      execute: async () => ({ applied: true }),
+    },
+    createOwnedSessionUseCase: {
+      execute: async () => ({ session: { id: 'ses-first-legal-chat' } }),
+    },
+    runtimeAnchorRepository,
+    modelOverrideStore: new InMemorySessionModelOverrideStore(),
+  });
+
+  await resolver.resolve({
+    message: {
+      traceId: 'trace-anchor-only',
+      runId: 'run-anchor-only',
+      toolSessionId: 'tool-anchor-only',
+      text: 'hello',
+      context: {
+        imGroupId: 'group-a',
+      },
+    },
+  });
+
+  assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only'), false);
+});
+
+test('SdkChatPreprocessor fails closed before slash execution when business entry is missing', async () => {
+  let slashExecuted = false;
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => {
+        slashExecuted = true;
+        throw new Error('unexpected_slash_execution');
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+  });
+
+  await assert.rejects(
+    () => preprocessor.preprocess({
+      traceId: 'trace-missing-entry-slash',
+      runId: 'run-missing-entry-slash',
+      toolSessionId: 'tool-missing-entry-slash',
+      text: '/sessions',
+      extParameters: {},
+    }),
+    /business_entry_key_required/u,
+  );
+  assert.equal(slashExecuted, false);
+});
+
+test('SdkChatPreprocessor applies request scoped slash policy after entry context resolution', async () => {
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async (input) => {
+        assert.equal(input.disabledInEntry, true);
+        return {
+          runId: 'synthetic-disabled',
+          facts: (async function* () {})(),
+          result: async () => ({ outcome: 'completed' }),
+        };
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+  });
+
+  const result = await preprocessor.preprocess({
+    traceId: 'trace-policy-slash',
+    runId: 'run-policy-slash',
+    toolSessionId: 'tool-policy-slash',
+    text: '/sessions',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-a',
+        allowedSlashCommands: ['new'],
+      },
+    },
+  });
+
+  assert.equal(result.kind, 'synthetic_run');
+});
+
+test('SdkChatPreprocessor passes effective directory to formal normal chat resolver', async () => {
+  const resolverCalls = [];
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execution');
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    effectiveDirectory: '/workspace/formal-chat',
+    normalChatSessionResolver: {
+      resolve: async (input) => {
+        resolverCalls.push(input);
+        return {
+          opencodeSessionId: 'ses-formal-chat',
+          scope: { directory: input.directory },
+        };
+      },
+    },
+  });
+
+  const result = await preprocessor.preprocess({
+    traceId: 'trace-formal-chat',
+    runId: 'run-formal-chat',
+    toolSessionId: 'tool-formal-chat',
+    text: 'hello',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-formal-chat',
+      },
+    },
+  });
+
+  assert.equal(result.kind, 'normal_chat');
+  assert.equal(resolverCalls[0].directory, '/workspace/formal-chat');
 });
 
 test('DefaultChatExecutionContextResolver allows stale real sessionId to keep acting as anchor after rebind', async () => {

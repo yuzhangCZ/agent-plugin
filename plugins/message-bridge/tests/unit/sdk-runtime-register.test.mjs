@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import {
@@ -124,6 +126,7 @@ async function startSdkRuntime(overrides = {}) {
     }
   })({
     client: createSdkRuntimeClient(overrides),
+    sessionIsolationDataDir: join(tmpdir(), `mb-sdk-runtime-${Date.now()}-${Math.random()}`),
   });
 
   await runtime.start();
@@ -223,6 +226,27 @@ test('sdk runtime register falls back to pluginVersion when sdkVersion is unavai
   }
 });
 
+test('sdk runtime wires session-isolation control plane into provider adapter', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+
+  try {
+    const runtime = await startSdkRuntime();
+    const providerAdapter = getProviderAdapter(runtime);
+    const contextResolver = getContextResolver(runtime);
+    const chatPreprocessor = providerAdapter.chatPreprocessor;
+
+    assert.equal(typeof providerAdapter.createSessionCommandPort.execute, 'function');
+    assert.equal(typeof providerAdapter.closeSessionCommandPort.execute, 'function');
+    assert.equal(contextResolver.dependencies.sessionAttachmentPort, undefined);
+    assert.equal(typeof chatPreprocessor.dependencies.normalChatSessionResolver.resolve, 'function');
+    assert.equal(typeof chatPreprocessor.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
 test('sdk runtime keeps non-not-found session.get failures aligned with legacy control-plane semantics', async () => {
   const { restore } = installRegisterCaptureWebSocket();
 
@@ -245,7 +269,18 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
     });
     const providerAdapter = getProviderAdapter(runtime);
     const contextResolver = getContextResolver(runtime);
-    const { toolSessionId: sessionId } = await providerAdapter.createSession({ title: '绑定会话' });
+    const { toolSessionId: sessionId } = await providerAdapter.createSession({
+      traceId: 'trace-bound',
+      welinkSessionId: 'welink-bound',
+      title: '绑定会话',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'direct',
+          businessSessionId: 'user-bound#bot-bound',
+        },
+      },
+    });
     assert.equal(sessionId, 'ses-bound');
 
     await assert.rejects(

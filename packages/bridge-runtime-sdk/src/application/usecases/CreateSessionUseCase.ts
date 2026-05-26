@@ -33,10 +33,17 @@ export class CreateSessionUseCase implements CreateSessionUseCasePort {
     };
     this.observation.usecaseStarted('create_session', command.traceId, context);
     try {
+      const payloadWithExtParameters = command.source.payload as typeof command.source.payload & {
+        extParameters?: Parameters<ProviderCommandHandlers['createSession']>[0]['extParameters'];
+      };
       const result = await this.handlers.createSession({
         traceId: command.traceId,
+        welinkSessionId: command.source.welinkSessionId,
         title: command.source.payload.title,
         assistantId: command.source.payload.assistantId,
+        ...(payloadWithExtParameters.extParameters !== undefined
+          ? { extParameters: payloadWithExtParameters.extParameters }
+          : {}),
       });
       this.sessionRegistry.ensure({
         toolSessionId: result.toolSessionId,

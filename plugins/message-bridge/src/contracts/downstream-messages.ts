@@ -21,11 +21,13 @@ export interface ChatPayload {
   assistantAccount?: string;
   sendUserAccount?: string;
   imGroupId?: string;
+  extParameters?: unknown;
 }
 
 export interface CreateSessionPayload {
   title?: string;
   assistantId?: string;
+  extParameters?: unknown;
 }
 
 export interface CloseSessionPayload {

@@ -10,6 +10,12 @@ import type {
   TextDoneFact,
 } from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
 import type {
+  BusinessEntryContext,
+  BusinessEntryContextResolver,
+} from './session-isolation/index.js';
+import type { BusinessEntryPolicy } from '../../port/session-isolation/dto/commands/index.js';
+
+import type {
   HostModelCatalogPort,
   HostSessionCreateContext,
   HostSessionCreationPort,
@@ -76,8 +82,6 @@ function buildSyntheticRun(toolSessionId: string, text: string): ProviderRun {
   };
 }
 
-type EntryKind = 'direct_chat' | 'group_chat';
-
 export interface ChatExecutionContext {
   opencodeSessionId: string;
   scope?: SessionScope;
@@ -102,6 +106,19 @@ export interface CreatedSessionBindingPort {
   register(anchor: string, opencodeSessionId: string): void;
 }
 
+export interface SessionAttachmentPort {
+  switchAttachedSession(input: { toolSessionId: string; sessionId: string }): Promise<{ applied: boolean }>;
+}
+
+export interface NormalChatSessionResolver {
+  resolve(input: {
+    message: ProviderRunMessageInput;
+    entryContext?: BusinessEntryContext;
+    directory?: string;
+    logger?: BridgeLogger;
+  }): Promise<ChatExecutionContext>;
+}
+
 type EntryPolicyDecision =
   | { kind: 'deny'; text: string }
   | { kind: 'normal_chat' }
@@ -117,11 +134,11 @@ type EntryPolicyDecision =
  * SDK chat 入口的 slash 能力策略。
  */
 export class StaticSlashCapabilityProvider {
-  isAllowed(input: { entryKind: EntryKind; command: SlashCommandDescriptor }): boolean {
-    if (input.entryKind !== 'group_chat') {
+  isAllowed(input: { policy?: BusinessEntryPolicy; command: SlashCommandDescriptor }): boolean {
+    if (!input.policy) {
       return true;
     }
-    return input.command.kind !== 'sessions' && input.command.kind !== 'session';
+    return input.policy.allowedSlashCommands.includes(input.command.kind);
   }
 }
 
@@ -134,15 +151,14 @@ export class ChatEntryPolicy {
     slashCapabilityProvider: StaticSlashCapabilityProvider;
   }) {}
 
-  decide(input: ProviderRunMessageInput): EntryPolicyDecision {
+  decide(input: ProviderRunMessageInput, policy?: BusinessEntryPolicy): EntryPolicyDecision {
     if (input.context?.suppressReply) {
       return { kind: 'deny', text: GROUP_CHAT_DENY_REPLY_TEXT };
     }
 
-    const entryKind = this.resolveEntryKind(input);
     const parseResult = this.dependencies.slashCommandParser.tryParse({
       text: input.text,
-      isGroupChat: entryKind === 'group_chat',
+      isGroupChat: Boolean(input.context?.imGroupId?.trim()),
     });
 
     if (parseResult.kind === 'none') {
@@ -154,7 +170,7 @@ export class ChatEntryPolicy {
       : parseResult.command;
 
     const allowed = this.dependencies.slashCapabilityProvider.isAllowed({
-      entryKind,
+      policy,
       command: descriptor,
     });
     if (!allowed) {
@@ -180,9 +196,6 @@ export class ChatEntryPolicy {
     };
   }
 
-  private resolveEntryKind(input: ProviderRunMessageInput): EntryKind {
-    return input.context?.imGroupId?.trim() ? 'group_chat' : 'direct_chat';
-  }
 }
 
 /**
@@ -264,6 +277,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
     modelOverrideStore: SessionModelOverrideStore;
     hostSessionCreationPort: HostSessionCreationPort;
     hostSessionQueryPort: HostSessionQueryPort;
+    sessionAttachmentPort?: SessionAttachmentPort;
   }) {}
 
   async resolveForChat(
@@ -279,7 +293,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
     const recentSessions = await this.dependencies.hostSessionQueryPort.listSessions({});
     const recentSession = recentSessions[0];
     if (recentSession) {
-      this.rebind(anchor, undefined, recentSession.id);
+      await this.rebind(anchor, undefined, recentSession.id);
       logger?.info('sdk_chat_context.bootstrap_reused_recent_session', {
         anchor,
         opencodeSessionId: recentSession.id,
@@ -293,7 +307,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
     }
 
     const created = await this.dependencies.hostSessionCreationPort.createSession(createContext);
-    this.rebind(anchor, undefined, created.id);
+    await this.rebind(anchor, undefined, created.id);
     logger?.info('sdk_chat_context.bootstrap_created', {
       anchor,
       opencodeSessionId: created.id,
@@ -358,7 +372,14 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
     }
   }
 
-  private rebind(anchor: string, previousSessionId: string | undefined, nextSessionId: string): void {
+  private async rebind(anchor: string, previousSessionId: string | undefined, nextSessionId: string): Promise<void> {
+    if (this.dependencies.sessionAttachmentPort) {
+      await this.dependencies.sessionAttachmentPort.switchAttachedSession({
+        toolSessionId: anchor,
+        sessionId: nextSessionId,
+      });
+      return;
+    }
     if (previousSessionId && previousSessionId !== nextSessionId) {
       this.dependencies.ownershipResolver.detach(previousSessionId);
     }
@@ -470,10 +491,24 @@ export class SdkChatPreprocessor {
     chatEntryPolicy: ChatEntryPolicy;
     slashExecutionUseCase: SdkSlashExecutionUseCase;
     contextResolver: ChatExecutionContextResolver;
+    normalChatSessionResolver?: NormalChatSessionResolver;
+    businessEntryContextResolver?: BusinessEntryContextResolver;
+    effectiveDirectory?: string;
   }) {}
 
   async preprocess(input: ProviderRunMessageInput, logger?: BridgeLogger): Promise<PreprocessResult> {
-    const decision = this.dependencies.chatEntryPolicy.decide(input);
+    const suppressDecision = this.dependencies.chatEntryPolicy.decide(input);
+    if (suppressDecision.kind === 'deny') {
+      return {
+        kind: 'synthetic_run',
+        run: buildSyntheticRun(input.toolSessionId, suppressDecision.text),
+      };
+    }
+
+    const entryContext = this.dependencies.businessEntryContextResolver
+      ? this.dependencies.businessEntryContextResolver.resolveForChatMessage(input)
+      : undefined;
+    const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
     if (decision.kind === 'deny') {
       return {
         kind: 'synthetic_run',
@@ -501,14 +536,21 @@ export class SdkChatPreprocessor {
 
     return {
       kind: 'normal_chat',
-      context: await this.dependencies.contextResolver.resolveForChat(
-        input.toolSessionId,
-        {
-          assistantId: input.assistantId,
-          imGroupId: input.context?.imGroupId,
-        },
-        logger,
-      ),
+      context: this.dependencies.normalChatSessionResolver
+        ? await this.dependencies.normalChatSessionResolver.resolve({
+          message: input,
+          entryContext,
+          ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
+          logger,
+        })
+        : await this.dependencies.contextResolver.resolveForChat(
+          input.toolSessionId,
+          {
+            assistantId: input.assistantId,
+            imGroupId: input.context?.imGroupId,
+          },
+          logger,
+        ),
     };
   }
 }

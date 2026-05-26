@@ -47,6 +47,19 @@ import {
   SdkSlashExecutionUseCase,
   StaticSlashCapabilityProvider,
 } from './sdk/SdkChatControlPlane.js';
+import {
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+  BusinessEntryContextResolver,
+  EntryAwareChatSessionResolver,
+  RuntimeAnchorRegistry,
+  RuntimePendingInteractionRegistry,
+  createSessionIsolationControlPlane,
+} from './sdk/session-isolation/index.js';
+import {
+  AkScopedEntrySessionStorePathResolver,
+  FileOwnedSessionRepository,
+} from '../adapter/session-isolation/repository/index.js';
 import { getErrorDetailsForLog, getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
 import { asRecord, asTrimmedString } from '../utils/type-guards.js';
 import type { BridgeSdkClient } from '../types/sdk.js';
@@ -68,6 +81,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   private readonly missingSdkCapabilities;
   private readonly logger: BridgeLogger;
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
+  private readonly sessionIsolationDataDir?: string;
 
   private eventFilter: EventFilter | null = null;
   private started = false;
@@ -80,6 +94,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     hostDirectory?: string;
     client: unknown;
     runtimeTraceId?: string;
+    sessionIsolationDataDir?: string;
   }) {
     this.workspacePath = options.workspacePath;
     this.hostDirectory = options.hostDirectory;
@@ -88,6 +103,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
     this.logger = new AppLogger(options.client, { component: 'sdk_runtime', runtimeMode: SDK_RUNTIME_MODE }, options.runtimeTraceId);
     this.statusAdapter = createBridgeRuntimeStatusAdapter();
+    this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
 
   async start(options: ManagedRuntimeStartOptions = {}): Promise<void> {
@@ -173,6 +189,17 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         };
       },
     };
+    const sessionCreationPort = {
+      createSession: async (input: { title?: string; directory?: string }) => {
+        const result = await createSessionUseCase.execute({
+          title: input.title,
+          isGroupChat: false,
+          effectiveDirectory: input.directory ?? config.bridgeDirectory ?? this.hostDirectory,
+          directoryMappingEnabled: directoryMappingPort.isConfigured(),
+        });
+        return result;
+      },
+    };
     const hostSessionQueryPort: HostSessionQueryPort = {
       getSession: async (sessionId: string) => {
         return this.getHostSessionInfo(startupValidation.sdkClient, sessionId);
@@ -184,6 +211,34 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     const hostModelCatalogPort: HostModelCatalogPort = {
       listModels: async () => this.listHostModels(startupValidation.sdkClient),
     };
+    const businessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
+    const businessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
+    const businessEntryContextResolver = new BusinessEntryContextResolver({
+      businessEntryKeyResolver,
+      businessEntryPolicyResolver,
+    });
+    const runtimeAnchorRegistry = new RuntimeAnchorRegistry();
+    const ownedSessionRepository = new FileOwnedSessionRepository({
+      filePath: new AkScopedEntrySessionStorePathResolver({
+        ...(this.sessionIsolationDataDir ? { dataDir: this.sessionIsolationDataDir } : {}),
+      }).resolve({ authAk: config.auth.ak }),
+    });
+    const sessionIsolationControlPlane = createSessionIsolationControlPlane({
+      akScopeKey: config.auth.ak,
+      bindingStore,
+      ownershipResolver,
+      businessEntryKeyResolver,
+      ownedSessionRepository,
+      hostSessionQueryPort,
+      sessionCreationPort,
+      sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,
+      pendingInteractionRegistry: new RuntimePendingInteractionRegistry(),
+      runtimeAnchorRepository: runtimeAnchorRegistry,
+      toolSessionIdFactory: () => randomUUID(),
+      ownedHostEventForwarder: {
+        forward: async () => ({ applied: true }),
+      },
+    });
     const contextResolver = new DefaultChatExecutionContextResolver({
       bindingStore,
       ownershipResolver,
@@ -210,11 +265,23 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         contextResolver,
       }),
       contextResolver,
+      businessEntryContextResolver,
+      effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
+      normalChatSessionResolver: new EntryAwareChatSessionResolver({
+        businessEntryKeyResolver,
+        resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
+        switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
+        createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
+        runtimeAnchorRepository: runtimeAnchorRegistry,
+        modelOverrideStore: sessionModelOverrideStore,
+      }),
     });
     this.providerAdapter = new OpenCodeProviderAdapter({
       rawClient: this.rawClient,
       logger: this.logger.child({ component: 'provider_adapter' }),
       createSessionUseCase,
+      createSessionCommandPort: sessionIsolationControlPlane.createSessionCommandPort,
+      closeSessionCommandPort: sessionIsolationControlPlane.closeSessionCommandPort,
       effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
       directoryMappingEnabled: directoryMappingPort.isConfigured(),
       opencodeSessionGatewayAdapter,
