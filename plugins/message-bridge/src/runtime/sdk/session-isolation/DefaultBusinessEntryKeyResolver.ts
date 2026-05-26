@@ -39,6 +39,25 @@ function readBusinessEntryKey(input: unknown): BusinessEntryKey | undefined {
   return key as BusinessEntryKeyInput;
 }
 
+function readPartialBusinessEntryKey(input: unknown): Partial<BusinessEntryKeyInput> | undefined {
+  const record = asRecord(input);
+  if (!record) {
+    return undefined;
+  }
+  const key = {
+    ...(asNormalizedKeyPart(record.businessSessionDomain)
+      ? { businessSessionDomain: asNormalizedKeyPart(record.businessSessionDomain) }
+      : {}),
+    ...(asNormalizedKeyPart(record.businessSessionType)
+      ? { businessSessionType: asNormalizedKeyPart(record.businessSessionType) }
+      : {}),
+    ...(asTrimmedString(record.businessSessionId)
+      ? { businessSessionId: asTrimmedString(record.businessSessionId) }
+      : {}),
+  };
+  return Object.keys(key).length > 0 ? key : undefined;
+}
+
 /**
  * 从 gateway 扩展参数解析控制面业务入口 key。
  * @remarks create_session 只接受显式三元组；chat 可按历史上下文字段补全，补全失败时 fail-closed。
@@ -64,7 +83,7 @@ export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver
 
     return this.completeChatEntryKey({
       ...input.context,
-      extParameters: input.extParameters,
+      platformExtParam: readPartialBusinessEntryKey(extParameters?.platformExtParam),
     });
   }
 
@@ -72,35 +91,70 @@ export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver
     assistantAccount?: string;
     sendUserAccount?: string;
     imGroupId?: string;
-    extParameters?: unknown;
+    platformExtParam?: Partial<BusinessEntryKeyInput>;
   } | undefined): BusinessEntryKey | undefined {
+    const domain = asNormalizedKeyPart(input?.platformExtParam?.businessSessionDomain);
+    if (!domain || (domain !== 'im' && domain !== 'miniapp')) {
+      return undefined;
+    }
+    const sendUserAccount = asTrimmedString(input?.sendUserAccount);
+    const assistantAccount = asTrimmedString(input?.assistantAccount);
     const imGroupId = asTrimmedString(input?.imGroupId);
-    const extParameters = asRecord(input?.extParameters);
-    if (imGroupId) {
+    const type = asNormalizedKeyPart(input?.platformExtParam?.businessSessionType);
+
+    if (domain === 'im') {
+      if (type === 'group') {
+        if (!imGroupId) {
+          return undefined;
+        }
+        return {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: imGroupId,
+        };
+      }
+      if (type === 'direct') {
+        if (!sendUserAccount || !assistantAccount) {
+          return undefined;
+        }
+        return {
+          businessSessionDomain: 'im',
+          businessSessionType: 'direct',
+          businessSessionId: `${sendUserAccount}#${assistantAccount}`,
+        };
+      }
+      if (type) {
+        return undefined;
+      }
+
+      if (imGroupId) {
+        return {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: imGroupId,
+        };
+      }
+      if (!sendUserAccount || !assistantAccount) {
+        return undefined;
+      }
       return {
         businessSessionDomain: 'im',
-        businessSessionType: 'group',
-        businessSessionId: imGroupId,
+        businessSessionType: 'direct',
+        businessSessionId: `${sendUserAccount}#${assistantAccount}`,
       };
     }
 
-    const sendUserAccount = asTrimmedString(input?.sendUserAccount);
-    const assistantAccount = asTrimmedString(input?.assistantAccount);
-    const platformExtParam = asRecord(extParameters?.platformExtParam);
-    if (asNormalizedKeyPart(platformExtParam?.businessSessionDomain) === 'miniapp' && assistantAccount) {
-      return {
-        businessSessionDomain: 'miniapp',
-        businessSessionType: 'direct',
-        businessSessionId: assistantAccount,
-      };
+    if (type && type !== 'direct') {
+      return undefined;
     }
-    if (!sendUserAccount || !assistantAccount) {
+    const businessSessionId = assistantAccount ?? sendUserAccount;
+    if (!businessSessionId) {
       return undefined;
     }
     return {
-      businessSessionDomain: 'im',
+      businessSessionDomain: 'miniapp',
       businessSessionType: 'direct',
-      businessSessionId: `${sendUserAccount}#${assistantAccount}`,
+      businessSessionId,
     };
   }
 }

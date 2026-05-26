@@ -476,7 +476,7 @@ test('EntryAwareChatSessionResolver fails closed when chat business key cannot b
   );
 });
 
-test('EntryAwareChatSessionResolver clears anchor-only state after first legal chat bootstrap', async () => {
+test('EntryAwareChatSessionResolver keeps anchor-only state when chat businessSessionDomain is missing', async () => {
   const runtimeAnchorRepository = new RuntimeAnchorRegistry();
   await runtimeAnchorRepository.createAnchorOnly({ toolSessionId: 'tool-anchor-only' });
   const resolver = new EntryAwareChatSessionResolver({
@@ -497,19 +497,22 @@ test('EntryAwareChatSessionResolver clears anchor-only state after first legal c
     modelOverrideStore: new InMemorySessionModelOverrideStore(),
   });
 
-  await resolver.resolve({
-    message: {
-      traceId: 'trace-anchor-only',
-      runId: 'run-anchor-only',
-      toolSessionId: 'tool-anchor-only',
-      text: 'hello',
-      context: {
-        imGroupId: 'group-a',
+  await assert.rejects(
+    () => resolver.resolve({
+      message: {
+        traceId: 'trace-anchor-only',
+        runId: 'run-anchor-only',
+        toolSessionId: 'tool-anchor-only',
+        text: 'hello',
+        context: {
+          imGroupId: 'group-a',
+        },
       },
-    },
-  });
+    }),
+    /business_entry_key_required/,
+  );
 
-  assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only'), false);
+  assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only'), true);
 });
 
 test('SdkChatPreprocessor fails closed before slash execution when business entry is missing', async () => {
@@ -550,6 +553,118 @@ test('SdkChatPreprocessor fails closed before slash execution when business entr
     /business_entry_key_required/u,
   );
   assert.equal(slashExecuted, false);
+});
+
+test('SdkChatPreprocessor accepts miniapp chat when assistantAccount is missing but sendUserAccount is present', async () => {
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execution');
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    normalChatSessionResolver: {
+      resolve: async (input) => {
+        assert.deepEqual(input.entryContext, {
+          entryKey: {
+            businessSessionDomain: 'miniapp',
+            businessSessionType: 'direct',
+            businessSessionId: 'miniapp-user-1',
+          },
+          policy: {
+            entryKey: 'miniapp:direct:miniapp-user-1',
+            controlled: false,
+            allowOpencodeNativeSessions: true,
+            allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+          },
+        });
+        return {
+          opencodeSessionId: 'ses-miniapp-fallback',
+          bootstrapSource: 'bootstrap_created',
+        };
+      },
+    },
+  });
+
+  const result = await preprocessor.preprocess({
+    traceId: 'trace-miniapp-fallback',
+    runId: 'run-miniapp-fallback',
+    toolSessionId: 'tool-miniapp-fallback',
+    text: 'hello',
+    context: {
+      sendUserAccount: 'miniapp-user-1',
+    },
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'miniapp',
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    kind: 'normal_chat',
+    context: {
+      opencodeSessionId: 'ses-miniapp-fallback',
+      bootstrapSource: 'bootstrap_created',
+    },
+  });
+});
+
+test('SdkChatPreprocessor fails closed when domain is missing even if im legacy fields exist', async () => {
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execution');
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+  });
+
+  await assert.rejects(
+    () => preprocessor.preprocess({
+      traceId: 'trace-missing-domain-im',
+      runId: 'run-missing-domain-im',
+      toolSessionId: 'tool-missing-domain-im',
+      text: 'hello',
+      context: {
+        imGroupId: 'group-a',
+        assistantAccount: 'bot-1',
+        sendUserAccount: 'user-1',
+      },
+      extParameters: {},
+    }),
+    /business_entry_key_required/u,
+  );
 });
 
 test('SdkChatPreprocessor applies request scoped slash policy after entry context resolution', async () => {

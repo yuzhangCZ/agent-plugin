@@ -124,25 +124,27 @@ payload.extParameters.platformExtParam.businessSessionId
 - `chat.payload.extParameters` 与 `create_session.payload.extParameters` 使用同一 `ExtParameters` 契约。
 - 显式 `platformExtParam` 优先于 `imGroupId`、账号拼接、`title` 等历史兼容字段。
 - 历史字段只在显式字段缺失时用于补全。
+- 本节规则属于协议收紧：`businessSessionDomain` 缺失时不再自动推断 `im`，旧输入需同步补齐该字段。
 - `title` 保留为建会话时传给宿主的 prompt/展示型入参，不参与 `BusinessEntryKey` 解析。
 - `close_session`、`abort_session`、`question_reply`、`permission_reply` 不基于 `extParameters` 做目标选择、删除判定、回复恢复或业务入口路由。
 - `question_reply` / `permission_reply` 只允许使用 interaction 注册时记录的 `hostSessionId` 做一致性校验；不得在 reply 阶段基于 host `sessionId` 扫描或恢复旧 interaction。
 
-对 `chat`，若三元组缺失，则执行补全：
+对 `chat`，`businessSessionDomain` 是正式必填字段；缺失时直接 fail-closed，不再基于 `imGroupId`、账号字段或其他历史上下文推断 domain。
+
+在显式 `businessSessionDomain` 合法存在的前提下，才允许继续补全 `businessSessionType` / `businessSessionId`：
 
 1. `im`
-   - `businessSessionDomain = "im"`
-   - `businessSessionType = imGroupId ? "group" : "direct"`
-   - `businessSessionId`
-     - `group`：`imGroupId`
-     - `direct`：`${sendUserAccount}#${assistantAccount}`
+   - 若显式 `businessSessionType = "group"`，`businessSessionId` 缺失时仅允许使用 `imGroupId`
+   - 若显式 `businessSessionType = "direct"`，`businessSessionId` 缺失时仅允许使用 `${sendUserAccount}#${assistantAccount}`
+   - 若 `businessSessionType` 缺失：
+     - 有合法 `imGroupId` 时推断为 `group`
+     - 否则在 `assistantAccount` 与 `sendUserAccount` 都合法时推断为 `direct`
 2. `miniapp`
-   - `businessSessionDomain = "miniapp"`
-   - `businessSessionType = "direct"`
-   - `businessSessionId = assistantAccount`
-3. `im:skill:*`
+   - 若显式 `businessSessionType = "direct"`，`businessSessionId` 缺失时优先使用 `assistantAccount`，缺失时回退为 `sendUserAccount`
+   - 若 `businessSessionType` 缺失，固定按 `direct` 处理，`businessSessionId` 仍按 `assistantAccount -> sendUserAccount` 补全
+3. 其他 domain
    - 不做历史补全
-   - 仅接受显式完整三元组
+   - 统一 fail-closed
 
 对 `chat`，补全失败时：
 
@@ -159,7 +161,7 @@ payload.extParameters.platformExtParam.businessSessionId
 
 | Action | 正式业务入口输入 | 兼容补全输入 | `extParameters` 语义 | 失败边界 |
 | --- | --- | --- | --- | --- |
-| `chat` | `payload.extParameters.platformExtParam.businessSessionDomain/type/id` | `imGroupId`、`assistantAccount`、`sendUserAccount` | 正式参与 `BusinessEntryKey` 解析 | 若显式字段缺失且补全失败，则 fail-closed |
+| `chat` | `payload.extParameters.platformExtParam.businessSessionDomain/type/id` | 仅在显式 `businessSessionDomain` 为 `im` 或 `miniapp` 时允许使用 `imGroupId`、`assistantAccount`、`sendUserAccount` 补全 type/id；不再推断 domain | 正式参与 `BusinessEntryKey` 解析 | `businessSessionDomain` 缺失、不支持，或补全失败时 fail-closed |
 | `create_session` | `payload.extParameters.platformExtParam.businessSessionDomain/type/id` | 无正式 entry 补全；缺合法 `entryKey` 时走 `anchor-only` 兼容路径；`title` 不参与隔离语义 | 正式参与 `BusinessEntryKey` 解析；与 `chat` 复用同一 `ExtParameters` 契约 | 有合法 `entryKey` 时按正式建会话路径处理；否则仅创建 `anchor-only` runtime anchor，不调用 `session.create` |
 | `close_session` | 无 | `payload.toolSessionId` 命中 runtime binding | 即使存在也不参与目标解析 | `toolSessionId` 未绑定或已失效时按幂等失败处理 |
 | `abort_session` | 无 | `payload.toolSessionId` 命中 active run | 即使存在也不参与目标解析 | 当前 `toolSessionId` 无活跃 run 时按幂等失败处理 |
