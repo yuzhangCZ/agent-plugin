@@ -257,6 +257,9 @@ function createAdapter(overrides = {}) {
     createSessionUseCase,
     ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
     ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
+    ...(overrides.abortSessionCommandPort ? { abortSessionCommandPort: overrides.abortSessionCommandPort } : {}),
+    ...(overrides.questionReplyCommandPort ? { questionReplyCommandPort: overrides.questionReplyCommandPort } : {}),
+    ...(overrides.permissionReplyCommandPort ? { permissionReplyCommandPort: overrides.permissionReplyCommandPort } : {}),
     ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
     effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
     directoryMappingEnabled: false,
@@ -277,6 +280,171 @@ function createAdapter(overrides = {}) {
     subagentSessionMapper: new SubagentSessionMapper(() => sdkClient),
   });
 }
+
+test('provider adapter delegates question replies to session-isolation command port', async () => {
+  const calls = [];
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    questionReplyCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { applied: true };
+      },
+    },
+    question: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        throw new Error('legacy question reply should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.replyQuestion({
+    traceId: 'trace-question-port',
+    questionId: 'question-a',
+    answers: [['answer-a']],
+  }), { applied: true });
+  assert.deepEqual(calls, [{ questionId: 'question-a', answer: 'answer-a' }]);
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation question reply command rejects', async () => {
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    questionReplyCommandPort: {
+      execute: async () => {
+        throw new Error('question_pending_interaction_not_found');
+      },
+    },
+    question: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.replyQuestion({
+      traceId: 'trace-question-port-failed',
+      questionId: 'question-missing',
+      answers: [['answer-a']],
+    }),
+    /question_pending_interaction_not_found/,
+  );
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter delegates permission replies to session-isolation command port', async () => {
+  const calls = [];
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    permissionReplyCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { applied: true };
+      },
+    },
+    permission: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        throw new Error('legacy permission reply should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.replyPermission({
+    traceId: 'trace-permission-port',
+    permissionId: 'permission-a',
+    reply: 'once',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ permissionId: 'permission-a', response: 'once' }]);
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation permission reply command rejects', async () => {
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    permissionReplyCommandPort: {
+      execute: async () => {
+        throw new Error('permission_pending_interaction_not_found');
+      },
+    },
+    permission: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.replyPermission({
+      traceId: 'trace-permission-port-failed',
+      permissionId: 'permission-missing',
+      reply: 'deny',
+    }),
+    /permission_pending_interaction_not_found/,
+  );
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter delegates abort session to session-isolation command port', async () => {
+  const calls = [];
+  let legacyAbortCalls = 0;
+  const adapter = createAdapter({
+    abortSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { kind: 'aborted', toolSessionId: input.toolSessionId };
+      },
+    },
+    session: {
+      abort: async () => {
+        legacyAbortCalls += 1;
+        throw new Error('legacy abort should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.abortSession({
+    traceId: 'trace-abort-port',
+    toolSessionId: 'tool-abort-port',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ toolSessionId: 'tool-abort-port' }]);
+  assert.equal(legacyAbortCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation abort command reports inactive session', async () => {
+  let legacyAbortCalls = 0;
+  const adapter = createAdapter({
+    abortSessionCommandPort: {
+      execute: async (input) => ({ kind: 'not_active', toolSessionId: input.toolSessionId }),
+    },
+    session: {
+      abort: async () => {
+        legacyAbortCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.abortSession({
+      traceId: 'trace-abort-port-not-active',
+      toolSessionId: 'tool-abort-missing',
+    }),
+    (error) => {
+      assert.equal(error.message, 'abort_session_not_active');
+      assert.deepEqual(error.errorEvidence, {
+        sourceOperation: 'session.abort',
+        sourceErrorCode: 'session_not_found',
+      });
+      return true;
+    },
+  );
+  assert.equal(legacyAbortCalls, 0);
+});
 
 test('provider adapter observes raw host events through session-isolation port without changing routing result', async () => {
   const observed = [];

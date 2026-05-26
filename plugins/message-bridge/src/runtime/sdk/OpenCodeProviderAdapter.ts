@@ -21,9 +21,12 @@ import { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
 import { getErrorMessage } from '../../utils/error.js';
 import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js';
 import type {
+  AbortSessionCommandPort,
   CloseSessionCommandPort,
   CreateSessionCommandPort,
   HostEventPort,
+  PermissionReplyCommandPort,
+  QuestionReplyCommandPort,
 } from '../../port/session-isolation/inbound/index.js';
 import type {
   ChatExecutionContext,
@@ -66,6 +69,9 @@ type ProviderAdapterOptions = {
   createSessionUseCase: CreateSessionUseCase;
   createSessionCommandPort?: CreateSessionCommandPort;
   closeSessionCommandPort?: CloseSessionCommandPort;
+  abortSessionCommandPort?: AbortSessionCommandPort;
+  questionReplyCommandPort?: QuestionReplyCommandPort;
+  permissionReplyCommandPort?: PermissionReplyCommandPort;
   effectiveDirectory?: string;
   directoryMappingEnabled: boolean;
   opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
@@ -135,6 +141,9 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly createSessionCommandPort?: CreateSessionCommandPort;
   private readonly closeSessionCommandPort?: CloseSessionCommandPort;
+  private readonly abortSessionCommandPort?: AbortSessionCommandPort;
+  private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
+  private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
   private readonly effectiveDirectory?: string;
   private readonly directoryMappingEnabled: boolean;
   private readonly createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
@@ -157,6 +166,9 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     this.createSessionUseCase = options.createSessionUseCase;
     this.createSessionCommandPort = options.createSessionCommandPort;
     this.closeSessionCommandPort = options.closeSessionCommandPort;
+    this.abortSessionCommandPort = options.abortSessionCommandPort;
+    this.questionReplyCommandPort = options.questionReplyCommandPort;
+    this.permissionReplyCommandPort = options.permissionReplyCommandPort;
     this.effectiveDirectory = options.effectiveDirectory;
     this.directoryMappingEnabled = options.directoryMappingEnabled;
     this.chatPreprocessor = options.chatPreprocessor;
@@ -298,6 +310,14 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
   async replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
     const answer = input.answers[0]?.[0] ?? '';
+    if (this.questionReplyCommandPort) {
+      await this.questionReplyCommandPort.execute({
+        questionId: input.questionId,
+        answer,
+      });
+      return { applied: true };
+    }
+
     const result = await this.opencodeSessionGatewayAdapter.replyQuestion({
       questionId: input.questionId,
       answer,
@@ -310,6 +330,14 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }> {
+    if (this.permissionReplyCommandPort) {
+      await this.permissionReplyCommandPort.execute({
+        permissionId: input.permissionId,
+        response: input.reply,
+      });
+      return { applied: true };
+    }
+
     const result = await this.opencodeSessionGatewayAdapter.replyPermission({
       permissionId: input.permissionId,
       response: input.reply,
@@ -339,6 +367,21 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async abortSession(input: { toolSessionId: string }): Promise<{ applied: true }> {
+    if (this.abortSessionCommandPort) {
+      const result = await this.abortSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
+      if (result.kind !== 'aborted') {
+        const error = new Error('abort_session_not_active');
+        Object.assign(error, {
+          errorEvidence: {
+            sourceOperation: 'session.abort',
+            sourceErrorCode: 'session_not_found',
+          },
+        });
+        throw error;
+      }
+      return { applied: true };
+    }
+
     const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
     const result = await this.opencodeSessionGatewayAdapter.abortSession({
       sessionId: context.opencodeSessionId,
