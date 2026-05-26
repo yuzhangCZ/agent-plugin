@@ -270,6 +270,55 @@ describe('session-isolation create and close use cases', () => {
     }]);
   });
 
+  test('CreateOwnedSessionUseCase honors uncontrolled direct-entry policy when creating and binding ownership', async () => {
+    const { calls: hostCalls, gateway } = createHostSessionGateway();
+    const { calls: coordinatorCalls, coordinator } = createOwnedSessionCoordinator();
+    const useCase = new DefaultCreateOwnedSessionUseCase({
+      hostSessionGateway: gateway,
+      ownedSessionCoordinator: coordinator,
+    });
+    const directEntryKey = {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: 'user-a',
+    };
+    const policy = {
+      entryKey: 'im:direct:user-a',
+      controlled: false,
+      allowOpencodeNativeSessions: true,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+    };
+
+    assert.deepStrictEqual(await useCase.execute({
+      toolSessionId: 'tool-direct',
+      entryKey: directEntryKey,
+      policy,
+      directory: '/workspace/direct',
+    }), {
+      session: { id: 'ses-created', title: undefined, directory: '/workspace/direct' },
+    });
+    assert.deepStrictEqual(hostCalls, [{
+      method: 'create',
+      input: {
+        directory: '/workspace/direct',
+        control: {
+          controlled: false,
+          permissionProfile: 'default',
+        },
+      },
+    }]);
+    assert.deepStrictEqual(coordinatorCalls, [{
+      method: 'bindOwnedSession',
+      input: {
+        toolSessionId: 'tool-direct',
+        sessionId: 'ses-created',
+        entryKey: directEntryKey,
+        policy,
+        directory: '/workspace/direct',
+      },
+    }]);
+  });
+
   test('CreateOwnedSessionUseCase deletes created host session when ownership binding fails', async () => {
     const host = createHostSessionGateway();
     const useCase = new DefaultCreateOwnedSessionUseCase({

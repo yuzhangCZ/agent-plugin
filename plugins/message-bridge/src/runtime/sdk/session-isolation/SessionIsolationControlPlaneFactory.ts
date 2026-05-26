@@ -43,6 +43,7 @@ import type {
 } from '../../../port/session-isolation/outbound/index.js';
 import type { RuntimePendingInteractionRegistry } from './RuntimePendingInteractionRegistry.js';
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
+import { SessionIsolationSlashCommandExecutor } from './SessionIsolationSlashCommandExecutor.js';
 
 type LegacyQuestionListPort = {
   listQuestions(): Promise<unknown[]>;
@@ -76,6 +77,7 @@ export interface SessionIsolationControlPlane {
   hostEventPort: DefaultHostEventUseCase;
   resolveEntrySessionContextUseCase: DefaultResolveEntrySessionContextUseCase;
   switchAttachedSessionUseCase: DefaultSwitchAttachedSessionUseCase;
+  slashCommandExecutor: SessionIsolationSlashCommandExecutor;
 }
 
 /**
@@ -162,6 +164,16 @@ export function createSessionIsolationControlPlane(
       ownedSessionCoordinator,
     }),
   });
+  const slashCommandExecutor = new SessionIsolationSlashCommandExecutor({
+    resolveEntrySessionContextUseCase,
+    switchAttachedSessionUseCase,
+    createOwnedSessionUseCase,
+    runtimeAnchorRepository: dependencies.runtimeAnchorRepository ?? {
+      isAnchorOnly: async () => false,
+      createAnchorOnly: async () => undefined,
+      delete: async () => undefined,
+    },
+  });
 
   return {
     chatCommandPort: new DefaultChatCommandUseCase({
@@ -180,5 +192,6 @@ export function createSessionIsolationControlPlane(
     hostEventPort,
     resolveEntrySessionContextUseCase,
     switchAttachedSessionUseCase,
+    slashCommandExecutor,
   };
 }

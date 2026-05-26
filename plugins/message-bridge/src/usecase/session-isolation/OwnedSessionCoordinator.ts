@@ -34,13 +34,14 @@ export class DefaultOwnedSessionCoordinator implements OwnedSessionCoordinator {
   }) {}
 
   async bindOwnedSession(input: CreateOwnedSessionInput): Promise<OwnedSessionMutationResult> {
+    const controlled = input.policy?.controlled ?? true;
     try {
       await this.dependencies.ownedSessionRepository.upsert({
         akScopeKey: this.dependencies.akScopeKey,
         entryKey: this.dependencies.entryKeyCodec.stringify(input.entryKey),
         sessionId: input.sessionId,
-        controlled: true,
-        permissionProfile: 'dialog_only',
+        controlled,
+        permissionProfile: controlled ? 'dialog_only' : 'default',
       });
       await this.attach(input.toolSessionId, input.sessionId);
       return { applied: true };

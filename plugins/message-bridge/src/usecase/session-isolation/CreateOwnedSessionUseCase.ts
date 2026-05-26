@@ -40,13 +40,14 @@ export class DefaultCreateOwnedSessionUseCase {
   }
 
   private toHostCreateInput(input: CreateOwnedSessionRequest): HostSessionCreateInput {
+    const controlled = input.policy?.controlled ?? true;
     return {
       ...(input.title ? { title: input.title } : {}),
       ...(input.assistantId ? { assistantId: input.assistantId } : {}),
       ...(input.directory ? { directory: input.directory } : {}),
       control: {
-        controlled: true,
-        permissionProfile: 'dialog_only',
+        controlled,
+        permissionProfile: controlled ? 'dialog_only' : 'default',
       },
     };
   }

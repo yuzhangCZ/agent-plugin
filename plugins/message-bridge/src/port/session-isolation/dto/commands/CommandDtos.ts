@@ -35,6 +35,7 @@ export interface CreateOwnedSessionInput {
   toolSessionId: string;
   sessionId: string;
   entryKey: BusinessEntryKey;
+  policy?: BusinessEntryPolicy;
   title?: string;
   assistantId?: string;
   directory?: string;

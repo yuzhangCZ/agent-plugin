@@ -267,6 +267,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       }),
       slashExecutionUseCase: new SdkSlashExecutionUseCase({
         slashCommandExecutor,
+        sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
         replyPresenter: new DefaultSlashCommandReplyPresenter(),
         contextResolver,
       }),

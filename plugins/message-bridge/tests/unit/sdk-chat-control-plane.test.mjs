@@ -169,6 +169,83 @@ test('SdkSlashExecutionUseCase returns synthetic success run for /model and pres
   assert.deepEqual(await run.result(), { outcome: 'completed' });
 });
 
+test('SdkSlashExecutionUseCase routes /sessions through session-isolation executor when entry context exists', async () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  let formalExecutorInput;
+
+  const usecase = new SdkSlashExecutionUseCase({
+    slashCommandExecutor: new SlashCommandExecutor({
+      bindingStore,
+      ownershipResolver,
+      modelOverrideStore,
+      hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
+      hostSessionQueryPort: {
+        getSession: async () => ({ id: 'unexpected-get' }),
+        listSessions: async () => {
+          throw new Error('legacy slash sessions should not be used');
+        },
+      },
+      hostModelCatalogPort: {
+        listModels: async () => [],
+      },
+    }),
+    sessionIsolationSlashCommandExecutor: {
+      execute: async (input) => {
+        formalExecutorInput = input;
+        return {
+          kind: 'sessions',
+          activeSessionId: 'ses-formal',
+          sessions: [{ id: 'ses-formal', title: 'formal session' }],
+        };
+      },
+    },
+    replyPresenter: new DefaultSlashCommandReplyPresenter(),
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('legacy slash context resolver should not be used');
+      },
+      resolveForControlAction: async () => ({ opencodeSessionId: 'unexpected-control' }),
+    },
+  });
+
+  const entryContext = {
+    entryKey: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: 'user-a',
+    },
+    policy: {
+      entryKey: 'im:direct:user-a',
+      controlled: true,
+      allowOpencodeNativeSessions: false,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+    },
+  };
+  const run = await usecase.execute({
+    anchor: 'anchor-formal-sessions',
+    descriptor: { kind: 'sessions' },
+    command: { kind: 'sessions' },
+    entryContext,
+    directory: '/workspace/formal',
+    logger: createLogger(),
+  });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.equal(facts[1].content.includes('formal session'), true);
+  assert.deepEqual(formalExecutorInput, {
+    command: { kind: 'sessions' },
+    anchor: 'anchor-formal-sessions',
+    entryContext,
+    directory: '/workspace/formal',
+  });
+});
+
 test('DefaultChatExecutionContextResolver carries session-scoped model override and self-heals invalid binding', async () => {
   const bindingStore = new InMemoryToolSessionBindingStore();
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();

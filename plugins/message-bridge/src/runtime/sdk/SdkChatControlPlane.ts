@@ -29,6 +29,7 @@ import type {
   SlashCommandDescriptor,
   SlashCommandParser,
   SlashCommandReplyPresenter,
+  SlashCommandResult,
   ToolSessionBindingStore,
 } from '../../port/SlashCommandControlPlanePort.js';
 import { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
@@ -108,6 +109,16 @@ export interface CreatedSessionBindingPort {
 
 export interface SessionAttachmentPort {
   switchAttachedSession(input: { toolSessionId: string; sessionId: string }): Promise<{ applied: boolean }>;
+}
+
+export interface SessionIsolationSlashCommandExecutionPort {
+  execute(input: {
+    command: SlashCommand;
+    anchor: string;
+    entryContext: BusinessEntryContext;
+    createContext?: HostSessionCreateContext;
+    directory?: string;
+  }): Promise<SlashCommandResult>;
 }
 
 export interface NormalChatSessionResolver {
@@ -204,6 +215,7 @@ export class ChatEntryPolicy {
 export class SdkSlashExecutionUseCase {
   constructor(private readonly dependencies: {
     slashCommandExecutor: SlashCommandExecutor;
+    sessionIsolationSlashCommandExecutor?: SessionIsolationSlashCommandExecutionPort;
     replyPresenter: SlashCommandReplyPresenter;
     contextResolver: ChatExecutionContextResolver;
   }) {}
@@ -212,7 +224,9 @@ export class SdkSlashExecutionUseCase {
     anchor: string;
     descriptor: SlashCommandDescriptor;
     command?: SlashCommand;
+    entryContext?: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
+    directory?: string;
     disabledInEntry?: boolean;
     invalid?: boolean;
     logger?: BridgeLogger;
@@ -237,6 +251,11 @@ export class SdkSlashExecutionUseCase {
     }
 
     try {
+      const formalResult = await this.executeSessionIsolationCommand(input);
+      if (formalResult) {
+        return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(formalResult));
+      }
+
       const context = await this.dependencies.contextResolver.resolveForChat(
         input.anchor,
         input.createContext,
@@ -264,6 +283,32 @@ export class SdkSlashExecutionUseCase {
         ),
       );
     }
+  }
+
+  private async executeSessionIsolationCommand(input: {
+    anchor: string;
+    command?: SlashCommand;
+    entryContext?: BusinessEntryContext;
+    createContext?: HostSessionCreateContext;
+    directory?: string;
+  }): Promise<SlashCommandResult | undefined> {
+    if (!input.command || !input.entryContext || !this.dependencies.sessionIsolationSlashCommandExecutor) {
+      return undefined;
+    }
+    if (!this.isSessionIsolationCommand(input.command)) {
+      return undefined;
+    }
+    return this.dependencies.sessionIsolationSlashCommandExecutor.execute({
+      command: input.command,
+      anchor: input.anchor,
+      entryContext: input.entryContext,
+      ...(input.createContext ? { createContext: input.createContext } : {}),
+      ...(input.directory ? { directory: input.directory } : {}),
+    });
+  }
+
+  private isSessionIsolationCommand(command: SlashCommand): command is Extract<SlashCommand, { kind: 'new' | 'sessions' | 'session' }> {
+    return command.kind === 'new' || command.kind === 'sessions' || command.kind === 'session';
   }
 }
 
@@ -523,12 +568,14 @@ export class SdkChatPreprocessor {
           anchor: input.toolSessionId,
           descriptor: decision.descriptor,
           command: decision.command,
+          entryContext,
           disabledInEntry: decision.disabledInEntry,
           invalid: decision.invalid,
           createContext: {
             assistantId: input.assistantId,
             imGroupId: input.context?.imGroupId,
           },
+          ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
           logger,
         }),
       };

@@ -94,6 +94,12 @@ export class EntryAwareChatSessionResolver {
     const created = await this.dependencies.createOwnedSessionUseCase.execute({
       toolSessionId: input.message.toolSessionId,
       entryKey,
+      policy: input.entryContext?.policy ?? {
+        entryKey: '',
+        controlled: true,
+        allowOpencodeNativeSessions: false,
+        allowedSlashCommands: ['new', 'models', 'model'],
+      },
       ...(input.message.assistantId ? { assistantId: input.message.assistantId } : {}),
       ...(input.directory ? { directory: input.directory } : {}),
     });

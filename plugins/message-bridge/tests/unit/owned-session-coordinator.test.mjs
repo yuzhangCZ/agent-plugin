@@ -114,6 +114,37 @@ describe('DefaultOwnedSessionCoordinator', () => {
     });
   });
 
+  test('bindOwnedSession persists default permission profile for uncontrolled entries', async () => {
+    const {
+      coordinator,
+      ownedSessionRepository,
+    } = createCoordinator();
+
+    await coordinator.bindOwnedSession({
+      toolSessionId: 'tool-direct',
+      sessionId: 'ses-direct',
+      entryKey: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'UserA',
+      },
+      policy: {
+        entryKey: 'im:direct:UserA',
+        controlled: false,
+        allowOpencodeNativeSessions: true,
+        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      },
+    });
+
+    assert.deepStrictEqual([...ownedSessionRepository.records.values()], [{
+      akScopeKey: 'ak-test',
+      entryKey: 'im:direct:UserA',
+      sessionId: 'ses-direct',
+      controlled: false,
+      permissionProfile: 'default',
+    }]);
+  });
+
   test('switchAttachedSession replaces the previous attach owner and binding', async () => {
     const { coordinator, anchorBindingRepository, attachOwnerRepository } = createCoordinator();
     await anchorBindingRepository.upsert({
