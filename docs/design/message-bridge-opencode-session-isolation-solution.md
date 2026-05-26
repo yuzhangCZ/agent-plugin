@@ -252,15 +252,12 @@ flowchart LR
 状态文件固定路径模型：
 
 ```text
-<data-dir>/message-bridge/sessions/<ak-scope>/entry-session-store.json
+~/.local/share/message-bridge/sessions/<ak-scope>/entry-session-store.json
 ```
 
 其中：
 
-- `data-dir` 按平台取值：
-  - macOS: `~/Library/Application Support`
-  - Linux: `$XDG_DATA_HOME`，若为空则 `~/.local/share`
-  - Windows: `%LOCALAPPDATA%`
+- 所有平台默认使用同一套 Unix 风格路径：`~/.local/share`
 - `<ak-scope>` 固定为 `sha256(auth.ak)` 的小写十六进制字符串
 
 ### 3.5 两层状态模型
@@ -1344,7 +1341,7 @@ sequenceDiagram
 - 同一个 runtime 实例只对应一个有效 `AK scope`
 - 不允许从单次消息 payload 反查或派生另一个 `ak`
 - ownership 文件不放在插件配置目录，也不放在工作目录相对路径下
-- ownership 文件根目录固定为操作系统用户级数据目录下的 `message-bridge/sessions`
+- ownership 文件根目录固定为当前用户目录下的 `.local/share/message-bridge/sessions`
 - `<ak-scope>` 固定为 `sha256(auth.ak)` 的小写十六进制字符串
 
 ### 6.4 写安全

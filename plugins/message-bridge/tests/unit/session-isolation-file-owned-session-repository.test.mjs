@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
 import {
@@ -29,7 +29,7 @@ const ownedRecord = {
 };
 
 describe('FileOwnedSessionRepository', () => {
-  test('path resolver uses sha256 auth ak scope below user data directory', () => {
+  test('path resolver uses sha256 auth ak scope below override data directory', () => {
     const resolver = new AkScopedEntrySessionStorePathResolver({
       dataDir: '/tmp/message-bridge-data',
     });
@@ -38,6 +38,16 @@ describe('FileOwnedSessionRepository', () => {
     assert.equal(
       resolver.resolve({ authAk: 'ak-secret' }),
       join('/tmp/message-bridge-data', 'message-bridge', 'sessions', expectedScope, 'entry-session-store.json'),
+    );
+  });
+
+  test('path resolver defaults to Unix-style user local share directory on all platforms', () => {
+    const resolver = new AkScopedEntrySessionStorePathResolver();
+    const expectedScope = createHash('sha256').update('ak-secret').digest('hex');
+
+    assert.equal(
+      resolver.resolve({ authAk: 'ak-secret' }),
+      join(homedir(), '.local', 'share', 'message-bridge', 'sessions', expectedScope, 'entry-session-store.json'),
     );
   });
 
