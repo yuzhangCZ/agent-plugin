@@ -1,7 +1,7 @@
 # Message Bridge OpenCode 会话隔离与持久化方案设计
 
-**Version:** 3.2  
-**Date:** 2026-05-25  
+**Version:** 3.3  
+**Date:** 2026-05-27  
 **Status:** Reviewing  
 **Owner:** agent-plugin maintainers  
 **Related:** `./message-bridge-slash-commands-temporary-solution.md`, `./message-bridge-slash-commands-solution.md`, `./toolsessionid-dependency-analysis.md`
@@ -54,7 +54,7 @@
 - ownership 持久化边界以 `AK scope` 为准，`AK scope` 唯一来源是当前 runtime 连接配置的 `auth.ak`。
 - SDK 链路内所有新建 OpenCode session 的路径，统一走同一个 `CreateOwnedSessionUseCase`。
 - `session.deleted` 是 SDK 链路内统一删除生命周期事件真源，主消费路径为 plugin `event` hook。
-- `suppressReply` 是消息级硬约束，优先于 slash parse 与普通 chat bootstrap。
+- `suppressReply` 是消息级硬约束，优先于统一 `ensureRealSession(...)` 与后续 slash / 普通 chat 执行。
 - 创建宿主会话成功但 ownership 落盘失败时，本次请求失败，并执行 best-effort 删除；若删除失败，仅记录高优先级错误日志。
 - `create_session.payload.extParameters` 与 `chat.payload.extParameters` 使用同一 `ExtParameters` 契约；`title` 仅作为宿主 prompt/展示型入参。
 - `toolSessionId` 是对话链路锚点，host `sessionId` 是宿主会话管理锚点；`session_created` 对外仍只返回 `toolSessionId`。
@@ -336,7 +336,7 @@ interface AnchorOnlyRuntimeAnchorRecord {
 - host `sessionId` 不承载 request run 归属语义，只承载 ownership / visibility / deletion 语义。
 - 即使多个 `toolSessionId` 复用同一 host `sessionId`，也各自维护独立 run 生命周期。
 - `abort_session` 只能中断当前 `toolSessionId` 的活跃 run。
-- `anchor-only runtime anchor` 也可以承载 runtime 路由语义，但在首次合法 `chat` 前不承载 host session 生命周期语义。
+- `anchor-only runtime anchor` 也可以承载 runtime 路由语义，但在首次成功完成 `ensureRealSession(...)` 前不承载 host session 生命周期语义。
 - pending question / permission interaction 映射属于 process-local runtime state。
 - pending interaction 映射必须记录 `tokenId -> toolSessionId + hostSessionId`，其中 `tokenId` 是 `questionId` 或 `permissionId`。
 - `question_reply` / `permission_reply` 执行前必须校验当前 `toolSessionId` 仍绑定到最初产生该 interaction 的同一个 host `sessionId`。
@@ -346,7 +346,7 @@ interface AnchorOnlyRuntimeAnchorRecord {
 - 当前版本不为 `anchor-only runtime anchor` 引入空闲超时自动回收。
 - `anchor-only runtime anchor` 仅在以下情况消失：
   - `close_session(toolSessionId)` 幂等成功删除
-  - 首次合法 `chat` 成功完成 bootstrap 并转入 bound 状态
+  - 首次成功完成 `ensureRealSession(...)` 并转入 bound 状态
   - 进程重启导致 process-local 状态整体丢失
 - 当前版本允许同一旧客户端多次 `create_session` 生成多个 `anchor-only runtime anchor`；数量治理不属于本轮正式语义。
 
@@ -519,7 +519,7 @@ visibleSessions(entry) =
 
 约束：
 
-- `/sessions`、`/session <sessionId>`、普通消息 bootstrap 共用同一 `visibleSessions(entryKey)` 真源。
+- `/sessions`、`/session <sessionId>`、普通消息 ensure 共用同一 `visibleSessions(entryKey)` 真源。
 - 图和文字中的“宿主候选集”与“最终可见集”必须视为两个不同集合。
 - 禁止继续使用“`listSessions({})` 第一个结果就是可复用会话”的全局最近活跃策略。
 - 每次使用 binding 前都必须重新过可见性校验。
@@ -574,7 +574,19 @@ slash 命令是否可用由 `BusinessEntryPolicy.allowedSlashCommands` 决定，
 - 不回退到普通 chat
 - 不发送 `tool_error`
 
-`suppressReply` 优先级高于 slash parse，命中后直接短路，不进入 slash 控制面。
+`suppressReply` 优先级高于统一 `ensureRealSession(...)`，命中后直接短路，不进入 slash 控制面，也不进入普通 prompt。
+
+### 3.10.1 `tool.update.toolName` 协议对齐
+
+OpenCode `tool` part 的 canonical 工具名来源固定为 `part.tool`。
+
+约束：
+
+- `state.title` 仅用于展示，不参与 `toolName` 推断。
+- `part.tool` 缺失或为空时，bridge 对外回落 `toolName='tool'`。
+- 该回落仅是 fail-closed 占位，不表示推断成功。
+- 发生回落时必须通过 translator diagnostics 记录：
+  `context.diagnostics.warn('tool_update_missing_tool_name', ...)`
 
 ## 4. 生命周期与核心流程
 
@@ -588,9 +600,10 @@ slash 命令是否可用由 `BusinessEntryPolicy.allowedSlashCommands` 决定，
 2. 生成 `entryKey`
 3. 解析本地 `BusinessEntryPolicy`
 4. 先判 `suppressReply`
-5. 再做 slash parse
-6. 若命中 slash，再判 `allowedSlashCommands`
-7. 若是普通消息，才进入 bootstrap / prompt
+5. 统一执行 `ensureRealSession(...)`
+6. 成功后再做 slash parse
+7. 若命中 slash，再判 `allowedSlashCommands`
+8. 再进入 slash executor 或普通 prompt executor
 
 约束：
 
@@ -598,12 +611,17 @@ slash 命令是否可用由 `BusinessEntryPolicy.allowedSlashCommands` 决定，
 - 命中 `suppressReply` 时：
   - 直接走拒绝快路径
   - 不进入 slash 控制面
-  - 不进入普通 chat bootstrap
+  - 不进入 `ensureRealSession(...)`
   - 不复用会话
   - 不新建会话
   - 不调用宿主 prompt
+- 所有 `invoke/chat` 输入都必须先经过 `ensureRealSession(...)`。
+- slash parser 不再决定是否进入 ensure。
+- `/new` 也不排除在 ensure 之外；但 `/new` 的 ensured context 只作为前置解析结果，命令本身仍必须显式创建并切换到新会话。
+- `ensureRealSession(...)` 允许产生副作用；即使后续 slash 被禁用或判定为非法，只要 ensure 已执行，其创建 session / 改写 binding / 清理 anchor-only 的结果都视为合法设计结果。
+- 包括 `/models`、`/model` 在内的所有 slash 命令，都建立在“先完成真实 OpenCode session 绑定”之上。
 
-后续各张时序图都是这条总路径的局部展开。为避免读者在 slash 控制面与普通消息 bootstrap 之间来回跳，先给出统一入口分流图。
+后续各张时序图都基于这条“先 ensure，再分流”的主链。为避免 slash 控制面与普通消息链路再各自补会话语义，先给出统一入口图。
 
 ```mermaid
 flowchart TD
@@ -611,23 +629,20 @@ flowchart TD
   Entry --> Policy["解析 BusinessEntryPolicy"]
   Policy --> Suppress{"suppressReply?"}
 
-  Suppress -- 是 --> Reject["拒绝快路径<br/>不进入 slash / bootstrap / prompt"]
-  Suppress -- 否 --> Slash{"命中 slash?"}
+  Suppress -- 是 --> Reject["拒绝快路径<br/>不进入 ensure / slash / prompt"]
+  Suppress -- 否 --> Ensure["统一执行 ensureRealSession(...)"]
+  Ensure --> EnsureFail{"ensure 成功?"}
+  EnsureFail -- 否 --> Fail["fail-closed / synthetic failure"]
+  EnsureFail -- 是 --> Slash{"命中 slash?"}
 
-  Slash -- 否 --> Bootstrap["普通消息进入 bootstrap"]
-  Bootstrap --> Binding{"binding 有效且可见?"}
-  Binding -- 是 --> PromptBound["复用现有 binding<br/>session.prompt"]
-  Binding -- 否 --> Visible["重算 visibleSessions(entryKey)"]
-  Visible --> Candidate{"存在可见候选?"}
-  Candidate -- 是 --> PromptReuse["绑定最近活跃候选<br/>session.prompt"]
-  Candidate -- 否 --> Create["调用 CreateOwnedSessionUseCase"]
+  Slash -- 否 --> PromptBound["普通消息直接复用 ensured session<br/>session.prompt"]
 
   Slash -- 是 --> Gate{"命令在 allowedSlashCommands 内?"}
   Gate -- 否 --> Deny["返回 synthetic assistant failure reply"]
   Gate -- 是 --> Command{"slash 类型"}
-  Command -- /new --> Create
-  Command -- /sessions --> Sessions["读取 visibleSessions(entryKey)<br/>并展示结果"]
-  Command -- /session '<sessionId>' --> Switch["按 visibleSessions(entryKey) 校验后<br/>切换 binding / attach owner"]
+  Command -- /new --> New["基于 ensured context<br/>显式新建并切换到新会话"]
+  Command -- /sessions --> Sessions["基于 ensure 后最新上下文展示<br/>visibleSessions(entryKey)"]
+  Command -- /session '<sessionId>' --> Switch["按 ensure 后最新上下文校验后<br/>切换 binding / attach owner"]
   Command -- 其他已允许命令 --> Other["按各自控制面继续执行"]
 ```
 
@@ -670,7 +685,7 @@ SDK 链路内任何新建 OpenCode session 的路径，都必须走同一个 `Cr
 
 - `create_session`
 - `/new`
-- 普通消息 bootstrap 在无可见候选或原会话失效后的自动重建
+- 普通消息 ensure 在无可见候选或原会话失效后的自动重建
 
 正式建会话路径的前置条件：
 
@@ -733,7 +748,7 @@ sequenceDiagram
 
 约束：
 
-- runtime 生成的 `toolSessionId` 仅要求字符串形态与 OpenCode `sessionId` 兼容，不要求复用宿主的同一生成算法。
+- runtime 生成的 `toolSessionId` 固定为 OpenCode 风格：`ses_${uuid_without_dashes}`。
 - 此时 `toolSessionId` 只承担 runtime conversation anchor 语义，不代表真实 host `sessionId`。
 - 对旧客户端，`create_session` 成功仅表示 runtime conversation anchor 已创建。
 
@@ -750,53 +765,115 @@ sequenceDiagram
   Note over Gateway,Anchor: 不调用 session.create / 不写 ownership / 不建立 binding
 ```
 
-### 4.3.2 `anchor-only` 首次合法 `chat` 的第一次正式 bootstrap
+### 4.3.2 `anchor-only` 的首次真实 session ensure
 
-旧 `create_session` 返回的 `toolSessionId` 后续收到首次合法 `chat` 时，不通过 `toolSessionId` 查找 host `sessionId`，而是按该次 `chat` 的合法 `entryKey` 执行标准 bootstrap。
+旧 `create_session` 返回的 `toolSessionId` 后续收到任何 `chat` 输入时，都先统一进入 `ensureRealSession(...)`。`anchor-only` 不再等 slash / 普通消息各自补会话语义。
 
 固定流程：
 
 1. 命中 `toolSessionId`
 2. 识别当前 anchor 处于 `anchor-only` 状态
-3. 解析本次 `chat` 的合法 `entryKey`
-4. 计算 `visibleSessions(entryKey)`
-5. 若存在可见候选，直接绑定该候选 host session
-6. 若无可见候选，调用 `CreateOwnedSessionUseCase` 新建真实 host session
-7. 成功后删除 `anchor-only` 状态，并建立正式 binding
+3. 解析本次输入对应的合法 `entryKey`
+4. 若已有 attached binding，则直接复用
+5. 若无 attached binding，则直接调用 `CreateOwnedSessionUseCase` 新建真实 host session
+6. 建立正式 binding 与 attach owner
+7. 成功后删除 `anchor-only` 状态
 
 失败边界：
 
-- 若首次合法 `chat` 仍无法形成合法 `entryKey`，则 fail-closed
-- 若能形成合法 `entryKey` 但复用/建会话失败，则该 anchor 保持 `anchor-only`
+- 若本次输入仍无法形成合法 `entryKey`，则 fail-closed
+- 若能形成合法 `entryKey` 但 ensure 失败，则该 anchor 保持 `anchor-only`
 - 不允许产生半绑定状态
 
 ```mermaid
 sequenceDiagram
-  participant Gateway as Gateway/Runtime
-  participant Anchor as RuntimeAnchorRegistry
-  participant Visible as VisibilityResolver
+  participant Client
+  participant Bridge as message-bridge
+  participant Ensure as ensureRealSession
   participant Host as OpenCode Host
+  participant Anchor as RuntimeAnchorRegistry
 
-  Gateway->>Anchor: get(toolSessionId)
-  Anchor-->>Gateway: anchor-only
-  Gateway->>Gateway: 解析本次 chat 的 entryKey
-  Gateway->>Visible: 计算 visibleSessions(entryKey)
-  alt 存在可见候选
-    Visible-->>Gateway: candidate sessionId
-    Gateway->>Anchor: bind(toolSessionId, candidate sessionId)
-  else 无可见候选
-    Gateway->>Host: session.create(permission?)
-    Host-->>Gateway: new sessionId
-    Gateway->>Anchor: bind(toolSessionId, new sessionId)
+  Client->>Bridge: invoke(chat, toolSessionId, text)
+  Bridge->>Ensure: ensureRealSession(toolSessionId, text, context)
+  Ensure->>Anchor: isAnchorOnly(toolSessionId)
+  Anchor-->>Ensure: true
+  Ensure->>Ensure: 解析合法 entryKey
+  alt key 缺失
+    Ensure-->>Bridge: business_entry_key_required
+  else 已有 binding
+    Ensure-->>Bridge: 复用已绑定 session
+  else 无 binding
+    Ensure->>Host: session.create(permission?)
+    Host-->>Ensure: new sessionId
+    Ensure->>Ensure: 建立 toolSessionId -> hostSessionId binding
+    Ensure->>Anchor: clearAnchorOnly(toolSessionId)
+    Ensure-->>Bridge: 返回 ensured session
   end
-  Gateway->>Anchor: clearAnchorOnly(toolSessionId)
 ```
 
-### 4.4 普通消息 bootstrap - binding 有效直接复用
+### 4.4 统一 `ensureRealSession(...)` 前置步骤
 
-本节与下一节都只覆盖“普通消息路径”，对应上图中 `普通消息 -> bootstrap` 之后的局部展开。
+`ensureRealSession(...)` 是所有 `invoke/chat` 输入的统一前置步骤。它在 slash parse 之前运行，负责把当前 `toolSessionId` 收敛到真实 OpenCode session，或明确失败。
 
-普通消息 bootstrap 顺序固定为：
+统一职责：
+
+1. 解析/补全 `BusinessEntryKey`
+2. 解析 `BusinessEntryPolicy`
+3. 判断当前 `toolSessionId` 是否已有 attached binding
+4. 判断当前是否为 `anchor-only`
+5. 必要时创建真实 host session
+6. 返回 ensured session 上下文
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Bridge as message-bridge
+  participant Ensure as ensureRealSession
+  participant Host as OpenCode Host
+  participant AnchorReg as RuntimeAnchorRegistry
+  participant Exec as Executor Selector
+  participant Slash as Slash Executor
+  participant Prompt as Prompt Executor
+
+  Client->>Bridge: invoke(chat, toolSessionId, text)
+  Bridge->>Ensure: ensureRealSession(toolSessionId, text, context)
+
+  alt business entry key 缺失
+    Ensure-->>Bridge: business_entry_key_required
+    Bridge-->>Client: tool_error
+  else key 合法
+    alt 已有 attached binding
+      Ensure-->>Bridge: opencodeSessionId
+    else 当前为 anchor-only
+      Ensure->>Host: create session
+      Host-->>Ensure: hostSessionId
+      Ensure->>Ensure: 建立 toolSessionId -> hostSessionId binding
+      Ensure->>AnchorReg: delete(toolSessionId)
+      Ensure-->>Bridge: opencodeSessionId
+    else 非 anchor-only 且有 visible session
+      Ensure-->>Bridge: 复用 visibleSessions[0]
+    else 非 anchor-only 且无 visible session
+      Ensure->>Host: create session
+      Host-->>Ensure: hostSessionId
+      Ensure-->>Bridge: opencodeSessionId
+    end
+  end
+
+  Bridge->>Exec: 识别 slash / 普通 chat
+  alt slash
+    Exec->>Slash: execute(command, ensuredSessionContext)
+    Slash-->>Client: synthetic reply / tool_done
+  else 普通 chat
+    Exec->>Prompt: prompt(opencodeSessionId, text, ...)
+    Prompt-->>Client: streamed facts
+  end
+```
+
+### 4.5 普通消息 ensure - binding 有效直接复用
+
+本节与下一节都只覆盖“普通消息路径”，对应上图中 `ensureRealSession(...)` 成功后的局部展开。
+
+普通消息 ensure 顺序固定为：
 
 1. 解析/补全 `BusinessEntryKey`
 2. 解析 `BusinessEntryPolicy`
@@ -829,9 +906,9 @@ sequenceDiagram
   end
 ```
 
-### 4.5 普通消息 bootstrap - binding 越界后收敛并重算
+### 4.6 普通消息 ensure - binding 越界后收敛并重算
 
-本节继续只覆盖“普通消息路径”，不涉及 slash 控制面。
+本节继续只覆盖“普通消息路径”，不涉及 slash 控制面的展示层。
 
 当 binding 越界、宿主 session 不存在或不再可见时：
 
@@ -870,7 +947,7 @@ sequenceDiagram
   end
 ```
 
-### 4.6 新建会话 - ownership 落盘成功
+### 4.7 新建会话 - ownership 落盘成功
 
 ```mermaid
 sequenceDiagram
@@ -892,7 +969,7 @@ sequenceDiagram
   Gateway-->>Gateway: 返回新 session 并允许后续 prompt / reply
 ```
 
-### 4.7 新建会话 - ownership 落盘失败补偿
+### 4.8 新建会话 - ownership 落盘失败补偿
 
 ```mermaid
 sequenceDiagram
@@ -919,19 +996,38 @@ sequenceDiagram
   Gateway-->>Gateway: 本次请求失败结束
 ```
 
-### 4.8 `/sessions` 与 `/session <sessionId>`
+### 4.9 `/new`、`/sessions` 与 `/session <sessionId>`
 
-- `/sessions`、`/session <sessionId>`、普通消息 bootstrap 共用同一 `visibleSessions(entryKey)` 真源。
+- `/sessions`、`/session <sessionId>`、普通消息 ensure 共用同一 `visibleSessions(entryKey)` 真源。
 - `/sessions` 向用户展示的会话标识固定为 host `sessionId`。
 - `/session <sessionId>` 的 `sessionId` 固定指 host `sessionId`。
 - `/session <sessionId>` 只更新 runtime binding 和 attach owner，不修改 ownership。
-- `/sessions`、`/session <sessionId>` 不暴露也不操作 `anchor-only runtime anchor`。
+- `/new`、`/sessions`、`/session <sessionId>` 全部消费 `ensureRealSession(...)` 的结果。
+- `/new` 的 ensured context 仅作为前置解析结果；命令本身仍必须显式调用统一建会话入口创建新 session。
+- 若 ensure 过程中发生了 binding 写入或建会话，slash executor 展示前必须重新获取最新 `ResolvedEntrySessionContext`。
 - 不允许切到：
   - 其他入口 owned 会话
   - 当前工作目录外会话
   - 当前策略不允许的 native 会话
 
-### 4.9 `/session <sessionId>` 切换与 attach owner 转移
+```mermaid
+sequenceDiagram
+  participant Client
+  participant Bridge as message-bridge
+  participant Ensure as ensureRealSession
+  participant Create as CreateOwnedSessionUseCase
+  participant Slash as Slash Executor
+
+  Client->>Bridge: invoke(chat, text="/new")
+  Bridge->>Ensure: ensureRealSession(...)
+  Ensure-->>Bridge: ensuredSessionContext(opencodeSessionId)
+  Bridge->>Slash: execute("/new", ensuredSessionContext)
+  Slash->>Create: createOwnedSession(toolSessionId, entryKey, policy)
+  Create-->>Slash: new session
+  Slash-->>Client: 切换到新建 session
+```
+
+### 4.10 `/session <sessionId>` 切换与 attach owner 转移
 
 当 `toolSessionId` 从 `oldSessionId` 切换到 `newSessionId` 时：
 
@@ -1438,18 +1534,19 @@ sequenceDiagram
 - 不调用宿主 `session.create`
 - 不写 ownership / binding
 
-### 7.2.3 `anchor-only` 的首次合法 `chat`
+### 7.2.3 `anchor-only` 的首次 ensure
 
 场景目标：
 
 - 已存在 `anchor-only runtime anchor`
-- 后续 `chat` 可解析出合法 `entryKey`
+- 后续任意 `chat` 输入可解析出合法 `entryKey`
 
 预期：
 
-- 不通过 `toolSessionId` 查找 host `sessionId`
-- 按该次 `chat` 的 `entryKey` 正常执行 bootstrap
-- 可复用现有可见 host session，或新建真实 host session
+- 所有 `chat` 输入先执行 `ensureRealSession(...)`
+- `anchor-only` 若已有 binding，则直接复用
+- `anchor-only` 若无 binding，则优先新建真实 host session
+- 不复用旧 `visibleSessions[0]`
 - 成功后才建立正式 binding，并清除 `anchor-only` 状态
 
 ### 7.3 `suppressReply` 快路径
@@ -1461,9 +1558,9 @@ sequenceDiagram
 
 预期：
 
-- 在 slash parse 前短路
+- 在 `ensureRealSession(...)` 前短路
 - 不进入 slash 白名单判定
-- 不 bootstrap、不 prompt
+- 不 ensure、不 prompt
 - 不触发 OpenCode `session.create / session.prompt`
 
 ### 7.4 创建成功但 ownership 落盘失败
@@ -1516,9 +1613,10 @@ sequenceDiagram
 
 - `close_session(toolSessionId)` 直接删除该 anchor，幂等成功
 - `abort_session(toolSessionId)` 返回“无活跃 run”一类幂等失败
-- `/sessions` 与 `/session <sessionId>` 不暴露该 anchor
+- `/new`、`/sessions`、`/session <sessionId>` 都先消费 ensure 结果
+- 被禁用或非法的 slash 也允许先完成 ensure 副作用，再返回 synthetic failure
 - 当前版本不引入空闲超时自动回收
-- `anchor-only` 仅在 `close_session`、首次合法 `chat` 成功 bootstrap、或进程重启时消失
+- `anchor-only` 仅在 `close_session`、首次成功完成 ensure、或进程重启时消失
 
 ### 7.6 验收清单
 
@@ -1542,23 +1640,31 @@ sequenceDiagram
 - 旧 `create_session` 若无法解析出合法 `entryKey`，则创建 `anchor-only runtime anchor`，不执行 `session.create`
 - `session_created` 对外仅返回 `toolSessionId`
 - runtime 生成的 `toolSessionId` 在 `anchor-only` 阶段仅承担 runtime 路由语义，不代表真实 host `sessionId`
+- anchor-only 默认 `toolSessionId` 格式固定为 `ses_${uuid_without_dashes}`
 - `/sessions` 展示的切换标识为 host `sessionId`
 - `/session <sessionId>` 按 host `sessionId` 切换 binding
-- `/sessions` 与 `/session <sessionId>` 不暴露 `anchor-only runtime anchor`
+- 所有 `invoke/chat` 输入都先执行 `ensureRealSession(...)`
+- slash parser 在 ensure 之后执行
+- `/new` 的 ensured context 只作为前置解析结果，命令本身仍显式创建新 session
+- 被禁用或非法的 slash 不回滚 ensure 副作用
+- `/models`、`/model` 等 slash 同样要求先完成真实 session 绑定
 - ownership 落盘失败时：
   - 请求失败
   - 不写 binding / attach owner
   - 尝试删除宿主 session
 - binding 命中前必须重新过可见性校验；越界时先清理再重算
-- `anchor-only` 状态下的首次合法 `chat` 按该次 `chat` 的 `entryKey` 执行正常 bootstrap，而不是通过 `toolSessionId` 查找 host session
-- 首次真实 bootstrap 失败后，anchor 仍保持 `anchor-only`
+- `anchor-only` 状态下的首次 ensure 先校验该次输入的 `entryKey`
+- `anchor-only` 无 binding 且校验通过时优先新建真实 host session，而不是复用旧可见会话
+- 首次真实 ensure 失败后，anchor 仍保持 `anchor-only`
 - “最近活跃候选”取宿主 `session.list` 返回列表中首个满足当前 `visibleSessions(entryKey)` 条件的会话
-- `/sessions`、`/session`、普通消息 bootstrap 共享同一 `visibleSessions(entryKey)` 真源
+- `/sessions`、`/session`、普通消息 ensure 共享同一 `visibleSessions(entryKey)` 真源
 - `close_session` 成功后立即移除 ownership / attach owner / 所有指向该 host session 的 binding
 - `T1` 删除共享 `S1` 后，`T2` 下一次消息按“无 binding”路径重新收敛
 - request run 的正式归属锚点是 `toolSessionId`
 - `abort_session(T1)` 不会中断 `T2` 的活跃 run
 - `abort_session(anchor-only toolSessionId)` 返回“无活跃 run”一类幂等失败
+- `tool.update.toolName` 的 canonical 来源固定为 `part.tool`
+- `state.title` 仅作展示，缺失 `part.tool` 时回落 `toolName='tool'` 并记录 `tool_update_missing_tool_name`
 - `question_reply` / `permission_reply` 在重启后因映射缺失统一 fail-closed
 - `session.deleted` 到达时：
   - ownership、binding、attach owner 同步清理
@@ -1590,7 +1696,7 @@ sequenceDiagram
 - 采用 `auth.ak` 作为 `AK scope` 唯一来源，并在连接身份可用后按需懒加载 ownership
 - 采用 `CreateOwnedSessionUseCase` 作为 SDK 链路唯一合法的新建会话入口
 - 采用 `session.deleted` 作为 SDK 链路统一删除生命周期事件真源
-- 采用 `visibleSessions(entryKey)` 作为 `/sessions`、`/session`、普通消息 bootstrap 的统一真源
+- 采用 `visibleSessions(entryKey)` 作为 `/sessions`、`/session`、普通消息 ensure 的统一真源
 
 这套设计能同时满足：
 

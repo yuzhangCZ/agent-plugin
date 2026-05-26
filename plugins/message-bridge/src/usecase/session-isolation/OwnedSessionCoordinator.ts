@@ -36,6 +36,7 @@ export class DefaultOwnedSessionCoordinator implements OwnedSessionCoordinator {
   async bindOwnedSession(input: CreateOwnedSessionInput): Promise<OwnedSessionMutationResult> {
     const controlled = input.policy?.controlled ?? true;
     try {
+      const existing = await this.dependencies.anchorBindingRepository.get(input.toolSessionId);
       await this.dependencies.ownedSessionRepository.upsert({
         akScopeKey: this.dependencies.akScopeKey,
         entryKey: this.dependencies.entryKeyCodec.stringify(input.entryKey),
@@ -43,6 +44,9 @@ export class DefaultOwnedSessionCoordinator implements OwnedSessionCoordinator {
         controlled,
         permissionProfile: controlled ? 'dialog_only' : 'default',
       });
+      if (existing?.sessionId && existing.sessionId !== input.sessionId) {
+        await this.dependencies.attachOwnerRepository.delete(existing.sessionId);
+      }
       await this.attach(input.toolSessionId, input.sessionId);
       return { applied: true };
     } catch (error) {

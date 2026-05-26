@@ -655,7 +655,7 @@ test('provider adapter createSession logs anchor-only session-isolation result w
     createSessionCommandPort: {
       execute: async () => ({
         kind: 'anchor_only',
-        toolSessionId: 'tool-anchor-only',
+        toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
       }),
     },
   });
@@ -673,16 +673,163 @@ test('provider adapter createSession logs anchor-only session-isolation result w
   });
 
   assert.deepEqual(result, {
-    toolSessionId: 'tool-anchor-only',
+    toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
   });
   assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{
     level: 'info',
     message: 'runtime_sdk.provider.createSession.session_isolation_resolved',
     extra: {
       resultKind: 'anchor_only',
-      toolSessionId: 'tool-anchor-only',
+      toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
       hasExtParameters: true,
       hasPlatformBusinessSessionId: false,
+    },
+  }]);
+});
+
+test('provider adapter maps tool parts using part.tool and records diagnostics when tool name is missing', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-tool-update', 'tool-tool-update']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-tool-update',
+    runId: 'run-tool-update',
+    toolSessionId: 'tool-tool-update',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-tool-update',
+        id: 'msg-tool-update',
+        role: 'assistant',
+        time: {
+          created: '2026-05-27T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        tool: 'read_file',
+        callID: 'call-read-file',
+        state: {
+          status: 'running',
+          title: '读取文件',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update-missing-name',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        callID: 'call-missing-name',
+        state: {
+          status: 'completed',
+          title: '标题不能当工具名',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-tool-update',
+        id: 'msg-tool-update',
+        role: 'assistant',
+        time: {
+          created: '2026-05-27T12:00:00.000Z',
+          completed: '2026-05-27T12:00:01.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+  const toolFacts = facts.filter((fact) => fact.type === 'tool.update');
+
+  assert.deepEqual(toolFacts, [
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update',
+      toolCallId: 'call-read-file',
+      toolName: 'read_file',
+      status: 'running',
+      title: '读取文件',
+      raw: {
+        part: {
+          id: 'part-tool-update',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          tool: 'read_file',
+          callID: 'call-read-file',
+          state: {
+            status: 'running',
+            title: '读取文件',
+          },
+        },
+      },
+    },
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-missing-name',
+      toolCallId: 'call-missing-name',
+      toolName: 'tool',
+      status: 'completed',
+      title: '标题不能当工具名',
+      raw: {
+        part: {
+          id: 'part-tool-update-missing-name',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          callID: 'call-missing-name',
+          state: {
+            status: 'completed',
+            title: '标题不能当工具名',
+          },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(warnings, [{
+    message: 'provider_adapter.protocol_diagnostic',
+    extra: {
+      code: 'tool_update_missing_tool_name',
+      toolSessionId: 'tool-tool-update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-missing-name',
+      partType: 'tool',
     },
   }]);
 });

@@ -145,6 +145,40 @@ describe('DefaultOwnedSessionCoordinator', () => {
     }]);
   });
 
+  test('bindOwnedSession clears the previous attach owner when rebinding the same anchor to a new session', async () => {
+    const { coordinator, anchorBindingRepository, attachOwnerRepository } = createCoordinator();
+    await anchorBindingRepository.upsert({
+      toolSessionId: 'tool-1',
+      sessionId: 'ses-old',
+      state: 'attached',
+    });
+    await attachOwnerRepository.upsert({
+      sessionId: 'ses-old',
+      toolSessionId: 'tool-1',
+    });
+
+    await coordinator.bindOwnedSession({
+      toolSessionId: 'tool-1',
+      sessionId: 'ses-new',
+      entryKey: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-new',
+      },
+    });
+
+    assert.strictEqual(await attachOwnerRepository.get('ses-old'), undefined);
+    assert.deepStrictEqual(await anchorBindingRepository.get('tool-1'), {
+      toolSessionId: 'tool-1',
+      sessionId: 'ses-new',
+      state: 'attached',
+    });
+    assert.deepStrictEqual(await attachOwnerRepository.get('ses-new'), {
+      sessionId: 'ses-new',
+      toolSessionId: 'tool-1',
+    });
+  });
+
   test('switchAttachedSession replaces the previous attach owner and binding', async () => {
     const { coordinator, anchorBindingRepository, attachOwnerRepository } = createCoordinator();
     await anchorBindingRepository.upsert({

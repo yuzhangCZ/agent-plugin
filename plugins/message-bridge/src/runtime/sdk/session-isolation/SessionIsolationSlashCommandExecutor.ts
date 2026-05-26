@@ -8,6 +8,7 @@ import type { ResolvedEntrySessionContext } from '../../../port/session-isolatio
 import type { CreateOwnedSessionRequest } from '../../../usecase/session-isolation/CreateOwnedSessionUseCase.js';
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
 import type { BusinessEntryContext } from './BusinessEntryContextResolver.js';
+import type { ChatExecutionContext } from '../SdkChatControlPlane.js';
 
 type ResolveEntrySessionContextUseCase = {
   execute(input: {
@@ -41,6 +42,7 @@ export class SessionIsolationSlashCommandExecutor {
   async execute(input: {
     command: SlashCommand;
     anchor: string;
+    ensuredContext: ChatExecutionContext;
     entryContext: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
     directory?: string;
@@ -62,6 +64,7 @@ export class SessionIsolationSlashCommandExecutor {
 
   private async executeNew(input: {
     anchor: string;
+    ensuredContext: ChatExecutionContext;
     entryContext: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
     directory?: string;
@@ -82,6 +85,7 @@ export class SessionIsolationSlashCommandExecutor {
 
   private async executeSessions(input: {
     anchor: string;
+    ensuredContext: ChatExecutionContext;
     entryContext: BusinessEntryContext;
     directory?: string;
   }): Promise<Extract<SlashCommandResult, { kind: 'sessions' }>> {
@@ -89,13 +93,14 @@ export class SessionIsolationSlashCommandExecutor {
     return {
       kind: 'sessions',
       sessions: context.visibleSessions,
-      ...(context.session ? { activeSessionId: context.session.id } : {}),
+      ...(input.ensuredContext.opencodeSessionId ? { activeSessionId: input.ensuredContext.opencodeSessionId } : {}),
     };
   }
 
   private async executeSession(input: {
     command: Extract<SlashCommand, { kind: 'session' }>;
     anchor: string;
+    ensuredContext: ChatExecutionContext;
     entryContext: BusinessEntryContext;
     directory?: string;
   }): Promise<Extract<SlashCommandResult, { kind: 'session' }>> {
@@ -112,7 +117,7 @@ export class SessionIsolationSlashCommandExecutor {
     return {
       kind: 'session',
       session: target,
-      ...(context.session ? { previousSessionId: context.session.id } : {}),
+      ...(input.ensuredContext.opencodeSessionId ? { previousSessionId: input.ensuredContext.opencodeSessionId } : {}),
     };
   }
 

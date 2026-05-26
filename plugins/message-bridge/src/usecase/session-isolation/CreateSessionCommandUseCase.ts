@@ -43,7 +43,7 @@ export class DefaultCreateSessionCommandUseCase {
       extParameters: input.extParameters,
     });
     if (!entryKey) {
-      const toolSessionId = this.dependencies.toolSessionIdFactory?.() ?? crypto.randomUUID();
+      const toolSessionId = this.dependencies.toolSessionIdFactory?.() ?? `ses_${crypto.randomUUID().replaceAll('-', '')}`;
       await this.dependencies.runtimeAnchorRepository?.createAnchorOnly({ toolSessionId });
       return {
         kind: 'anchor_only',

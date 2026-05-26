@@ -228,6 +228,34 @@ describe('session-isolation create and close use cases', () => {
     ]);
   });
 
+  test('CreateSessionCommandUseCase defaults anchor-only toolSessionId to ses_ formatted id', async () => {
+    const useCase = new DefaultCreateSessionCommandUseCase({
+      businessEntryKeyResolver: {
+        resolve: () => undefined,
+      },
+      hostSessionGateway: {
+        create: async () => {
+          throw new Error('unexpected_create');
+        },
+      },
+      ownedSessionCoordinator: {
+        bindOwnedSession: async () => {
+          throw new Error('unexpected_bind');
+        },
+      },
+      runtimeAnchorRepository: {
+        createAnchorOnly: async () => undefined,
+      },
+    });
+
+    const result = await useCase.execute({
+      welinkSessionId: 'welink-default-anchor-only',
+    });
+
+    assert.equal(result.kind, 'anchor_only');
+    assert.match(result.toolSessionId, /^ses_[0-9a-f]{32}$/);
+  });
+
   test('CreateOwnedSessionUseCase creates controlled host session then binds ownership through coordinator', async () => {
     const host = createHostSessionGateway();
     const owned = createOwnedSessionCoordinator();

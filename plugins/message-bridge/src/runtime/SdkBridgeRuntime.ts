@@ -247,7 +247,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,
       pendingInteractionRegistry,
       runtimeAnchorRepository: runtimeAnchorRegistry,
-      toolSessionIdFactory: () => randomUUID(),
+      toolSessionIdFactory: () => `ses_${randomUUID().replaceAll('-', '')}`,
       ownedHostEventForwarder: {
         forward: async () => ({ applied: true }),
       },

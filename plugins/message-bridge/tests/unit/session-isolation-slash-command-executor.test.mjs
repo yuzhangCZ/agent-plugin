@@ -70,6 +70,11 @@ test('SessionIsolationSlashCommandExecutor lists visible sessions from entry con
   const result = await executor.execute({
     command: { kind: 'sessions' },
     anchor: 'tool-a',
+    ensuredContext: {
+      opencodeSessionId: 'ses-current',
+      session: { id: 'ses-current', title: '当前会话', directory: '/repo' },
+      bootstrapSource: 'existing_binding',
+    },
     entryContext,
     directory: '/repo',
   });
@@ -99,6 +104,11 @@ test('SessionIsolationSlashCommandExecutor switches only to a visible session an
   const result = await executor.execute({
     command: { kind: 'session', sessionId: 'ses-target' },
     anchor: 'tool-anchor-only',
+    ensuredContext: {
+      opencodeSessionId: 'ses-current',
+      session: { id: 'ses-current', title: '当前会话', directory: '/repo' },
+      bootstrapSource: 'existing_binding',
+    },
     entryContext,
     directory: '/repo',
   });
@@ -122,6 +132,11 @@ test('SessionIsolationSlashCommandExecutor rejects invisible target sessions wit
     async () => executor.execute({
       command: { kind: 'session', sessionId: 'ses-out' },
       anchor: 'tool-a',
+      ensuredContext: {
+        opencodeSessionId: 'ses-current',
+        session: { id: 'ses-current', title: '当前会话', directory: '/repo' },
+        bootstrapSource: 'existing_binding',
+      },
       entryContext,
       directory: '/repo',
     }),
@@ -130,12 +145,17 @@ test('SessionIsolationSlashCommandExecutor rejects invisible target sessions wit
   assert.deepEqual(calls.map((call) => call.method), ['resolve']);
 });
 
-test('SessionIsolationSlashCommandExecutor creates owned session for /new through session-isolation use case', async () => {
+test('SessionIsolationSlashCommandExecutor always creates and switches to a new session for /new', async () => {
   const { executor, calls } = createExecutor();
 
   const result = await executor.execute({
     command: { kind: 'new' },
     anchor: 'tool-anchor-only',
+    ensuredContext: {
+      opencodeSessionId: 'ses-created-by-ensure',
+      session: { id: 'ses-created-by-ensure', title: '新会话', directory: '/repo' },
+      bootstrapSource: 'bootstrap_created',
+    },
     entryContext,
     createContext: { assistantId: 'assistant-a', imGroupId: 'group-ignored' },
     directory: '/repo',

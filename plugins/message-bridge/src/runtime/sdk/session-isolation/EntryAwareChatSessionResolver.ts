@@ -77,6 +77,28 @@ export class EntryAwareChatSessionResolver {
       return this.toChatExecutionContext(existingSession, 'existing_binding');
     }
 
+    const isAnchorOnly = await this.dependencies.runtimeAnchorRepository.isAnchorOnly(input.message.toolSessionId);
+    if (isAnchorOnly) {
+      const created = await this.dependencies.createOwnedSessionUseCase.execute({
+        toolSessionId: input.message.toolSessionId,
+        entryKey,
+        policy: input.entryContext?.policy ?? {
+          entryKey: '',
+          controlled: true,
+          allowOpencodeNativeSessions: false,
+          allowedSlashCommands: ['new', 'models', 'model'],
+        },
+        ...(input.message.assistantId ? { assistantId: input.message.assistantId } : {}),
+        ...(input.directory ? { directory: input.directory } : {}),
+      });
+      await this.clearAnchorOnly(input.message.toolSessionId);
+      input.logger?.info('sdk_chat_context.entry_created_from_anchor_only', {
+        anchor: input.message.toolSessionId,
+        opencodeSessionId: created.session.id,
+      });
+      return this.toChatExecutionContext(created.session, 'bootstrap_created');
+    }
+
     const visibleSession = context.visibleSessions[0];
     if (visibleSession) {
       await this.dependencies.switchAttachedSessionUseCase.execute({
@@ -123,6 +145,7 @@ export class EntryAwareChatSessionResolver {
   ): ChatExecutionContext {
     return {
       opencodeSessionId: session.id,
+      session,
       scope: this.buildScope(session),
       modelOverride: this.dependencies.modelOverrideStore.get(session.id),
       bootstrapSource,

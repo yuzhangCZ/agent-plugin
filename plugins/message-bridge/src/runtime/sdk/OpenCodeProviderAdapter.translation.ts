@@ -307,10 +307,10 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
     }
 
     if (partType === 'tool') {
-      const tool = asObject(part?.tool);
       const state = asObject(part?.state);
-      const toolCallId = asTrimmedString(tool?.callID) ?? partId;
-      const toolName = asTrimmedString(tool?.name) ?? asTrimmedString(state?.title) ?? 'tool';
+      const toolCallId = asTrimmedString(part?.callID) ?? partId;
+      const resolvedToolName = asTrimmedString(part?.tool);
+      const toolName = resolvedToolName ?? 'tool';
       const status = asTrimmedString(state?.status);
       const normalizedStatus = status === 'running' || status === 'completed' || status === 'error'
         ? status
@@ -320,6 +320,14 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
           trackingSessionId,
           messageId,
           envelopeMessageId: messageId,
+          partId,
+          partType,
+        });
+      }
+      if (!resolvedToolName) {
+        context.diagnostics.warn('tool_update_missing_tool_name', {
+          toolSessionId: trackingSessionId,
+          messageId,
           partId,
           partType,
         });

@@ -36,6 +36,14 @@ function createLogger() {
   };
 }
 
+async function collect(asyncIterable) {
+  const items = [];
+  for await (const item of asyncIterable) {
+    items.push(item);
+  }
+  return items;
+}
+
 test('ChatEntryPolicy denies suppressReply before slash parse', () => {
   const policy = new ChatEntryPolicy({
     slashCommandParser: new SimpleSlashCommandParser(),
@@ -227,6 +235,11 @@ test('SdkSlashExecutionUseCase routes /sessions through session-isolation execut
     anchor: 'anchor-formal-sessions',
     descriptor: { kind: 'sessions' },
     command: { kind: 'sessions' },
+    ensuredContext: {
+      opencodeSessionId: 'ses-formal',
+      session: { id: 'ses-formal', title: 'formal session' },
+      bootstrapSource: 'existing_binding',
+    },
     entryContext,
     directory: '/workspace/formal',
     logger: createLogger(),
@@ -241,9 +254,170 @@ test('SdkSlashExecutionUseCase routes /sessions through session-isolation execut
   assert.deepEqual(formalExecutorInput, {
     command: { kind: 'sessions' },
     anchor: 'anchor-formal-sessions',
+    ensuredContext: {
+      opencodeSessionId: 'ses-formal',
+      session: { id: 'ses-formal', title: 'formal session' },
+      bootstrapSource: 'existing_binding',
+    },
     entryContext,
     directory: '/workspace/formal',
   });
+});
+
+test('SdkSlashExecutionUseCase still lets /new create a new session after ensure', async () => {
+  let legacyCreateCalls = 0;
+  const usecase = new SdkSlashExecutionUseCase({
+    slashCommandExecutor: new SlashCommandExecutor({
+      bindingStore: new InMemoryToolSessionBindingStore(),
+      ownershipResolver: new InMemoryOpencodeSessionOwnershipResolver(),
+      modelOverrideStore: new InMemorySessionModelOverrideStore(),
+      hostSessionCreationPort: {
+        createSession: async () => {
+          legacyCreateCalls += 1;
+          return { id: 'unexpected-create' };
+        },
+      },
+      hostSessionQueryPort: {
+        getSession: async () => ({ id: 'unexpected-get' }),
+        listSessions: async () => [],
+      },
+      hostModelCatalogPort: {
+        listModels: async () => [],
+      },
+    }),
+    replyPresenter: new DefaultSlashCommandReplyPresenter(),
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => ({ opencodeSessionId: 'unexpected-control' }),
+    },
+  });
+
+  const run = await usecase.execute({
+    anchor: 'anchor-new',
+    descriptor: { kind: 'new' },
+    command: { kind: 'new' },
+    ensuredContext: {
+      opencodeSessionId: 'ses-ensured-new',
+      session: { id: 'ses-ensured-new', title: 'ensured new', directory: '/workspace/new' },
+      bootstrapSource: 'bootstrap_created',
+    },
+    logger: createLogger(),
+  });
+
+  const facts = await collect(run.facts);
+  assert.equal(facts[1].content.includes('unexpected-create'), true);
+  assert.equal(legacyCreateCalls, 1);
+});
+
+test('SdkChatPreprocessor keeps ensure side effects before denied slash response', async () => {
+  const callOrder = [];
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async (input) => {
+        callOrder.push('slash');
+        assert.equal(input.disabledInEntry, true);
+        return {
+          runId: 'synthetic-denied-slash',
+          facts: (async function* () {})(),
+          result: async () => ({ outcome: 'completed' }),
+        };
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    normalChatSessionResolver: {
+      resolve: async () => {
+        callOrder.push('ensure');
+        return {
+          opencodeSessionId: 'ses-denied-before-slash',
+          session: { id: 'ses-denied-before-slash' },
+          bootstrapSource: 'bootstrap_created',
+        };
+      },
+    },
+  });
+
+  const result = await preprocessor.preprocess({
+    traceId: 'trace-denied-slash-after-ensure',
+    runId: 'run-denied-slash-after-ensure',
+    toolSessionId: 'tool-denied-slash-after-ensure',
+    text: '/sessions',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-a',
+      },
+    },
+  });
+
+  assert.equal(result.kind, 'synthetic_run');
+  assert.deepEqual(callOrder, ['ensure', 'slash']);
+});
+
+test('SdkChatPreprocessor requires ensured real session before /models executes', async () => {
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execute');
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    normalChatSessionResolver: {
+      resolve: async (input) => {
+        const error = new Error('business_entry_key_required');
+        if (!input.entryContext) {
+          throw error;
+        }
+        return {
+          opencodeSessionId: 'ses-models',
+          session: { id: 'ses-models' },
+          bootstrapSource: 'existing_binding',
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => preprocessor.preprocess({
+      traceId: 'trace-models-requires-entry',
+      runId: 'run-models-requires-entry',
+      toolSessionId: 'tool-models-requires-entry',
+      text: '/models',
+    }),
+    /business_entry_key_required/,
+  );
 });
 
 test('DefaultChatExecutionContextResolver carries session-scoped model override and self-heals invalid binding', async () => {
@@ -278,6 +452,7 @@ test('DefaultChatExecutionContextResolver carries session-scoped model override 
 
   assert.deepEqual(resolved, {
     opencodeSessionId: 'ses-fresh',
+    session: { id: 'ses-fresh', directory: '/workspace/fresh' },
     scope: { directory: '/workspace/fresh' },
     modelOverride: { providerId: 'openai', modelId: 'gpt-5.4' },
     bootstrapSource: 'bootstrap_reused_recent_session',
@@ -318,6 +493,7 @@ test('DefaultChatExecutionContextResolver delegates recent-session attachment to
 
   assert.deepEqual(resolved, {
     opencodeSessionId: 'ses-recent-formal',
+    session: { id: 'ses-recent-formal', directory: '/workspace/formal' },
     scope: { directory: '/workspace/formal' },
     modelOverride: undefined,
     bootstrapSource: 'bootstrap_reused_recent_session',
@@ -354,6 +530,7 @@ test('DefaultChatExecutionContextResolver delegates newly-created session attach
 
   assert.deepEqual(resolved, {
     opencodeSessionId: 'ses-created-formal',
+    session: { id: 'ses-created-formal', directory: '/workspace/created' },
     scope: { directory: '/workspace/created' },
     bootstrapSource: 'bootstrap_created',
   });
@@ -429,12 +606,14 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
 
   assert.deepEqual(reused, {
     opencodeSessionId: 'ses-group-a',
+    session: { id: 'ses-group-a', directory: '/workspace/a' },
     scope: { directory: '/workspace/a' },
     modelOverride: undefined,
     bootstrapSource: 'bootstrap_reused_recent_session',
   });
   assert.deepEqual(created, {
     opencodeSessionId: 'ses-created-b',
+    session: { id: 'ses-created-b', directory: '/workspace/b' },
     scope: { directory: '/workspace/b' },
     modelOverride: undefined,
     bootstrapSource: 'bootstrap_created',
@@ -442,6 +621,122 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
   assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
   assert.equal(createCalls[0].toolSessionId, 'tool-b');
   assert.equal(createCalls[0].entryKey.businessSessionId, 'group-b');
+});
+
+test('EntryAwareChatSessionResolver creates a new host session for anchor-only input even when visible sessions exist', async () => {
+  const runtimeAnchorRepository = new RuntimeAnchorRegistry();
+  await runtimeAnchorRepository.createAnchorOnly({ toolSessionId: 'tool-anchor-only-create' });
+  const switchCalls = [];
+  const createCalls = [];
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async (input) => ({
+        toolSessionId: input.toolSessionId,
+        visibleSessions: [{ id: 'ses-visible-existing', directory: '/workspace/existing' }],
+      }),
+    },
+    switchAttachedSessionUseCase: {
+      execute: async (input) => {
+        switchCalls.push(input);
+        return { applied: true };
+      },
+    },
+    createOwnedSessionUseCase: {
+      execute: async (input) => {
+        createCalls.push(input);
+        return { session: { id: 'ses-created-anchor-only', directory: '/workspace/new' } };
+      },
+    },
+    runtimeAnchorRepository,
+    modelOverrideStore: new InMemorySessionModelOverrideStore(),
+  });
+
+  const result = await resolver.resolve({
+    message: {
+      traceId: 'trace-anchor-only-create',
+      runId: 'run-anchor-only-create',
+      toolSessionId: 'tool-anchor-only-create',
+      text: 'hello',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-anchor',
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    opencodeSessionId: 'ses-created-anchor-only',
+    session: { id: 'ses-created-anchor-only', directory: '/workspace/new' },
+    scope: { directory: '/workspace/new' },
+    modelOverride: undefined,
+    bootstrapSource: 'bootstrap_created',
+  });
+  assert.deepEqual(createCalls.map((call) => call.toolSessionId), ['tool-anchor-only-create']);
+  assert.deepEqual(switchCalls, []);
+  assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only-create'), false);
+});
+
+test('SdkChatPreprocessor ensures real session before slash execution', async () => {
+  const callOrder = [];
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async (input) => {
+        callOrder.push('slash');
+        assert.equal(input.ensuredContext?.opencodeSessionId, 'ses-ensured-before-slash');
+        return {
+          runId: 'synthetic-test',
+          facts: (async function* () {})(),
+          result: async () => ({ outcome: 'completed' }),
+        };
+      },
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    normalChatSessionResolver: {
+      resolve: async () => {
+        callOrder.push('ensure');
+        return {
+          opencodeSessionId: 'ses-ensured-before-slash',
+          session: { id: 'ses-ensured-before-slash' },
+          bootstrapSource: 'bootstrap_created',
+        };
+      },
+    },
+  });
+
+  await preprocessor.preprocess({
+    traceId: 'trace-ensure-before-slash',
+    runId: 'run-ensure-before-slash',
+    toolSessionId: 'tool-ensure-before-slash',
+    text: '/sessions',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-a#bot-a',
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['ensure', 'slash']);
 });
 
 test('EntryAwareChatSessionResolver fails closed when chat business key cannot be completed', async () => {
@@ -540,6 +835,13 @@ test('SdkChatPreprocessor fails closed before slash execution when business entr
       businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
       businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
     }),
+    normalChatSessionResolver: {
+      resolve: async () => ({
+        opencodeSessionId: 'ses-policy-slash',
+        session: { id: 'ses-policy-slash' },
+        bootstrapSource: 'existing_binding',
+      }),
+    },
   });
 
   await assert.rejects(
@@ -648,6 +950,13 @@ test('SdkChatPreprocessor fails closed when domain is missing even if im legacy 
       businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
       businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
     }),
+    normalChatSessionResolver: {
+      resolve: async () => ({
+        opencodeSessionId: 'ses-policy-slash',
+        session: { id: 'ses-policy-slash' },
+        bootstrapSource: 'existing_binding',
+      }),
+    },
   });
 
   await assert.rejects(
@@ -695,6 +1004,13 @@ test('SdkChatPreprocessor applies request scoped slash policy after entry contex
       businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
       businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
     }),
+    normalChatSessionResolver: {
+      resolve: async () => ({
+        opencodeSessionId: 'ses-policy-slash',
+        session: { id: 'ses-policy-slash' },
+        bootstrapSource: 'existing_binding',
+      }),
+    },
   });
 
   const result = await preprocessor.preprocess({
@@ -800,6 +1116,7 @@ test('DefaultChatExecutionContextResolver allows stale real sessionId to keep ac
 
   assert.deepEqual(resolved, {
     opencodeSessionId: 'ses-rebound',
+    session: { id: 'ses-rebound', directory: '/workspace/rebound' },
     scope: { directory: '/workspace/rebound' },
     modelOverride: undefined,
     bootstrapSource: 'bootstrap_reused_recent_session',

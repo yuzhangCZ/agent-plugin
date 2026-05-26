@@ -85,6 +85,13 @@ function buildSyntheticRun(toolSessionId: string, text: string): ProviderRun {
 
 export interface ChatExecutionContext {
   opencodeSessionId: string;
+  session?: {
+    id: string;
+    title?: string;
+    projectID?: string;
+    workspaceID?: string;
+    directory?: string;
+  };
   scope?: SessionScope;
   modelOverride?: SessionModelOverride;
   bootstrapSource: SlashCommandContext['bootstrapSource'];
@@ -115,6 +122,7 @@ export interface SessionIsolationSlashCommandExecutionPort {
   execute(input: {
     command: SlashCommand;
     anchor: string;
+    ensuredContext: ChatExecutionContext;
     entryContext: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
     directory?: string;
@@ -227,6 +235,7 @@ export class SdkSlashExecutionUseCase {
     entryContext?: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
     directory?: string;
+    ensuredContext?: ChatExecutionContext;
     disabledInEntry?: boolean;
     invalid?: boolean;
     logger?: BridgeLogger;
@@ -256,7 +265,7 @@ export class SdkSlashExecutionUseCase {
         return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(formalResult));
       }
 
-      const context = await this.dependencies.contextResolver.resolveForChat(
+      const context = input.ensuredContext ?? await this.dependencies.contextResolver.resolveForChat(
         input.anchor,
         input.createContext,
         input.logger,
@@ -291,6 +300,7 @@ export class SdkSlashExecutionUseCase {
     entryContext?: BusinessEntryContext;
     createContext?: HostSessionCreateContext;
     directory?: string;
+    ensuredContext?: ChatExecutionContext;
   }): Promise<SlashCommandResult | undefined> {
     if (!input.command || !input.entryContext || !this.dependencies.sessionIsolationSlashCommandExecutor) {
       return undefined;
@@ -301,6 +311,10 @@ export class SdkSlashExecutionUseCase {
     return this.dependencies.sessionIsolationSlashCommandExecutor.execute({
       command: input.command,
       anchor: input.anchor,
+      ensuredContext: input.ensuredContext ?? {
+        opencodeSessionId: '',
+        bootstrapSource: 'bootstrap_created',
+      },
       entryContext: input.entryContext,
       ...(input.createContext ? { createContext: input.createContext } : {}),
       ...(input.directory ? { directory: input.directory } : {}),
@@ -345,6 +359,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
       });
       return {
         opencodeSessionId: recentSession.id,
+        session: recentSession,
         scope: this.buildScope(recentSession),
         modelOverride: this.dependencies.modelOverrideStore.get(recentSession.id),
         bootstrapSource: 'bootstrap_reused_recent_session',
@@ -359,6 +374,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
     });
     return {
       opencodeSessionId: created.id,
+      session: created,
       scope: this.buildScope(created),
       bootstrapSource: 'bootstrap_created',
     };
@@ -399,6 +415,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
       return {
         opencodeSessionId: existing.activeOpencodeSessionId,
+        session,
         scope: this.buildScope(session),
         modelOverride: this.dependencies.modelOverrideStore.get(existing.activeOpencodeSessionId),
         bootstrapSource: 'existing_binding',
@@ -553,6 +570,21 @@ export class SdkChatPreprocessor {
     const entryContext = this.dependencies.businessEntryContextResolver
       ? this.dependencies.businessEntryContextResolver.resolveForChatMessage(input)
       : undefined;
+    const ensuredContext = this.dependencies.normalChatSessionResolver
+      ? await this.dependencies.normalChatSessionResolver.resolve({
+        message: input,
+        entryContext,
+        ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
+        logger,
+      })
+      : await this.dependencies.contextResolver.resolveForChat(
+        input.toolSessionId,
+        {
+          assistantId: input.assistantId,
+          imGroupId: input.context?.imGroupId,
+        },
+        logger,
+      );
     const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
     if (decision.kind === 'deny') {
       return {
@@ -575,6 +607,7 @@ export class SdkChatPreprocessor {
             assistantId: input.assistantId,
             imGroupId: input.context?.imGroupId,
           },
+          ensuredContext,
           ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
           logger,
         }),
@@ -583,21 +616,7 @@ export class SdkChatPreprocessor {
 
     return {
       kind: 'normal_chat',
-      context: this.dependencies.normalChatSessionResolver
-        ? await this.dependencies.normalChatSessionResolver.resolve({
-          message: input,
-          entryContext,
-          ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
-          logger,
-        })
-        : await this.dependencies.contextResolver.resolveForChat(
-          input.toolSessionId,
-          {
-            assistantId: input.assistantId,
-            imGroupId: input.context?.imGroupId,
-          },
-          logger,
-        ),
+      context: ensuredContext,
     };
   }
 }
