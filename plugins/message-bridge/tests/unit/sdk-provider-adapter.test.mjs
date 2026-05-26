@@ -257,6 +257,7 @@ function createAdapter(overrides = {}) {
     createSessionUseCase,
     ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
     ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
+    ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
     effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
     directoryMappingEnabled: false,
     opencodeSessionGatewayAdapter,
@@ -276,6 +277,110 @@ function createAdapter(overrides = {}) {
     subagentSessionMapper: new SubagentSessionMapper(() => sdkClient),
   });
 }
+
+test('provider adapter observes raw host events through session-isolation port without changing routing result', async () => {
+  const observed = [];
+  const adapter = createAdapter({
+    hostEventPort: {
+      handle: async (event) => {
+        observed.push(event.type);
+        return { kind: 'ignored', reason: 'unowned_event' };
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'detached-session',
+        id: 'msg-detached',
+        role: 'assistant',
+        time: {
+          completed: '2026-05-22T12:00:01.000Z',
+        },
+      },
+    },
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(observed, ['message.updated']);
+});
+
+test('provider adapter keeps active run routing when session-isolation host event observer fails', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-observer-failure', 'tool-observer-failure']],
+    hostEventPort: {
+      handle: async () => {
+        throw new Error('observer failed');
+      },
+    },
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-observer-failure',
+    runId: 'run-observer-failure',
+    toolSessionId: 'tool-observer-failure',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-observer-failure',
+        id: 'msg-observer-failure',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-observer-failure',
+        id: 'msg-observer-failure',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+          completed: '2026-05-22T12:00:01.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'message.done']);
+  assert.deepEqual(warnings.filter((entry) => entry.message === 'provider_adapter.session_isolation_event_observer_failed'), [{
+    message: 'provider_adapter.session_isolation_event_observer_failed',
+    extra: {
+      eventType: 'message.updated',
+      error: 'observer failed',
+    },
+  }, {
+    message: 'provider_adapter.session_isolation_event_observer_failed',
+    extra: {
+      eventType: 'message.updated',
+      error: 'observer failed',
+    },
+  }]);
+});
 
 test('provider adapter createSession returns real OpenCode sessionId and establishes identity binding', async () => {
   const adapter = createAdapter({

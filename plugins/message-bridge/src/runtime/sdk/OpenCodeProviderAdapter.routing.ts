@@ -2,6 +2,7 @@ import type { ProviderRuntimeContext } from '../../../../../packages/bridge-runt
 import { getErrorMessage } from '../../utils/error.js';
 import { asTrimmedString } from '../../utils/type-guards.js';
 import type { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
+import type { HostEventPort } from '../../port/session-isolation/inbound/index.js';
 import type {
   EventAnchorResolver,
 } from './SdkChatControlPlane.js';
@@ -196,10 +197,13 @@ export class ProviderEventCoordinator {
     partKindState: PartKindStore;
     activeRunTranslatorRegistry: EventTranslatorRegistry;
     outboundTranslatorRegistry: EventTranslatorRegistry;
+    sessionIsolationHostEventPort?: HostEventPort;
     getRuntimeContext: () => ProviderRuntimeContext | null;
   }) {}
 
   async handleEvent(event: BridgeEvent): Promise<boolean> {
+    await this.observeSessionIsolationHostEvent(event);
+
     if (event.type === 'session.created') {
       this.dependencies.sessionCreatedRecorder.record(event);
       return true;
@@ -293,5 +297,24 @@ export class ProviderEventCoordinator {
       messageId: translation.envelopeMessageId,
     });
     return true;
+  }
+
+  private async observeSessionIsolationHostEvent(event: BridgeEvent): Promise<void> {
+    const hostEventPort = this.dependencies.sessionIsolationHostEventPort;
+    if (!hostEventPort) {
+      return;
+    }
+    try {
+      const result = await hostEventPort.handle(event);
+      this.dependencies.logger.debug?.('provider_adapter.session_isolation_event_observed', {
+        eventType: event.type,
+        resultKind: result.kind,
+      });
+    } catch (error) {
+      this.dependencies.logger.warn('provider_adapter.session_isolation_event_observer_failed', {
+        eventType: event.type,
+        error: getErrorMessage(error),
+      });
+    }
   }
 }

@@ -23,6 +23,7 @@ import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js
 import type {
   CloseSessionCommandPort,
   CreateSessionCommandPort,
+  HostEventPort,
 } from '../../port/session-isolation/inbound/index.js';
 import type {
   ChatExecutionContext,
@@ -74,6 +75,7 @@ type ProviderAdapterOptions = {
   eventAnchorResolver: EventAnchorResolver;
   createdSessionBindingPort: CreatedSessionBindingPort;
   subagentSessionMapper: SubagentSessionMapper;
+  hostEventPort?: HostEventPort;
 };
 
 function fromFacts<T>(facts: T[]): AsyncIterable<T> {
@@ -192,6 +194,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       partKindState: this.partKinds,
       activeRunTranslatorRegistry,
       outboundTranslatorRegistry,
+      ...(options.hostEventPort ? { sessionIsolationHostEventPort: options.hostEventPort } : {}),
       getRuntimeContext: () => this.runtimeContext,
     });
   }

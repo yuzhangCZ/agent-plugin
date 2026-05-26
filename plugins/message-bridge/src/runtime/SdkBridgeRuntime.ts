@@ -288,6 +288,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       createSessionUseCase,
       createSessionCommandPort: sessionIsolationControlPlane.createSessionCommandPort,
       closeSessionCommandPort: sessionIsolationControlPlane.closeSessionCommandPort,
+      hostEventPort: sessionIsolationControlPlane.hostEventPort,
       effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
       directoryMappingEnabled: directoryMappingPort.isConfigured(),
       opencodeSessionGatewayAdapter,
