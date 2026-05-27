@@ -30,6 +30,7 @@ export type OwnedSessionMutationResult = RuntimeAppliedResult;
 
 export type ResolvedEntrySessionContext = {
   toolSessionId: string;
+  bindingSessionId?: string;
   session?: HostSessionRecord;
   visibleSessions: HostSessionRecord[];
 };

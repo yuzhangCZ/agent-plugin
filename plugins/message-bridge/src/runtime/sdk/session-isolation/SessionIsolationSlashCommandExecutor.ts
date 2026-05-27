@@ -7,6 +7,7 @@ import type { HostSessionRecord } from '../../../port/session-isolation/dto/reco
 import type { ResolvedEntrySessionContext } from '../../../port/session-isolation/dto/results/index.js';
 import type { CreateOwnedSessionRequest } from '../../../usecase/session-isolation/CreateOwnedSessionUseCase.js';
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
+import type { BridgeLogger } from '../../AppLogger.js';
 import type { BusinessEntryContext } from './BusinessEntryContextResolver.js';
 import type { ChatExecutionContext } from '../SdkChatControlPlane.js';
 
@@ -37,6 +38,7 @@ export class SessionIsolationSlashCommandExecutor {
     switchAttachedSessionUseCase: SwitchAttachedSessionUseCase;
     createOwnedSessionUseCase: CreateOwnedSessionUseCase;
     runtimeAnchorRepository: RuntimeAnchorRepository;
+    logger?: BridgeLogger;
   }) {}
 
   async execute(input: {
@@ -77,6 +79,12 @@ export class SessionIsolationSlashCommandExecutor {
       ...(input.directory ? { directory: input.directory } : {}),
     });
     await this.clearAnchorOnly(input.anchor);
+    this.dependencies.logger?.info('session_isolation.slash.new.created', {
+      anchor: input.anchor,
+      entryKey: input.entryContext.policy.entryKey,
+      createdSessionId: created.session.id,
+      directory: input.directory,
+    });
     return {
       kind: 'new',
       session: created.session,
@@ -90,6 +98,13 @@ export class SessionIsolationSlashCommandExecutor {
     directory?: string;
   }): Promise<Extract<SlashCommandResult, { kind: 'sessions' }>> {
     const context = await this.resolveVisibleContext(input);
+    this.dependencies.logger?.info('session_isolation.slash.sessions.resolved', {
+      anchor: input.anchor,
+      activeSessionId: input.ensuredContext.opencodeSessionId,
+      visibleSessionIds: context.visibleSessions.map((session) => session.id),
+      visibleSessionCount: context.visibleSessions.length,
+      directory: input.directory,
+    });
     return {
       kind: 'sessions',
       sessions: context.visibleSessions,

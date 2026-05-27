@@ -44,6 +44,7 @@ import type {
 import type { RuntimePendingInteractionRegistry } from './RuntimePendingInteractionRegistry.js';
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
 import { SessionIsolationSlashCommandExecutor } from './SessionIsolationSlashCommandExecutor.js';
+import type { BridgeLogger } from '../../AppLogger.js';
 
 export interface SessionIsolationControlPlaneDependencies {
   akScopeKey: string;
@@ -59,6 +60,7 @@ export interface SessionIsolationControlPlaneDependencies {
   diagnostics?: SessionIsolationDiagnosticsPort;
   runtimeAnchorRepository?: RuntimeAnchorRepository;
   toolSessionIdFactory?: () => string;
+  logger?: BridgeLogger;
 }
 
 export interface SessionIsolationControlPlane {
@@ -98,6 +100,7 @@ export function createSessionIsolationControlPlane(
     anchorBindingRepository,
     attachOwnerRepository,
     ...(dependencies.diagnostics ? { diagnostics: dependencies.diagnostics } : {}),
+    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
   });
   const resolveEntrySessionContextUseCase = new DefaultResolveEntrySessionContextUseCase({
     akScopeKey: dependencies.akScopeKey,
@@ -105,6 +108,7 @@ export function createSessionIsolationControlPlane(
     ownedSessionRepository,
     anchorBindingRepository,
     hostSessionGateway,
+    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
   });
   const switchAttachedSessionUseCase = new DefaultSwitchAttachedSessionUseCase({
     ownedSessionCoordinator,
@@ -165,6 +169,7 @@ export function createSessionIsolationControlPlane(
       createAnchorOnly: async () => undefined,
       delete: async () => undefined,
     },
+    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
   });
 
   return {

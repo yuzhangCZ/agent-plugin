@@ -59,11 +59,25 @@ class MemoryAttachOwnerRepository {
   }
 }
 
+function createLogger(entries) {
+  const info = (message, extra) => entries.push({ level: 'info', message, extra });
+  return {
+    debug: () => undefined,
+    info,
+    warn: () => undefined,
+    error: () => undefined,
+    child: () => createLogger(entries),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 function createCoordinator() {
+  const logEntries = [];
   const ownedSessionRepository = new MemoryOwnedSessionRepository();
   const anchorBindingRepository = new MemoryAnchorBindingRepository();
   const attachOwnerRepository = new MemoryAttachOwnerRepository();
   return {
+    logEntries,
     ownedSessionRepository,
     anchorBindingRepository,
     attachOwnerRepository,
@@ -73,6 +87,7 @@ function createCoordinator() {
       ownedSessionRepository,
       anchorBindingRepository,
       attachOwnerRepository,
+      logger: createLogger(logEntries),
     }),
   };
 }
@@ -84,6 +99,7 @@ describe('DefaultOwnedSessionCoordinator', () => {
       ownedSessionRepository,
       anchorBindingRepository,
       attachOwnerRepository,
+      logEntries,
     } = createCoordinator();
 
     await coordinator.bindOwnedSession({
@@ -111,6 +127,17 @@ describe('DefaultOwnedSessionCoordinator', () => {
     assert.deepStrictEqual(await attachOwnerRepository.get('ses-1'), {
       sessionId: 'ses-1',
       toolSessionId: 'tool-1',
+    });
+    assert.deepStrictEqual(logEntries[0], {
+      level: 'info',
+      message: 'session_isolation.ownership.bound',
+      extra: {
+        toolSessionId: 'tool-1',
+        sessionId: 'ses-1',
+        entryKey: 'im:group:GroupA',
+        controlled: true,
+        permissionProfile: 'dialog_only',
+      },
     });
   });
 

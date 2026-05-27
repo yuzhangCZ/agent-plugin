@@ -150,6 +150,14 @@ function createResolvedConfig(overrides = {}) {
   };
 }
 
+function createAppLoggerCapture(entries) {
+  return {
+    log: async (options) => {
+      entries.push(options?.body);
+    },
+  };
+}
+
 function createRuntimeWithResolvedConfig(config, options = {}) {
   return new (class extends BridgeRuntime {
     async resolveConfig() {
@@ -1122,6 +1130,53 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((sent).length, 1);
     assert.strictEqual(sent[0].type, 'tool_error');
     assert.strictEqual(sent[0].reason, undefined);
+  });
+
+  test('tool_error sending log includes error evidence source fields', async () => {
+    const logEntries = [];
+    const runtime = new BridgeRuntime({
+      client: createRuntimeClient({
+        app: createAppLoggerCapture(logEntries),
+      }),
+    });
+
+    const sent = [];
+    runtime.gatewayConnection = { send: (msg) => sent.push(msg) };
+    setRuntimeGatewayState(runtime, 'READY');
+    runtime.actionRouter = {
+      route: async () => ({
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to close session',
+        errorEvidence: {
+          sourceErrorCode: 'session_not_found',
+          sourceOperation: 'session.get',
+          httpStatus: 404,
+        },
+      }),
+    };
+
+    await runtime.handleDownstreamMessage({
+      type: 'invoke',
+      welinkSessionId: 's-tool-error-log',
+      action: 'close_session',
+      payload: { toolSessionId: 'tool-error-log' },
+    });
+
+    const toolErrorLog = logEntries.find((entry) => entry?.message === 'runtime.tool_error.sending');
+    assert.equal(typeof toolErrorLog?.extra?.runtimeTraceId, 'string');
+    assert.equal(typeof toolErrorLog?.extra?.traceId, 'string');
+    assert.equal(toolErrorLog?.extra?.welinkSessionId, 's-tool-error-log');
+    assert.equal(toolErrorLog?.extra?.error, 'Failed to close session');
+    assert.equal(toolErrorLog?.extra?.reason, undefined);
+    assert.equal(toolErrorLog?.extra?.action, 'close_session');
+    assert.equal(toolErrorLog?.extra?.toolSessionId, 'tool-error-log');
+    assert.equal(toolErrorLog?.extra?.sourceErrorCode, 'session_not_found');
+    assert.equal(toolErrorLog?.extra?.sourceOperation, 'session.get');
+    assert.equal(toolErrorLog?.extra?.httpStatus, 404);
+    assert.equal(toolErrorLog?.extra?.gatewayMessageId, undefined);
+    assert.equal(typeof toolErrorLog?.extra?.gatewayTraceId, 'string');
+    assert.strictEqual(sent[0].type, 'tool_error');
   });
 
   test('create_session session_not_found evidence does not collapse to session_not_found', async () => {

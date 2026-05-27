@@ -36,6 +36,20 @@ function createLogger() {
   };
 }
 
+function createCapturingLogger(entries) {
+  const write = (level) => (message, extra) => {
+    entries.push({ level, message, extra });
+  };
+  return {
+    debug: write('debug'),
+    info: write('info'),
+    warn: write('warn'),
+    error: write('error'),
+    child: () => createCapturingLogger(entries),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 async function collect(asyncIterable) {
   const items = [];
   for await (const item of asyncIterable) {
@@ -541,6 +555,7 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
   const switchCalls = [];
   const createCalls = [];
+  const logs = [];
   const resolver = new EntryAwareChatSessionResolver({
     businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
     resolveEntrySessionContextUseCase: {
@@ -587,6 +602,7 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
         },
       },
     },
+    logger: createCapturingLogger(logs),
   });
   const created = await resolver.resolve({
     message: {
@@ -602,6 +618,7 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
         },
       },
     },
+    logger: createCapturingLogger(logs),
   });
 
   assert.deepEqual(reused, {
@@ -621,6 +638,114 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
   assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
   assert.equal(createCalls[0].toolSessionId, 'tool-b');
   assert.equal(createCalls[0].entryKey.businessSessionId, 'group-b');
+  const reusedLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session');
+  const createdLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_created');
+  assert.equal(logs.some((entry) => entry.message === 'sdk_chat_context.entry_existing_binding'), false);
+  assert.equal(reusedLog.extra.entryKey, 'im:group:group-a');
+  assert.deepEqual(reusedLog.extra.visibleSessionIds, ['ses-group-a']);
+  assert.equal(createdLog.extra.entryKey, 'im:group:group-b');
+  assert.deepEqual(createdLog.extra.visibleSessionIds, []);
+});
+
+test('EntryAwareChatSessionResolver logs existing binding separately from visible session reuse', async () => {
+  const logs = [];
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async (input) => ({
+        toolSessionId: input.toolSessionId,
+        bindingSessionId: 'ses-bound',
+        session: { id: 'ses-bound', directory: '/workspace/bound' },
+        visibleSessions: [{ id: 'ses-bound', directory: '/workspace/bound' }],
+      }),
+    },
+    switchAttachedSessionUseCase: {
+      execute: async () => {
+        throw new Error('should not switch when binding already resolves');
+      },
+    },
+    createOwnedSessionUseCase: {
+      execute: async () => {
+        throw new Error('should not create when binding already resolves');
+      },
+    },
+    runtimeAnchorRepository: new RuntimeAnchorRegistry(),
+    modelOverrideStore: new InMemorySessionModelOverrideStore(),
+  });
+
+  const resolved = await resolver.resolve({
+    message: {
+      traceId: 'trace-existing-binding',
+      runId: 'run-existing-binding',
+      toolSessionId: 'tool-existing-binding',
+      text: 'hello',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-existing',
+        },
+      },
+    },
+    logger: createCapturingLogger(logs),
+  });
+
+  assert.deepEqual(resolved, {
+    opencodeSessionId: 'ses-bound',
+    session: { id: 'ses-bound', directory: '/workspace/bound' },
+    scope: { directory: '/workspace/bound' },
+    modelOverride: undefined,
+    bootstrapSource: 'existing_binding',
+  });
+  const existingBindingLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_existing_binding');
+  assert.equal(existingBindingLog.extra.entryKey, 'im:group:group-existing');
+  assert.deepEqual(existingBindingLog.extra.visibleSessionIds, ['ses-bound']);
+  assert.equal(existingBindingLog.extra.bindingSessionId, 'ses-bound');
+  assert.equal(logs.some((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session'), false);
+});
+
+test('EntryAwareChatSessionResolver keeps raw binding session id in logs when binding falls outside current visible scope', async () => {
+  const logs = [];
+  const resolver = new EntryAwareChatSessionResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    resolveEntrySessionContextUseCase: {
+      execute: async (input) => ({
+        toolSessionId: input.toolSessionId,
+        bindingSessionId: 'ses-stale-binding',
+        visibleSessions: [{ id: 'ses-visible', directory: '/workspace/visible' }],
+      }),
+    },
+    switchAttachedSessionUseCase: {
+      execute: async () => ({ applied: true }),
+    },
+    createOwnedSessionUseCase: {
+      execute: async () => {
+        throw new Error('should not create when a visible session can be reused');
+      },
+    },
+    runtimeAnchorRepository: new RuntimeAnchorRegistry(),
+    modelOverrideStore: new InMemorySessionModelOverrideStore(),
+  });
+
+  await resolver.resolve({
+    message: {
+      traceId: 'trace-stale-binding',
+      runId: 'run-stale-binding',
+      toolSessionId: 'tool-stale-binding',
+      text: 'hello',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-stale',
+        },
+      },
+    },
+    logger: createCapturingLogger(logs),
+  });
+
+  const reusedLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session');
+  assert.equal(reusedLog.extra.bindingSessionId, 'ses-stale-binding');
 });
 
 test('EntryAwareChatSessionResolver creates a new host session for anchor-only input even when visible sessions exist', async () => {
@@ -628,6 +753,7 @@ test('EntryAwareChatSessionResolver creates a new host session for anchor-only i
   await runtimeAnchorRepository.createAnchorOnly({ toolSessionId: 'tool-anchor-only-create' });
   const switchCalls = [];
   const createCalls = [];
+  const logs = [];
   const resolver = new EntryAwareChatSessionResolver({
     businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
     resolveEntrySessionContextUseCase: {
@@ -666,6 +792,7 @@ test('EntryAwareChatSessionResolver creates a new host session for anchor-only i
         },
       },
     },
+    logger: createCapturingLogger(logs),
   });
 
   assert.deepEqual(result, {
@@ -678,6 +805,9 @@ test('EntryAwareChatSessionResolver creates a new host session for anchor-only i
   assert.deepEqual(createCalls.map((call) => call.toolSessionId), ['tool-anchor-only-create']);
   assert.deepEqual(switchCalls, []);
   assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only-create'), false);
+  const createdLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_created_from_anchor_only');
+  assert.equal(createdLog.extra.entryKey, 'im:group:group-anchor');
+  assert.deepEqual(createdLog.extra.visibleSessionIds, ['ses-visible-existing']);
 });
 
 test('SdkChatPreprocessor ensures real session before slash execution', async () => {

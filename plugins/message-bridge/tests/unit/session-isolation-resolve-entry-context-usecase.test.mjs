@@ -74,6 +74,18 @@ function createHostSessionGateway(sessions) {
   };
 }
 
+function createLogger(entries) {
+  const info = (message, extra) => entries.push({ level: 'info', message, extra });
+  return {
+    debug: () => undefined,
+    info,
+    warn: () => undefined,
+    error: () => undefined,
+    child: () => createLogger(entries),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 const entryKey = {
   businessSessionDomain: 'IM',
   businessSessionType: 'Group',
@@ -81,6 +93,7 @@ const entryKey = {
 };
 
 function createUseCase({ sessions = [], ownedRecords = [], binding } = {}) {
+  const logEntries = [];
   const ownedSessionRepository = new MemoryOwnedSessionRepository();
   ownedSessionRepository.records = ownedRecords;
   const anchorBindingRepository = new MemoryAnchorBindingRepository();
@@ -96,13 +109,15 @@ function createUseCase({ sessions = [], ownedRecords = [], binding } = {}) {
       ownedSessionRepository,
       anchorBindingRepository,
       hostSessionGateway: host.gateway,
+      logger: createLogger(logEntries),
     }),
+    logEntries,
   };
 }
 
 describe('DefaultResolveEntrySessionContextUseCase', () => {
   test('returns active attached session when anchor binding points to a visible owned session', async () => {
-    const { useCase, host } = createUseCase({
+    const { useCase, host, logEntries } = createUseCase({
       sessions: [{ id: 'ses-1', directory: '/repo' }, { id: 'ses-2', directory: '/repo' }],
       ownedRecords: [
         {
@@ -128,10 +143,27 @@ describe('DefaultResolveEntrySessionContextUseCase', () => {
       directory: '/repo',
     }), {
       toolSessionId: 'tool-1',
+      bindingSessionId: 'ses-1',
       session: { id: 'ses-1', directory: '/repo' },
       visibleSessions: [{ id: 'ses-1', directory: '/repo' }],
     });
     assert.deepStrictEqual(host.calls, [{ method: 'list', input: { directory: '/repo' } }]);
+    assert.deepStrictEqual(logEntries[0], {
+      level: 'info',
+      message: 'session_isolation.context.resolved',
+      extra: {
+        toolSessionId: 'tool-1',
+        entryKey: 'im:group:GroupA',
+        allowOpencodeNativeSessions: false,
+        bindingSessionId: 'ses-1',
+        hostVisibleSessionIds: ['ses-1', 'ses-2'],
+        ownedSessionIds: ['ses-1'],
+        visibleSessionIds: ['ses-1'],
+        resolvedSessionId: 'ses-1',
+        directory: '/repo',
+        hasBinding: true,
+      },
+    });
   });
 
   test('omits session when anchor binding is missing or points outside entry visibility', async () => {
@@ -161,6 +193,7 @@ describe('DefaultResolveEntrySessionContextUseCase', () => {
       directory: '/repo',
     }), {
       toolSessionId: 'tool-1',
+      bindingSessionId: 'ses-other',
       visibleSessions: [{ id: 'ses-owned', directory: '/repo' }],
     });
   });
@@ -192,6 +225,7 @@ describe('DefaultResolveEntrySessionContextUseCase', () => {
       directory: '/repo',
     }), {
       toolSessionId: 'tool-1',
+      bindingSessionId: 'ses-stale',
       visibleSessions: [],
     });
   });

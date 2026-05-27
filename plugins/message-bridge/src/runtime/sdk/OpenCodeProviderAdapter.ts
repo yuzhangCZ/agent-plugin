@@ -18,7 +18,7 @@ import type { BridgeEvent } from '../types.js';
 import type { HostClientLike } from '../../types/index.js';
 import { CreateSessionRequestNormalizer } from '../../usecase/CreateSessionRequestNormalizer.js';
 import { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
-import { getErrorMessage } from '../../utils/error.js';
+import { getErrorMessage, getToolErrorEvidence } from '../../utils/error.js';
 import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js';
 import type {
   AbortSessionCommandPort,
@@ -127,6 +127,16 @@ function buildImmediateFailedRun(
         error,
       };
     },
+  };
+}
+
+function appendTerminalSourceEvidence(extra: Record<string, unknown>, errorDetails: unknown): Record<string, unknown> {
+  const evidence = getToolErrorEvidence(errorDetails);
+  return {
+    ...extra,
+    ...(evidence?.sourceOperation ? { sourceOperation: evidence.sourceOperation } : {}),
+    ...(evidence?.sourceErrorCode ? { sourceErrorCode: evidence.sourceErrorCode } : {}),
+    ...(evidence?.httpStatus !== undefined ? { httpStatus: evidence.httpStatus } : {}),
   };
 }
 
@@ -293,6 +303,16 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     try {
       preprocessed = await this.chatPreprocessor.preprocess(input, this.logger);
     } catch (error) {
+      this.logger.warn('provider_adapter.run.immediate_failed', {
+        toolSessionId: input.toolSessionId,
+        runId: input.runId,
+        providerOutcome: 'failed',
+        mappedProviderErrorCode: error instanceof Error && error.message === 'business_entry_key_required'
+          ? 'invalid_input'
+          : 'provider_unavailable',
+        error: getErrorMessage(error),
+        failureStage: 'preprocess',
+      });
       if (error instanceof Error && error.message === 'business_entry_key_required') {
         return buildImmediateFailedRun(input.toolSessionId, {
           code: 'invalid_input',
@@ -476,17 +496,22 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
       if (!promptResult.success) {
         this.executionSessionInvalidationPort.invalidateAfterFailure(input.toolSessionId, promptResult);
+        const sourceOperation = promptResult.errorEvidence?.sourceOperation;
+        const sourceErrorCode = promptResult.errorEvidence?.sourceErrorCode;
         this.logger.warn('provider_adapter.prompt.failed', {
           toolSessionId: input.toolSessionId,
           opencodeSessionId: context.opencodeSessionId,
           runId: activeRun.runId,
           durationMs: Math.max(0, Date.now() - startedAt),
+          providerOutcome: 'failed',
+          mappedProviderErrorCode: sourceOperation === 'session.get' && sourceErrorCode === 'session_not_found'
+            ? 'session_not_found'
+            : 'provider_unavailable',
           error: promptResult.errorMessage ?? 'provider_unavailable',
-          sourceOperation: promptResult.errorEvidence?.sourceOperation,
-          sourceErrorCode: promptResult.errorEvidence?.sourceErrorCode,
+          sourceOperation,
+          sourceErrorCode,
+          httpStatus: promptResult.errorEvidence?.httpStatus,
         });
-        const sourceOperation = promptResult.errorEvidence?.sourceOperation;
-        const sourceErrorCode = promptResult.errorEvidence?.sourceErrorCode;
         const error: ProviderError = sourceOperation === 'session.get' && sourceErrorCode === 'session_not_found'
           ? {
               code: 'session_not_found',
@@ -503,12 +528,17 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         return;
       }
 
-      this.logger.info('provider_adapter.prompt.completed', {
+      this.logger.info('provider_adapter.prompt.completed', appendTerminalSourceEvidence({
         toolSessionId: input.toolSessionId,
         opencodeSessionId: context.opencodeSessionId,
         runId: activeRun.runId,
         durationMs: Math.max(0, Date.now() - startedAt),
         terminalKind: promptResult.data.terminal.kind,
+        providerOutcome: promptResult.data.terminal.kind === 'failed'
+          ? 'failed'
+          : promptResult.data.terminal.kind === 'aborted'
+            ? 'aborted'
+            : 'completed',
         ...(promptResult.data.terminal.kind === 'failed'
           ? {
               terminalErrorCode: promptResult.data.terminal.errorCode,
@@ -516,17 +546,19 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
               terminalErrorDetails: promptResult.data.terminal.errorDetails,
             }
           : {}),
-      });
+      }, promptResult.data.terminal.kind === 'failed' ? promptResult.data.terminal.errorDetails : undefined));
       activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
     } catch (error) {
       this.executionSessionInvalidationPort.invalidateAfterFailure(input.toolSessionId, error);
-      this.logger.error('provider_adapter.prompt.threw', {
+      this.logger.error('provider_adapter.prompt.threw', appendTerminalSourceEvidence({
         toolSessionId: input.toolSessionId,
         opencodeSessionId: context.opencodeSessionId,
         runId: activeRun.runId,
         durationMs: Math.max(0, Date.now() - startedAt),
         error: getErrorMessage(error),
-      });
+        providerOutcome: 'failed',
+        mappedProviderErrorCode: 'internal_error',
+      }, error));
       activeRun.settlePromptTerminal({
         outcome: 'failed',
         error: {

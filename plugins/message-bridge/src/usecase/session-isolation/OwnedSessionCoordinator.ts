@@ -12,6 +12,7 @@ import type {
   OwnedSessionRepository,
   SessionIsolationDiagnosticsPort,
 } from '../../port/session-isolation/index.js';
+import type { BridgeLogger } from '../../types/logger.js';
 
 export interface OwnedSessionCoordinator {
   bindOwnedSession(input: CreateOwnedSessionInput): Promise<OwnedSessionMutationResult>;
@@ -31,23 +32,33 @@ export class DefaultOwnedSessionCoordinator implements OwnedSessionCoordinator {
     anchorBindingRepository: AnchorBindingRepository;
     attachOwnerRepository: AttachOwnerRepository;
     diagnostics?: SessionIsolationDiagnosticsPort;
+    logger?: BridgeLogger;
   }) {}
 
   async bindOwnedSession(input: CreateOwnedSessionInput): Promise<OwnedSessionMutationResult> {
     const controlled = input.policy?.controlled ?? true;
+    const entryKey = this.dependencies.entryKeyCodec.stringify(input.entryKey);
+    const permissionProfile = controlled ? 'dialog_only' : 'default';
     try {
       const existing = await this.dependencies.anchorBindingRepository.get(input.toolSessionId);
       await this.dependencies.ownedSessionRepository.upsert({
         akScopeKey: this.dependencies.akScopeKey,
-        entryKey: this.dependencies.entryKeyCodec.stringify(input.entryKey),
+        entryKey,
         sessionId: input.sessionId,
         controlled,
-        permissionProfile: controlled ? 'dialog_only' : 'default',
+        permissionProfile,
       });
       if (existing?.sessionId && existing.sessionId !== input.sessionId) {
         await this.dependencies.attachOwnerRepository.delete(existing.sessionId);
       }
       await this.attach(input.toolSessionId, input.sessionId);
+      this.dependencies.logger?.info('session_isolation.ownership.bound', {
+        toolSessionId: input.toolSessionId,
+        sessionId: input.sessionId,
+        entryKey,
+        controlled,
+        permissionProfile,
+      });
       return { applied: true };
     } catch (error) {
       this.recordMutationFailure('bindOwnedSession', {

@@ -40,11 +40,24 @@ function createPendingInteractionRegistry() {
   };
 }
 
+function createLogger(entries) {
+  const info = (message, extra) => entries.push({ level: 'info', message, extra });
+  return {
+    debug: () => undefined,
+    info,
+    warn: () => undefined,
+    error: () => undefined,
+    child: () => createLogger(entries),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 describe('createSessionIsolationControlPlane', () => {
   test('wires formal chat command path through host adapter and ownership repositories', async () => {
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const calls = [];
+    const logs = [];
     const graph = createSessionIsolationControlPlane({
       akScopeKey: 'ak-test',
       bindingStore,
@@ -82,6 +95,7 @@ describe('createSessionIsolationControlPlane', () => {
           return { applied: true };
         },
       },
+      logger: createLogger(logs),
     });
 
     assert.equal(typeof graph.hostEventPort.handle, 'function');
@@ -122,5 +136,7 @@ describe('createSessionIsolationControlPlane', () => {
         input: { sessionId: 'ses-created', text: 'hello', agent: 'assistant-1' },
       },
     ]);
+    assert.equal(logs.some((entry) => entry.message === 'session_isolation.context.resolved'), true);
+    assert.equal(logs.some((entry) => entry.message === 'session_isolation.ownership.bound'), true);
   });
 });

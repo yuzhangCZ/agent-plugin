@@ -31,8 +31,21 @@ function createRuntimeAnchorRepository(calls) {
   };
 }
 
+function createLogger(logs) {
+  const info = (message, extra) => logs.push({ level: 'info', message, extra });
+  return {
+    debug: () => undefined,
+    info,
+    warn: () => undefined,
+    error: () => undefined,
+    child: () => createLogger(logs),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 function createExecutor(overrides = {}) {
   const calls = [];
+  const logs = [];
   const executor = new SessionIsolationSlashCommandExecutor({
     resolveEntrySessionContextUseCase: {
       execute: async (input) => {
@@ -60,12 +73,13 @@ function createExecutor(overrides = {}) {
       },
     },
     runtimeAnchorRepository: createRuntimeAnchorRepository(calls),
+    logger: createLogger(logs),
   });
-  return { executor, calls };
+  return { executor, calls, logs };
 }
 
 test('SessionIsolationSlashCommandExecutor lists visible sessions from entry context only', async () => {
-  const { executor, calls } = createExecutor();
+  const { executor, calls, logs } = createExecutor();
 
   const result = await executor.execute({
     command: { kind: 'sessions' },
@@ -96,6 +110,17 @@ test('SessionIsolationSlashCommandExecutor lists visible sessions from entry con
       directory: '/repo',
     },
   }]);
+  assert.deepEqual(logs[0], {
+    level: 'info',
+    message: 'session_isolation.slash.sessions.resolved',
+    extra: {
+      anchor: 'tool-a',
+      activeSessionId: 'ses-current',
+      visibleSessionIds: ['ses-current', 'ses-target'],
+      visibleSessionCount: 2,
+      directory: '/repo',
+    },
+  });
 });
 
 test('SessionIsolationSlashCommandExecutor switches only to a visible session and clears anchor-only state', async () => {
@@ -146,7 +171,7 @@ test('SessionIsolationSlashCommandExecutor rejects invisible target sessions wit
 });
 
 test('SessionIsolationSlashCommandExecutor always creates and switches to a new session for /new', async () => {
-  const { executor, calls } = createExecutor();
+  const { executor, calls, logs } = createExecutor();
 
   const result = await executor.execute({
     command: { kind: 'new' },
@@ -173,6 +198,16 @@ test('SessionIsolationSlashCommandExecutor always creates and switches to a new 
       entryKey: entryContext.entryKey,
       policy: entryContext.policy,
       assistantId: 'assistant-a',
+      directory: '/repo',
+    },
+  });
+  assert.deepEqual(logs[0], {
+    level: 'info',
+    message: 'session_isolation.slash.new.created',
+    extra: {
+      anchor: 'tool-anchor-only',
+      entryKey: 'im:direct:user-a',
+      createdSessionId: 'ses-created',
       directory: '/repo',
     },
   });

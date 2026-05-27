@@ -6,6 +6,7 @@ import type {
   HostSessionGateway,
   OwnedSessionRepository,
 } from '../../port/session-isolation/outbound/index.js';
+import type { BridgeLogger } from '../../types/logger.js';
 
 export interface ResolveEntrySessionContextUseCase {
   execute(input: ChatContextQuery): Promise<ResolvedEntrySessionContext>;
@@ -22,10 +23,17 @@ export class DefaultResolveEntrySessionContextUseCase implements ResolveEntrySes
     ownedSessionRepository: OwnedSessionRepository;
     anchorBindingRepository: AnchorBindingRepository;
     hostSessionGateway: HostSessionGateway;
+    logger?: BridgeLogger;
   }) {}
 
   async execute(input: ChatContextQuery): Promise<ResolvedEntrySessionContext> {
     const entryKey = this.dependencies.entryKeyCodec.stringify(input.entryKey);
+    const policy = input.policy ?? {
+      entryKey,
+      controlled: true,
+      allowOpencodeNativeSessions: false,
+      allowedSlashCommands: ['new', 'models', 'model'],
+    };
     const [ownedRecords, binding, hostVisibleSessions] = await Promise.all([
       this.dependencies.ownedSessionRepository.findByEntryKey({
         akScopeKey: this.dependencies.akScopeKey,
@@ -42,7 +50,7 @@ export class DefaultResolveEntrySessionContextUseCase implements ResolveEntrySes
         visibleSessions.push(session);
         continue;
       }
-      if (!input.policy.allowOpencodeNativeSessions) {
+      if (!policy.allowOpencodeNativeSessions) {
         continue;
       }
       const ownedRecord = await this.dependencies.ownedSessionRepository.findBySessionId({
@@ -56,9 +64,22 @@ export class DefaultResolveEntrySessionContextUseCase implements ResolveEntrySes
     const session = binding?.state === 'attached' && binding.sessionId
       ? visibleSessions.find((candidate) => candidate.id === binding.sessionId)
       : undefined;
+    this.dependencies.logger?.info('session_isolation.context.resolved', {
+      toolSessionId: input.toolSessionId,
+      entryKey,
+      allowOpencodeNativeSessions: policy.allowOpencodeNativeSessions,
+      bindingSessionId: binding?.sessionId,
+      hostVisibleSessionIds: hostVisibleSessions.map((candidate) => candidate.id),
+      ownedSessionIds: ownedRecords.map((record) => record.sessionId),
+      visibleSessionIds: visibleSessions.map((candidate) => candidate.id),
+      resolvedSessionId: session?.id,
+      directory: input.directory,
+      hasBinding: Boolean(binding),
+    });
 
     return {
       toolSessionId: input.toolSessionId,
+      ...(binding?.sessionId ? { bindingSessionId: binding.sessionId } : {}),
       ...(session ? { session } : {}),
       visibleSessions,
     };

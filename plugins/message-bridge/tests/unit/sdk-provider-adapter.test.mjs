@@ -1305,7 +1305,51 @@ test('provider adapter records prompt lifecycle diagnostics around session.promp
   assert.equal(infos[1].extra.textLength, 5);
   assert.equal(infos[2].extra.toolSessionId, 'tool-prompt-log');
   assert.equal(infos[2].extra.terminalKind, 'completed');
+  assert.equal(infos[2].extra.providerOutcome, 'completed');
   assert.equal(typeof infos[2].extra.durationMs, 'number');
+});
+
+test('provider adapter logs immediate failed run when preprocess rejects', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    chatPreprocessor: {
+      preprocess: async () => {
+        throw new Error('business_entry_key_required');
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-immediate-failed',
+    runId: 'run-immediate-failed',
+    toolSessionId: 'tool-immediate-failed',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'invalid_input',
+      message: 'business_entry_key_required',
+    },
+  });
+  assert.deepEqual(warnings[0], {
+    message: 'provider_adapter.run.immediate_failed',
+    extra: {
+      toolSessionId: 'tool-immediate-failed',
+      runId: 'run-immediate-failed',
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'invalid_input',
+      error: 'business_entry_key_required',
+      failureStage: 'preprocess',
+    },
+  });
 });
 
 test('provider adapter reuses legacy subagent mapping to route child facts into parent active run', async () => {
@@ -2356,6 +2400,7 @@ test('provider adapter keeps bare APIError when prompt terminal only receives as
         runId: 'run-api-error-name-only',
         durationMs: infos.find((entry) => entry.message === 'provider_adapter.prompt.completed').extra.durationMs,
         terminalKind: 'failed',
+        providerOutcome: 'failed',
         terminalErrorCode: 'internal_error',
         terminalErrorMessage: 'APIError',
         terminalErrorDetails: {
@@ -2364,6 +2409,112 @@ test('provider adapter keeps bare APIError when prompt terminal only receives as
       },
     },
   );
+});
+
+test('provider adapter logs prompt failure source evidence and mapping', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-prompt-failed', 'tool-prompt-failed']],
+    session: {
+      prompt: async () => ({
+        error: {
+          code: 'rate_limit',
+          status: 429,
+          message: 'slow down',
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-prompt-failed',
+    runId: 'run-prompt-failed',
+    toolSessionId: 'tool-prompt-failed',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'provider_unavailable',
+      message: 'Failed to send message: slow down',
+    },
+  });
+  assert.deepEqual(warnings.find((entry) => entry.message === 'provider_adapter.prompt.failed'), {
+    message: 'provider_adapter.prompt.failed',
+    extra: {
+      toolSessionId: 'tool-prompt-failed',
+      opencodeSessionId: 'tool-prompt-failed',
+      runId: 'run-prompt-failed',
+      durationMs: warnings.find((entry) => entry.message === 'provider_adapter.prompt.failed').extra.durationMs,
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'provider_unavailable',
+      error: 'Failed to send message: slow down',
+      sourceOperation: 'session.prompt',
+      sourceErrorCode: 'rate_limit',
+      httpStatus: 429,
+    },
+  });
+});
+
+test('provider adapter logs thrown prompt error evidence attached on the error object', async () => {
+  const errors = [];
+  const logger = {
+    ...createLogger(),
+    error: (message, extra) => errors.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-prompt-threw', 'tool-prompt-threw']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    const error = new Error('prompt transport exploded');
+    Object.assign(error, {
+      errorEvidence: {
+        sourceOperation: 'session.prompt',
+        sourceErrorCode: 'transport_error',
+        httpStatus: 502,
+      },
+    });
+    throw error;
+  };
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-prompt-threw',
+    runId: 'run-prompt-threw',
+    toolSessionId: 'tool-prompt-threw',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'prompt transport exploded',
+    },
+  });
+  assert.deepEqual(errors.find((entry) => entry.message === 'provider_adapter.prompt.threw'), {
+    message: 'provider_adapter.prompt.threw',
+    extra: {
+      toolSessionId: 'tool-prompt-threw',
+      opencodeSessionId: 'tool-prompt-threw',
+      runId: 'run-prompt-threw',
+      durationMs: errors.find((entry) => entry.message === 'provider_adapter.prompt.threw').extra.durationMs,
+      error: 'prompt transport exploded',
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'internal_error',
+      sourceOperation: 'session.prompt',
+      sourceErrorCode: 'transport_error',
+      httpStatus: 502,
+    },
+  });
 });
 
 test('provider adapter keeps draining after prompt terminal and closes on the last terminal candidate', async () => {

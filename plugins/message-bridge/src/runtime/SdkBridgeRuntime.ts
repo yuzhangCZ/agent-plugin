@@ -242,6 +242,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       businessEntryKeyResolver,
       ownedSessionRepository,
       diagnostics: sessionIsolationDiagnostics,
+      logger: this.logger.child({ component: 'session_isolation' }),
       hostSessionQueryPort,
       sessionCreationPort,
       sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,

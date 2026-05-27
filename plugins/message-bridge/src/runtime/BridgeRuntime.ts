@@ -1495,7 +1495,13 @@ export class BridgeRuntime {
       welinkSessionId,
       error,
       reason,
+      action: logOptions?.action,
+      toolSessionId: logOptions?.toolSessionId,
       sourceErrorCode: result.success ? undefined : result.errorEvidence?.sourceErrorCode,
+      sourceOperation: result.success ? undefined : result.errorEvidence?.sourceOperation,
+      httpStatus: result.success ? undefined : result.errorEvidence?.httpStatus,
+      gatewayMessageId: logOptions?.gatewayMessageId,
+      gatewayTraceId: logOptions?.traceId,
     });
 
     const toolErrorMessage: GatewaySendPayload = {

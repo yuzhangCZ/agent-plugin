@@ -30,6 +30,10 @@ type SessionModelOverrideStore = {
   get(opencodeSessionId: string): { providerId: string; modelId: string } | undefined;
 };
 
+function stringifyEntryKey(entryKey: BusinessEntryContext['entryKey']): string {
+  return `${entryKey.businessSessionDomain.toLowerCase()}:${entryKey.businessSessionType.toLowerCase()}:${entryKey.businessSessionId}`;
+}
+
 /**
  * normal chat 的业务入口隔离解析器。
  * @remarks 这里只决定当前 prompt 应落到哪个 host session；fact streaming 仍由 provider 主链负责。
@@ -72,8 +76,19 @@ export class EntryAwareChatSessionResolver {
       ...(input.directory ? { directory: input.directory } : {}),
     });
     const existingSession = context.session;
+    const visibleSessionIds = context.visibleSessions.map((session) => session.id);
+    const bindingSessionId = context.bindingSessionId;
+    const serializedEntryKey = input.entryContext?.policy.entryKey || stringifyEntryKey(entryKey);
     if (existingSession) {
       await this.clearAnchorOnly(input.message.toolSessionId);
+      input.logger?.info('sdk_chat_context.entry_existing_binding', {
+        anchor: input.message.toolSessionId,
+        opencodeSessionId: existingSession.id,
+        entryKey: serializedEntryKey,
+        directory: input.directory,
+        visibleSessionIds,
+        bindingSessionId,
+      });
       return this.toChatExecutionContext(existingSession, 'existing_binding');
     }
 
@@ -95,6 +110,10 @@ export class EntryAwareChatSessionResolver {
       input.logger?.info('sdk_chat_context.entry_created_from_anchor_only', {
         anchor: input.message.toolSessionId,
         opencodeSessionId: created.session.id,
+        entryKey: serializedEntryKey,
+        directory: input.directory,
+        visibleSessionIds,
+        bindingSessionId,
       });
       return this.toChatExecutionContext(created.session, 'bootstrap_created');
     }
@@ -109,6 +128,10 @@ export class EntryAwareChatSessionResolver {
       input.logger?.info('sdk_chat_context.entry_reused_visible_session', {
         anchor: input.message.toolSessionId,
         opencodeSessionId: visibleSession.id,
+        entryKey: serializedEntryKey,
+        directory: input.directory,
+        visibleSessionIds,
+        bindingSessionId,
       });
       return this.toChatExecutionContext(visibleSession, 'bootstrap_reused_recent_session');
     }
@@ -129,6 +152,10 @@ export class EntryAwareChatSessionResolver {
     input.logger?.info('sdk_chat_context.entry_created', {
       anchor: input.message.toolSessionId,
       opencodeSessionId: created.session.id,
+      entryKey: serializedEntryKey,
+      directory: input.directory,
+      visibleSessionIds,
+      bindingSessionId,
     });
     return this.toChatExecutionContext(created.session, 'bootstrap_created');
   }
