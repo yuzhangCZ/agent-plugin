@@ -28,6 +28,18 @@ declare module "openclaw/plugin-sdk" {
       onRecordError: (err: unknown) => void;
     }): Promise<void>;
     readSessionUpdatedAt?(params: { storePath: string; sessionKey: string }): number | undefined;
+    emitSessionTranscriptUpdate?(update: {
+      sessionFile?: string;
+      sessionKey: string;
+      message: Record<string, unknown>;
+      messageId: string;
+    }): void | Promise<void>;
+    emitTranscriptUpdate?(update: {
+      sessionFile?: string;
+      sessionKey: string;
+      message: Record<string, unknown>;
+      messageId: string;
+    }): void | Promise<void>;
   }
 
   export interface PluginRuntime {
@@ -228,6 +240,27 @@ declare module "openclaw/plugin-sdk" {
     status?: ChannelPluginStatus<TAccount>;
     gateway?: ChannelPluginGateway<TAccount>;
   }
+}
+
+declare module "openclaw/plugin-sdk/agent-harness-runtime" {
+  export function emitSessionTranscriptUpdate(update: {
+    sessionFile: string;
+    sessionKey?: string;
+    message?: unknown;
+    messageId?: string;
+  }): void;
+}
+
+declare module "openclaw/plugin-sdk/session-store-runtime" {
+  export function loadSessionStore(
+    storePath: string,
+    opts?: Record<string, unknown>,
+  ): Record<string, unknown>;
+  export function resolveSessionTranscriptPathInDir(
+    sessionId: string,
+    sessionsDir: string,
+    topicId?: string | number,
+  ): string;
 }
 
 declare module "openclaw/plugin-sdk/core" {

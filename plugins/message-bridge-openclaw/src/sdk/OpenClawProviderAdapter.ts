@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 
 import type {
@@ -88,6 +89,28 @@ type RuntimeSessionRecord = {
     onRecordError: (err: unknown) => void;
   }): Promise<void>;
   readSessionUpdatedAt?(params: { storePath: string; sessionKey: string }): number | undefined;
+  emitSessionTranscriptUpdate?(update: DashboardTranscriptUpdate): void | Promise<void>;
+  emitTranscriptUpdate?(update: DashboardTranscriptUpdate): void | Promise<void>;
+};
+
+type DashboardTranscriptUpdate = {
+  sessionFile?: string;
+  sessionKey: string;
+  message: Record<string, unknown>;
+  messageId: string;
+};
+
+type DashboardTranscriptRuntime = {
+  emitSessionTranscriptUpdate?: (update: DashboardTranscriptUpdate) => void | Promise<void>;
+};
+
+type SessionStoreRuntime = {
+  loadSessionStore?: (storePath: string, opts?: Record<string, unknown>) => Record<string, unknown>;
+  resolveSessionTranscriptPathInDir?: (
+    sessionId: string,
+    sessionsDir: string,
+    topicId?: string | number,
+  ) => string;
 };
 
 type MessageBridgeRoute = {
@@ -138,6 +161,8 @@ interface ActiveRunState {
   pendingToolResultTarget: string | null;
   streamingEnabled: boolean;
   titleEmitted: boolean;
+  dashboardStorePath: string | null;
+  dashboardSessionFile: string | null;
   toolStates: Map<string, ActiveToolState>;
 }
 
@@ -347,6 +372,34 @@ async function loadOpenClawPluginSdk(): Promise<OpenClawPluginSdkModule> {
   } as OpenClawPluginSdkModule;
 }
 
+let dashboardTranscriptRuntimePromise: Promise<DashboardTranscriptRuntime | null> | null = null;
+let sessionStoreRuntimePromise: Promise<SessionStoreRuntime | null> | null = null;
+
+async function loadDashboardTranscriptRuntime(): Promise<DashboardTranscriptRuntime | null> {
+  dashboardTranscriptRuntimePromise ??= import("openclaw/plugin-sdk/agent-harness-runtime")
+    .then((mod) => ({
+      emitSessionTranscriptUpdate:
+        typeof mod.emitSessionTranscriptUpdate === "function"
+          ? mod.emitSessionTranscriptUpdate
+          : undefined,
+    }))
+    .catch(() => null);
+  return dashboardTranscriptRuntimePromise;
+}
+
+async function loadSessionStoreRuntime(): Promise<SessionStoreRuntime | null> {
+  sessionStoreRuntimePromise ??= import("openclaw/plugin-sdk/session-store-runtime")
+    .then((mod) => ({
+      loadSessionStore: typeof mod.loadSessionStore === "function" ? mod.loadSessionStore : undefined,
+      resolveSessionTranscriptPathInDir:
+        typeof mod.resolveSessionTranscriptPathInDir === "function"
+          ? mod.resolveSessionTranscriptPathInDir
+          : undefined,
+    }))
+    .catch(() => null);
+  return sessionStoreRuntimePromise;
+}
+
 /**
  * OpenClaw 宿主能力到 SDK Provider SPI 的适配层。
  * @remarks
@@ -432,6 +485,8 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       pendingToolResultTarget: null,
       streamingEnabled: this.options.account.streaming !== false,
       titleEmitted: false,
+      dashboardStorePath: null,
+      dashboardSessionFile: null,
       toolStates: new Map(),
     };
 
@@ -715,6 +770,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const sessionRuntime = this.getUsableSessionRecordRuntime();
     if (sessionRuntime) {
       const storePath = sessionRuntime.resolveStorePath(effectiveConfig.session?.store, { agentId: route.agentId });
+      state.dashboardStorePath = storePath;
       await sessionRuntime.recordInboundSession({
         storePath,
         sessionKey: state.sessionKey,
@@ -833,6 +889,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       content: text,
       raw: payload,
     }));
+    this.projectDashboardTranscriptUpdate(state);
   }
 
   private async runWithSubagentFallback(state: ActiveRunState, text: string): Promise<void> {
@@ -844,6 +901,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const { effectiveConfig } = resolveEffectiveReplyConfig(this.options.config);
     const route = this.resolveMessageBridgeRoute({ cfg: effectiveConfig, state, required: false });
     this.applyRouteSessionKey(state, route);
+    const sessionRuntime = this.getUsableSessionRecordRuntime();
+    if (sessionRuntime && route) {
+      state.dashboardStorePath = sessionRuntime.resolveStorePath(effectiveConfig.session?.store, {
+        agentId: route.agentId,
+      });
+    }
 
     const run = await subagent.run({
       sessionKey: state.sessionKey,
@@ -1173,12 +1236,124 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     this.ensureMessageStarted(state);
     state.textDeltaCount += 1;
-      state.queue.push(buildTextDeltaFact({
-        messageId: state.messageId,
-        partId: state.textPartId,
-        content: deltaText,
+    state.queue.push(buildTextDeltaFact({
+      messageId: state.messageId,
+      partId: state.textPartId,
+      content: deltaText,
       raw: payload,
     }));
+    this.projectDashboardTranscriptUpdate(state);
+  }
+
+  private projectDashboardTranscriptUpdate(state: ActiveRunState): void {
+    if (!state.accumulatedText) {
+      return;
+    }
+    const message: Record<string, unknown> = {
+      role: "assistant",
+      content: [{ type: "text", text: state.accumulatedText }],
+      timestamp: Date.now(),
+      stopReason: "stop",
+      api: "message-bridge",
+      provider: "openclaw",
+      model: "message-bridge-stream",
+    };
+    void this.emitDashboardTranscriptUpdate({
+      sessionKey: state.sessionKey,
+      message,
+      messageId: state.messageId,
+    });
+  }
+
+  private async emitDashboardTranscriptUpdate(update: Omit<DashboardTranscriptUpdate, "sessionFile">): Promise<void> {
+    const sessionRuntime = this.options.runtime.channel?.session as RuntimeSessionRecord | undefined;
+    const sessionFile = await this.resolveDashboardSessionFile(update.sessionKey);
+    const payload: DashboardTranscriptUpdate = {
+      ...update,
+      ...(sessionFile ? { sessionFile } : {}),
+    };
+    const directEmitter = sessionRuntime?.emitSessionTranscriptUpdate ?? sessionRuntime?.emitTranscriptUpdate;
+    if (directEmitter) {
+      try {
+        await directEmitter(payload);
+      } catch (error) {
+        this.options.logger.warn("runtime.dashboard_transcript.emit_failed", {
+          sessionKey: update.sessionKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
+    if (!payload.sessionFile) {
+      return;
+    }
+    const runtime = await loadDashboardTranscriptRuntime();
+    if (!runtime?.emitSessionTranscriptUpdate) {
+      return;
+    }
+    try {
+      await runtime.emitSessionTranscriptUpdate(payload);
+    } catch (error) {
+      this.options.logger.warn("runtime.dashboard_transcript.emit_failed", {
+        sessionKey: update.sessionKey,
+        sessionFile: payload.sessionFile,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async resolveDashboardSessionFile(sessionKey: string): Promise<string | null> {
+    const active = this.activeRunsBySessionKey.get(sessionKey);
+    if (!active) {
+      return null;
+    }
+    if (active.dashboardSessionFile) {
+      return active.dashboardSessionFile;
+    }
+    if (!active.dashboardStorePath) {
+      return null;
+    }
+    const runtime = await loadSessionStoreRuntime();
+    if (!runtime?.loadSessionStore) {
+      return null;
+    }
+
+    try {
+      const store = runtime.loadSessionStore(active.dashboardStorePath, {
+        clone: true,
+        skipCache: true,
+      });
+      const entry = asRecord(store[sessionKey]) ?? asRecord(store[sessionKey.toLowerCase()]);
+      if (!entry) {
+        return null;
+      }
+      const explicitSessionFile = asTrimmedString(entry.sessionFile);
+      if (explicitSessionFile) {
+        active.dashboardSessionFile = explicitSessionFile;
+        return explicitSessionFile;
+      }
+      const sessionId = asTrimmedString(entry.sessionId);
+      if (!sessionId || !runtime.resolveSessionTranscriptPathInDir) {
+        return null;
+      }
+      const topicId =
+        typeof entry.topicId === "string" || typeof entry.topicId === "number" ? entry.topicId : undefined;
+      const sessionFile = runtime.resolveSessionTranscriptPathInDir(
+        sessionId,
+        path.dirname(active.dashboardStorePath),
+        topicId,
+      );
+      active.dashboardSessionFile = sessionFile;
+      return sessionFile;
+    } catch (error) {
+      this.options.logger.warn("runtime.dashboard_transcript.resolve_session_file_failed", {
+        sessionKey,
+        storePath: active.dashboardStorePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   private handleReasoningAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
