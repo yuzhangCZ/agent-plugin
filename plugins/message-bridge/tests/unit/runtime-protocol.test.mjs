@@ -1288,7 +1288,6 @@ describe('runtime protocol strictness', () => {
     assert.strictEqual((prompts).length, 1);
     assert.deepStrictEqual(prompts[0], {
       path: { id: 'ses-chat-100' },
-      query: { directory: '/session/default-directory' },
       body: {
         parts: [{ type: 'text', text: 'hello' }],
       },
@@ -2286,9 +2285,6 @@ describe('runtime protocol strictness', () => {
 
     assert.deepStrictEqual(deleteCalls, [{
       path: { id: 'tool-close-1' },
-      query: {
-        directory: '/session/default-directory',
-      },
     }]);
     assert.strictEqual((sent).length, 0);
   });

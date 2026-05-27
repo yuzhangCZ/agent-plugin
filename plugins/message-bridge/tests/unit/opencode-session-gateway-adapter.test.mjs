@@ -149,6 +149,17 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
           hasAgent: true,
         },
       },
+      {
+        level: 'debug',
+        message: 'session_prompt.request.prepared',
+        extra: {
+          sessionId: 'ses-ok',
+          directory: '/tmp/explicit-dir',
+          providerID: undefined,
+          modelID: undefined,
+          hasAgent: true,
+        },
+      },
     ]);
   });
 
@@ -248,6 +259,16 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
       extra: {
         toolSessionId: 'ses-no-dir',
         hasDirectory: false,
+        hasAgent: false,
+      },
+    }, {
+      level: 'debug',
+      message: 'session_prompt.request.prepared',
+      extra: {
+        sessionId: 'ses-no-dir',
+        directory: undefined,
+        providerID: undefined,
+        modelID: undefined,
         hasAgent: false,
       },
     }]);
@@ -537,6 +558,16 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
       extra: {
         toolSessionId: 'ses-prompt-fail',
         hasDirectory: true,
+        hasAgent: false,
+      },
+    }, {
+      level: 'debug',
+      message: 'session_prompt.request.prepared',
+      extra: {
+        sessionId: 'ses-prompt-fail',
+        directory: undefined,
+        providerID: undefined,
+        modelID: undefined,
         hasAgent: false,
       },
     }]);
@@ -870,6 +901,17 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
         extra: {
           toolSessionId: 'ses-openx',
           hasDirectory: true,
+          hasAgent: false,
+        },
+      },
+      {
+        level: 'debug',
+        message: 'session_prompt.request.prepared',
+        extra: {
+          sessionId: 'ses-openx',
+          directory: undefined,
+          providerID: undefined,
+          modelID: undefined,
           hasAgent: false,
         },
       },

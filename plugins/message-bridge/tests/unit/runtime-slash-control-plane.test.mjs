@@ -518,7 +518,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-mention-1' },
-        query: { directory: '/tmp/mention-1' },
         body: {
           parts: [{ type: 'text', text: '@bot /sessions fdsfs' }],
         },
@@ -573,7 +572,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-unknown-1' },
-        query: { directory: '/tmp/unknown-1' },
         body: {
           parts: [{ type: 'text', text: '/abc' }],
         },
@@ -633,7 +631,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-bootstrap-1' },
-        query: { directory: '/tmp/bootstrap-1' },
         body: {
           parts: [{ type: 'text', text: 'hello' }],
         },
@@ -938,7 +935,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-switch-2' },
-        query: { directory: '/tmp/proj-switch' },
         body: {
           parts: [{ type: 'text', text: 'after switch' }],
         },
@@ -1039,7 +1035,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-switch-local-2' },
-        query: { directory: '/tmp/proj-switch-local' },
         body: {
           parts: [{ type: 'text', text: 'after switch' }],
         },
@@ -1305,7 +1300,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-model-1' },
-        query: { directory: '/tmp/proj-1' },
         body: {
           model: { providerID: 'openai', modelID: 'gpt-5.4' },
           parts: [{ type: 'text', text: 'hello model 1' }],
@@ -1313,7 +1307,6 @@ describe('runtime slash control-plane', () => {
       },
       {
         path: { id: 'ses-model-2' },
-        query: { directory: '/tmp/proj-1' },
         body: {
           parts: [{ type: 'text', text: 'hello model 2' }],
         },
@@ -1502,7 +1495,6 @@ describe('runtime slash control-plane', () => {
     assert.deepStrictEqual(prompts, [
       {
         path: { id: 'ses-invalid-2' },
-        query: { directory: '/tmp/invalid-2' },
         body: {
           parts: [{ type: 'text', text: 'second prompt succeeds' }],
         },

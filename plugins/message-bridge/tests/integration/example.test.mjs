@@ -62,6 +62,9 @@ function createRuntimeHarness({ state = 'READY', routeResult } = {}) {
   runtime.actionRouter = {
     route: async () => routeResult ?? { success: true, data: { ok: true } },
   };
+  runtime.bindingAwareChatRouter = {
+    route: async () => ({ kind: 'chat_prompted' }),
+  };
 
   return { runtime, sent: recorder.messages };
 }

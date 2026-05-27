@@ -9,6 +9,28 @@ import { setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests', 'fixtures', 'opencode-events');
 
+function createPromptResponse(overrides = {}) {
+  return {
+    data: {
+      info: {
+        id: 'msg-assistant-1',
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+        ...overrides.info,
+      },
+      parts: overrides.parts ?? [{ type: 'step-finish' }],
+    },
+  };
+}
+
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
@@ -23,7 +45,7 @@ function createRuntimeClient(overrides = {}) {
       list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
-      prompt: async () => ({ data: { ok: true } }),
+      prompt: async () => createPromptResponse(),
     },
     config: {
       providers: async () => ({ data: { providers: [] } }),

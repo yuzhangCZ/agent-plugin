@@ -34,10 +34,18 @@ function createAdapter(overrides = {}) {
 
 function assertFactsOmitToolSessionId(facts) {
   for (const fact of facts) {
+    if (fact.type === "session.title") {
+      continue;
+    }
     assert.equal("toolSessionId" in fact, false);
   }
 }
 
+function flushEvents() {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
 test("provider adapter fallback emits ordered facts and completed result", async () => {
   const provider = createAdapter({
     getSubagentRuntime: () => ({
@@ -75,19 +83,111 @@ test("provider adapter fallback emits ordered facts and completed result", async
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
-  assert.equal(facts[1].content, "hello from subagent");
+  assert.deepEqual(facts[0], {
+    type: "session.title",
+    toolSessionId: "tool-1",
+    title: "tool-1",
+  });
+  assert.equal(facts[2].content, "hello from subagent");
   await assert.doesNotReject(run.result());
   assert.deepEqual(await run.result(), { outcome: "completed" });
 });
 
-test("provider adapter createSession generates ses_ prefixed ids", async () => {
-  const provider = createAdapter();
+test("provider adapter abort closes active run and suppresses late runtime reply chunks", async () => {
+  const calls = [];
+  let capturedDispatcherOptions;
+  const provider = createAdapter({
+    runtime: {
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { accountId: "acct", agentId: "agent" };
+          },
+        },
+        reply: {
+          async abortRun(input) {
+            calls.push({ kind: "abort", ...input });
+          },
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }) {
+            capturedDispatcherOptions = dispatcherOptions;
+            replyOptions.onAgentRunStart("host-run-1");
+            await new Promise(() => {});
+          },
+        },
+      },
+    },
+  });
 
-  const created = await provider.createSession();
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-1",
+    toolSessionId: "ses_abort_active_1",
+    text: "hi",
+  });
+  await flushEvents();
+
+  const result = await provider.abortSession({
+    traceId: "trace-2",
+    toolSessionId: "ses_abort_active_1",
+    runId: "sdk-run-1",
+  });
+  await capturedDispatcherOptions.deliver({ text: "late chunk" }, { kind: "block" });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.deepEqual(result, { applied: true });
+  assert.deepEqual(await run.result(), { outcome: "aborted" });
+  assert.deepEqual(facts, []);
+  assert.deepEqual(calls, [
+    {
+      kind: "abort",
+      sessionKey: "agent:acct:ses_abort_active_1",
+      runId: "host-run-1",
+    },
+  ]);
+});
+
+test("provider adapter createSession waits for runtime response before emitting title fact", async () => {
+  const emitted = [];
+  const sessionRegistry = new SessionRegistry("agent:acct");
+  const provider = createAdapter({ sessionRegistry });
+
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage(input) {
+        const facts = [];
+        for await (const fact of input.facts) {
+          facts.push(fact);
+        }
+        emitted.push({ input, facts });
+        return { applied: true };
+      },
+    },
+  });
+
+  const created = await provider.createSession({
+    traceId: "trace-1",
+    title: "Requested Title",
+  });
+  await flushEvents();
 
   assert.match(created.toolSessionId, /^ses_/);
+  assert.equal(sessionRegistry.get(created.toolSessionId).title, "Requested Title");
+  assert.deepEqual(emitted, []);
 });
 
 test("provider adapter rejects question replies as unsupported", async () => {
@@ -306,7 +406,7 @@ test("provider adapter maps runtime assistant events to text delta facts", async
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.delta", "text.delta", "text.done", "message.done"],
+    ["session.title", "message.start", "text.delta", "text.delta", "text.done", "message.done"],
   );
   assert.deepEqual(
     facts.filter((fact) => fact.type === "text.delta").map((fact) => fact.content),
@@ -377,7 +477,7 @@ test("provider adapter maps runtime reasoning events to thinking facts", async (
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "thinking.delta", "thinking.done", "text.done", "message.done"],
+    ["session.title", "message.start", "thinking.delta", "thinking.done", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "thinking.delta").content, "thinking");
   assert.equal(facts.find((fact) => fact.type === "thinking.done").content, "thinking");
@@ -444,7 +544,7 @@ test("provider adapter suppresses assistant deltas when account streaming is dis
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "final answer");
 });
@@ -499,7 +599,7 @@ test("provider adapter suppresses runtime reply block deltas when config streami
 
   assert.deepEqual(
     facts.map((fact) => fact.type),
-    ["message.start", "text.done", "message.done"],
+    ["session.title", "message.start", "text.done", "message.done"],
   );
   assert.equal(facts.find((fact) => fact.type === "text.done").content, "partial final");
 });

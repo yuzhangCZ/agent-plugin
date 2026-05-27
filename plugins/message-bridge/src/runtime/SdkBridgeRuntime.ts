@@ -66,6 +66,10 @@ import type { BridgeSdkClient } from '../types/sdk.js';
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 const SDK_RUNTIME_MODE = 'sdk';
 
+function isRuntimeStartAbortedError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'runtime_start_aborted';
+}
+
 /**
  * SDK-backed runtime。
  * @remarks
@@ -104,13 +108,29 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   }
 
   async start(options: ManagedRuntimeStartOptions = {}): Promise<void> {
+    const pluginVersion = resolvePluginVersion();
+    this.logger.info('runtime.start.requested', {
+      workspacePath: this.workspacePath,
+      pluginVersion,
+    });
+
     if (this.started) {
       return;
     }
 
-    const pluginVersion = resolvePluginVersion();
     this.statusAdapter.publishConnecting();
-    const config = await this.resolveConfig();
+    let config;
+    try {
+      config = await this.resolveConfig();
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      this.logger.error('runtime.config.loading_failed', {
+        error: errorMessage,
+        workspacePath: this.workspacePath,
+      });
+      this.statusAdapter.publishConfigInvalid(errorMessage);
+      throw error;
+    }
     if (!config.enabled) {
       const disabledError = new Error(MESSAGE_BRIDGE_RUNTIME_DISABLED);
       this.statusAdapter.publishDisabled(disabledError.message);
@@ -321,11 +341,28 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       onTelemetryUpdated: () => this.syncSdkStatus(),
     });
 
+    let abortListener: (() => void) | undefined;
     try {
-      await this.sdkRuntime.start();
-      if (options.abortSignal?.aborted) {
-        this.stop();
-        throw new Error('runtime_start_aborted');
+      const startPromise = this.sdkRuntime.start();
+      if (options.abortSignal) {
+        const abortPromise = new Promise<never>((_, reject) => {
+          abortListener = () => {
+            void this.sdkRuntime?.stop().catch(() => undefined);
+            reject(new Error('runtime_start_aborted'));
+          };
+          if (options.abortSignal?.aborted) {
+            abortListener();
+            return;
+          }
+          options.abortSignal.addEventListener('abort', abortListener, { once: true });
+        });
+        await Promise.race([startPromise, abortPromise]);
+        if (options.abortSignal.aborted) {
+          await startPromise.catch(() => undefined);
+          throw new Error('runtime_start_aborted');
+        }
+      } else {
+        await startPromise;
       }
       this.started = true;
       this.syncSdkStatus();
@@ -334,8 +371,14 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         effectiveDirectory: this.effectiveDirectory,
       });
     } catch (error) {
-      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      if (!isRuntimeStartAbortedError(error)) {
+        this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      }
       throw error;
+    } finally {
+      if (abortListener) {
+        options.abortSignal?.removeEventListener('abort', abortListener);
+      }
     }
   }
 
