@@ -1165,6 +1165,215 @@ test('provider adapter translates active run raw events into ProviderFacts and t
   assert.deepEqual(await run.result(), { outcome: 'completed' });
 });
 
+test('provider adapter emits thinking.done only after reasoning part has time.end', async () => {
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-thinking', 'tool-thinking']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-thinking',
+    runId: 'run-thinking',
+    toolSessionId: 'tool-thinking',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-thinking',
+        id: 'msg-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-thinking-1',
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        type: 'reasoning',
+        text: '',
+        time: {
+          start: '2026-05-22T12:00:00.100Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'tool-thinking',
+      messageID: 'msg-1',
+      partID: 'part-thinking-1',
+      field: 'text',
+      delta: 'first thought',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-thinking-1',
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        type: 'reasoning',
+        text: 'first thought',
+        time: {
+          start: '2026-05-22T12:00:00.100Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-thinking-2',
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        type: 'reasoning',
+        text: '',
+        time: {
+          start: '2026-05-22T12:00:00.200Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'tool-thinking',
+      messageID: 'msg-1',
+      partID: 'part-thinking-2',
+      field: 'text',
+      delta: 'second thought',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-thinking-1',
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        type: 'reasoning',
+        text: 'first thought complete',
+        time: {
+          start: '2026-05-22T12:00:00.100Z',
+          end: '2026-05-22T12:00:00.300Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-thinking',
+        id: 'msg-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+          completed: '2026-05-22T12:00:01.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.deepEqual(facts, [
+    {
+      type: 'message.start',
+      messageId: 'msg-1',
+      raw: {
+        info: {
+          sessionID: 'tool-thinking',
+          id: 'msg-1',
+          role: 'assistant',
+          time: {
+            created: '2026-05-22T12:00:00.000Z',
+          },
+        },
+      },
+    },
+    {
+      type: 'thinking.delta',
+      messageId: 'msg-1',
+      partId: 'part-thinking-1',
+      content: 'first thought',
+      raw: {
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        partID: 'part-thinking-1',
+        field: 'text',
+        delta: 'first thought',
+      },
+    },
+    {
+      type: 'thinking.delta',
+      messageId: 'msg-1',
+      partId: 'part-thinking-2',
+      content: 'second thought',
+      raw: {
+        sessionID: 'tool-thinking',
+        messageID: 'msg-1',
+        partID: 'part-thinking-2',
+        field: 'text',
+        delta: 'second thought',
+      },
+    },
+    {
+      type: 'thinking.done',
+      messageId: 'msg-1',
+      partId: 'part-thinking-1',
+      content: 'first thought complete',
+      raw: {
+        part: {
+          id: 'part-thinking-1',
+          sessionID: 'tool-thinking',
+          messageID: 'msg-1',
+          type: 'reasoning',
+          text: 'first thought complete',
+          time: {
+            start: '2026-05-22T12:00:00.100Z',
+            end: '2026-05-22T12:00:00.300Z',
+          },
+        },
+      },
+    },
+    {
+      type: 'message.done',
+      messageId: 'msg-1',
+      reason: 'stop',
+      raw: {
+        info: {
+          sessionID: 'tool-thinking',
+          id: 'msg-1',
+          role: 'assistant',
+          time: {
+            created: '2026-05-22T12:00:00.000Z',
+            completed: '2026-05-22T12:00:01.000Z',
+          },
+          finish: 'stop',
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(await run.result(), { outcome: 'completed' });
+});
+
 test('provider adapter maps aborted prompt terminal to ProviderRun.result()', async () => {
   const promptDeferred = createDeferred();
   const adapter = createAdapter({

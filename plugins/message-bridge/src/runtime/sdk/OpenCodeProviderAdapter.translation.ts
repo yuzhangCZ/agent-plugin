@@ -282,6 +282,16 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
 
     if (partType === 'reasoning') {
       context.partKindState.remember(trackingSessionId, partId, 'reasoning');
+      const partTime = asObject(part?.time);
+      const hasEnded = partTime && 'end' in partTime && partTime.end !== undefined && partTime.end !== null;
+      if (!hasEnded) {
+        return {
+          recognized: true,
+          toolSessionId: context.factSessionContext.anchorSessionId,
+          envelopeMessageId: messageId,
+          facts: [],
+        };
+      }
       if (!context.assistantMessageState.isOpen(trackingSessionId, messageId)) {
         return rejectFactWithoutOpenMessage(context, 'thinking_done_without_open_message', {
           trackingSessionId,
