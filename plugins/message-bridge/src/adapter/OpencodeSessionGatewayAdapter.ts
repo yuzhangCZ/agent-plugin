@@ -467,6 +467,13 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     },
   ): Promise<ActionResult<PromptSessionResultData>> {
     const client = this.requireClient();
+    parameters.logger?.debug('session_prompt.request.prepared', {
+      sessionId: parameters.sessionId,
+      directory: parameters.directory,
+      providerID: parameters.modelOverride?.providerId,
+      modelID: parameters.modelOverride?.modelId,
+      hasAgent: Boolean(parameters.agent),
+    });
     return this.executeSdkCall({
       failurePrefix: 'Failed to send message',
       sourceOperation: 'session.prompt',
