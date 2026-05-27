@@ -333,7 +333,6 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
     const contextResolver = getContextResolver(runtime);
     const { toolSessionId: sessionId } = await providerAdapter.createSession({
       traceId: 'trace-bound',
-      welinkSessionId: 'welink-bound',
       title: '绑定会话',
       extParameters: {
         platformExtParam: {

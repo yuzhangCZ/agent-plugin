@@ -24,7 +24,6 @@ export interface ChatContextQuery {
 }
 
 export interface CreateSessionCommandInput {
-  welinkSessionId: string;
   title?: string;
   assistantId?: string;
   directory?: string;

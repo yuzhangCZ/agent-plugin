@@ -247,7 +247,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         directoryMappingEnabled: this.directoryMappingEnabled,
       });
       const result = await this.createSessionCommandPort.execute({
-        welinkSessionId: input.welinkSessionId ?? input.traceId,
         ...(input.title ? { title: input.title } : {}),
         ...(input.assistantId ? { assistantId: input.assistantId } : {}),
         ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),

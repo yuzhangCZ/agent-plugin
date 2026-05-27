@@ -580,7 +580,6 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
 
   const result = await adapter.createSession({
     traceId: 'trace-identity-session',
-    welinkSessionId: 'welink-identity-session',
     title: 'Identity Session',
   });
 
@@ -619,7 +618,6 @@ test('provider adapter createSession delegates creation and ownership to session
 
   const result = await adapter.createSession({
     traceId: 'trace-create-formal',
-    welinkSessionId: 'welink-create-formal',
     title: 'Formal Session',
     assistantId: 'assistant-formal',
     extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
@@ -630,7 +628,6 @@ test('provider adapter createSession delegates creation and ownership to session
     title: 'Formal Session',
   });
   assert.deepEqual(calls, [{
-    welinkSessionId: 'welink-create-formal',
     title: 'Formal Session',
     assistantId: 'assistant-formal',
     directory: '/workspace/formal-create',
@@ -662,7 +659,6 @@ test('provider adapter createSession logs anchor-only session-isolation result w
 
   const result = await adapter.createSession({
     traceId: 'trace-create-anchor-only',
-    welinkSessionId: 'welink-create-anchor-only',
     extParameters: {
       platformExtParam: {
         businessSessionDomain: 'miniapp',

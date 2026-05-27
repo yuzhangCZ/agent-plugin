@@ -75,7 +75,7 @@ payload: {
 
 当前 `create_session.payload` 已收敛为 `title?: string`。这个契约来自 UI -> skill-server -> gateway 的上游链路追溯，不再把 payload 当作任意透传对象处理。
 
-`create_session` 还要求顶层 `welinkSessionId` 为非空字符串；缺失时 runtime 会直接返回 `tool_error`，不会调用 SDK 创建会话。
+`create_session` 在网关协议边界仍要求顶层 `welinkSessionId` 为非空字符串；缺失时 runtime 会直接返回 `tool_error`，不会调用 SDK 创建会话。该字段只用于网关回包上下文与 SDK runtime 内部回写闭环，不再进入 `ProviderCreateSessionInput`。
 
 ### `close_session`
 

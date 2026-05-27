@@ -38,7 +38,6 @@ export class CreateSessionUseCase implements CreateSessionUseCasePort {
       };
       const result = await this.handlers.createSession({
         traceId: command.traceId,
-        welinkSessionId: command.source.welinkSessionId,
         title: command.source.payload.title,
         assistantId: command.source.payload.assistantId,
         ...(payloadWithExtParameters.extParameters !== undefined

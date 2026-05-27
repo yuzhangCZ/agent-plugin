@@ -431,6 +431,7 @@ type NormalizedDownstreamMessage =
 补充约束：
 
 - `create_session` 归一化后必须携带非空 `welinkSessionId`
+- 该字段在 `message-bridge` 内部只保留到 gateway 归一化对象、SDK runtime command 与回包回写链路，不进入 `ProviderCreateSessionInput`，也不进入 session-isolation `CreateSessionCommandInput`
 - 其他 `invoke` action 仍允许缺省 `welinkSessionId`
 
 按 action 进一步收敛后，关键内部数据如下：

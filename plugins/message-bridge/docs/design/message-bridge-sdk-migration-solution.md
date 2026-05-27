@@ -442,8 +442,9 @@ sequenceDiagram
 1. `directory/permission` 不进入 SDK contract。
 2. 只进入 `ProviderExecutionContext`。
 3. `ProviderExecutionContext` 通过插件私有装配层注入到 provider adapter，不通过 `ProviderCreateSessionInput` 传递。
-4. SDK runtime 普通首次 `create_session` 成功时，对外返回的 `toolSessionId` 直接使用 OpenCode 真实 `sessionId`。
-5. slash / control-plane / stale 恢复等特殊路径内部仍可保留 anchor 语义，但不改变普通首次 `create_session` 的对外 contract。
+4. `welinkSessionId` 停留在 gateway/runtime command/session registry 回写链路，不进入 `ProviderCreateSessionInput`，也不进入插件侧 `CreateSessionCommandInput`。
+5. SDK runtime 普通首次 `create_session` 成功时，对外返回的 `toolSessionId` 直接使用 OpenCode 真实 `sessionId`。
+6. slash / control-plane / stale 恢复等特殊路径内部仍可保留 anchor 语义，但不改变普通首次 `create_session` 的对外 contract。
 
 ```mermaid
 sequenceDiagram
@@ -658,7 +659,7 @@ Provider Adapter Layer 是 OpenCode 宿主适配边界，承担 Provider SPI 的
 | 角色 | 主要输入 | 主要输出 | 持有状态 | 失败语义 |
 |---|---|---|---|---|
 | `runMessage()` 执行入口 | `ProviderRunMessageInput`、插件私有执行上下文 | `ProviderRun` | 与返回形态对应的局部 run 状态：可为宿主 active run 订阅态、可立即收敛的 immediate run 状态，或 synthetic run 最小事实态 | apply 失败返回 `ProviderCommandError`；run 内失败通过 terminal/result 表达 |
-| `createSession()` 执行入口 | `ProviderCreateSessionInput`、插件私有执行上下文 | `ProviderCreateSessionResult` | 可选会话创建过程态 | 宿主 API 失败返回 command failure |
+| `createSession()` 执行入口 | `ProviderCreateSessionInput`（`traceId/title/assistantId/extParameters`）、插件私有执行上下文 | `ProviderCreateSessionResult` | 可选会话创建过程态 | 宿主 API 失败返回 command failure |
 | `replyQuestion()` 执行入口 | `ProviderQuestionReplyInput` | `{ applied: true }` | 最小 reply 路由状态 | 仅表示动作是否已应用到底层宿主 |
 | `replyPermission()` 执行入口 | `ProviderPermissionReplyInput` | `{ applied: true }` | permission continuation 所需的局部关联信息 | 不自动代表 resolved fact 已产生 |
 | raw event translator | OpenCode raw event、局部映射上下文 | `ProviderFact` 或“不可投影诊断” | part/type/interaction 关联查找上下文 | 翻译失败按 fail-closed/diagnostic 规则处理 |

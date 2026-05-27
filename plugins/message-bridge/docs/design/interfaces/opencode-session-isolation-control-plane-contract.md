@@ -252,7 +252,7 @@ export interface HostEventPort {
 | Port | 主要输入主键 | 是否参与 `entryKey` 解析 | 是否允许写 ownership |
 |---|---|---|---|
 | `ChatCommandPort` | `toolSessionId` + `extParameters` | 是 | 通过 use case 间接写 |
-| `CreateSessionCommandPort` | `welinkSessionId` + `extParameters` | 是 | 通过 use case 间接写 |
+| `CreateSessionCommandPort` | `extParameters` | 是 | 通过 use case 间接写 |
 | `CloseSessionCommandPort` | `toolSessionId` | 否 | 通过 use case 间接写 |
 | `AbortSessionCommandPort` | `toolSessionId` | 否 | 否 |
 | `QuestionReplyCommandPort` | `questionId` | 否 | 否 |

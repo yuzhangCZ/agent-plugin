@@ -99,7 +99,6 @@ describe('session-isolation create and close use cases', () => {
     });
 
     assert.deepStrictEqual(await useCase.execute({
-      welinkSessionId: 'welink-1',
       title: 'New session',
       assistantId: 'assistant-1',
       extParameters: { platformExtParam: { businessSessionId: 'group-a' } },
@@ -113,7 +112,6 @@ describe('session-isolation create and close use cases', () => {
         method: 'resolve',
         input: {
           source: 'create_session',
-          welinkSessionId: 'welink-1',
           extParameters: { platformExtParam: { businessSessionId: 'group-a' } },
         },
       },
@@ -166,7 +164,7 @@ describe('session-isolation create and close use cases', () => {
     });
 
     await assert.rejects(
-      () => useCase.execute({ welinkSessionId: 'welink-cleanup' }),
+      () => useCase.execute({}),
       /bind_failed/,
     );
     assert.deepStrictEqual(calls.map((call) => call.method), [
@@ -207,7 +205,6 @@ describe('session-isolation create and close use cases', () => {
     });
 
     assert.deepStrictEqual(await useCase.execute({
-      welinkSessionId: 'welink-without-entry',
     }), {
       kind: 'anchor_only',
       toolSessionId: 'tool-anchor-only',
@@ -217,7 +214,6 @@ describe('session-isolation create and close use cases', () => {
         method: 'resolve',
         input: {
           source: 'create_session',
-          welinkSessionId: 'welink-without-entry',
           extParameters: undefined,
         },
       },
@@ -249,7 +245,6 @@ describe('session-isolation create and close use cases', () => {
     });
 
     const result = await useCase.execute({
-      welinkSessionId: 'welink-default-anchor-only',
     });
 
     assert.equal(result.kind, 'anchor_only');
