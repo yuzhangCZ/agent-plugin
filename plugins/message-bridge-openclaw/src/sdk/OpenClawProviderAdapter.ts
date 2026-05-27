@@ -137,6 +137,7 @@ interface ActiveRunState {
   pendingFinalText: string | null;
   pendingToolResultTarget: string | null;
   streamingEnabled: boolean;
+  replyDispatcherOwnsAssistantText: boolean;
   titleEmitted: boolean;
   toolStates: Map<string, ActiveToolState>;
 }
@@ -431,6 +432,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       pendingFinalText: null,
       pendingToolResultTarget: null,
       streamingEnabled: this.options.account.streaming !== false,
+      replyDispatcherOwnsAssistantText: false,
       titleEmitted: false,
       toolStates: new Map(),
     };
@@ -676,6 +678,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
     this.applyRouteSessionKey(state, route, { required: true });
     const replyRuntime = this.options.runtime.channel!.reply as UsableReplyRuntime;
+    state.replyDispatcherOwnsAssistantText = true;
     const envelopeOptions = replyRuntime.resolveEnvelopeFormatOptions(effectiveConfig);
     const body = replyRuntime.formatAgentEnvelope({
       channel: "message-bridge",
@@ -1078,6 +1081,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     if (evt.stream === "assistant") {
+      if (state.replyDispatcherOwnsAssistantText) {
+        return;
+      }
       this.handleAssistantAgentEvent(state, payload);
       return;
     }

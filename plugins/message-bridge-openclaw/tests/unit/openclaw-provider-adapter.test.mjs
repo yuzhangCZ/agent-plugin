@@ -810,6 +810,72 @@ test("provider adapter resolves inbound session store from effective config", as
   ]);
 });
 
+test("provider adapter ignores runtime assistant deltas when reply dispatcher already streams text", async () => {
+  let agentListener;
+  const provider = createAdapter({
+    runtime: {
+      events: {
+        onAgentEvent(listener) {
+          agentListener = listener;
+          return () => true;
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return {
+              accountId: "acct",
+              agentId: "main",
+              sessionKey: "agent:main:message-bridge:direct:ses_reply_event_duplicate_1",
+            };
+          },
+        },
+        reply: {
+          resolveEnvelopeFormatOptions() {
+            return {};
+          },
+          formatAgentEnvelope({ body }) {
+            return body;
+          },
+          finalizeInboundContext(input) {
+            return input;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ ctx, dispatcherOptions }) {
+            await dispatcherOptions.deliver({ text: "hello " }, { kind: "block" });
+            agentListener({
+              stream: "assistant",
+              sessionKey: ctx.SessionKey,
+              data: {
+                delta: "hello ",
+              },
+            });
+            await dispatcherOptions.deliver({ text: "hello world" }, { kind: "final" });
+          },
+        },
+      },
+    },
+  });
+
+  await provider.initialize();
+  const run = await provider.runMessage({
+    traceId: "trace-1",
+    runId: "sdk-run-reply-event-duplicate-1",
+    toolSessionId: "ses_reply_event_duplicate_1",
+    text: "hi",
+  });
+
+  const facts = [];
+  for await (const fact of run.facts) {
+    facts.push(fact);
+  }
+
+  assert.deepEqual(
+    facts.filter((fact) => fact.type === "text.delta").map((fact) => fact.content),
+    ["hello "],
+  );
+  assert.equal(facts.find((fact) => fact.type === "text.done").content, "hello world");
+});
+
 test("provider adapter fails runtime reply when route resolver does not return a session key", async () => {
   const provider = createAdapter({
     runtime: {
