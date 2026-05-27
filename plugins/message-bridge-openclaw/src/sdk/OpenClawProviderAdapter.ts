@@ -99,7 +99,6 @@ interface ActiveToolState {
 interface ActiveRunState {
   toolSessionId: string;
   sessionKey: string;
-  sessionTitle: string;
   runId: string;
   messageId: string;
   textPartId: string;
@@ -381,9 +380,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     assistantId?: string;
   }): Promise<{ toolSessionId: string }> {
     const toolSessionId = createToolSessionId();
-    this.options.sessionRegistry.ensure(toolSessionId, undefined, {
-      ...(input.title ? { title: input.title } : {}),
-    });
+    this.options.sessionRegistry.ensure(toolSessionId);
     return { toolSessionId };
   }
 
@@ -400,7 +397,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const state: ActiveRunState = {
       toolSessionId: input.toolSessionId,
       sessionKey: record.sessionKey,
-      sessionTitle: record.title,
       runId: input.runId,
       messageId: `msg_${randomUUID()}`,
       textPartId: `part_${randomUUID()}`,
@@ -802,7 +798,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       state.titleEmitted = true;
       state.queue.push(buildSessionTitleFact({
         toolSessionId: state.toolSessionId,
-        title: state.sessionTitle,
+        title: state.toolSessionId,
       }));
     }
     state.queue.push(buildMessageStartFact({

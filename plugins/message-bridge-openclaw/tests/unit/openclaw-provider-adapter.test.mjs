@@ -186,7 +186,7 @@ test("provider adapter createSession waits for runtime response before emitting 
   await flushEvents();
 
   assert.match(created.toolSessionId, /^ses_/);
-  assert.equal(sessionRegistry.get(created.toolSessionId).title, "Requested Title");
+  assert.equal(sessionRegistry.get(created.toolSessionId).title, created.toolSessionId);
   assert.deepEqual(emitted, []);
 });
 
