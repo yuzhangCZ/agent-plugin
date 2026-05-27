@@ -14,7 +14,6 @@ import { LegacyHostSessionGatewayAdapter } from '../../../adapter/session-isolat
 import { DefaultEntryKeyCodec } from '../../../domain/session-isolation/index.js';
 import {
   DefaultAbortAnchoredRunUseCase,
-  DefaultChatCommandUseCase,
   DefaultCloseOwnedSessionUseCase,
   DefaultCreateOwnedSessionUseCase,
   DefaultCreateSessionCommandUseCase,
@@ -64,7 +63,6 @@ export interface SessionIsolationControlPlaneDependencies {
 }
 
 export interface SessionIsolationControlPlane {
-  chatCommandPort: DefaultChatCommandUseCase;
   createSessionCommandPort: DefaultCreateSessionCommandUseCase;
   createOwnedSessionUseCase: DefaultCreateOwnedSessionUseCase;
   closeSessionCommandPort: DefaultCloseOwnedSessionUseCase;
@@ -173,13 +171,6 @@ export function createSessionIsolationControlPlane(
   });
 
   return {
-    chatCommandPort: new DefaultChatCommandUseCase({
-      businessEntryKeyResolver: dependencies.businessEntryKeyResolver,
-      resolveEntrySessionContextUseCase,
-      switchAttachedSessionUseCase,
-      createOwnedSessionUseCase,
-      hostSessionGateway,
-    }),
     createSessionCommandPort,
     createOwnedSessionUseCase,
     closeSessionCommandPort,

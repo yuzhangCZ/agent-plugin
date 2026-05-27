@@ -90,6 +90,7 @@ export interface SessionScopedActionGatewayPort {
   promptSession(parameters: {
     sessionId: string;
     text: string;
+    directory?: string;
     agent?: string;
     modelOverride?: SessionModelOverride;
     logger?: BridgeLogger;

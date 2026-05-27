@@ -27,7 +27,6 @@ describe('session-isolation port structure', () => {
   test('declares the initial inbound, outbound, and dto contract files', async () => {
     const expectedFiles = [
       'src/port/session-isolation/inbound/index.ts',
-      'src/port/session-isolation/inbound/ChatCommandPort.ts',
       'src/port/session-isolation/inbound/CreateSessionCommandPort.ts',
       'src/port/session-isolation/inbound/CloseSessionCommandPort.ts',
       'src/port/session-isolation/inbound/AbortSessionCommandPort.ts',

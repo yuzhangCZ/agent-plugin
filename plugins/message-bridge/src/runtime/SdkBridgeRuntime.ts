@@ -11,10 +11,8 @@ import {
   CreateSessionRequestNormalizer,
   CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
-  ResolveCreateSessionDirectoryUseCase,
   SlashCommandExecutor,
 } from '../usecase/index.js';
-import { JsonAssiantDirectoryMappingAdapter, EnvBridgeChannelAdapter } from '../adapter/index.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import type {
   HostModelCatalogPort,
@@ -76,7 +74,6 @@ const SDK_RUNTIME_MODE = 'sdk';
  */
 export class SdkBridgeRuntime implements ManagedRuntime {
   private readonly workspacePath?: string;
-  private readonly hostDirectory?: string;
   private readonly rawClient;
   private readonly sdkClient;
   private readonly missingSdkCapabilities;
@@ -98,7 +95,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     sessionIsolationDataDir?: string;
   }) {
     this.workspacePath = options.workspacePath;
-    this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.sdkClient = createSdkAdapter(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
@@ -121,7 +117,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       throw disabledError;
     }
 
-    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.effectiveDirectory = config.bridgeDirectory;
     this.eventFilter = new EventFilter(config.events.allowlist);
 
     let startupValidation;
@@ -135,31 +131,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     }
 
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
-    const directoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
-      process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
-      () => this.logger,
-    );
-    const bridgeChannelPort = new EnvBridgeChannelAdapter();
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
     const slashCommandParser = new SimpleSlashCommandParser();
-    const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
-      () => startupValidation.sdkClient,
-      () => ({
-        channel: config.gateway.channel,
-        bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
-      }),
-    );
-    const resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
-      bridgeChannelPort,
-      directoryMappingPort,
-      this.logger,
-    );
-    const createSessionUseCase = new CreateSessionUseCase(
-      resolveCreateSessionDirectoryUseCase,
-      opencodeSessionGatewayAdapter,
-    );
+    const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => startupValidation.sdkClient);
+    const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
     const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
     const hostSessionCreationPort: HostSessionCreationPort = {
       createSession: async (input?: { assistantId?: string; imGroupId?: string }) => {
@@ -169,8 +146,8 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         });
         const result = await createSessionUseCase.execute({
           ...normalized,
-          effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
-          directoryMappingEnabled: directoryMappingPort.isConfigured(),
+          directory: config.bridgeDirectory,
+          ...(config.bridgeDirectory ? { directorySource: 'config' } : {}),
         });
         if (!result.success) {
           const error = new Error(result.errorMessage ?? 'create_session_failed');
@@ -195,8 +172,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         const result = await createSessionUseCase.execute({
           title: input.title,
           isGroupChat: false,
-          effectiveDirectory: input.directory ?? config.bridgeDirectory ?? this.hostDirectory,
-          directoryMappingEnabled: directoryMappingPort.isConfigured(),
+          directory: input.directory ?? config.bridgeDirectory,
+          ...(input.directory
+            ? { directorySource: 'explicit' as const }
+            : config.bridgeDirectory
+              ? { directorySource: 'config' as const }
+              : {}),
         });
         return result;
       },
@@ -281,7 +262,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       }),
       contextResolver,
       businessEntryContextResolver,
-      effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
+      effectiveDirectory: config.bridgeDirectory,
       normalChatSessionResolver: new EntryAwareChatSessionResolver({
         businessEntryKeyResolver,
         resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
@@ -302,8 +283,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       permissionReplyCommandPort: sessionIsolationControlPlane.permissionReplyCommandPort,
       hostEventPort: sessionIsolationControlPlane.hostEventPort,
       pendingInteractionRecorder: pendingInteractionRegistry,
-      effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
-      directoryMappingEnabled: directoryMappingPort.isConfigured(),
+      effectiveDirectory: config.bridgeDirectory,
       opencodeSessionGatewayAdapter,
       chatPreprocessor,
       contextResolver,

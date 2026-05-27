@@ -2,11 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  EnvBridgeChannelAdapter,
   InMemoryOpencodeSessionOwnershipResolver,
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
-  JsonAssiantDirectoryMappingAdapter,
   OpencodeSessionGatewayAdapter,
   SimpleSlashCommandParser,
 } from '../../src/adapter/index.ts';
@@ -15,7 +13,6 @@ import {
   CreateSessionRequestNormalizer,
   CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
-  ResolveCreateSessionDirectoryUseCase,
   SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
@@ -141,18 +138,8 @@ function createAdapter(overrides = {}) {
   const bindingStore = new InMemoryToolSessionBindingStore();
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
-  const directoryMappingPort = new JsonAssiantDirectoryMappingAdapter(undefined, () => logger);
-  const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
-    () => sdkClient,
-    () => ({
-      channel: overrides.gatewayChannel ?? 'openx',
-      bridgeDirectoryConfigured: 'bridgeDirectory' in overrides ? Boolean(overrides.bridgeDirectory) : true,
-    }),
-  );
-  const createSessionUseCase = new CreateSessionUseCase(
-    new ResolveCreateSessionDirectoryUseCase(new EnvBridgeChannelAdapter(), directoryMappingPort, logger),
-    opencodeSessionGatewayAdapter,
-  );
+  const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => sdkClient);
+  const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
   const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   const hostSessionCreationPort = {
     createSession: async (input) => {
@@ -162,8 +149,7 @@ function createAdapter(overrides = {}) {
       });
       const result = await createSessionUseCase.execute({
         ...normalized,
-        effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
-        directoryMappingEnabled: false,
+        directory: overrides.bridgeDirectory ?? '/workspace/test',
       });
       if (!result.success || !result.data.sessionId) {
         const error = new Error(result.errorMessage ?? 'create_session_failed');
@@ -276,8 +262,7 @@ function createAdapter(overrides = {}) {
     ...(overrides.permissionReplyCommandPort ? { permissionReplyCommandPort: overrides.permissionReplyCommandPort } : {}),
     ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
     ...(overrides.pendingInteractionRecorder ? { pendingInteractionRecorder: overrides.pendingInteractionRecorder } : {}),
-    effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
-    directoryMappingEnabled: false,
+    effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
     opencodeSessionGatewayAdapter,
     chatPreprocessor,
     contextResolver,
@@ -630,7 +615,7 @@ test('provider adapter createSession delegates creation and ownership to session
   assert.deepEqual(calls, [{
     title: 'Formal Session',
     assistantId: 'assistant-formal',
-    directory: '/workspace/formal-create',
+    directory: '/workspace/test',
     extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
   }]);
   assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{

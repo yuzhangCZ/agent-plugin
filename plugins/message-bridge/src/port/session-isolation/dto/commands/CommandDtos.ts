@@ -8,14 +8,6 @@ export interface BusinessEntryPolicy {
   allowedSlashCommands: SlashCommandDescriptor['kind'][];
 }
 
-export interface ChatCommandInput {
-  toolSessionId: string;
-  text: string;
-  welinkSessionId?: string;
-  assistantId?: string;
-  extParameters?: unknown;
-}
-
 export interface ChatContextQuery {
   toolSessionId: string;
   entryKey: BusinessEntryKey;
@@ -81,4 +73,5 @@ export interface HostPromptInput {
   sessionId: string;
   text: string;
   assistantId?: string;
+  directory?: string;
 }

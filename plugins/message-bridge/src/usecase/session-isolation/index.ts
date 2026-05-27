@@ -1,5 +1,5 @@
 export * from './AbortAnchoredRunUseCase.js';
-export * from './ChatCommandUseCase.js';
+export * from './BusinessEntryKeyResolver.js';
 export * from './CloseOwnedSessionUseCase.js';
 export * from './CreateOwnedSessionUseCase.js';
 export * from './CreateSessionCommandUseCase.js';

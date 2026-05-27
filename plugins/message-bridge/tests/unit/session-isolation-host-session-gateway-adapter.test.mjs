@@ -101,13 +101,19 @@ describe('LegacyHostSessionGatewayAdapter', () => {
     assert.deepStrictEqual(await adapter.prompt({
       sessionId: 'ses-1',
       text: 'hello',
+      directory: '/scoped/repo',
       assistantId: 'assistant-1',
     }), { applied: true });
     assert.deepStrictEqual(await adapter.delete('ses-1'), { applied: true });
     assert.deepStrictEqual(calls, [
       {
         method: 'promptSession',
-        input: { sessionId: 'ses-1', text: 'hello', agent: 'assistant-1' },
+        input: {
+          sessionId: 'ses-1',
+          text: 'hello',
+          directory: '/scoped/repo',
+          agent: 'assistant-1',
+        },
       },
       { method: 'closeSession', input: { sessionId: 'ses-1' } },
     ]);

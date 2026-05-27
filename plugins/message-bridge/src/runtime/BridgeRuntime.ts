@@ -22,7 +22,7 @@ import { AbortSessionAction } from '../action/AbortSessionAction.js';
 import { QuestionReplyAction } from '../action/QuestionReplyAction.js';
 import { DefaultActionRouter } from '../action/ActionRouter.js';
 import { DefaultActionRegistry } from '../action/ActionRegistry.js';
-import { EnvBridgeChannelAdapter, JsonAssiantDirectoryMappingAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
+import { EnvBridgeChannelAdapter, OpencodeSessionGatewayAdapter } from '../adapter/index.js';
 import {
   InMemoryOpencodeSessionOwnershipResolver,
   InMemorySessionModelOverrideStore,
@@ -54,7 +54,6 @@ import {
 import {
   DOWNSTREAM_MESSAGE_TYPE,
 } from '../gateway-wire/downstream.js';
-import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import { TOOL_EVENT_TYPE } from '../gateway-wire/tool-event.js';
 import {
   adaptGatewayBusinessMessage,
@@ -65,7 +64,6 @@ import {
   ChatUseCase,
   CreateSessionRequestNormalizer,
   CreateSessionUseCase,
-  ResolveCreateSessionDirectoryUseCase,
 } from '../usecase/index.js';
 import { BridgeEvent } from './types.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
@@ -160,9 +158,7 @@ export class BridgeRuntime {
   private readonly registry = new DefaultActionRegistry();
   private readonly upstreamTransportProjector: UpstreamTransportProjector = new DefaultUpstreamTransportProjector();
   private readonly bridgeChannelPort: EnvBridgeChannelAdapter;
-  private readonly assiantDirectoryMappingPort: JsonAssiantDirectoryMappingAdapter;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
-  private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase;
   private readonly createSessionRequestNormalizer: CreateSessionRequestNormalizer;
   private readonly createSessionUseCase: CreateSessionUseCase;
   private readonly chatUseCase: ChatUseCase;
@@ -194,13 +190,6 @@ export class BridgeRuntime {
   private readonly sessionSender: GatewaySessionSenderPort;
   private readonly syntheticAssistantReplySender: SyntheticAssistantReplySender;
   private gatewayConnectionOverride: GatewayClient | null = null;
-  private sessionDirectoryPolicyContext: {
-    channel?: string;
-    bridgeDirectoryConfigured: boolean;
-  } = {
-    channel: TOOL_TYPE_OPENX,
-    bridgeDirectoryConfigured: true,
-  };
 
   constructor(options: BridgeRuntimeOptions) {
     this.workspacePath = options.workspacePath;
@@ -210,24 +199,9 @@ export class BridgeRuntime {
     this.logger = new AppLogger(this.rawClient, { component: 'runtime' }, options.runtimeTraceId);
     this.sdkClient = createSdkAdapter(options.client);
     this.bridgeChannelPort = new EnvBridgeChannelAdapter();
-    this.assiantDirectoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
-      process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
-      () => this.logger,
-    );
-    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
-      () => this.sdkClient,
-      () => this.sessionDirectoryPolicyContext,
-    );
-    this.resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
-      this.bridgeChannelPort,
-      this.assiantDirectoryMappingPort,
-      this.logger,
-    );
+    this.opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => this.sdkClient);
     this.createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
-    this.createSessionUseCase = new CreateSessionUseCase(
-      this.resolveCreateSessionDirectoryUseCase,
-      this.opencodeSessionGatewayAdapter,
-    );
+    this.createSessionUseCase = new CreateSessionUseCase(this.opencodeSessionGatewayAdapter);
     this.chatUseCase = new ChatUseCase(this.opencodeSessionGatewayAdapter);
     this.slashCommandCompletionPort = new RuntimeSlashCommandCompletionPort({
       projector: this.gatewayEnvelopeProjector,
@@ -362,18 +336,12 @@ export class BridgeRuntime {
       throw disabledError;
     }
 
-    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
-    this.sessionDirectoryPolicyContext = {
-      channel: config.gateway.channel,
-      bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
-    };
+    this.effectiveDirectory = config.bridgeDirectory;
     this.logger.info('runtime.directory.resolved', {
       workspacePath: this.workspacePath,
       hostDirectory: this.hostDirectory,
       effectiveDirectory: this.effectiveDirectory,
-      directorySource: config.bridgeDirectory ? 'env' : this.hostDirectory ? 'host_input' : 'none',
-      sessionDirectoryPolicyChannel: this.sessionDirectoryPolicyContext.channel,
-      sessionDirectoryPolicyBridgeDirectoryConfigured: this.sessionDirectoryPolicyContext.bridgeDirectoryConfigured,
+      directorySource: config.bridgeDirectory ? 'env' : 'none',
     });
 
     let startupValidation;
@@ -1010,7 +978,6 @@ export class BridgeRuntime {
       connectionState: connection.getState(),
       welinkSessionId,
       effectiveDirectory: this.effectiveDirectory,
-      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
       logger: logger.child({
         component: 'action',
         welinkSessionId,
@@ -1026,8 +993,8 @@ export class BridgeRuntime {
     });
     const createSessionInput = {
       ...normalizedRequest,
-      effectiveDirectory: this.effectiveDirectory,
-      directoryMappingEnabled: this.assiantDirectoryMappingPort.isConfigured(),
+      directory: this.effectiveDirectory,
+      ...(this.effectiveDirectory ? { directorySource: 'config' as const } : {}),
     };
     const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession(createSessionInput);
     const result = await this.createSessionUseCase.execute(createSessionInput, preparedCreateSession);
@@ -1159,6 +1126,7 @@ export class BridgeRuntime {
   private async promptControlPlaneSession(input: {
     sessionId: string;
     text: string;
+    directory?: string;
     assistantId?: string;
     modelOverride?: { providerId: string; modelId: string };
     logger?: BridgeLogger;
@@ -1166,6 +1134,7 @@ export class BridgeRuntime {
     const result = await this.opencodeSessionGatewayAdapter.promptSession({
       sessionId: input.sessionId,
       text: input.text,
+      ...(input.directory ?? this.effectiveDirectory ? { directory: input.directory ?? this.effectiveDirectory } : {}),
       agent: input.assistantId,
       modelOverride: input.modelOverride,
       logger: input.logger,

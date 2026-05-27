@@ -171,7 +171,6 @@
 | `BRIDGE_AUTH_SK` | `auth.sk` | 支持 `${VAR_NAME}` 替换；是否生效受第 6.1 节规则约束 |
 | `BRIDGE_SDK_TIMEOUT_MS` | `sdk.timeoutMs` | 使用 `parseInt(..., 10)` 解析 |
 | `BRIDGE_EVENTS_ALLOWLIST` | `events.allowlist` | 以逗号分隔并逐项 `trim()` |
-| `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE` | 运行时目录映射文件路径 | 指向对象 key 映射 JSON 文件，形如 `{ "<assistantId>": { "directory": "<path>" } }`；根 key 表示下行协议中的 `assistantId`，运行期更新文件后后续请求可见；旧平铺格式与其他非法条目都会记录 warning，但不会阻断同文件合法条目生效，也不会阻断请求回退 |
 
 宿主侧用户级配置根相关变量：
 
@@ -202,7 +201,6 @@ BRIDGE_GATEWAY_RECONNECT_BASE_MS=1000
 BRIDGE_GATEWAY_RECONNECT_MAX_MS=30000
 BRIDGE_SDK_TIMEOUT_MS=10000
 BRIDGE_EVENTS_ALLOWLIST=message.updated,session.status
-BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 ```
 
 补充说明：
@@ -257,7 +255,6 @@ BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE=/path/to/assistant-directory-map.json
 - `exponential=true` 表示按指数增长重连间隔，再受 `maxMs` 截断
 - `maxElapsedMs` 表示单轮自动重连总时长，而不是单次等待时间
 - `gateway.ping.intervalMs`
-- `BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE`
 
 ## 9. 默认白名单
 

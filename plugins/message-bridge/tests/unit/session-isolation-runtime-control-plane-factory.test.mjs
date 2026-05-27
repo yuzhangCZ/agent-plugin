@@ -53,7 +53,7 @@ function createLogger(entries) {
 }
 
 describe('createSessionIsolationControlPlane', () => {
-  test('wires formal chat command path through host adapter and ownership repositories', async () => {
+  test('wires create_session command path through host adapter and ownership repositories', async () => {
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const calls = [];
@@ -99,22 +99,26 @@ describe('createSessionIsolationControlPlane', () => {
     });
 
     assert.equal(typeof graph.hostEventPort.handle, 'function');
-    assert.deepStrictEqual(await graph.chatCommandPort.execute({
-      toolSessionId: 'tool-1',
-      text: 'hello',
+    assert.deepStrictEqual(await graph.createSessionCommandPort.execute({
+      title: 'hello',
       assistantId: 'assistant-1',
-      extParameters: {},
+      extParameters: {
+        platformExtParam: entryKey,
+      },
     }), {
-      kind: 'prompted',
-      toolSessionId: 'tool-1',
-      sessionId: 'ses-created',
+      kind: 'entry_owned',
+      toolSessionId: 'ses-created',
+      session: {
+        id: 'ses-created',
+        title: 'hello',
+      },
     });
-    assert.deepStrictEqual(bindingStore.get('tool-1'), {
-      anchor: 'tool-1',
+    assert.deepStrictEqual(bindingStore.get('ses-created'), {
+      anchor: 'ses-created',
       activeOpencodeSessionId: 'ses-created',
       status: 'active',
     });
-    assert.strictEqual(ownershipResolver.resolveAttachedAnchor('ses-created'), 'tool-1');
+    assert.strictEqual(ownershipResolver.resolveAttachedAnchor('ses-created'), 'ses-created');
     assert.equal(calls[0].method, 'createSession');
     assert.deepStrictEqual(calls[0].input.permission, [
       { permission: 'bash', pattern: '*', action: 'deny' },
@@ -130,13 +134,8 @@ describe('createSessionIsolationControlPlane', () => {
       { permission: 'knowledge*', pattern: '*', action: 'deny' },
       { permission: 'playwright*', pattern: '*', action: 'deny' },
     ]);
-    assert.deepStrictEqual(calls.slice(1), [
-      {
-        method: 'promptSession',
-        input: { sessionId: 'ses-created', text: 'hello', agent: 'assistant-1' },
-      },
-    ]);
-    assert.equal(logs.some((entry) => entry.message === 'session_isolation.context.resolved'), true);
+    assert.equal(calls[0].input.title, 'hello');
+    assert.equal(calls.length, 1);
     assert.equal(logs.some((entry) => entry.message === 'session_isolation.ownership.bound'), true);
   });
 });

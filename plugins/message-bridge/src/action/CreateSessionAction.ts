@@ -48,8 +48,8 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
         const normalizedRequest = this.normalizePayload(payload);
         const preparedCreateSession = await this.createSessionUseCase.resolveCreateSession({
           ...normalizedRequest,
-          effectiveDirectory: context.effectiveDirectory,
-          directoryMappingEnabled: Boolean(context.directoryMappingEnabled),
+          directory: context.effectiveDirectory,
+          ...(context.effectiveDirectory ? { directorySource: 'config' } : {}),
         });
         resolvedDirectory = preparedCreateSession.resolvedDirectory;
         resolvedDirectorySource = preparedCreateSession.resolvedDirectorySource;
@@ -57,8 +57,8 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
 
         const useCaseResult = await this.createSessionUseCase.execute({
           ...normalizedRequest,
-          effectiveDirectory: context.effectiveDirectory,
-          directoryMappingEnabled: Boolean(context.directoryMappingEnabled),
+          directory: context.effectiveDirectory,
+          ...(context.effectiveDirectory ? { directorySource: 'config' } : {}),
         }, preparedCreateSession);
 
         if (useCaseResult.success) {
@@ -200,9 +200,9 @@ export class CreateSessionAction implements Action<'create_session', CreateSessi
   private resolveFallbackDirectory(effectiveDirectory?: string): PreparedCreateSession {
     return {
       directory: effectiveDirectory,
-      source: effectiveDirectory ? 'effective' : 'none',
+      source: effectiveDirectory ? 'config' : 'none',
       resolvedDirectory: effectiveDirectory,
-      resolvedDirectorySource: effectiveDirectory ? 'effective' : 'none',
+      resolvedDirectorySource: effectiveDirectory ? 'config' : 'none',
     };
   }
 

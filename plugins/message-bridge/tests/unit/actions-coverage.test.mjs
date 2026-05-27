@@ -59,11 +59,12 @@ describe('ChatAction coverage', () => {
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
       payload: { toolSessionId: 's-1', text: 'hi' },
+      directory: undefined,
       logger: undefined,
     });
   });
 
-  test('does not read effectiveDirectory when delegating chat', async () => {
+  test('forwards effectiveDirectory when delegating chat', async () => {
     const calls = [];
     const action = createChatAction({
       execute: async (input) => {
@@ -78,6 +79,7 @@ describe('ChatAction coverage', () => {
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
       payload: { toolSessionId: 's-2', text: 'hello' },
+      directory: '/tmp/bridge-dir',
       logger: undefined,
     });
   });
@@ -100,6 +102,7 @@ describe('ChatAction coverage', () => {
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(calls[0], {
       payload: { toolSessionId: 's-3', text: 'hello agent', assistantId: 'persona-1' },
+      directory: '/tmp/bridge-dir',
       logger: undefined,
     });
   });

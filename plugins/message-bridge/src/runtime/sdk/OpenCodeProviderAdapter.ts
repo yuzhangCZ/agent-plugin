@@ -74,7 +74,6 @@ type ProviderAdapterOptions = {
   questionReplyCommandPort?: QuestionReplyCommandPort;
   permissionReplyCommandPort?: PermissionReplyCommandPort;
   effectiveDirectory?: string;
-  directoryMappingEnabled: boolean;
   opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   chatPreprocessor: SdkChatPreprocessor;
   contextResolver: ChatExecutionContextResolver;
@@ -169,7 +168,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
   private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
   private readonly effectiveDirectory?: string;
-  private readonly directoryMappingEnabled: boolean;
   private readonly createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   private readonly chatPreprocessor: SdkChatPreprocessor;
   private readonly contextResolver: ChatExecutionContextResolver;
@@ -194,7 +192,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     this.questionReplyCommandPort = options.questionReplyCommandPort;
     this.permissionReplyCommandPort = options.permissionReplyCommandPort;
     this.effectiveDirectory = options.effectiveDirectory;
-    this.directoryMappingEnabled = options.directoryMappingEnabled;
     this.chatPreprocessor = options.chatPreprocessor;
     this.contextResolver = options.contextResolver;
     this.executionSessionInvalidationPort = options.executionSessionInvalidationPort;
@@ -253,8 +250,8 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       const prepared = await this.createSessionUseCase.resolveCreateSession({
         ...normalized,
         title: input.title,
-        effectiveDirectory: this.effectiveDirectory,
-        directoryMappingEnabled: this.directoryMappingEnabled,
+        directory: this.effectiveDirectory,
+        ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
       });
       const result = await this.createSessionCommandPort.execute({
         ...(input.title ? { title: input.title } : {}),
@@ -280,8 +277,8 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     const result = await this.createSessionUseCase.execute({
       ...normalized,
       title: input.title,
-      effectiveDirectory: this.effectiveDirectory,
-      directoryMappingEnabled: this.directoryMappingEnabled,
+      directory: this.effectiveDirectory,
+      ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
     });
     if (!result.success) {
       throw new Error(result.errorMessage ?? 'create_session_failed');
@@ -489,6 +486,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       const promptResult = await this.opencodeSessionGatewayAdapter.promptSession({
         sessionId: context.opencodeSessionId,
         text: input.text,
+        ...(this.effectiveDirectory ? { directory: this.effectiveDirectory } : {}),
         agent: input.assistantId,
         modelOverride: context.modelOverride,
         logger: this.logger,

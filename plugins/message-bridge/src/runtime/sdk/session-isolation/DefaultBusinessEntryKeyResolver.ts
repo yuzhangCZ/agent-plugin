@@ -1,6 +1,8 @@
 import type { BusinessEntryKey } from '../../../domain/session-isolation/index.js';
-import type { ChatCommandInput } from '../../../port/session-isolation/dto/commands/index.js';
-import type { BusinessEntryKeyResolver } from '../../../usecase/session-isolation/index.js';
+import type {
+  BusinessEntryKeyResolver,
+  BusinessEntryKeyResolverInput,
+} from '../../../usecase/session-isolation/index.js';
 
 type BusinessEntryKeyInput = Pick<BusinessEntryKey, 'businessSessionDomain' | 'businessSessionType' | 'businessSessionId'>;
 
@@ -63,14 +65,7 @@ function readPartialBusinessEntryKey(input: unknown): Partial<BusinessEntryKeyIn
  * @remarks create_session 只接受显式三元组；chat 可按历史上下文字段补全，补全失败时 fail-closed。
  */
 export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver {
-  resolve(input: Pick<ChatCommandInput, 'welinkSessionId' | 'extParameters'> & {
-    source?: 'chat' | 'create_session';
-    context?: {
-      assistantAccount?: string;
-      sendUserAccount?: string;
-      imGroupId?: string;
-    };
-  }): BusinessEntryKey | undefined {
+  resolve(input: BusinessEntryKeyResolverInput): BusinessEntryKey | undefined {
     const extParameters = asRecord(input.extParameters);
     const fromPlatformExtParam = readBusinessEntryKey(extParameters?.platformExtParam);
     if (fromPlatformExtParam) {

@@ -15,7 +15,7 @@ import type {
 } from '../../port/session-isolation/outbound/index.js';
 import type { CreateOwnedSessionInput } from '../../port/session-isolation/dto/commands/index.js';
 import type { OwnedSessionCoordinator } from './OwnedSessionCoordinator.js';
-import type { BusinessEntryKeyResolver } from './ChatCommandUseCase.js';
+import type { BusinessEntryKeyResolver } from './BusinessEntryKeyResolver.js';
 
 export interface RuntimeAnchorRepository {
   createAnchorOnly(input: { toolSessionId: string }): Promise<void>;

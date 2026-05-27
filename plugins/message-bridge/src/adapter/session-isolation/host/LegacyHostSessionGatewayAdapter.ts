@@ -69,6 +69,7 @@ export class LegacyHostSessionGatewayAdapter implements HostSessionGateway {
     this.unwrap(await this.dependencies.sessionScopedActionGatewayPort.promptSession({
       sessionId: input.sessionId,
       text: input.text,
+      ...(input.directory ? { directory: input.directory } : {}),
       ...(input.assistantId ? { agent: input.assistantId } : {}),
     }));
     return { applied: true };

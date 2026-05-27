@@ -16,20 +16,13 @@ import type {
   PromptSessionTerminal,
   SessionScopedActionGatewayPort,
 } from '../port/SessionScopedActionGatewayPort.js';
-import { TOOL_TYPE_OPENX } from '../contracts/transport-messages.js';
 import type { BridgeSdkClient } from '../types/sdk.js';
 import { hasError, safeExecute } from '../types/sdk.js';
 import type { ActionResult } from '../types/action-runtime.js';
 import type { BridgeLogger } from '../types/logger.js';
 import type { ToolErrorEvidence } from '../utils/error.js';
 import { getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
-import { SessionDirectoryResolver } from './SessionDirectoryResolver.js';
-import { SessionLookupResolver, type SessionLookupResult, type SessionLookupView } from './SessionLookupResolver.js';
-
-export interface SessionDirectoryPolicyContext {
-  channel?: string;
-  bridgeDirectoryConfigured: boolean;
-}
+import { SessionLookupResolver, type SessionLookupResult } from './SessionLookupResolver.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -53,15 +46,6 @@ function extractSessionObject(result: unknown): {
     };
   }
   return { session: {} };
-}
-
-function buildDirectoryResolutionFailure<TData>(failurePrefix: string): ActionResult<TData> {
-  return {
-    success: false,
-    errorCode: 'SDK_UNREACHABLE',
-    errorMessage: `${failurePrefix}: session.get returned without directory`,
-    errorEvidence: { sourceOperation: 'session.get' },
-  };
 }
 
 function buildPreflightFailure<TData>(
@@ -349,70 +333,11 @@ function buildPromptPayloadFailure(
   };
 }
 
-type PreparedPromptSessionContext = {
-  session: SessionLookupView;
-  directory?: string;
-};
-
 export class OpencodeSessionGatewayAdapter implements SessionCreationPort, SessionScopedActionGatewayPort {
   private readonly sessionLookupResolver: SessionLookupResolver;
-  private readonly sessionDirectoryResolver: SessionDirectoryResolver;
-  private readonly getDirectoryPolicyContext: () => SessionDirectoryPolicyContext;
 
-  constructor(
-    private readonly getClient: () => BridgeSdkClient | null,
-    getDirectoryPolicyContext?: () => SessionDirectoryPolicyContext,
-  ) {
+  constructor(private readonly getClient: () => BridgeSdkClient | null) {
     this.sessionLookupResolver = new SessionLookupResolver(getClient);
-    this.sessionDirectoryResolver = new SessionDirectoryResolver();
-    this.getDirectoryPolicyContext = getDirectoryPolicyContext ?? (() => ({
-      bridgeDirectoryConfigured: true,
-    }));
-  }
-
-  private shouldSkipDirectoryResolution(): boolean {
-    const policyContext = this.getDirectoryPolicyContext();
-    return policyContext.channel === TOOL_TYPE_OPENX && !policyContext.bridgeDirectoryConfigured;
-  }
-
-  private async withResolvedDirectory<TResult>(parameters: {
-    sessionId: string;
-    failurePrefix: string;
-    logger?: BridgeLogger;
-    logFields?: Record<string, unknown>;
-    handler: (context: { client: BridgeSdkClient; directory?: string }) => Promise<ActionResult<TResult>>;
-  }): Promise<ActionResult<TResult>> {
-    const client = this.requireClient();
-    const lookup = await this.sessionLookupResolver.resolve({
-      sessionId: parameters.sessionId,
-      logger: parameters.logger,
-      logFields: parameters.logFields,
-    });
-    if (!lookup.success) {
-      return buildPreflightFailure(parameters.failurePrefix, lookup);
-    }
-    if (this.shouldSkipDirectoryResolution()) {
-      parameters.logger?.info('session_directory.policy.openx.directory_omitted', {
-        toolSessionId: parameters.sessionId,
-        ...(parameters.logFields ?? {}),
-      });
-      return parameters.handler({ client });
-    }
-
-    const resolution = this.sessionDirectoryResolver.resolve({
-      sessionId: parameters.sessionId,
-      session: lookup.session,
-      logger: parameters.logger,
-      logFields: parameters.logFields,
-    });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure(parameters.failurePrefix);
-    }
-
-    return parameters.handler({
-      client,
-      directory: resolution.directory,
-    });
   }
 
   private async executeSdkCall<TResult>(parameters: {
@@ -493,6 +418,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
   async promptSession(parameters: {
     sessionId: string;
     text: string;
+    directory?: string;
     agent?: string;
     modelOverride?: SessionModelOverride;
     logger?: BridgeLogger;
@@ -505,25 +431,14 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     if (!preflight.success) {
       return preflight;
     }
-
-    const prepared = this.resolvePromptDirectoryPolicy({
-      sessionId: parameters.sessionId,
-      session: preflight.data.session,
-      agent: parameters.agent,
-      logger: parameters.logger,
-    });
-    if (!prepared.success) {
-      return prepared;
-    }
-
-    return this.executePreparedPromptSession(prepared.data, parameters);
+    return this.executePreparedPromptSession(parameters);
   }
 
   async preparePromptPreflight(parameters: {
     sessionId: string;
     agent?: string;
     logger?: BridgeLogger;
-  }): Promise<ActionResult<PreparedPromptSessionContext>> {
+  }): Promise<ActionResult<{ sessionId: string }>> {
     const lookup = await this.sessionLookupResolver.resolve({
       sessionId: parameters.sessionId,
       logger: parameters.logger,
@@ -536,55 +451,16 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     return {
       success: true,
       data: {
-        session: lookup.session,
-      },
-    };
-  }
-
-  resolvePromptDirectoryPolicy(parameters: {
-    sessionId: string;
-    session: SessionLookupView;
-    agent?: string;
-    logger?: BridgeLogger;
-  }): ActionResult<PreparedPromptSessionContext> {
-    const logFields = { hasAgent: Boolean(parameters.agent) };
-    if (this.shouldSkipDirectoryResolution()) {
-      parameters.logger?.info('session_directory.policy.openx.directory_omitted', {
-        toolSessionId: parameters.sessionId,
-        ...logFields,
-      });
-      return {
-        success: true,
-        data: {
-          session: parameters.session,
-        },
-      };
-    }
-
-    const resolution = this.sessionDirectoryResolver.resolve({
-      sessionId: parameters.sessionId,
-      session: parameters.session,
-      logger: parameters.logger,
-      logFields,
-    });
-    if (!resolution.success) {
-      return buildDirectoryResolutionFailure('Failed to send message');
-    }
-
-    return {
-      success: true,
-      data: {
-        session: parameters.session,
-        directory: resolution.directory,
+        sessionId: lookup.session.id ?? parameters.sessionId,
       },
     };
   }
 
   async executePreparedPromptSession(
-    prepared: PreparedPromptSessionContext,
     parameters: {
       sessionId: string;
       text: string;
+      directory?: string;
       agent?: string;
       modelOverride?: SessionModelOverride;
       logger?: BridgeLogger;
@@ -596,7 +472,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       sourceOperation: 'session.prompt',
       promiseFactory: () => client.session.prompt({
         sessionID: parameters.sessionId,
-        ...(prepared.directory ? { directory: prepared.directory } : {}),
+        ...(parameters.directory ? { directory: parameters.directory } : {}),
         ...(parameters.modelOverride
           ? {
               model: {
@@ -627,23 +503,17 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     sessionId: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<AbortSessionResultData>> {
-    return this.withResolvedDirectory({
-      sessionId: parameters.sessionId,
+    const client = this.requireClient();
+    return this.executeSdkCall({
       failurePrefix: 'Failed to abort session',
-      logger: parameters.logger,
-      handler: ({ client, directory }) =>
-        this.executeSdkCall({
-          failurePrefix: 'Failed to abort session',
-          sourceOperation: 'session.abort',
-          promiseFactory: () => client.session.abort({
-            sessionID: parameters.sessionId,
-            ...(directory ? { directory } : {}),
-          }),
-          onSuccess: () => ({
-            success: true,
-            data: { sessionId: parameters.sessionId, aborted: true },
-          }),
-        }),
+      sourceOperation: 'session.abort',
+      promiseFactory: () => client.session.abort({
+        sessionID: parameters.sessionId,
+      }),
+      onSuccess: () => ({
+        success: true,
+        data: { sessionId: parameters.sessionId, aborted: true },
+      }),
     });
   }
 
@@ -651,23 +521,17 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     sessionId: string;
     logger?: BridgeLogger;
   }): Promise<ActionResult<CloseSessionResultData>> {
-    return this.withResolvedDirectory({
-      sessionId: parameters.sessionId,
+    const client = this.requireClient();
+    return this.executeSdkCall({
       failurePrefix: 'Failed to close session',
-      logger: parameters.logger,
-      handler: ({ client, directory }) =>
-        this.executeSdkCall({
-          failurePrefix: 'Failed to close session',
-          sourceOperation: 'session.delete',
-          promiseFactory: () => client.session.delete({
-            sessionID: parameters.sessionId,
-            ...(directory ? { directory } : {}),
-          }),
-          onSuccess: () => ({
-            success: true,
-            data: { sessionId: parameters.sessionId, closed: true },
-          }),
-        }),
+      sourceOperation: 'session.delete',
+      promiseFactory: () => client.session.delete({
+        sessionID: parameters.sessionId,
+      }),
+      onSuccess: () => ({
+        success: true,
+        data: { sessionId: parameters.sessionId, closed: true },
+      }),
     });
   }
 

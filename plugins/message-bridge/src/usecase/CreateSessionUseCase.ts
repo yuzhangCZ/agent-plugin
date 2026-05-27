@@ -1,21 +1,19 @@
 import type { CreateSessionResultData } from '../contracts/downstream-messages.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type { ActionResult } from '../types/action-runtime.js';
-import type {
-  ResolveCreateSessionDirectoryUseCase,
-  ResolvedCreateSessionDirectory,
-} from './ResolveCreateSessionDirectoryUseCase.js';
 import type { CreateSessionRequest } from './CreateSessionRequestNormalizer.js';
 
 /** 统一建会话用例输入：只保留业务语义与环境注入，不再泄露入口差异。 */
 export interface CreateSessionUseCaseInput extends CreateSessionRequest {
-  effectiveDirectory?: string;
-  directoryMappingEnabled: boolean;
+  directory?: string;
+  directorySource?: 'explicit' | 'config';
 }
 
-export interface PreparedCreateSession extends ResolvedCreateSessionDirectory {
+export interface PreparedCreateSession {
+  directory?: string;
+  source: 'explicit' | 'config' | 'none';
   resolvedDirectory?: string;
-  resolvedDirectorySource: ResolvedCreateSessionDirectory['source'];
+  resolvedDirectorySource: 'explicit' | 'config' | 'none';
 }
 
 const IM_GROUP_DENY_PERMISSIONS = [
@@ -34,22 +32,17 @@ const IM_GROUP_DENY_PERMISSIONS = [
 ] as const;
 
 export class CreateSessionUseCase {
-  constructor(
-    private readonly resolveCreateSessionDirectoryUseCase: ResolveCreateSessionDirectoryUseCase,
-    private readonly sessionCreationPort: SessionCreationPort,
-  ) {}
+  constructor(private readonly sessionCreationPort: SessionCreationPort) {}
 
   async resolveCreateSession(input: CreateSessionUseCaseInput): Promise<PreparedCreateSession> {
-    const resolvedDirectory = await this.resolveCreateSessionDirectoryUseCase.execute({
-      assistantId: input.assistantId,
-      effectiveDirectory: input.effectiveDirectory,
-      directoryMappingEnabled: input.directoryMappingEnabled,
-    });
-
+    const resolvedDirectory = input.directory;
+    const resolvedDirectorySource = resolvedDirectory
+      ? (input.directorySource ?? 'explicit')
+      : 'none';
     return {
-      ...resolvedDirectory,
-      resolvedDirectory: resolvedDirectory.directory,
-      resolvedDirectorySource: resolvedDirectory.source,
+      ...(resolvedDirectory ? { directory: resolvedDirectory, resolvedDirectory } : {}),
+      source: resolvedDirectorySource,
+      resolvedDirectorySource,
     };
   }
 
