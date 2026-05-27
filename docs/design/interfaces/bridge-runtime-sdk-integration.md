@@ -274,6 +274,7 @@ async health() {
 | `traceId` | `string` | 是 | 本次调用 traceId。 |
 | `title` | `string` | 否 | 可选会话标题。 |
 | `assistantId` | `string` | 否 | 可选 assistant 标识。 |
+| `extParameters` | `ExtParameters` | 否 | 扩展参数；与 `runMessage` 复用同一扩展参数契约。SDK 仅透传，不解释业务语义。 |
 
 #### 出参类型：`ProviderCreateSessionResult`
 
@@ -308,11 +309,40 @@ async createSession() {
 | `toolSessionId` | `string` | 是 | 目标会话标识。 |
 | `text` | `string` | 是 | 本次用户输入文本。 |
 | `assistantId` | `string` | 否 | 可选 assistant 标识。 |
-| `extParameters` | `Record<string, unknown>` | 否 | 透传字段，SDK 不解释其业务语义。 |
+| `extParameters` | `ExtParameters` | 否 | 平台/业务扩展参数；当前正式协议字段见下表。SDK 仅透传，不解释业务语义。 |
 | `context.assistantAccount` | `string` | 否 | 可选 assistant 账号信息。 |
 | `context.sendUserAccount` | `string` | 否 | 可选发送用户账号信息。 |
 | `context.imGroupId` | `string` | 否 | 可选群组标识。 |
 | `context.suppressReply` | `boolean` | 否 | 可选回复抑制标记。 |
+
+#### 扩展类型：`ExtParameters`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `businessExtParam` | `JsonValue` | 否 | 业务扩展参数透传字段。 |
+| `platformExtParam` | `PlatformExtParam` | 否 | 平台扩展参数透传字段。 |
+
+#### 扩展类型：`PlatformExtParam`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `businessSessionDomain` | `string` | 否 | 业务入口所属域。 |
+| `businessSessionType` | `string` | 否 | 业务入口类型。 |
+| `businessSessionId` | `string` | 否 | 业务入口唯一标识。 |
+| `allowedSlashCommands` | `string[]` | 否 | 请求级平台扩展命令集合。 |
+
+#### 业务入口字段当前正式支持值
+
+| `businessSessionDomain` | `businessSessionType` | `businessSessionId` | 说明 |
+|---|---|---|---|
+| `im` | `direct` | 例如：`user-a#bot-a` | IM 单聊业务入口。 |
+| `im` | `group` | 例如：`group-a` | IM 群会话业务入口。 |
+| `miniapp` | `direct` | 例如：`miniapp-user-1` | MiniApp direct 业务入口。 |
+
+- 业务入口字段由 `businessSessionDomain`、`businessSessionType`、`businessSessionId` 三者共同组成。
+- `businessSessionId` 示例仅用于说明当前协议形态，不展开生成、补全或推导规则。
+- `bridge-runtime-sdk` 对 `extParameters` 仅做透传，不在 SDK 内解释业务路由语义。
+- `allowedSlashCommands` 仅作为当前已定义扩展字段说明，不在本节展开链路差异。
 
 #### 出参类型：`ProviderRun`
 
