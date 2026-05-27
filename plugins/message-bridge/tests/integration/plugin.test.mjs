@@ -11,6 +11,7 @@ import {
 import * as PluginModule from '../../src/index.ts';
 import { qrcodeAuth as sourceQrCodeAuth } from '../../../../packages/skill-qrcode-auth/src/index.ts';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
+import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
 
@@ -716,10 +717,14 @@ describe('plugin contract', () => {
 
   test('explicit start config_invalid failure keeps reject message equal to lastError', async () => {
     process.env.BRIDGE_ENABLED = 'true';
-    const originalResolveConfig = BridgeRuntime.prototype.resolveConfig;
+    const originalLegacyResolveConfig = BridgeRuntime.prototype.resolveConfig;
+    const originalSdkResolveConfig = SdkBridgeRuntime.prototype.resolveConfig;
 
     try {
       BridgeRuntime.prototype.resolveConfig = async function mockedResolveConfig() {
+        throw new Error('broken config');
+      };
+      SdkBridgeRuntime.prototype.resolveConfig = async function mockedResolveConfig() {
         throw new Error('broken config');
       };
 
@@ -743,7 +748,8 @@ describe('plugin contract', () => {
       assert.strictEqual(rejection.message, getMessageBridgeStatus().lastError);
       assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'config_invalid');
     } finally {
-      BridgeRuntime.prototype.resolveConfig = originalResolveConfig;
+      BridgeRuntime.prototype.resolveConfig = originalLegacyResolveConfig;
+      SdkBridgeRuntime.prototype.resolveConfig = originalSdkResolveConfig;
     }
   });
 
@@ -846,7 +852,7 @@ describe('plugin contract', () => {
       assert.strictEqual(secondResult.status, 'fulfilled');
 
       assert.notStrictEqual(getRuntime(), null);
-      assert.strictEqual(websocketCtorCalls, 2);
+      assert.strictEqual(websocketCtorCalls, 3);
 
       const explicitStartLogs = logs.filter((entry) => entry?.message === 'runtime.singleton.init_explicit_attempt_started');
       assert.strictEqual(explicitStartLogs.length, 2);

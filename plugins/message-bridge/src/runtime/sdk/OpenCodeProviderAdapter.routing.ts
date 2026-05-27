@@ -2,6 +2,7 @@ import type { ProviderRuntimeContext } from '../../../../../packages/bridge-runt
 import { getErrorMessage } from '../../utils/error.js';
 import { asTrimmedString } from '../../utils/type-guards.js';
 import type { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
+import type { HostEventPort } from '../../port/session-isolation/inbound/index.js';
 import type {
   EventAnchorResolver,
 } from './SdkChatControlPlane.js';
@@ -9,6 +10,7 @@ import type { BridgeEvent } from '../types.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type {
   FactSessionContext,
+  PendingInteractionRecorderPort,
   ProtocolDiagnosticPort,
   SessionIdentityResolution,
   TranslationObservationPort,
@@ -103,6 +105,7 @@ export class EventSessionIdentityResolver {
         rawSessionId,
         anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
+        hostSessionId: resolution.mapping.parentSessionId,
         subagentSessionId: resolution.mapping.childSessionId,
         ...(resolution.mapping.agentName ? { subagentName: resolution.mapping.agentName } : {}),
       };
@@ -122,6 +125,7 @@ export class EventSessionIdentityResolver {
         rawSessionId,
         anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
+        hostSessionId: rawSessionId,
         lookupFailedCause: resolution.error,
       };
     }
@@ -138,6 +142,7 @@ export class EventSessionIdentityResolver {
       rawSessionId,
       anchorSessionId: anchorResolution.anchor,
       trackingSessionId: rawSessionId,
+      hostSessionId: rawSessionId,
     };
   }
 }
@@ -196,10 +201,14 @@ export class ProviderEventCoordinator {
     partKindState: PartKindStore;
     activeRunTranslatorRegistry: EventTranslatorRegistry;
     outboundTranslatorRegistry: EventTranslatorRegistry;
+    sessionIsolationHostEventPort?: HostEventPort;
+    pendingInteractionRecorder?: PendingInteractionRecorderPort;
     getRuntimeContext: () => ProviderRuntimeContext | null;
   }) {}
 
   async handleEvent(event: BridgeEvent): Promise<boolean> {
+    await this.observeSessionIsolationHostEvent(event);
+
     if (event.type === 'session.created') {
       this.dependencies.sessionCreatedRecorder.record(event);
       return true;
@@ -260,6 +269,7 @@ export class ProviderEventCoordinator {
       activeRun.observeTrackingSession(factSessionContext.trackingSessionId);
       const translation = this.dependencies.activeRunTranslatorRegistry.translate(translationContext);
       if (translation.recognized) {
+        this.recordPendingInteractions(translation.facts, factSessionContext, resolution.hostSessionId);
         activeRun.pushFacts(translation);
         this.dependencies.logger.debug?.('provider_adapter.event.routed_to_active_run', {
           eventType: event.type,
@@ -293,5 +303,59 @@ export class ProviderEventCoordinator {
       messageId: translation.envelopeMessageId,
     });
     return true;
+  }
+
+  private async observeSessionIsolationHostEvent(event: BridgeEvent): Promise<void> {
+    const hostEventPort = this.dependencies.sessionIsolationHostEventPort;
+    if (!hostEventPort) {
+      return;
+    }
+    try {
+      const result = await hostEventPort.handle(event);
+      this.dependencies.logger.debug?.('provider_adapter.session_isolation_event_observed', {
+        eventType: event.type,
+        resultKind: result.kind,
+      });
+    } catch (error) {
+      this.dependencies.logger.warn('provider_adapter.session_isolation_event_observer_failed', {
+        eventType: event.type,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  private recordPendingInteractions(
+    facts: { type: string }[],
+    factSessionContext: FactSessionContext,
+    hostSessionId: string,
+  ): void {
+    const recorder = this.dependencies.pendingInteractionRecorder;
+    if (!recorder) {
+      return;
+    }
+    for (const fact of facts) {
+      if (fact.type === 'question.ask') {
+        const questionId = (fact as { questionId?: unknown }).questionId;
+        if (typeof questionId === 'string' && questionId.trim().length > 0) {
+          recorder.record({
+            kind: 'question',
+            tokenId: questionId,
+            toolSessionId: factSessionContext.anchorSessionId,
+            hostSessionId,
+          });
+        }
+      }
+      if (fact.type === 'permission.ask') {
+        const permissionId = (fact as { permissionId?: unknown }).permissionId;
+        if (typeof permissionId === 'string' && permissionId.trim().length > 0) {
+          recorder.record({
+            kind: 'permission',
+            tokenId: permissionId,
+            toolSessionId: factSessionContext.anchorSessionId,
+            hostSessionId,
+          });
+        }
+      }
+    }
   }
 }

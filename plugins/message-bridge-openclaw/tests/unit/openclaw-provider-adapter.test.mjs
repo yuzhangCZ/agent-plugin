@@ -46,7 +46,6 @@ function flushEvents() {
     setImmediate(resolve);
   });
 }
-
 test("provider adapter fallback emits ordered facts and completed result", async () => {
   const provider = createAdapter({
     getSubagentRuntime: () => ({

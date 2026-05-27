@@ -186,9 +186,11 @@ dto/
 
 ### 5.1 Inbound Ports
 
+当前实现中，normal chat 已迁移到 provider 主链处理，不再暴露独立 `ChatCommandPort`。  
+本节只覆盖仍由 session-isolation 下行控制面直接承接的入口。
+
 建议文件：
 
-- `port/session-isolation/inbound/ChatCommandPort.ts`
 - `port/session-isolation/inbound/CreateSessionCommandPort.ts`
 - `port/session-isolation/inbound/CloseSessionCommandPort.ts`
 - `port/session-isolation/inbound/AbortSessionCommandPort.ts`
@@ -202,7 +204,6 @@ dto/
 import type { BridgeEvent } from '../../../runtime/types.js';
 import type {
   AbortAnchoredRunInput,
-  ChatCommandInput,
   CloseOwnedSessionInput,
   CreateSessionCommandInput,
   PermissionReplyCommandInput,
@@ -210,17 +211,12 @@ import type {
 } from '../dto/commands/index.js';
 import type {
   AbortAnchoredRunResult,
-  ChatCommandResult,
   CloseOwnedSessionResult,
   CreateSessionCommandResult,
   HostEventHandleResult,
   PermissionReplyCommandResult,
   QuestionReplyCommandResult,
 } from '../dto/results/index.js';
-
-export interface ChatCommandPort {
-  execute(input: ChatCommandInput): Promise<ChatCommandResult>;
-}
 
 export interface CreateSessionCommandPort {
   execute(input: CreateSessionCommandInput): Promise<CreateSessionCommandResult>;
@@ -251,8 +247,7 @@ export interface HostEventPort {
 
 | Port | 主要输入主键 | 是否参与 `entryKey` 解析 | 是否允许写 ownership |
 |---|---|---|---|
-| `ChatCommandPort` | `toolSessionId` + `extParameters` | 是 | 通过 use case 间接写 |
-| `CreateSessionCommandPort` | `welinkSessionId` + `extParameters` | 是 | 通过 use case 间接写 |
+| `CreateSessionCommandPort` | `extParameters` | 是 | 通过 use case 间接写 |
 | `CloseSessionCommandPort` | `toolSessionId` | 否 | 通过 use case 间接写 |
 | `AbortSessionCommandPort` | `toolSessionId` | 否 | 否 |
 | `QuestionReplyCommandPort` | `questionId` | 否 | 否 |
@@ -271,28 +266,30 @@ export type HostEventHandleResult =
 
 ### 5.2 下行命令控制面交互图
 
+normal chat 当前真实链路：
+
+`Provider.runMessage -> SdkChatPreprocessor -> EntryAwareChatSessionResolver -> OpencodeSessionGatewayAdapter.promptSession`
+
+下图仅表示仍由 session-isolation 控制面直接暴露的下行入口，不再把 normal chat 画成独立 inbound port。
+
 ```mermaid
 flowchart LR
   Gateway["gateway downstream"] --> Runtime["runtime sdk wiring"]
-  Runtime --> ChatPort["ChatCommandPort"]
   Runtime --> CreatePort["CreateSessionCommandPort"]
   Runtime --> ClosePort["CloseSessionCommandPort"]
   Runtime --> AbortPort["AbortSessionCommandPort"]
   Runtime --> QuestionPort["QuestionReplyCommandPort"]
   Runtime --> PermissionPort["PermissionReplyCommandPort"]
 
-  ChatPort --> ResolveCtx["ResolveEntrySessionContextUseCase"]
   CreatePort --> CreateOwned["CreateOwnedSessionUseCase"]
   ClosePort --> CloseOwned["CloseOwnedSessionUseCase"]
   AbortPort --> AbortRun["AbortAnchoredRunUseCase"]
   QuestionPort --> LookupBridge["InteractionLookupBridge"]
   PermissionPort --> LookupBridge
 
-  ResolveCtx --> Coordinator["OwnedSessionCoordinator"]
   CreateOwned --> Coordinator
   CloseOwned --> Coordinator
 
-  ResolveCtx --> HostGateway["HostSessionGateway"]
   CreateOwned --> HostGateway
   CloseOwned --> HostGateway
   AbortRun --> SdkBridge["SdkExecutionBridge"]

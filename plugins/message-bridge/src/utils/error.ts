@@ -52,6 +52,43 @@ function asHttpStatus(value: unknown): number | undefined {
   return undefined;
 }
 
+function asSourceOperation(value: unknown): ToolErrorEvidence['sourceOperation'] | undefined {
+  switch (value) {
+    case 'session.create':
+    case 'session.get':
+    case 'session.prompt':
+    case 'session.abort':
+    case 'session.delete':
+    case 'permission.reply':
+    case 'question.list':
+    case 'question.reply':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function readAttachedToolErrorEvidence(error: unknown): ToolErrorEvidence | undefined {
+  if (!isRecord(error) || !('errorEvidence' in error)) {
+    return undefined;
+  }
+  const attached = (error as { errorEvidence?: unknown }).errorEvidence;
+  if (!isRecord(attached)) {
+    return undefined;
+  }
+  const sourceErrorCode = stringifyScalar(attached.sourceErrorCode);
+  const httpStatus = asHttpStatus(attached.httpStatus);
+  const sourceOperation = asSourceOperation(attached.sourceOperation);
+  if (!sourceErrorCode && httpStatus === undefined && !sourceOperation) {
+    return undefined;
+  }
+  return {
+    ...(sourceErrorCode ? { sourceErrorCode } : {}),
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(sourceOperation ? { sourceOperation } : {}),
+  };
+}
+
 function getConstructorName(value: unknown): string | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -187,12 +224,13 @@ export function getToolErrorEvidence(
   error: unknown,
   sourceOperation?: ToolErrorEvidence['sourceOperation'],
 ): ToolErrorEvidence | undefined {
+  const attachedEvidence = readAttachedToolErrorEvidence(error);
   const details = getErrorDetails(error);
-  const sourceErrorCode = details.code;
+  const sourceErrorCode = attachedEvidence?.sourceErrorCode ?? details.code;
 
-  let httpStatus: number | undefined;
+  let httpStatus: number | undefined = attachedEvidence?.httpStatus;
   if (isRecord(error)) {
-    httpStatus =
+    httpStatus ??=
       asHttpStatus(error.httpStatus) ??
       asHttpStatus(error.statusCode) ??
       asHttpStatus(error.status);
@@ -207,13 +245,15 @@ export function getToolErrorEvidence(
     }
   }
 
-  if (!sourceErrorCode && httpStatus === undefined) {
+  const effectiveSourceOperation = sourceOperation ?? attachedEvidence?.sourceOperation;
+
+  if (!sourceErrorCode && httpStatus === undefined && !effectiveSourceOperation) {
     return undefined;
   }
 
   return {
     sourceErrorCode,
     httpStatus,
-    ...(sourceOperation ? { sourceOperation } : {}),
+    ...(effectiveSourceOperation ? { sourceOperation: effectiveSourceOperation } : {}),
   };
 }

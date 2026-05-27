@@ -7,6 +7,28 @@ import { join } from 'node:path';
 import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { getRuntimeGatewayState, setRuntimeGatewayState } from '../helpers/mock-gateway.mjs';
 
+function createPromptResponse(overrides = {}) {
+  return {
+    data: {
+      info: {
+        id: 'msg-assistant-1',
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: {
+            read: 0,
+            write: 0,
+          },
+        },
+        ...overrides.info,
+      },
+      parts: overrides.parts ?? [{ type: 'step-finish' }],
+    },
+  };
+}
+
 function createRuntimeClient(overrides = {}) {
   const base = {
     global: {},
@@ -22,7 +44,7 @@ function createRuntimeClient(overrides = {}) {
       list: async () => ({ data: [] }),
       abort: async () => ({}),
       delete: async () => ({}),
-      prompt: async () => ({ data: { ok: true } }),
+      prompt: async () => createPromptResponse(),
     },
     config: {
       providers: async () => ({ data: { providers: [] } }),
@@ -166,7 +188,7 @@ describe('protocol directory-context integration', () => {
           get: createSessionGetResponder('/bridge/directory'),
           prompt: async (options) => {
             promptCalls.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
       }),
@@ -313,15 +335,15 @@ describe('protocol directory-context integration', () => {
             },
             prompt: async (options) => {
               promptCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
             abort: async (options) => {
               abortCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
             delete: async (options) => {
               deleteCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
           },
           _client: {
@@ -390,6 +412,9 @@ describe('protocol directory-context integration', () => {
         {
           path: { id: 'session-openx-1' },
         },
+        {
+          path: { id: 'session-openx-1' },
+        },
       ]);
       assert.deepStrictEqual(promptCalls, [
         {
@@ -447,15 +472,15 @@ describe('protocol directory-context integration', () => {
           get: createSessionGetResponder('/bridge/directory'),
           prompt: async (options) => {
             promptCalls.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
           abort: async (options) => {
             abortCalls.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
           delete: async (options) => {
             deleteCalls.push(options);
-            return { data: { ok: true } };
+            return createPromptResponse();
           },
         },
         _client: {
@@ -559,21 +584,15 @@ describe('protocol directory-context integration', () => {
         path: {
           id: 'dir-chain-1',
         },
-        query: {
-          directory: '/bridge/directory',
-        },
       },
     ]);
-    assert.deepStrictEqual(deleteCalls, [
-      {
-        path: {
-          id: 'dir-chain-1',
+      assert.deepStrictEqual(deleteCalls, [
+        {
+          path: {
+            id: 'dir-chain-1',
+          },
         },
-        query: {
-          directory: '/bridge/directory',
-        },
-      },
-    ]);
+      ]);
     assert.deepStrictEqual(postCalls, [
       {
         url: '/session/{id}/permissions/{permissionID}',
@@ -592,7 +611,7 @@ describe('protocol directory-context integration', () => {
     ]);
   });
 
-  test('uniassistant channel resolves mapped directory and forwards assistantId as agent with chat directory', async () => {
+  test('uniassistant channel forwards assistantId as agent without directory mapping side effects', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
     const configDir = join(workspace, '.opencode');
@@ -674,7 +693,7 @@ describe('protocol directory-context integration', () => {
             get: createSessionGetResponder('/tenant/persona-1'),
             prompt: async (options) => {
               promptCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
           },
         }),
@@ -707,18 +726,12 @@ describe('protocol directory-context integration', () => {
           body: {
             title: 'Assiant session',
           },
-          query: {
-            directory: '/tenant/persona-1',
-          },
         },
       ]);
       assert.deepStrictEqual(promptCalls, [
         {
           path: {
             id: 'dir-assiant-1',
-          },
-          query: {
-            directory: '/tenant/persona-1',
           },
           body: {
             agent: 'persona-1',
@@ -774,7 +787,7 @@ describe('protocol directory-context integration', () => {
             get: createSessionGetResponder('/bridge/directory'),
             prompt: async (options) => {
               promptCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
           },
         }),
@@ -844,7 +857,7 @@ describe('protocol directory-context integration', () => {
     }
   });
 
-  test('uniassistant channel only applies mapped directory in create_session across full action chain', async () => {
+  test('uniassistant channel keeps config effectiveDirectory across full action chain', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-chain-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
     await writeFile(
@@ -880,15 +893,15 @@ describe('protocol directory-context integration', () => {
             get: createSessionGetResponder('/tenant/persona-1'),
             prompt: async (options) => {
               promptCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
             abort: async (options) => {
               abortCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
             delete: async (options) => {
               deleteCalls.push(options);
-              return { data: { ok: true } };
+              return createPromptResponse();
             },
           },
           _client: {
@@ -973,7 +986,7 @@ describe('protocol directory-context integration', () => {
             title: 'Assiant chain session',
           },
           query: {
-            directory: '/tenant/persona-1',
+            directory: '/bridge/directory',
           },
         },
       ]);
@@ -983,7 +996,7 @@ describe('protocol directory-context integration', () => {
             id: 'dir-assiant-chain-1',
           },
           query: {
-            directory: '/tenant/persona-1',
+            directory: '/bridge/directory',
           },
           body: {
             agent: 'persona-1',
@@ -996,18 +1009,12 @@ describe('protocol directory-context integration', () => {
           path: {
             id: 'dir-assiant-chain-1',
           },
-          query: {
-            directory: '/tenant/persona-1',
-          },
         },
       ]);
       assert.deepStrictEqual(deleteCalls, [
         {
           path: {
             id: 'dir-assiant-chain-1',
-          },
-          query: {
-            directory: '/tenant/persona-1',
           },
         },
       ]);
@@ -1041,7 +1048,7 @@ describe('protocol directory-context integration', () => {
     }
   });
 
-  test('uniassistant channel falls back to effectiveDirectory when map misses and reflects runtime map updates', async () => {
+  test('uniassistant channel ignores mapping file updates and keeps config effectiveDirectory', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-hot-'));
     const mapFile = join(workspace, 'assiant-directory-map.json');
     await writeFile(mapFile, JSON.stringify({ 'persona-1': '/tenant/persona-1' }), 'utf8');
@@ -1127,115 +1134,13 @@ describe('protocol directory-context integration', () => {
             title: 'Assiant hit session',
           },
           query: {
-            directory: '/tenant/persona-2',
-          },
-        },
-      ]);
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const unresolvedWarnings = logCalls.filter((call) => call.body?.message === 'assiant.directory_map.unresolved');
-      assert.strictEqual(unresolvedWarnings.length, 1);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.reason, 'directory_unresolved');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.channel, 'uniassistant');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.assistantId, 'persona-2');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.directoryMappingEnabled, true);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.hasEffectiveDirectory, true);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
-      const invalidEntryWarnings = logCalls.filter((call) => call.body?.message === 'assiant.directory_map.invalid_entry');
-      assert.strictEqual(invalidEntryWarnings.length, 1);
-      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.assiantId, 'persona-1');
-      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.entryType, 'string');
-      assert.deepStrictEqual(invalidEntryWarnings[0].body?.extra?.isLegacyFlatString, true);
-    } finally {
-      if (previousChannel === undefined) {
-        delete process.env.BRIDGE_GATEWAY_CHANNEL;
-      } else {
-        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
-      }
-      if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
-      } else {
-        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
-      }
-    }
-  });
-
-  test('uniassistant channel warns when create_session payload misses assistantId', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'mb-assiant-directory-missing-agent-'));
-    const mapFile = join(workspace, 'assiant-directory-map.json');
-    await writeFile(
-      mapFile,
-      JSON.stringify({
-        'persona-1': {
-          directory: '/tenant/persona-1',
-        },
-      }),
-      'utf8',
-    );
-
-    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = mapFile;
-
-    try {
-      const createCalls = [];
-      const logCalls = [];
-      const runtime = new BridgeRuntime({
-        workspacePath: '/workspace/current',
-        hostDirectory: '/workspace/current',
-        client: createRuntimeClient({
-          app: {
-            log: async (options) => {
-              logCalls.push(options);
-              return true;
-            },
-          },
-          session: {
-            create: async (options) => {
-              createCalls.push(options);
-              return { data: { id: 'dir-assiant-missing-agent' } };
-            },
-          },
-        }),
-      });
-      setRuntimeChannel(runtime, 'uniassistant');
-
-      runtime.effectiveDirectory = '/bridge/directory';
-      runtime.gatewayConnection = {
-        send: () => {},
-      };
-      setRuntimeGatewayState(runtime, 'READY');
-
-      await runtime.handleDownstreamMessage({
-        type: 'invoke',
-        welinkSessionId: 'wl-assiant-missing-agent',
-        action: 'create_session',
-        payload: {
-          title: 'Assiant missing agent session',
-        },
-      });
-
-      assert.deepStrictEqual(createCalls, [
-        {
-          body: {
-            title: 'Assiant missing agent session',
-          },
-          query: {
             directory: '/bridge/directory',
           },
         },
       ]);
-
       await new Promise((resolve) => setTimeout(resolve, 10));
-      const unresolvedWarnings = logCalls.filter((call) => call.body?.message === 'assiant.directory_map.unresolved');
-      assert.strictEqual(unresolvedWarnings.length, 1);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.reason, 'missing_assiant_id');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.channel, 'uniassistant');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.assistantId, undefined);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.directoryMappingEnabled, true);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.hasEffectiveDirectory, true);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
+      const directoryMapLogs = logCalls.filter((call) => String(call.body?.message ?? '').startsWith('assiant.directory_map.'));
+      assert.deepStrictEqual(directoryMapLogs, []);
     } finally {
       if (previousChannel === undefined) {
         delete process.env.BRIDGE_GATEWAY_CHANNEL;
@@ -1250,82 +1155,4 @@ describe('protocol directory-context integration', () => {
     }
   });
 
-  test('uniassistant channel warns when mapping file is not configured', async () => {
-    const previousChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
-    const previousMapFile = process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
-    process.env.BRIDGE_GATEWAY_CHANNEL = 'uniassistant';
-    delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
-
-    try {
-      const createCalls = [];
-      const logCalls = [];
-      const runtime = new BridgeRuntime({
-        workspacePath: '/workspace/current',
-        hostDirectory: '/workspace/current',
-        client: createRuntimeClient({
-          app: {
-            log: async (options) => {
-              logCalls.push(options);
-              return true;
-            },
-          },
-          session: {
-            create: async (options) => {
-              createCalls.push(options);
-              return { data: { id: 'dir-assiant-no-map-file' } };
-            },
-          },
-        }),
-      });
-      setRuntimeChannel(runtime, 'uniassistant');
-
-      runtime.effectiveDirectory = '/bridge/directory';
-      runtime.gatewayConnection = {
-        send: () => {},
-      };
-      setRuntimeGatewayState(runtime, 'READY');
-
-      await runtime.handleDownstreamMessage({
-        type: 'invoke',
-        welinkSessionId: 'wl-assiant-no-map-file',
-        action: 'create_session',
-        payload: {
-          title: 'Assiant no map file session',
-          assistantId: 'persona-no-map',
-        },
-      });
-
-      assert.deepStrictEqual(createCalls, [
-        {
-          body: {
-            title: 'Assiant no map file session',
-          },
-          query: {
-            directory: '/bridge/directory',
-          },
-        },
-      ]);
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const unresolvedWarnings = logCalls.filter((call) => call.body?.message === 'assiant.directory_map.unresolved');
-      assert.strictEqual(unresolvedWarnings.length, 1);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.reason, 'mapping_file_unconfigured');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.channel, 'uniassistant');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.assistantId, 'persona-no-map');
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.directoryMappingEnabled, false);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.hasEffectiveDirectory, true);
-      assert.deepStrictEqual(unresolvedWarnings[0].body?.extra?.fallbackSource, 'effective');
-    } finally {
-      if (previousChannel === undefined) {
-        delete process.env.BRIDGE_GATEWAY_CHANNEL;
-      } else {
-        process.env.BRIDGE_GATEWAY_CHANNEL = previousChannel;
-      }
-      if (previousMapFile === undefined) {
-        delete process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE;
-      } else {
-        process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE = previousMapFile;
-      }
-    }
-  });
 });

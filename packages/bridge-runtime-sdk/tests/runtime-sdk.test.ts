@@ -429,7 +429,6 @@ test('abort_session forwards active run id and sends tool_done when run resolves
     welinkSessionId: 'welink-1',
   });
 });
-
 test('start_request_run reuses session welinkSessionId when chat invoke omits it', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));

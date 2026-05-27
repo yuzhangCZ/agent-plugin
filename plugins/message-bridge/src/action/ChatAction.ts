@@ -41,6 +41,7 @@ export class ChatAction implements Action<'chat', ChatPayload, void> {
     try {
       const useCaseResult = await this.chatUseCase.execute({
         payload,
+        directory: context.effectiveDirectory,
         logger: context.logger,
       });
 

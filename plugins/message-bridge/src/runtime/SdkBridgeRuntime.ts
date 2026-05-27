@@ -11,10 +11,8 @@ import {
   CreateSessionRequestNormalizer,
   CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
-  ResolveCreateSessionDirectoryUseCase,
   SlashCommandExecutor,
 } from '../usecase/index.js';
-import { JsonAssiantDirectoryMappingAdapter, EnvBridgeChannelAdapter } from '../adapter/index.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import type {
   HostModelCatalogPort,
@@ -30,7 +28,7 @@ import { EventFilter } from '../event/EventFilter.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
-import { getMessageBridgeStatus, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
+import { readMessageBridgeStatusSnapshot, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
 import { isBridgeStartupError, validateBridgeStartup } from './Startup.js';
@@ -47,12 +45,30 @@ import {
   SdkSlashExecutionUseCase,
   StaticSlashCapabilityProvider,
 } from './sdk/SdkChatControlPlane.js';
+import {
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+  BusinessEntryContextResolver,
+  EntryAwareChatSessionResolver,
+  RuntimeAnchorRegistry,
+  RuntimePendingInteractionRegistry,
+  SessionIsolationDiagnostics,
+  createSessionIsolationControlPlane,
+} from './sdk/session-isolation/index.js';
+import {
+  AkScopedEntrySessionStorePathResolver,
+  FileOwnedSessionRepository,
+} from '../adapter/session-isolation/repository/index.js';
 import { getErrorDetailsForLog, getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
 import { asRecord, asTrimmedString } from '../utils/type-guards.js';
 import type { BridgeSdkClient } from '../types/sdk.js';
 
 const MESSAGE_BRIDGE_RUNTIME_DISABLED = 'message_bridge_runtime_disabled';
 const SDK_RUNTIME_MODE = 'sdk';
+
+function isRuntimeStartAbortedError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'runtime_start_aborted';
+}
 
 /**
  * SDK-backed runtime。
@@ -62,12 +78,12 @@ const SDK_RUNTIME_MODE = 'sdk';
  */
 export class SdkBridgeRuntime implements ManagedRuntime {
   private readonly workspacePath?: string;
-  private readonly hostDirectory?: string;
   private readonly rawClient;
   private readonly sdkClient;
   private readonly missingSdkCapabilities;
   private readonly logger: BridgeLogger;
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
+  private readonly sessionIsolationDataDir?: string;
 
   private eventFilter: EventFilter | null = null;
   private started = false;
@@ -80,31 +96,48 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     hostDirectory?: string;
     client: unknown;
     runtimeTraceId?: string;
+    sessionIsolationDataDir?: string;
   }) {
     this.workspacePath = options.workspacePath;
-    this.hostDirectory = options.hostDirectory;
     this.rawClient = toHostClientLike(options.client);
     this.sdkClient = createSdkAdapter(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
     this.logger = new AppLogger(options.client, { component: 'sdk_runtime', runtimeMode: SDK_RUNTIME_MODE }, options.runtimeTraceId);
     this.statusAdapter = createBridgeRuntimeStatusAdapter();
+    this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
 
   async start(options: ManagedRuntimeStartOptions = {}): Promise<void> {
+    const pluginVersion = resolvePluginVersion();
+    this.logger.info('runtime.start.requested', {
+      workspacePath: this.workspacePath,
+      pluginVersion,
+    });
+
     if (this.started) {
       return;
     }
 
-    const pluginVersion = resolvePluginVersion();
     this.statusAdapter.publishConnecting();
-    const config = await this.resolveConfig();
+    let config;
+    try {
+      config = await this.resolveConfig();
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      this.logger.error('runtime.config.loading_failed', {
+        error: errorMessage,
+        workspacePath: this.workspacePath,
+      });
+      this.statusAdapter.publishConfigInvalid(errorMessage);
+      throw error;
+    }
     if (!config.enabled) {
       const disabledError = new Error(MESSAGE_BRIDGE_RUNTIME_DISABLED);
       this.statusAdapter.publishDisabled(disabledError.message);
       throw disabledError;
     }
 
-    this.effectiveDirectory = config.bridgeDirectory ?? this.hostDirectory;
+    this.effectiveDirectory = config.bridgeDirectory;
     this.eventFilter = new EventFilter(config.events.allowlist);
 
     let startupValidation;
@@ -118,31 +151,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     }
 
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
-    const directoryMappingPort = new JsonAssiantDirectoryMappingAdapter(
-      process.env.BRIDGE_ASSISTANT_DIRECTORY_MAP_FILE?.trim(),
-      () => this.logger,
-    );
-    const bridgeChannelPort = new EnvBridgeChannelAdapter();
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
     const slashCommandParser = new SimpleSlashCommandParser();
-    const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
-      () => startupValidation.sdkClient,
-      () => ({
-        channel: config.gateway.channel,
-        bridgeDirectoryConfigured: Boolean(config.bridgeDirectory),
-      }),
-    );
-    const resolveCreateSessionDirectoryUseCase = new ResolveCreateSessionDirectoryUseCase(
-      bridgeChannelPort,
-      directoryMappingPort,
-      this.logger,
-    );
-    const createSessionUseCase = new CreateSessionUseCase(
-      resolveCreateSessionDirectoryUseCase,
-      opencodeSessionGatewayAdapter,
-    );
+    const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => startupValidation.sdkClient);
+    const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
     const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
     const hostSessionCreationPort: HostSessionCreationPort = {
       createSession: async (input?: { assistantId?: string; imGroupId?: string }) => {
@@ -152,8 +166,8 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         });
         const result = await createSessionUseCase.execute({
           ...normalized,
-          effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
-          directoryMappingEnabled: directoryMappingPort.isConfigured(),
+          directory: config.bridgeDirectory,
+          ...(config.bridgeDirectory ? { directorySource: 'config' } : {}),
         });
         if (!result.success) {
           const error = new Error(result.errorMessage ?? 'create_session_failed');
@@ -173,6 +187,21 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         };
       },
     };
+    const sessionCreationPort = {
+      createSession: async (input: { title?: string; directory?: string }) => {
+        const result = await createSessionUseCase.execute({
+          title: input.title,
+          isGroupChat: false,
+          directory: input.directory ?? config.bridgeDirectory,
+          ...(input.directory
+            ? { directorySource: 'explicit' as const }
+            : config.bridgeDirectory
+              ? { directorySource: 'config' as const }
+              : {}),
+        });
+        return result;
+      },
+    };
     const hostSessionQueryPort: HostSessionQueryPort = {
       getSession: async (sessionId: string) => {
         return this.getHostSessionInfo(startupValidation.sdkClient, sessionId);
@@ -184,6 +213,47 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     const hostModelCatalogPort: HostModelCatalogPort = {
       listModels: async () => this.listHostModels(startupValidation.sdkClient),
     };
+    const businessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
+    const businessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
+    const businessEntryContextResolver = new BusinessEntryContextResolver({
+      businessEntryKeyResolver,
+      businessEntryPolicyResolver,
+    });
+    const sessionIsolationDiagnostics = new SessionIsolationDiagnostics({
+      logger: this.logger.child({ component: 'session_isolation' }),
+    });
+    const runtimeAnchorRegistry = new RuntimeAnchorRegistry();
+    const sessionIsolationStorePath = new AkScopedEntrySessionStorePathResolver({
+      ...(this.sessionIsolationDataDir ? { dataDir: this.sessionIsolationDataDir } : {}),
+    }).resolve({ authAk: config.auth.ak });
+    this.logger.info('session_isolation.store.configured', {
+      filePath: sessionIsolationStorePath,
+      pathMode: 'unix_user_local_share',
+      hasOverrideDataDir: Boolean(this.sessionIsolationDataDir),
+    });
+    const ownedSessionRepository = new FileOwnedSessionRepository({
+      filePath: sessionIsolationStorePath,
+      diagnostics: sessionIsolationDiagnostics,
+    });
+    const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
+    const sessionIsolationControlPlane = createSessionIsolationControlPlane({
+      akScopeKey: config.auth.ak,
+      bindingStore,
+      ownershipResolver,
+      businessEntryKeyResolver,
+      ownedSessionRepository,
+      diagnostics: sessionIsolationDiagnostics,
+      logger: this.logger.child({ component: 'session_isolation' }),
+      hostSessionQueryPort,
+      sessionCreationPort,
+      sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,
+      pendingInteractionRegistry,
+      runtimeAnchorRepository: runtimeAnchorRegistry,
+      toolSessionIdFactory: () => `ses_${randomUUID().replaceAll('-', '')}`,
+      ownedHostEventForwarder: {
+        forward: async () => ({ applied: true }),
+      },
+    });
     const contextResolver = new DefaultChatExecutionContextResolver({
       bindingStore,
       ownershipResolver,
@@ -206,17 +276,34 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       }),
       slashExecutionUseCase: new SdkSlashExecutionUseCase({
         slashCommandExecutor,
+        sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
         replyPresenter: new DefaultSlashCommandReplyPresenter(),
         contextResolver,
       }),
       contextResolver,
+      businessEntryContextResolver,
+      effectiveDirectory: config.bridgeDirectory,
+      normalChatSessionResolver: new EntryAwareChatSessionResolver({
+        businessEntryKeyResolver,
+        resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
+        switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
+        createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
+        runtimeAnchorRepository: runtimeAnchorRegistry,
+        modelOverrideStore: sessionModelOverrideStore,
+      }),
     });
     this.providerAdapter = new OpenCodeProviderAdapter({
       rawClient: this.rawClient,
       logger: this.logger.child({ component: 'provider_adapter' }),
       createSessionUseCase,
-      effectiveDirectory: config.bridgeDirectory ?? this.hostDirectory,
-      directoryMappingEnabled: directoryMappingPort.isConfigured(),
+      createSessionCommandPort: sessionIsolationControlPlane.createSessionCommandPort,
+      closeSessionCommandPort: sessionIsolationControlPlane.closeSessionCommandPort,
+      abortSessionCommandPort: sessionIsolationControlPlane.abortSessionCommandPort,
+      questionReplyCommandPort: sessionIsolationControlPlane.questionReplyCommandPort,
+      permissionReplyCommandPort: sessionIsolationControlPlane.permissionReplyCommandPort,
+      hostEventPort: sessionIsolationControlPlane.hostEventPort,
+      pendingInteractionRecorder: pendingInteractionRegistry,
+      effectiveDirectory: config.bridgeDirectory,
       opencodeSessionGatewayAdapter,
       chatPreprocessor,
       contextResolver,
@@ -254,11 +341,28 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       onTelemetryUpdated: () => this.syncSdkStatus(),
     });
 
+    let abortListener: (() => void) | undefined;
     try {
-      await this.sdkRuntime.start();
-      if (options.abortSignal?.aborted) {
-        this.stop();
-        throw new Error('runtime_start_aborted');
+      const startPromise = this.sdkRuntime.start();
+      if (options.abortSignal) {
+        const abortPromise = new Promise<never>((_, reject) => {
+          abortListener = () => {
+            void this.sdkRuntime?.stop().catch(() => undefined);
+            reject(new Error('runtime_start_aborted'));
+          };
+          if (options.abortSignal?.aborted) {
+            abortListener();
+            return;
+          }
+          options.abortSignal.addEventListener('abort', abortListener, { once: true });
+        });
+        await Promise.race([startPromise, abortPromise]);
+        if (options.abortSignal.aborted) {
+          await startPromise.catch(() => undefined);
+          throw new Error('runtime_start_aborted');
+        }
+      } else {
+        await startPromise;
       }
       this.started = true;
       this.syncSdkStatus();
@@ -267,8 +371,14 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         effectiveDirectory: this.effectiveDirectory,
       });
     } catch (error) {
-      this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      if (!isRuntimeStartAbortedError(error)) {
+        this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+      }
       throw error;
+    } finally {
+      if (abortListener) {
+        options.abortSignal?.removeEventListener('abort', abortListener);
+      }
     }
   }
 
@@ -433,7 +543,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     }
 
     if (status.state === 'ready') {
-      const publicStatus = getMessageBridgeStatus();
+      const publicStatus = readMessageBridgeStatusSnapshot();
       if (publicStatus.phase === 'ready' && publicStatus.connected) {
         return;
       }

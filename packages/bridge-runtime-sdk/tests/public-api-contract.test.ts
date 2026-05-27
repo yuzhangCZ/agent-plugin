@@ -77,6 +77,7 @@ test('public contract source locks interaction ids and tool.update string bounda
   assert.equal(toolUpdateBlock.includes('input?: string;'), true);
   assert.equal(toolUpdateBlock.includes('output?: string;'), true);
   assert.equal(errorSource.includes("'pending_interaction_conflict'"), true);
+  assert.equal(source.includes('welinkSessionId?: string;'), false);
 });
 
 test('application ports own runtime orchestration contracts without duplicate local interfaces', async () => {

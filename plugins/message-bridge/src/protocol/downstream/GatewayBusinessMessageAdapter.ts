@@ -36,6 +36,7 @@ function adaptInvokeMessage(
           ...(message.payload.assistantAccount ? { assistantAccount: message.payload.assistantAccount } : {}),
           ...(message.payload.sendUserAccount ? { sendUserAccount: message.payload.sendUserAccount } : {}),
           ...(message.payload.imGroupId ? { imGroupId: message.payload.imGroupId } : {}),
+          ...('extParameters' in message.payload ? { extParameters: message.payload.extParameters } : {}),
         },
       });
     case 'create_session':
@@ -46,6 +47,7 @@ function adaptInvokeMessage(
         payload: {
           ...(message.payload.title ? { title: message.payload.title } : {}),
           ...(message.payload.assistantId ? { assistantId: message.payload.assistantId } : {}),
+          ...('extParameters' in message.payload ? { extParameters: message.payload.extParameters } : {}),
         },
       });
     case 'close_session':

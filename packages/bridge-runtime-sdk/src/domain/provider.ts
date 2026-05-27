@@ -192,6 +192,7 @@ export interface ProviderCreateSessionInput {
   traceId: string;
   title?: string;
   assistantId?: string;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderCreateSessionResult {

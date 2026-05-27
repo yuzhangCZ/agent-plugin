@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import {
@@ -61,6 +63,16 @@ function createSdkRuntimeClient(overrides = {}) {
   };
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function createResolvedConfig() {
   return {
     config_version: 1,
@@ -76,6 +88,27 @@ function createResolvedConfig() {
     },
     events: {
       allowlist: ['message.updated'],
+    },
+  };
+}
+
+function createPromptResponse() {
+  return {
+    data: {
+      info: {
+        id: 'msg-prompt-1',
+      },
+      parts: [{ type: 'step-finish' }],
+    },
+  };
+}
+
+function createDirectEntryExtParameters(id = 'user-sdk-reply#bot-sdk-reply') {
+  return {
+    platformExtParam: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: id,
     },
   };
 }
@@ -124,6 +157,7 @@ async function startSdkRuntime(overrides = {}) {
     }
   })({
     client: createSdkRuntimeClient(overrides),
+    sessionIsolationDataDir: join(tmpdir(), `mb-sdk-runtime-${Date.now()}-${Math.random()}`),
   });
 
   await runtime.start();
@@ -223,6 +257,58 @@ test('sdk runtime register falls back to pluginVersion when sdkVersion is unavai
   }
 });
 
+test('sdk runtime wires session-isolation control plane into provider adapter', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+
+  try {
+    const runtime = await startSdkRuntime();
+    const providerAdapter = getProviderAdapter(runtime);
+    const contextResolver = getContextResolver(runtime);
+    const chatPreprocessor = providerAdapter.chatPreprocessor;
+
+    assert.equal(typeof providerAdapter.createSessionCommandPort.execute, 'function');
+    assert.equal(typeof providerAdapter.closeSessionCommandPort.execute, 'function');
+    assert.equal(typeof providerAdapter.abortSessionCommandPort.execute, 'function');
+    assert.equal(typeof providerAdapter.questionReplyCommandPort.execute, 'function');
+    assert.equal(typeof providerAdapter.permissionReplyCommandPort.execute, 'function');
+    assert.equal(contextResolver.dependencies.sessionAttachmentPort, undefined);
+    assert.equal(typeof chatPreprocessor.dependencies.normalChatSessionResolver.resolve, 'function');
+    assert.equal(typeof chatPreprocessor.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
+test('sdk runtime logs session-isolation store file path during startup', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const logs = [];
+
+  try {
+    const runtime = await startSdkRuntime({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const storeLogs = logs.filter((entry) => entry?.message === 'session_isolation.store.configured');
+    assert.equal(storeLogs.length, 1);
+    assert.equal(storeLogs[0].level, 'info');
+    assert.equal(storeLogs[0].extra.pathMode, 'unix_user_local_share');
+    assert.equal(storeLogs[0].extra.hasOverrideDataDir, true);
+    assert.match(storeLogs[0].extra.filePath, /entry-session-store\.json$/u);
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
 test('sdk runtime keeps non-not-found session.get failures aligned with legacy control-plane semantics', async () => {
   const { restore } = installRegisterCaptureWebSocket();
 
@@ -245,7 +331,17 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
     });
     const providerAdapter = getProviderAdapter(runtime);
     const contextResolver = getContextResolver(runtime);
-    const { toolSessionId: sessionId } = await providerAdapter.createSession({ title: '绑定会话' });
+    const { toolSessionId: sessionId } = await providerAdapter.createSession({
+      traceId: 'trace-bound',
+      title: '绑定会话',
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'direct',
+          businessSessionId: 'user-bound#bot-bound',
+        },
+      },
+    });
     assert.equal(sessionId, 'ses-bound');
 
     await assert.rejects(
@@ -313,6 +409,107 @@ test('sdk runtime slash session keeps legacy scope filtering and rejects out-of-
       status: 'active',
     });
 
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
+test('sdk runtime question reply fails closed after slash switches the anchor to another host session', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const promptDeferred = createDeferred();
+  const questionReplyCalls = [];
+  let createCount = 0;
+
+  try {
+    const runtime = await startSdkRuntime({
+      session: {
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: createCount === 1 ? 'ses-sdk-question-1' : 'ses-sdk-question-2',
+              directory: createCount === 1 ? '/workspace/question-1' : '/workspace/question-2',
+            },
+          };
+        },
+        get: async (options) => ({
+          data: {
+            id: options?.path?.id ?? options?.sessionID ?? 'session-default',
+            directory: options?.path?.id === 'ses-sdk-question-2'
+              ? '/workspace/question-2'
+              : '/workspace/question-1',
+          },
+        }),
+        prompt: async () => promptDeferred.promise,
+      },
+      _client: {
+        post: async (options) => {
+          questionReplyCalls.push(options);
+          return { data: true };
+        },
+      },
+    });
+    const providerAdapter = getProviderAdapter(runtime);
+    const extParameters = createDirectEntryExtParameters();
+
+    const run = await providerAdapter.runMessage({
+      traceId: 'trace-sdk-question-run',
+      runId: 'run-sdk-question',
+      toolSessionId: 'tool-sdk-question',
+      text: 'hello',
+      extParameters,
+    });
+
+    await providerAdapter.handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          sessionID: 'ses-sdk-question-1',
+          id: 'msg-sdk-question-1',
+          role: 'assistant',
+          time: {
+            created: '2026-05-26T10:00:00.000Z',
+          },
+        },
+      },
+    });
+    await providerAdapter.handleEvent({
+      type: 'question.asked',
+      properties: {
+        sessionID: 'ses-sdk-question-1',
+        id: 'question-sdk-1',
+        tool: {
+          messageID: 'msg-sdk-question-1',
+        },
+        questions: [{
+          question: '确认？',
+          options: [{ label: '是' }],
+        }],
+      },
+    });
+
+    const slashRun = await providerAdapter.runMessage({
+      traceId: 'trace-sdk-question-slash',
+      runId: 'run-sdk-question-slash',
+      toolSessionId: 'tool-sdk-question',
+      text: '/new',
+      extParameters,
+    });
+    await slashRun.result();
+
+    await assert.rejects(
+      () => providerAdapter.replyQuestion({
+        traceId: 'trace-sdk-question-reply',
+        questionId: 'question-sdk-1',
+        answers: [['是']],
+      }),
+      /question interaction not found/u,
+    );
+    assert.deepStrictEqual(questionReplyCalls, []);
+
+    promptDeferred.resolve(createPromptResponse());
+    await run.result();
     runtime.stop();
   } finally {
     restore();

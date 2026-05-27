@@ -57,6 +57,7 @@ export function configureMessageBridgeStatusLogger(client: unknown, options: Mes
 export function getMessageBridgeStatus(): MessageBridgeStatusSnapshot {
   const currentSnapshot = cloneCurrentSnapshot();
   logStatusApi('status_api.query', {
+    querySource: 'runtime_api',
     phase: currentSnapshot.phase,
     connected: currentSnapshot.connected,
     unavailableReason: currentSnapshot.unavailableReason,
@@ -65,6 +66,14 @@ export function getMessageBridgeStatus(): MessageBridgeStatusSnapshot {
     updatedAt: currentSnapshot.updatedAt,
   });
   return currentSnapshot;
+}
+
+/**
+ * 读取当前状态快照但不记录 status_api.query。
+ * @remarks 仅供 runtime 内部状态同步/发布前读取使用；外部 API 必须继续调用 `getMessageBridgeStatus()`。
+ */
+export function readMessageBridgeStatusSnapshot(): MessageBridgeStatusSnapshot {
+  return cloneCurrentSnapshot();
 }
 
 export function publishMessageBridgeStatus(nextSnapshot: MessageBridgeStatusSnapshot): MessageBridgeStatusSnapshot {

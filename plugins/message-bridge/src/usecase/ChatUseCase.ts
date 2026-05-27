@@ -5,6 +5,7 @@ import type { BridgeLogger } from '../types/logger.js';
 
 export interface ChatUseCaseInput {
   payload: ChatPayload;
+  directory?: string;
   logger?: BridgeLogger;
 }
 
@@ -15,6 +16,7 @@ export class ChatUseCase {
     const result = await this.sessionScopedActionGatewayPort.promptSession({
       sessionId: input.payload.toolSessionId,
       text: input.payload.text,
+      ...(input.directory ? { directory: input.directory } : {}),
       agent: input.payload.assistantId,
       ...(input.logger ? { logger: input.logger } : {}),
     });

@@ -33,6 +33,15 @@ test('session runtime registry enforces active run/outbound coordination and clo
   assert.equal(registry.acquireActiveOutbound('tool-1', 'msg-3').ok, false);
 });
 
+test('session runtime registry preserves seeded welinkSessionId across later ensures without the field', () => {
+  const registry = new InMemorySessionRuntimeRegistry();
+
+  registry.ensure({ toolSessionId: 'tool-1', welinkSessionId: 'we-1' });
+  const preserved = registry.ensure({ toolSessionId: 'tool-1' });
+
+  assert.equal(preserved.welinkSessionId, 'we-1');
+});
+
 test('pending interaction registry enforces global token uniqueness and session clearing', () => {
   const registry = new InMemoryPendingInteractionRegistry();
 

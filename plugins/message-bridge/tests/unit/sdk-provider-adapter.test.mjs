@@ -2,11 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  EnvBridgeChannelAdapter,
   InMemoryOpencodeSessionOwnershipResolver,
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
-  JsonAssiantDirectoryMappingAdapter,
   OpencodeSessionGatewayAdapter,
   SimpleSlashCommandParser,
 } from '../../src/adapter/index.ts';
@@ -15,7 +13,6 @@ import {
   CreateSessionRequestNormalizer,
   CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
-  ResolveCreateSessionDirectoryUseCase,
   SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
@@ -74,6 +71,20 @@ function createLogger() {
   };
 }
 
+function createCapturingLogger(logs) {
+  const write = (level) => (message, extra) => {
+    logs.push({ level, message, extra });
+  };
+  return {
+    debug: write('debug'),
+    info: write('info'),
+    warn: write('warn'),
+    error: write('error'),
+    child: () => createCapturingLogger(logs),
+    getTraceId: () => 'trace-test',
+  };
+}
+
 function createSdkClient(overrides = {}) {
   return {
     session: {
@@ -127,18 +138,8 @@ function createAdapter(overrides = {}) {
   const bindingStore = new InMemoryToolSessionBindingStore();
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
-  const directoryMappingPort = new JsonAssiantDirectoryMappingAdapter(undefined, () => logger);
-  const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(
-    () => sdkClient,
-    () => ({
-      channel: overrides.gatewayChannel ?? 'openx',
-      bridgeDirectoryConfigured: 'bridgeDirectory' in overrides ? Boolean(overrides.bridgeDirectory) : true,
-    }),
-  );
-  const createSessionUseCase = new CreateSessionUseCase(
-    new ResolveCreateSessionDirectoryUseCase(new EnvBridgeChannelAdapter(), directoryMappingPort, logger),
-    opencodeSessionGatewayAdapter,
-  );
+  const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => sdkClient);
+  const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
   const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   const hostSessionCreationPort = {
     createSession: async (input) => {
@@ -148,8 +149,7 @@ function createAdapter(overrides = {}) {
       });
       const result = await createSessionUseCase.execute({
         ...normalized,
-        effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
-        directoryMappingEnabled: false,
+        directory: overrides.bridgeDirectory ?? '/workspace/test',
       });
       if (!result.success || !result.data.sessionId) {
         const error = new Error(result.errorMessage ?? 'create_session_failed');
@@ -227,7 +227,7 @@ function createAdapter(overrides = {}) {
     hostSessionCreationPort,
     hostSessionQueryPort,
   });
-  const chatPreprocessor = new SdkChatPreprocessor({
+  const chatPreprocessor = overrides.chatPreprocessor ?? new SdkChatPreprocessor({
     chatEntryPolicy: new ChatEntryPolicy({
       slashCommandParser: new SimpleSlashCommandParser(),
       slashCapabilityProvider: new StaticSlashCapabilityProvider(),
@@ -255,8 +255,14 @@ function createAdapter(overrides = {}) {
     rawClient: createRawClient(),
     logger,
     createSessionUseCase,
-    effectiveDirectory: overrides.hostDirectory ?? '/workspace/test',
-    directoryMappingEnabled: false,
+    ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
+    ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
+    ...(overrides.abortSessionCommandPort ? { abortSessionCommandPort: overrides.abortSessionCommandPort } : {}),
+    ...(overrides.questionReplyCommandPort ? { questionReplyCommandPort: overrides.questionReplyCommandPort } : {}),
+    ...(overrides.permissionReplyCommandPort ? { permissionReplyCommandPort: overrides.permissionReplyCommandPort } : {}),
+    ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
+    ...(overrides.pendingInteractionRecorder ? { pendingInteractionRecorder: overrides.pendingInteractionRecorder } : {}),
+    effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
     opencodeSessionGatewayAdapter,
     chatPreprocessor,
     contextResolver,
@@ -275,6 +281,275 @@ function createAdapter(overrides = {}) {
   });
 }
 
+test('provider adapter delegates question replies to session-isolation command port', async () => {
+  const calls = [];
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    questionReplyCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { applied: true };
+      },
+    },
+    question: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        throw new Error('legacy question reply should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.replyQuestion({
+    traceId: 'trace-question-port',
+    questionId: 'question-a',
+    answers: [['answer-a']],
+  }), { applied: true });
+  assert.deepEqual(calls, [{ questionId: 'question-a', answer: 'answer-a' }]);
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation question reply command rejects', async () => {
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    questionReplyCommandPort: {
+      execute: async () => {
+        throw new Error('question_pending_interaction_not_found');
+      },
+    },
+    question: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.replyQuestion({
+      traceId: 'trace-question-port-failed',
+      questionId: 'question-missing',
+      answers: [['answer-a']],
+    }),
+    /question_pending_interaction_not_found/,
+  );
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter delegates permission replies to session-isolation command port', async () => {
+  const calls = [];
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    permissionReplyCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { applied: true };
+      },
+    },
+    permission: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        throw new Error('legacy permission reply should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.replyPermission({
+    traceId: 'trace-permission-port',
+    permissionId: 'permission-a',
+    reply: 'once',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ permissionId: 'permission-a', response: 'once' }]);
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation permission reply command rejects', async () => {
+  let legacyReplyCalls = 0;
+  const adapter = createAdapter({
+    permissionReplyCommandPort: {
+      execute: async () => {
+        throw new Error('permission_pending_interaction_not_found');
+      },
+    },
+    permission: {
+      reply: async () => {
+        legacyReplyCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.replyPermission({
+      traceId: 'trace-permission-port-failed',
+      permissionId: 'permission-missing',
+      reply: 'deny',
+    }),
+    /permission_pending_interaction_not_found/,
+  );
+  assert.equal(legacyReplyCalls, 0);
+});
+
+test('provider adapter delegates abort session to session-isolation command port', async () => {
+  const calls = [];
+  let legacyAbortCalls = 0;
+  const adapter = createAdapter({
+    abortSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { kind: 'aborted', toolSessionId: input.toolSessionId };
+      },
+    },
+    session: {
+      abort: async () => {
+        legacyAbortCalls += 1;
+        throw new Error('legacy abort should not be used');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.abortSession({
+    traceId: 'trace-abort-port',
+    toolSessionId: 'tool-abort-port',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ toolSessionId: 'tool-abort-port' }]);
+  assert.equal(legacyAbortCalls, 0);
+});
+
+test('provider adapter fails closed when session-isolation abort command reports inactive session', async () => {
+  let legacyAbortCalls = 0;
+  const adapter = createAdapter({
+    abortSessionCommandPort: {
+      execute: async (input) => ({ kind: 'not_active', toolSessionId: input.toolSessionId }),
+    },
+    session: {
+      abort: async () => {
+        legacyAbortCalls += 1;
+        return { data: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => adapter.abortSession({
+      traceId: 'trace-abort-port-not-active',
+      toolSessionId: 'tool-abort-missing',
+    }),
+    (error) => {
+      assert.equal(error.message, 'abort_session_not_active');
+      assert.deepEqual(error.errorEvidence, {
+        sourceOperation: 'session.abort',
+        sourceErrorCode: 'session_not_found',
+      });
+      return true;
+    },
+  );
+  assert.equal(legacyAbortCalls, 0);
+});
+
+test('provider adapter observes raw host events through session-isolation port without changing routing result', async () => {
+  const observed = [];
+  const adapter = createAdapter({
+    hostEventPort: {
+      handle: async (event) => {
+        observed.push(event.type);
+        return { kind: 'ignored', reason: 'unowned_event' };
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'detached-session',
+        id: 'msg-detached',
+        role: 'assistant',
+        time: {
+          completed: '2026-05-22T12:00:01.000Z',
+        },
+      },
+    },
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(observed, ['message.updated']);
+});
+
+test('provider adapter keeps active run routing when session-isolation host event observer fails', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-observer-failure', 'tool-observer-failure']],
+    hostEventPort: {
+      handle: async () => {
+        throw new Error('observer failed');
+      },
+    },
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-observer-failure',
+    runId: 'run-observer-failure',
+    toolSessionId: 'tool-observer-failure',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-observer-failure',
+        id: 'msg-observer-failure',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-observer-failure',
+        id: 'msg-observer-failure',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+          completed: '2026-05-22T12:00:01.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.deepEqual(facts.map((fact) => fact.type), ['message.start', 'message.done']);
+  assert.deepEqual(warnings.filter((entry) => entry.message === 'provider_adapter.session_isolation_event_observer_failed'), [{
+    message: 'provider_adapter.session_isolation_event_observer_failed',
+    extra: {
+      eventType: 'message.updated',
+      error: 'observer failed',
+    },
+  }, {
+    message: 'provider_adapter.session_isolation_event_observer_failed',
+    extra: {
+      eventType: 'message.updated',
+      error: 'observer failed',
+    },
+  }]);
+});
+
 test('provider adapter createSession returns real OpenCode sessionId and establishes identity binding', async () => {
   const adapter = createAdapter({
     session: {
@@ -288,7 +563,10 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
     },
   });
 
-  const result = await adapter.createSession({ title: 'Identity Session' });
+  const result = await adapter.createSession({
+    traceId: 'trace-identity-session',
+    title: 'Identity Session',
+  });
 
   assert.deepEqual(result, {
     toolSessionId: 'ses-created-identity',
@@ -303,6 +581,287 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
     adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-identity'),
     'ses-created-identity',
   );
+});
+
+test('provider adapter createSession delegates creation and ownership to session-isolation command port', async () => {
+  const calls = [];
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    hostDirectory: '/workspace/formal-create',
+    createSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return {
+          kind: 'entry_owned',
+          toolSessionId: 'ses-formal-create',
+          session: { id: 'ses-formal-create', title: 'Formal Session' },
+        };
+      },
+    },
+  });
+
+  const result = await adapter.createSession({
+    traceId: 'trace-create-formal',
+    title: 'Formal Session',
+    assistantId: 'assistant-formal',
+    extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
+  });
+
+  assert.deepEqual(result, {
+    toolSessionId: 'ses-formal-create',
+    title: 'Formal Session',
+  });
+  assert.deepEqual(calls, [{
+    title: 'Formal Session',
+    assistantId: 'assistant-formal',
+    directory: '/workspace/test',
+    extParameters: { platformExtParam: { businessSessionDomain: 'im', businessSessionType: 'single', businessSessionId: 'u-1' } },
+  }]);
+  assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{
+    level: 'info',
+    message: 'runtime_sdk.provider.createSession.session_isolation_resolved',
+    extra: {
+      resultKind: 'entry_owned',
+      toolSessionId: 'ses-formal-create',
+      hasExtParameters: true,
+      hasPlatformBusinessSessionId: true,
+    },
+  }]);
+});
+
+test('provider adapter createSession logs anchor-only session-isolation result when business id is absent', async () => {
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    createSessionCommandPort: {
+      execute: async () => ({
+        kind: 'anchor_only',
+        toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
+      }),
+    },
+  });
+
+  const result = await adapter.createSession({
+    traceId: 'trace-create-anchor-only',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'miniapp',
+        businessSessionType: 'direct',
+        businessSessionId: null,
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
+  });
+  assert.deepEqual(logs.filter((entry) => entry.message === 'runtime_sdk.provider.createSession.session_isolation_resolved'), [{
+    level: 'info',
+    message: 'runtime_sdk.provider.createSession.session_isolation_resolved',
+    extra: {
+      resultKind: 'anchor_only',
+      toolSessionId: 'ses_0123456789abcdef0123456789abcdef',
+      hasExtParameters: true,
+      hasPlatformBusinessSessionId: false,
+    },
+  }]);
+});
+
+test('provider adapter maps tool parts using part.tool and records diagnostics when tool name is missing', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-tool-update', 'tool-tool-update']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-tool-update',
+    runId: 'run-tool-update',
+    toolSessionId: 'tool-tool-update',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-tool-update',
+        id: 'msg-tool-update',
+        role: 'assistant',
+        time: {
+          created: '2026-05-27T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        tool: 'read_file',
+        callID: 'call-read-file',
+        state: {
+          status: 'running',
+          title: '读取文件',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update-missing-name',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        callID: 'call-missing-name',
+        state: {
+          status: 'completed',
+          title: '标题不能当工具名',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-tool-update',
+        id: 'msg-tool-update',
+        role: 'assistant',
+        time: {
+          created: '2026-05-27T12:00:00.000Z',
+          completed: '2026-05-27T12:00:01.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+  const toolFacts = facts.filter((fact) => fact.type === 'tool.update');
+
+  assert.deepEqual(toolFacts, [
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update',
+      toolCallId: 'call-read-file',
+      toolName: 'read_file',
+      status: 'running',
+      title: '读取文件',
+      raw: {
+        part: {
+          id: 'part-tool-update',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          tool: 'read_file',
+          callID: 'call-read-file',
+          state: {
+            status: 'running',
+            title: '读取文件',
+          },
+        },
+      },
+    },
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-missing-name',
+      toolCallId: 'call-missing-name',
+      toolName: 'tool',
+      status: 'completed',
+      title: '标题不能当工具名',
+      raw: {
+        part: {
+          id: 'part-tool-update-missing-name',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          callID: 'call-missing-name',
+          state: {
+            status: 'completed',
+            title: '标题不能当工具名',
+          },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(warnings, [{
+    message: 'provider_adapter.protocol_diagnostic',
+    extra: {
+      code: 'tool_update_missing_tool_name',
+      toolSessionId: 'tool-tool-update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-missing-name',
+      partType: 'tool',
+    },
+  }]);
+});
+
+test('provider adapter closeSession delegates cleanup to session-isolation command port', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    closeSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return { kind: 'closed', sessionId: 'ses-close-formal' };
+      },
+    },
+    session: {
+      delete: async () => {
+        throw new Error('legacy_close_should_not_be_called');
+      },
+    },
+  });
+
+  assert.deepEqual(await adapter.closeSession({
+    traceId: 'trace-close-formal',
+    toolSessionId: 'tool-close-formal',
+  }), { applied: true });
+  assert.deepEqual(calls, [{ toolSessionId: 'tool-close-formal' }]);
+});
+
+test('provider adapter maps missing business entry to invalid_input failed run', async () => {
+  const adapter = createAdapter({
+    chatPreprocessor: {
+      preprocess: async () => {
+        throw new Error('business_entry_key_required');
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-missing-entry',
+    runId: 'run-missing-entry',
+    toolSessionId: 'tool-missing-entry',
+    text: 'hello',
+    extParameters: {},
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'invalid_input',
+      message: 'business_entry_key_required',
+    },
+  });
 });
 
 test('provider adapter returns synthetic ProviderRun for suppressReply deny path', async () => {
@@ -731,7 +1290,51 @@ test('provider adapter records prompt lifecycle diagnostics around session.promp
   assert.equal(infos[1].extra.textLength, 5);
   assert.equal(infos[2].extra.toolSessionId, 'tool-prompt-log');
   assert.equal(infos[2].extra.terminalKind, 'completed');
+  assert.equal(infos[2].extra.providerOutcome, 'completed');
   assert.equal(typeof infos[2].extra.durationMs, 'number');
+});
+
+test('provider adapter logs immediate failed run when preprocess rejects', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    chatPreprocessor: {
+      preprocess: async () => {
+        throw new Error('business_entry_key_required');
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-immediate-failed',
+    runId: 'run-immediate-failed',
+    toolSessionId: 'tool-immediate-failed',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'invalid_input',
+      message: 'business_entry_key_required',
+    },
+  });
+  assert.deepEqual(warnings[0], {
+    message: 'provider_adapter.run.immediate_failed',
+    extra: {
+      toolSessionId: 'tool-immediate-failed',
+      runId: 'run-immediate-failed',
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'invalid_input',
+      error: 'business_entry_key_required',
+      failureStage: 'preprocess',
+    },
+  });
 });
 
 test('provider adapter reuses legacy subagent mapping to route child facts into parent active run', async () => {
@@ -842,6 +1445,61 @@ test('provider adapter reuses legacy subagent mapping to route child facts into 
       },
     ],
   );
+});
+
+test('provider adapter records subagent pending interactions against parent host session', async () => {
+  const promptDeferred = createDeferred();
+  const pendingInteractions = [];
+  const adapter = createAdapter({
+    bindings: [['ses-parent-pending-1', 'ses-parent-pending-1']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-subagent-pending',
+    runId: 'run-subagent-pending',
+    toolSessionId: 'ses-parent-pending-1',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'session.created',
+    properties: {
+      info: {
+        id: 'ses-child-pending-1',
+        parentID: 'ses-parent-pending-1',
+        title: 'research-agent',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'ses-child-pending-1',
+      id: 'perm-child-pending-1',
+      type: 'shell',
+      title: 'Need permission',
+      tool: {
+        messageID: 'msg-child-permission-1',
+        callID: 'call-child-permission-1',
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.equal(facts.some((fact) => fact.type === 'permission.ask'), true);
+  assert.deepEqual(pendingInteractions, [{
+    kind: 'permission',
+    tokenId: 'perm-child-pending-1',
+    toolSessionId: 'ses-parent-pending-1',
+    hostSessionId: 'ses-parent-pending-1',
+  }]);
 });
 
 test('provider adapter does not emit detached child permission.asked after session.created prewarm', async () => {
@@ -1143,8 +1801,12 @@ test('provider adapter resolves ProviderRun.result() only after facts drain clos
 
 test('provider adapter maps permission.asked tool context and synthesizes compatible partId fallback', async () => {
   const promptDeferred = createDeferred();
+  const pendingInteractions = [];
   const adapter = createAdapter({
     bindings: [['tool-permission', 'tool-permission']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
     session: {
       prompt: async () => promptDeferred.promise,
     },
@@ -1229,12 +1891,30 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     },
   );
   assert.match(facts[1].partId, /^prt_[0-9a-f]{32}$/);
+  assert.deepEqual(pendingInteractions, [
+    {
+      kind: 'permission',
+      tokenId: 'perm-1',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-2',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+  ]);
 });
 
 test('provider adapter maps question.asked multiple to question.ask multiSelect', async () => {
   const promptDeferred = createDeferred();
+  const pendingInteractions = [];
   const adapter = createAdapter({
     bindings: [['tool-question', 'tool-question']],
+    pendingInteractionRecorder: {
+      record: (interaction) => pendingInteractions.push(interaction),
+    },
     session: {
       prompt: async () => promptDeferred.promise,
     },
@@ -1339,6 +2019,12 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
       },
     },
   ]);
+  assert.deepEqual(pendingInteractions, [{
+    kind: 'question',
+    tokenId: 'question-1',
+    toolSessionId: 'tool-question',
+    hostSessionId: 'tool-question',
+  }]);
 });
 
 test('provider adapter synthesizes question partId fallback without reusing questionId', async () => {
@@ -1699,6 +2385,7 @@ test('provider adapter keeps bare APIError when prompt terminal only receives as
         runId: 'run-api-error-name-only',
         durationMs: infos.find((entry) => entry.message === 'provider_adapter.prompt.completed').extra.durationMs,
         terminalKind: 'failed',
+        providerOutcome: 'failed',
         terminalErrorCode: 'internal_error',
         terminalErrorMessage: 'APIError',
         terminalErrorDetails: {
@@ -1707,6 +2394,112 @@ test('provider adapter keeps bare APIError when prompt terminal only receives as
       },
     },
   );
+});
+
+test('provider adapter logs prompt failure source evidence and mapping', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-prompt-failed', 'tool-prompt-failed']],
+    session: {
+      prompt: async () => ({
+        error: {
+          code: 'rate_limit',
+          status: 429,
+          message: 'slow down',
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-prompt-failed',
+    runId: 'run-prompt-failed',
+    toolSessionId: 'tool-prompt-failed',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'provider_unavailable',
+      message: 'Failed to send message: slow down',
+    },
+  });
+  assert.deepEqual(warnings.find((entry) => entry.message === 'provider_adapter.prompt.failed'), {
+    message: 'provider_adapter.prompt.failed',
+    extra: {
+      toolSessionId: 'tool-prompt-failed',
+      opencodeSessionId: 'tool-prompt-failed',
+      runId: 'run-prompt-failed',
+      durationMs: warnings.find((entry) => entry.message === 'provider_adapter.prompt.failed').extra.durationMs,
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'provider_unavailable',
+      error: 'Failed to send message: slow down',
+      sourceOperation: 'session.prompt',
+      sourceErrorCode: 'rate_limit',
+      httpStatus: 429,
+    },
+  });
+});
+
+test('provider adapter logs thrown prompt error evidence attached on the error object', async () => {
+  const errors = [];
+  const logger = {
+    ...createLogger(),
+    error: (message, extra) => errors.push({ message, extra }),
+    child: () => logger,
+  };
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-prompt-threw', 'tool-prompt-threw']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    const error = new Error('prompt transport exploded');
+    Object.assign(error, {
+      errorEvidence: {
+        sourceOperation: 'session.prompt',
+        sourceErrorCode: 'transport_error',
+        httpStatus: 502,
+      },
+    });
+    throw error;
+  };
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-prompt-threw',
+    runId: 'run-prompt-threw',
+    toolSessionId: 'tool-prompt-threw',
+    text: 'hello',
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'prompt transport exploded',
+    },
+  });
+  assert.deepEqual(errors.find((entry) => entry.message === 'provider_adapter.prompt.threw'), {
+    message: 'provider_adapter.prompt.threw',
+    extra: {
+      toolSessionId: 'tool-prompt-threw',
+      opencodeSessionId: 'tool-prompt-threw',
+      runId: 'run-prompt-threw',
+      durationMs: errors.find((entry) => entry.message === 'provider_adapter.prompt.threw').extra.durationMs,
+      error: 'prompt transport exploded',
+      providerOutcome: 'failed',
+      mappedProviderErrorCode: 'internal_error',
+      sourceOperation: 'session.prompt',
+      sourceErrorCode: 'transport_error',
+      httpStatus: 502,
+    },
+  });
 });
 
 test('provider adapter keeps draining after prompt terminal and closes on the last terminal candidate', async () => {
