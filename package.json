@@ -44,6 +44,13 @@
     "test:openclaw:integration": "pnpm --dir plugins/message-bridge-openclaw run test:integration",
     "test:openclaw:runtime": "pnpm --dir plugins/message-bridge-openclaw run test:runtime",
     "verify:openclaw:env": "pnpm --dir plugins/message-bridge-openclaw run verify:openclaw:env",
-    "verify:openclaw:load": "pnpm --dir plugins/message-bridge-openclaw run verify:openclaw:load"
+    "verify:openclaw:load": "pnpm --dir plugins/message-bridge-openclaw run verify:openclaw:load",
+    "lint": "eslint plugins packages"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.0",
+    "globals": "^17.6.0",
+    "typescript-eslint": "^8.60.0"
   }
 }
