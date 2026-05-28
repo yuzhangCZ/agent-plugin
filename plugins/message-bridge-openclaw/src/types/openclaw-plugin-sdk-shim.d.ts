@@ -6,7 +6,7 @@ declare module "openclaw/plugin-sdk" {
   }
 
   export interface ChannelRouteResolver {
-    resolveAgentRoute?(input: unknown): { accountId: string; agentId: string };
+    resolveAgentRoute?(input: unknown): { accountId: string; agentId: string; sessionKey?: string };
   }
 
   export interface ReplyRuntimeLike {
@@ -18,10 +18,23 @@ declare module "openclaw/plugin-sdk" {
     cancelRun?(params: { sessionKey: string; runId?: string }): Promise<void>;
   }
 
+  export interface SessionRuntimeLike {
+    resolveStorePath?(store: string | undefined, opts: { agentId: string }): string;
+    recordInboundSession?(input: {
+      storePath: string;
+      sessionKey: string;
+      ctx: Record<string, unknown>;
+      createIfMissing?: boolean;
+      onRecordError: (err: unknown) => void;
+    }): Promise<void>;
+    readSessionUpdatedAt?(params: { storePath: string; sessionKey: string }): number | undefined;
+  }
+
   export interface PluginRuntime {
     channel?: {
       routing?: ChannelRouteResolver;
       reply?: ReplyRuntimeLike;
+      session?: SessionRuntimeLike;
     };
     events?: {
       onAgentEvent?(listener: (evt: unknown) => void): () => boolean;

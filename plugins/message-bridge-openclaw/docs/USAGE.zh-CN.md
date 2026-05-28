@@ -30,6 +30,24 @@ OpenClaw 安装兼容窗口：
 - 安装目录中不要复制 `node_modules/`
 - 尤其不要包含 `node_modules/openclaw`
 
+## Dashboard 会话同步
+
+外部宿主通过 `message-bridge` 发送的会话会映射到 OpenClaw 的 agent session key，并显示在 `openclaw --dev dashboard` 会话列表中。
+
+同步链路：
+
+1. 外部宿主经 ai-gateway 下发 `create_session` / `chat`。
+2. `message-bridge-openclaw` 用 OpenClaw route resolver 解析 `agent:<agentId>:...` 形态的 canonical session key。
+3. 插件在调用 OpenClaw reply runtime 前写入 OpenClaw session store。
+4. dashboard 从 OpenClaw session store / transcript 读取会话列表与历史。
+
+排查顺序：
+
+1. 确认 message-bridge channel 状态为 connected。
+2. 确认日志没有 `runtime.session_record.failed`。
+3. 确认会话 key 为 `agent:<agentId>:...`，而不是 `message-bridge:<accountId>:...`。
+4. 若列表可见但历史缺少用户 turn，检查 OpenClaw session transcript helper 是否可用。
+
 ## 1. 当前支持的安装方式
 
 - 正式私有 npm 安装

@@ -78,6 +78,25 @@ type UsableReplyRuntime = ReplyRuntime & {
   dispatchReplyWithBufferedBlockDispatcher(input: unknown): Promise<void>;
 };
 
+type RuntimeSessionRecord = {
+  resolveStorePath(store: string | undefined, opts: { agentId: string }): string;
+  recordInboundSession(input: {
+    storePath: string;
+    sessionKey: string;
+    ctx: Record<string, unknown>;
+    createIfMissing?: boolean;
+    onRecordError: (err: unknown) => void;
+  }): Promise<void>;
+  readSessionUpdatedAt?(params: { storePath: string; sessionKey: string }): number | undefined;
+};
+
+type MessageBridgeRoute = {
+  accountId: string;
+  agentId: string;
+  sessionKey?: string;
+  raw: Record<string, unknown>;
+};
+
 interface AsyncQueueController<T> {
   iterable: AsyncIterable<T>;
   push(value: T): void;
@@ -118,6 +137,7 @@ interface ActiveRunState {
   pendingFinalText: string | null;
   pendingToolResultTarget: string | null;
   streamingEnabled: boolean;
+  replyDispatcherOwnsAssistantText: boolean;
   titleEmitted: boolean;
   toolStates: Map<string, ActiveToolState>;
 }
@@ -412,6 +432,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       pendingFinalText: null,
       pendingToolResultTarget: null,
       streamingEnabled: this.options.account.streaming !== false,
+      replyDispatcherOwnsAssistantText: false,
       titleEmitted: false,
       toolStates: new Map(),
     };
@@ -568,24 +589,96 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     );
   }
 
-  private async runWithReplyRuntime(state: ActiveRunState, text: string): Promise<void> {
-    const { createReplyPrefixOptions, normalizeOutboundReplyPayload } = await loadOpenClawPluginSdk();
-    const { effectiveConfig, streamingEnabled } = resolveEffectiveReplyConfig(this.options.config);
-    state.streamingEnabled = this.options.account.streaming !== false && streamingEnabled;
+  private getUsableSessionRecordRuntime(): RuntimeSessionRecord | null {
+    const session = this.options.runtime.channel?.session as RuntimeSessionRecord | undefined;
+    if (
+      session &&
+      typeof session.resolveStorePath === "function" &&
+      typeof session.recordInboundSession === "function"
+    ) {
+      return session;
+    }
+    return null;
+  }
+
+  private resolveCanonicalSessionKey(
+    route: Record<string, unknown>,
+    fallback: string,
+    options?: { required?: boolean },
+  ): string {
+    const routed = asTrimmedString(route.sessionKey);
+    if (!routed && options?.required) {
+      throw new Error("openclaw_route_session_key_unavailable");
+    }
+    return routed ?? fallback;
+  }
+
+  private bindCanonicalSessionKey(state: ActiveRunState, sessionKey: string): void {
+    if (sessionKey === state.sessionKey) {
+      return;
+    }
+    this.activeRunsBySessionKey.delete(state.sessionKey);
+    state.sessionKey = sessionKey;
+    this.options.sessionRegistry.bindSessionKey(state.toolSessionId, sessionKey);
+    this.activeRunsBySessionKey.set(sessionKey, state);
+  }
+
+  private resolveMessageBridgeRoute(input: {
+    cfg: OpenClawConfig;
+    state: ActiveRunState;
+    required: boolean;
+  }): MessageBridgeRoute | null {
     const resolveAgentRoute = this.options.runtime.channel?.routing?.resolveAgentRoute;
     if (!resolveAgentRoute) {
-      throw new Error("openclaw_route_resolver_unavailable");
+      if (input.required) {
+        throw new Error("openclaw_route_resolver_unavailable");
+      }
+      return null;
     }
     const route = resolveAgentRoute({
-      cfg: effectiveConfig,
+      cfg: input.cfg,
       channel: "message-bridge",
       accountId: this.options.account.accountId,
       peer: {
         kind: "direct",
-        id: state.toolSessionId,
+        id: input.state.toolSessionId,
       },
     });
+    const raw = asRecord(route) ?? {};
+    const sessionKey = asTrimmedString(raw.sessionKey);
+    return {
+      accountId: asTrimmedString(raw.accountId) ?? this.options.account.accountId,
+      agentId: asTrimmedString(raw.agentId) ?? "main",
+      ...(sessionKey ? { sessionKey } : {}),
+      raw,
+    };
+  }
+
+  private applyRouteSessionKey(
+    state: ActiveRunState,
+    route: MessageBridgeRoute | null,
+    options?: { required?: boolean },
+  ): void {
+    if (!route) {
+      return;
+    }
+    this.bindCanonicalSessionKey(
+      state,
+      this.resolveCanonicalSessionKey(route.raw, state.sessionKey, options),
+    );
+  }
+
+  private async runWithReplyRuntime(state: ActiveRunState, text: string): Promise<void> {
+    const { createReplyPrefixOptions, normalizeOutboundReplyPayload } = await loadOpenClawPluginSdk();
+    const { effectiveConfig, streamingEnabled } = resolveEffectiveReplyConfig(this.options.config);
+    state.streamingEnabled = this.options.account.streaming !== false && streamingEnabled;
+    const route = this.resolveMessageBridgeRoute({ cfg: effectiveConfig, state, required: true });
+    if (!route) {
+      throw new Error("openclaw_route_resolver_unavailable");
+    }
+    this.applyRouteSessionKey(state, route, { required: true });
     const replyRuntime = this.options.runtime.channel!.reply as UsableReplyRuntime;
+    state.replyDispatcherOwnsAssistantText = true;
     const envelopeOptions = replyRuntime.resolveEnvelopeFormatOptions(effectiveConfig);
     const body = replyRuntime.formatAgentEnvelope({
       channel: "message-bridge",
@@ -621,6 +714,24 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       channel: "message-bridge",
       accountId: this.options.account.accountId,
     });
+
+    const sessionRuntime = this.getUsableSessionRecordRuntime();
+    if (sessionRuntime) {
+      const storePath = sessionRuntime.resolveStorePath(effectiveConfig.session?.store, { agentId: route.agentId });
+      await sessionRuntime.recordInboundSession({
+        storePath,
+        sessionKey: state.sessionKey,
+        ctx: ctxPayload as Record<string, unknown>,
+        createIfMissing: true,
+        onRecordError: (error) => {
+          this.options.logger.warn("runtime.session_record.failed", {
+            toolSessionId: state.toolSessionId,
+            sessionKey: state.sessionKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
+    }
 
     await replyRuntime.dispatchReplyWithBufferedBlockDispatcher({
       ctx: ctxPayload,
@@ -732,6 +843,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     if (!subagent) {
       throw new Error("openclaw_runtime_missing_reply_executor");
     }
+
+    const { effectiveConfig } = resolveEffectiveReplyConfig(this.options.config);
+    const route = this.resolveMessageBridgeRoute({ cfg: effectiveConfig, state, required: false });
+    this.applyRouteSessionKey(state, route);
 
     const run = await subagent.run({
       sessionKey: state.sessionKey,
@@ -966,6 +1081,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       return;
     }
     if (evt.stream === "assistant") {
+      if (state.replyDispatcherOwnsAssistantText) {
+        return;
+      }
       this.handleAssistantAgentEvent(state, payload);
       return;
     }
