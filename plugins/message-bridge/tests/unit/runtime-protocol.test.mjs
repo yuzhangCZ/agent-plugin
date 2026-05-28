@@ -1766,7 +1766,10 @@ describe('runtime protocol strictness', () => {
       });
       await new Promise((r) => setTimeout(r, 20));
 
-      assert.ok(logs.some((entry) => entry?.body?.level === 'debug' && entry.body.message === 'event.received'));
+      const receivedLog = logs.find((entry) => entry?.body?.message === 'event.received');
+      assert.strictEqual(receivedLog?.body?.level, 'info');
+      assert.strictEqual(Object.hasOwn(receivedLog.body.extra, 'originalLevel'), false);
+      assert.strictEqual(Object.hasOwn(receivedLog.body.extra, 'debugPromotedToInfo'), false);
       assert.ok(
         logs.some(
           (entry) =>

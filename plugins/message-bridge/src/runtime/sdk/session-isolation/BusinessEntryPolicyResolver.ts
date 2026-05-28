@@ -52,6 +52,7 @@ export class DefaultBusinessEntryPolicyResolver {
       allowedSlashCommands: requestAllowedSlashCommands
         ? requestAllowedSlashCommands.filter((command) => template.allowedSlashCommands.includes(command))
         : template.allowedSlashCommands,
+      slashPolicySource: requestAllowedSlashCommands ? 'request_payload' : 'entry_template',
     };
   }
 

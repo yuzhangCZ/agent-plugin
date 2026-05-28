@@ -105,6 +105,8 @@ export class AppLogger implements BridgeLogger {
   }
 
   private write(level: BridgeLogLevel, message: string, extra?: Record<string, unknown>): void {
+    // debug 开关打开后使用 info 通道投递结构化 debug 日志，避免宿主过滤 debug 级别导致诊断缺失。
+    const deliveryLevel: BridgeLogLevel = this.debugEnabled && level === 'debug' ? 'info' : level;
     const enriched = {
       runtimeTraceId: this.traceId,
       traceId: this.traceId,
@@ -115,7 +117,7 @@ export class AppLogger implements BridgeLogger {
 
     if (!this.appLog) {
       if (this.debugEnabled) {
-        console.debug('[message-bridge][log-fallback]', level, message, payload);
+        console.debug('[message-bridge][log-fallback]', deliveryLevel, message, payload);
       }
       return;
     }
@@ -125,17 +127,17 @@ export class AppLogger implements BridgeLogger {
         this.appLog?.({
           body: {
             service: 'message-bridge',
-            level,
+            level: deliveryLevel,
             message,
             extra: payload as Record<string, unknown>,
           },
         }),
       )
       .catch((err) => {
-      if (this.debugEnabled) {
-        const reason = err instanceof Error ? err.message : String(err);
-        console.debug('[message-bridge][log-send-failed]', reason, { level, message });
-      }
+        if (this.debugEnabled) {
+          const reason = err instanceof Error ? err.message : String(err);
+          console.debug('[message-bridge][log-send-failed]', reason, { level: deliveryLevel, message });
+        }
       });
   }
 }

@@ -21,6 +21,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
       controlled: true,
       allowOpencodeNativeSessions: false,
       allowedSlashCommands: ['new', 'models', 'model'],
+      slashPolicySource: 'entry_template',
     });
   });
 
@@ -41,6 +42,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         controlled: false,
         allowOpencodeNativeSessions: true,
         allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        slashPolicySource: 'entry_template',
       },
     );
   });
@@ -66,6 +68,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         controlled: true,
         allowOpencodeNativeSessions: false,
         allowedSlashCommands: ['new', 'model'],
+        slashPolicySource: 'request_payload',
       },
     );
   });
@@ -91,6 +94,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         controlled: false,
         allowOpencodeNativeSessions: true,
         allowedSlashCommands: [],
+        slashPolicySource: 'request_payload',
       },
     );
   });
@@ -116,6 +120,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         controlled: false,
         allowOpencodeNativeSessions: true,
         allowedSlashCommands: ['sessions', 'new'],
+        slashPolicySource: 'request_payload',
       },
     );
   });
