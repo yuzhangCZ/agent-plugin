@@ -1766,7 +1766,7 @@ describe('runtime protocol strictness', () => {
       });
       await new Promise((r) => setTimeout(r, 20));
 
-      assert.ok(logs.some((entry) => entry?.body?.level === 'debug' && entry.body.message === 'event.received'));
+      assert.ok(logs.some((entry) => entry?.body?.level === 'info' && entry.body.message === 'event.received'));
       assert.ok(
         logs.some(
           (entry) =>

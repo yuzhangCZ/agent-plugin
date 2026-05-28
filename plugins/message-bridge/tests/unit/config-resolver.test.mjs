@@ -86,6 +86,44 @@ describe('ConfigResolver debug defaults', () => {
     }
   });
 
+  test('BRIDGE_DEBUG=false overrides project debug=true', async () => {
+    process.env.BRIDGE_DEBUG = 'false';
+    const workspace = await mkdtemp(join(tmpdir(), 'message-bridge-config-'));
+    process.env.HOME = workspace;
+    try {
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.jsonc'),
+        JSON.stringify({ debug: true }),
+        'utf8',
+      );
+
+      const config = await new ConfigResolver().resolveConfig(workspace);
+      assert.strictEqual(config.debug, false);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('BRIDGE_DEBUG=true overrides project debug=false', async () => {
+    process.env.BRIDGE_DEBUG = 'true';
+    const workspace = await mkdtemp(join(tmpdir(), 'message-bridge-config-'));
+    process.env.HOME = workspace;
+    try {
+      await mkdir(join(workspace, '.opencode'), { recursive: true });
+      await writeFile(
+        join(workspace, '.opencode', 'message-bridge.jsonc'),
+        JSON.stringify({ debug: false }),
+        'utf8',
+      );
+
+      const config = await new ConfigResolver().resolveConfig(workspace);
+      assert.strictEqual(config.debug, true);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('loads user config from OPENCODE_CONFIG_DIR', async () => {
     const tempHome = await mkdtemp(join(tmpdir(), 'message-bridge-config-'));
     const configRoot = await mkdtemp(join(tmpdir(), 'message-bridge-custom-config-'));
