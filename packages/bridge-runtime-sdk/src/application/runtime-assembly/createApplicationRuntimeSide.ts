@@ -60,7 +60,6 @@ export function createApplicationRuntimeSide(
   );
   const interactionCoordinator = new InteractionCoordinator(pendingInteractionRegistry, observation);
   const requestRunCoordinator = new RequestRunCoordinator(
-    sessionRegistry,
     interactionCoordinator,
     validator,
     {

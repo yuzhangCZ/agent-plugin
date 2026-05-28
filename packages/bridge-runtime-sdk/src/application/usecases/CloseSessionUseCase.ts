@@ -35,7 +35,6 @@ export class CloseSessionUseCase implements CloseSessionUseCasePort {
         traceId: command.traceId,
         toolSessionId: command.source.payload.toolSessionId,
       });
-      this.sessionRegistry.markClosed(command.source.payload.toolSessionId);
       this.interactionCoordinator.clearSession(command.source.payload.toolSessionId);
       this.factEnricher.clearSession(command.source.payload.toolSessionId);
       this.sessionRegistry.delete(command.source.payload.toolSessionId);

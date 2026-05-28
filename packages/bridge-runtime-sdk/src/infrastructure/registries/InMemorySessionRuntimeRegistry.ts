@@ -21,7 +21,8 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     const created: SessionRuntimeRecord = {
       toolSessionId: input.toolSessionId,
       ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
-      lifecycle: 'active',
+      requestRun: { status: 'idle' },
+      outbound: { status: 'idle' },
     };
     this.records.set(input.toolSessionId, created);
     return created;
@@ -35,51 +36,48 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     this.records.delete(toolSessionId);
   }
 
-  acquireActiveRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
+  acquireRequestRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
     const record = this.ensure({ toolSessionId });
-    if (record.activeRunId || record.lifecycle === 'closed') {
+    if (record.requestRun.status !== 'idle') {
       return { ok: false };
     }
-    record.activeRunId = runId;
+    record.requestRun = { status: 'running', runId };
     return { ok: true, record };
   }
 
-  releaseActiveRun(toolSessionId: string, runId: string): void {
+  releaseRequestRun(toolSessionId: string, runId: string): void {
     const record = this.records.get(toolSessionId);
-    if (record?.activeRunId === runId) {
-      delete record.activeRunId;
+    if (record?.requestRun.status === 'running' && record.requestRun.runId === runId) {
+      record.requestRun = { status: 'idle' };
     }
   }
 
-  acquireActiveOutbound(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
+  getRequestRunState(toolSessionId: string) {
+    return this.records.get(toolSessionId)?.requestRun ?? { status: 'idle' };
+  }
+
+  getActiveRequestRunId(toolSessionId: string): string | undefined {
+    const requestRun = this.getRequestRunState(toolSessionId);
+    return requestRun.status === 'running' ? requestRun.runId : undefined;
+  }
+
+  acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
     const record = this.ensure({ toolSessionId });
-    if (record.activeOutboundMessageId || record.lifecycle === 'closed') {
+    if (record.outbound.status !== 'idle') {
       return { ok: false };
     }
-    record.activeOutboundMessageId = messageId;
+    record.outbound = { status: 'emitting', messageId };
     return { ok: true, record };
   }
 
-  releaseActiveOutbound(toolSessionId: string, messageId: string): void {
+  releaseOutboundEmission(toolSessionId: string, messageId: string): void {
     const record = this.records.get(toolSessionId);
-    if (record?.activeOutboundMessageId === messageId) {
-      delete record.activeOutboundMessageId;
+    if (record?.outbound.status === 'emitting' && record.outbound.messageId === messageId) {
+      record.outbound = { status: 'idle' };
     }
   }
 
-  markAborting(toolSessionId: string): SessionRuntimeRecord | undefined {
-    const record = this.records.get(toolSessionId);
-    if (record) {
-      record.lifecycle = 'aborting';
-    }
-    return record;
-  }
-
-  markClosed(toolSessionId: string): SessionRuntimeRecord | undefined {
-    const record = this.records.get(toolSessionId);
-    if (record) {
-      record.lifecycle = 'closed';
-    }
-    return record;
+  getOutboundEmissionState(toolSessionId: string) {
+    return this.records.get(toolSessionId)?.outbound ?? { status: 'idle' };
   }
 }

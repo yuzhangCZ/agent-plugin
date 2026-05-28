@@ -2,7 +2,6 @@ import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
-import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
 import type { RequestRunFailureToolErrorProjector } from '../projectors/RequestRunFailureToolErrorProjector.ts';
 import type { EventPipeline } from './coordinator.types.ts';
@@ -16,7 +15,6 @@ const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
  * request run 协调器。
  */
 export class RequestRunCoordinator {
-  private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly interactionCoordinator: InteractionCoordinator;
   private readonly validator: FactSequenceValidator;
   private readonly pipeline: EventPipeline;
@@ -25,7 +23,6 @@ export class RequestRunCoordinator {
   private readonly factEnricher: ProviderFactEnricher;
 
   constructor(
-    sessionRegistry: SessionRuntimeRegistry,
     interactionCoordinator: InteractionCoordinator,
     validator: FactSequenceValidator,
     pipeline: EventPipeline,
@@ -33,7 +30,6 @@ export class RequestRunCoordinator {
     terminalProjector: RunTerminalSignalProjector,
     requestRunFailureProjector: RequestRunFailureToolErrorProjector,
   ) {
-    this.sessionRegistry = sessionRegistry;
     this.interactionCoordinator = interactionCoordinator;
     this.validator = validator;
     this.pipeline = pipeline;
@@ -111,9 +107,8 @@ export class RequestRunCoordinator {
         );
         continue;
       }
-      const sessionLifecycle = this.sessionRegistry.get(toolSessionId)?.lifecycle ?? 'active';
       const classification = classifyFact(fact.type);
-      this.validator.consume(toolSessionId, fact, state, profile, sessionLifecycle);
+      this.validator.consume(toolSessionId, fact, state, profile);
       this.interactionCoordinator.registerFromFact(toolSessionId, fact);
       const envelopeFields = this.toToolEventEnvelopeFields(fact);
       const events = this.pipeline.factProjector.project(enriched.fact);

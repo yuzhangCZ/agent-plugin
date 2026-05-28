@@ -35,7 +35,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       runId,
     };
     this.observation.usecaseStarted('start_request_run', command.traceId, context);
-    const acquired = this.sessionRegistry.acquireActiveRun(toolSessionId, runId);
+    const acquired = this.sessionRegistry.acquireRequestRun(toolSessionId, runId);
     if (!acquired.ok) {
       const error = new RuntimeContractError(
         'run_already_active',
@@ -94,7 +94,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       );
       throw error;
     } finally {
-      this.sessionRegistry.releaseActiveRun(toolSessionId, runId);
+      this.sessionRegistry.releaseRequestRun(toolSessionId, runId);
     }
   }
 }
