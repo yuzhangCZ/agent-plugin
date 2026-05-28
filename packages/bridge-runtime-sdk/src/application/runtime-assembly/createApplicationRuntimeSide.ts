@@ -104,7 +104,6 @@ export function createApplicationRuntimeSide(
     close_session: new CloseSessionUseCase(
       providerHandlers,
       sessionRegistry,
-      interactionCoordinator,
       factEnricher,
       observation,
     ),

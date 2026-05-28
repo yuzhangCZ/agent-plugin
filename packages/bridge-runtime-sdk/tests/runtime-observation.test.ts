@@ -101,8 +101,6 @@ class StubPendingInteractionRegistry implements PendingInteractionRegistry {
   register() {
     return { ok: true as const };
   }
-
-  clearSession(): void {}
 }
 
 type RecordedLog = {
@@ -666,7 +664,6 @@ test('usecases emit failed observation events for non request-run failures', asy
       },
     },
     new StubSessionRuntimeRegistry(),
-    interactionCoordinator,
     factEnricher,
     closeObservation,
   );

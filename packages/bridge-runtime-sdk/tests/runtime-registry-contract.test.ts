@@ -62,7 +62,7 @@ test('session runtime registry preserves seeded welinkSessionId across later ens
   assert.equal(preserved.welinkSessionId, 'we-1');
 });
 
-test('pending interaction registry enforces global token uniqueness and session clearing', () => {
+test('pending interaction registry enforces global token uniqueness and exact token consumption', () => {
   const registry = new InMemoryPendingInteractionRegistry();
 
   assert.deepEqual(registry.register({
@@ -104,6 +104,19 @@ test('pending interaction registry enforces global token uniqueness and session 
     kind: 'permission',
     tokenId: 'perm-1',
   }), { ok: true });
-  registry.clearSession('tool-1');
-  assert.equal(registry.consume({ kind: 'permission', tokenId: 'perm-1' }), undefined);
+  assert.deepEqual(registry.register({
+    toolSessionId: 'tool-1',
+    kind: 'permission',
+    tokenId: 'perm-2',
+  }), { ok: true });
+  assert.deepEqual(registry.consume({ kind: 'permission', tokenId: 'perm-1' }), {
+    toolSessionId: 'tool-1',
+    kind: 'permission',
+    tokenId: 'perm-1',
+  });
+  assert.deepEqual(registry.consume({ kind: 'permission', tokenId: 'perm-2' }), {
+    toolSessionId: 'tool-1',
+    kind: 'permission',
+    tokenId: 'perm-2',
+  });
 });

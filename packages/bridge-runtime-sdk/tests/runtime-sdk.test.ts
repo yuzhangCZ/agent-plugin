@@ -898,6 +898,147 @@ test('runtime consumes permission replies by permissionId and forwards reply con
   });
 });
 
+test('close_session preserves pending question reply token routing', async () => {
+  const connection = new FakeGatewayClient();
+  const repliedQuestionIds: string[] = [];
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-close-1',
+                questions: [{ question: 'Proceed?' }],
+              },
+              { type: 'message.done', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion(input) {
+          repliedQuestionIds.push(input.questionId);
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'close_session',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-close-1', answer: 'yes' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(repliedQuestionIds, ['question-close-1']);
+});
+
+test('close_session preserves pending permission reply token routing', async () => {
+  const connection = new FakeGatewayClient();
+  const repliedPermissionIds: string[] = [];
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', messageId: 'msg-1' },
+              {
+                type: 'permission.ask',
+                messageId: 'msg-1',
+                partId: 'part-permission-1',
+                permissionId: 'permission-close-1',
+              },
+              { type: 'message.done', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission(input) {
+          repliedPermissionIds.push(input.permissionId);
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'close_session',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    payload: { permissionId: 'permission-close-1', response: 'always' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(repliedPermissionIds, ['permission-close-1']);
+});
+
 test('question.ask projects cloud questions payload and omits legacy flat fields', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
@@ -1465,9 +1606,9 @@ test('permission.ask remains valid without messageId and still registers reply t
   assert.equal(runtime.getStatus().state, 'ready');
 });
 
-test('question.ask rejects globally duplicated questionId across sessions and clears current session pending interactions', async () => {
+test('question.ask rejects globally duplicated questionId across sessions without clearing pending interactions', async () => {
   const connection = new FakeGatewayClient();
-  let replyCount = 0;
+  const repliedQuestionIds: string[] = [];
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
       {
@@ -1500,6 +1641,13 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
               {
                 type: 'question.ask',
                 messageId: 'msg-2',
+                partId: 'part-question-current',
+                questionId: 'question-current',
+                questions: [{ question: 'Current question' }],
+              },
+              {
+                type: 'question.ask',
+                messageId: 'msg-2',
                 partId: 'part-question-2',
                 questionId: 'question-dup',
                 questions: [{ question: 'Second question' }],
@@ -1509,8 +1657,8 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
             { outcome: 'completed' },
           );
         },
-        async replyQuestion() {
-          replyCount += 1;
+        async replyQuestion(input) {
+          repliedQuestionIds.push(input.questionId);
           return { applied: true };
         },
         async replyPermission() {
@@ -1548,10 +1696,23 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
     payload: { questionId: 'question-dup', answer: 'A' },
   });
   await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-current', answer: 'B' },
+  });
+  await flushEvents();
 
-  assert.equal(replyCount, 1);
+  assert.deepEqual(repliedQuestionIds, ['question-dup', 'question-current']);
   assert.equal(runtime.getStatus().state, 'ready');
-  assert.deepEqual(connection.sent.at(-1), {
+  assert.deepEqual(connection.sent.findLast((message) => {
+    return typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_error'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-2';
+  }), {
     type: 'tool_error',
     toolSessionId: 'tool-2',
     welinkSessionId: 'welink-2',
@@ -1565,9 +1726,9 @@ test('question.ask rejects globally duplicated questionId across sessions and cl
   });
 });
 
-test('permission.ask rejects globally duplicated permissionId across sessions and clears current session pending interactions', async () => {
+test('permission.ask rejects globally duplicated permissionId across sessions without clearing pending interactions', async () => {
   const connection = new FakeGatewayClient();
-  let replyCount = 0;
+  const repliedPermissionIds: string[] = [];
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
       {
@@ -1599,6 +1760,12 @@ test('permission.ask rejects globally duplicated permissionId across sessions an
               {
                 type: 'permission.ask',
                 messageId: 'msg-2',
+                partId: 'part-permission-current',
+                permissionId: 'permission-current',
+              },
+              {
+                type: 'permission.ask',
+                messageId: 'msg-2',
                 partId: 'part-permission-2',
                 permissionId: 'permission-dup',
               },
@@ -1610,8 +1777,8 @@ test('permission.ask rejects globally duplicated permissionId across sessions an
         async replyQuestion() {
           return { applied: true };
         },
-        async replyPermission() {
-          replyCount += 1;
+        async replyPermission(input) {
+          repliedPermissionIds.push(input.permissionId);
           return { applied: true };
         },
         async closeSession() {
@@ -1646,10 +1813,23 @@ test('permission.ask rejects globally duplicated permissionId across sessions an
     payload: { permissionId: 'permission-dup', response: 'once' },
   });
   await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'permission_reply',
+    payload: { permissionId: 'permission-current', response: 'always' },
+  });
+  await flushEvents();
 
-  assert.equal(replyCount, 1);
+  assert.deepEqual(repliedPermissionIds, ['permission-dup', 'permission-current']);
   assert.equal(runtime.getStatus().state, 'ready');
-  assert.deepEqual(connection.sent.at(-1), {
+  assert.deepEqual(connection.sent.findLast((message) => {
+    return typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_error'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-2';
+  }), {
     type: 'tool_error',
     toolSessionId: 'tool-2',
     welinkSessionId: 'welink-2',

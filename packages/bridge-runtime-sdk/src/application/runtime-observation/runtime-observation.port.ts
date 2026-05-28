@@ -111,7 +111,6 @@ export interface RuntimeObservation {
   ): void;
   interactionRegistered(kind: 'question' | 'permission', toolSessionId: string, tokenId: string): void;
   interactionConsumed(kind: 'question' | 'permission', toolSessionId: string, tokenId: string): void;
-  interactionCleared(toolSessionId: string): void;
   interactionConflict(
     kind: 'question' | 'permission',
     toolSessionId: string,

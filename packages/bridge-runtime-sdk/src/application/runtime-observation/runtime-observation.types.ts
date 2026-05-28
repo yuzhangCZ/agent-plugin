@@ -165,7 +165,7 @@ export type FactProcessedObservationEvent =
  */
 export type InteractionChangedObservationEvent = {
   type: 'interaction_changed';
-  action: 'register' | 'consume' | 'clear' | 'conflict';
+  action: 'register' | 'consume' | 'conflict';
   kind?: 'question' | 'permission';
   toolSessionId: string;
   tokenId?: string;

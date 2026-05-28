@@ -268,10 +268,6 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
     this.port.record({ type: 'interaction_changed', action: 'consume', kind, toolSessionId, tokenId });
   }
 
-  interactionCleared(toolSessionId: string): void {
-    this.port.record({ type: 'interaction_changed', action: 'clear', toolSessionId });
-  }
-
   interactionConflict(
     kind: 'question' | 'permission',
     toolSessionId: string,

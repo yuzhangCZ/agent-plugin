@@ -150,7 +150,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
         write(
           this.logger,
           event.action === 'conflict' ? 'warn' : 'info',
-          `runtime_sdk.interaction.${event.action === 'consume' ? 'consumed' : event.action === 'clear' ? 'cleared' : event.action === 'register' ? 'registered' : 'conflict'}`,
+          `runtime_sdk.interaction.${event.action === 'consume' ? 'consumed' : event.action === 'register' ? 'registered' : 'conflict'}`,
           {
             kind: event.kind,
             toolSessionId: event.toolSessionId,

@@ -39,5 +39,4 @@ export interface PendingInteractionRegistry {
     kind: PendingInteractionRecord['kind'];
     tokenId: string;
   }): PendingInteractionRecord | undefined;
-  clearSession(toolSessionId: string): void;
 }
