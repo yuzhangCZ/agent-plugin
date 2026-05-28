@@ -39,6 +39,85 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+// 仅提取日志安全的事件身份字段；不要在这里承载 raw event -> fact 的翻译语义。
+function summarizeEventIdentity(event: BridgeEvent): Record<string, unknown> {
+  const properties = asObject(event.properties);
+  switch (event.type) {
+    case 'message.updated': {
+      const info = asObject(properties?.info);
+      const messageId = asTrimmedString(info?.id);
+      return {
+        ...(messageId ? { messageId } : {}),
+      };
+    }
+    case 'message.part.delta': {
+      const messageId = asTrimmedString(properties?.messageID);
+      const partId = asTrimmedString(properties?.partID);
+      return {
+        ...(messageId ? { messageId } : {}),
+        ...(partId ? { partId } : {}),
+      };
+    }
+    case 'message.part.updated': {
+      const part = asObject(properties?.part);
+      const messageId = asTrimmedString(part?.messageID);
+      const partId = asTrimmedString(part?.id);
+      return {
+        ...(messageId ? { messageId } : {}),
+        ...(partId ? { partId } : {}),
+      };
+    }
+    case 'question.asked': {
+      const questionId = asTrimmedString(properties?.id);
+      const messageId = asTrimmedString(asObject(properties?.tool)?.messageID);
+      return {
+        ...(questionId ? { questionId } : {}),
+        ...(messageId ? { messageId } : {}),
+      };
+    }
+    case 'permission.asked': {
+      const permissionId = asTrimmedString(properties?.id);
+      const messageId = asTrimmedString(asObject(properties?.tool)?.messageID);
+      return {
+        ...(permissionId ? { permissionId } : {}),
+        ...(messageId ? { messageId } : {}),
+      };
+    }
+    case 'permission.replied': {
+      const permissionId = asTrimmedString(properties?.requestID);
+      return {
+        ...(permissionId ? { permissionId } : {}),
+      };
+    }
+    default:
+      return {};
+  }
+}
+
+function buildEventRouteSummary(input: {
+  event: BridgeEvent;
+  rawSessionId: string;
+  factSessionContext: FactSessionContext;
+  hasActiveRun: boolean;
+  activeRunId?: string;
+}): Record<string, unknown> {
+  return {
+    eventType: input.event.type,
+    rawSessionId: input.rawSessionId,
+    anchorSessionId: input.factSessionContext.anchorSessionId,
+    hasActiveRun: input.hasActiveRun,
+    activeRunId: input.activeRunId,
+    ...(input.factSessionContext.trackingSessionId !== input.rawSessionId
+      ? { trackingSessionId: input.factSessionContext.trackingSessionId }
+      : {}),
+    ...(input.factSessionContext.subagentSessionId
+      ? { subagentSessionId: input.factSessionContext.subagentSessionId }
+      : {}),
+    ...(input.factSessionContext.subagentName ? { subagentName: input.factSessionContext.subagentName } : {}),
+    ...summarizeEventIdentity(input.event),
+  };
+}
+
 export class DefaultProtocolDiagnosticPort implements ProtocolDiagnosticPort {
   constructor(private readonly logger: BridgeLogger) {}
 
@@ -242,16 +321,17 @@ export class ProviderEventCoordinator {
     }
 
     const factSessionContext = this.dependencies.factRoutingContextAssembler.assemble(resolution);
-    const hasActiveRun = this.dependencies.activeRunRegistry.has(factSessionContext.anchorSessionId);
+    const activeRun = this.dependencies.activeRunRegistry.get(factSessionContext.anchorSessionId);
     const runtimeContext = this.dependencies.getRuntimeContext();
+    const eventRouteSummary = buildEventRouteSummary({
+      event,
+      rawSessionId,
+      factSessionContext,
+      hasActiveRun: Boolean(activeRun),
+      activeRunId: activeRun?.runId,
+    });
     this.dependencies.logger.debug?.('provider_adapter.event.received', {
-      eventType: event.type,
-      translated:
-        this.dependencies.activeRunTranslatorRegistry.recognizes(event.type)
-        || this.dependencies.outboundTranslatorRegistry.recognizes(event.type),
-      toolSessionId: rawSessionId,
-      resolvedToolSessionId: factSessionContext.anchorSessionId,
-      hasActiveRun,
+      ...eventRouteSummary,
       hasRuntimeContext: Boolean(runtimeContext),
     });
 
@@ -264,10 +344,14 @@ export class ProviderEventCoordinator {
       observation: this.dependencies.observation,
     };
 
-    const activeRun = this.dependencies.activeRunRegistry.get(factSessionContext.anchorSessionId);
     if (activeRun) {
       activeRun.observeTrackingSession(factSessionContext.trackingSessionId);
       const translation = this.dependencies.activeRunTranslatorRegistry.translate(translationContext);
+      this.dependencies.logger.debug?.('provider_adapter.event.translation', {
+        ...eventRouteSummary,
+        recognized: translation.recognized,
+        factTypes: translation.facts.map((fact) => fact.type),
+      });
       if (translation.recognized) {
         this.recordPendingInteractions(translation.facts, factSessionContext, resolution.hostSessionId);
         activeRun.pushFacts(translation);
@@ -286,6 +370,11 @@ export class ProviderEventCoordinator {
     }
 
     const translation = this.dependencies.outboundTranslatorRegistry.translate(translationContext);
+    this.dependencies.logger.debug?.('provider_adapter.event.translation', {
+      ...eventRouteSummary,
+      recognized: translation.recognized,
+      factTypes: translation.facts.map((fact) => fact.type),
+    });
     if (!translation.recognized || !translation.toolSessionId || translation.facts.length === 0 || !translation.envelopeMessageId) {
       return false;
     }
