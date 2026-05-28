@@ -2847,6 +2847,85 @@ test('provider adapter closes facts by drain timeout when no terminal candidate 
   }]);
 });
 
+test('provider adapter does not let stale cleanup delete a newer active run', async () => {
+  const logs = [];
+  const logger = createCapturingLogger(logs);
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  const promptCalls = [];
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-stale-cleanup', 'tool-stale-cleanup']],
+    session: {
+      prompt: async () => {
+        const deferred = promptCalls.length === 0 ? firstPrompt : secondPrompt;
+        promptCalls.push(deferred);
+        return deferred.promise;
+      },
+    },
+  });
+
+  const firstRun = await adapter.runMessage({
+    traceId: 'trace-stale-cleanup-1',
+    runId: 'run-stale-cleanup-1',
+    toolSessionId: 'tool-stale-cleanup',
+    text: 'first',
+  });
+  firstPrompt.resolve(createPromptResponse({
+    info: {
+      error: {
+        name: 'MessageAbortedError',
+        data: { message: 'User aborted' },
+      },
+    },
+  }));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const secondRun = await adapter.runMessage({
+    traceId: 'trace-stale-cleanup-2',
+    runId: 'run-stale-cleanup-2',
+    toolSessionId: 'tool-stale-cleanup',
+    text: 'second',
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await firstRun.result(), { outcome: 'aborted' });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-stale-cleanup',
+        id: 'msg-second-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:02.000Z',
+          completed: '2026-05-22T12:00:03.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptResponse());
+
+  assert.deepEqual(await secondRun.result(), { outcome: 'completed' });
+  assert.deepEqual(
+    (await collect(secondRun.facts)).map((fact) => fact.type),
+    ['message.start', 'message.done'],
+  );
+  assert.deepEqual(
+    logs.find((entry) => entry.message === 'provider_adapter.active_run.cleanup_skipped')?.extra,
+    {
+      anchorSessionId: 'tool-stale-cleanup',
+      cleanupRunId: 'run-stale-cleanup-1',
+      currentRunId: 'run-stale-cleanup-2',
+      trackingSessionIds: ['tool-stale-cleanup'],
+      cleanupSkippedReason: 'active_run_replaced',
+    },
+  );
+});
+
 test('provider adapter records diagnostic when assistant completed arrives without a created event', async () => {
   const warnings = [];
   const logger = {
@@ -2937,44 +3016,62 @@ test('provider adapter records received upstream event routing diagnostics', asy
     debug: (message, extra) => debugs.push({ message, extra }),
     child: () => logger,
   };
-  const outboundCalls = [];
+  const promptDeferred = createDeferred();
   const adapter = createAdapter({
     logger,
     bindings: [['tool-session-42', 'tool-session-42']],
-  });
-  await adapter.initialize({
-    outbound: {
-      async emitOutboundMessage(input) {
-        outboundCalls.push(input);
-        return { applied: true };
-      },
+    session: {
+      prompt: async () => promptDeferred.promise,
     },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-routing-diagnostics',
+    runId: 'run-routing-diagnostics',
+    toolSessionId: 'tool-session-42',
+    text: 'hello',
   });
 
   const handled = await adapter.handleEvent({
-    type: 'session.updated',
+    type: 'message.updated',
     properties: {
       info: {
-        id: 'tool-session-42',
-        title: '讨论项目架构',
+        sessionID: 'tool-session-42',
+        id: 'msg-routing-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
       },
     },
   });
+  promptDeferred.resolve(createPromptResponse());
+  await collect(run.facts);
+  await run.result();
 
-  assert.equal(handled, false);
-  assert.equal(outboundCalls.length, 0);
-  assert.deepEqual(
-    debugs.map((entry) => entry.message),
-    ['provider_adapter.event.received'],
-  );
-  assert.deepEqual(debugs[0].extra, {
-    eventType: 'session.updated',
-    translated: true,
-    toolSessionId: 'tool-session-42',
-    resolvedToolSessionId: 'tool-session-42',
-    hasActiveRun: false,
-    hasRuntimeContext: true,
+  assert.equal(handled, true);
+  const received = debugs.find((entry) => entry.message === 'provider_adapter.event.received');
+  const translation = debugs.find((entry) => entry.message === 'provider_adapter.event.translation');
+  assert.deepEqual(received?.extra, {
+    eventType: 'message.updated',
+    rawSessionId: 'tool-session-42',
+    anchorSessionId: 'tool-session-42',
+    hasActiveRun: true,
+    activeRunId: 'run-routing-diagnostics',
+    hasRuntimeContext: false,
+    messageId: 'msg-routing-1',
   });
+  assert.deepEqual(translation?.extra, {
+    eventType: 'message.updated',
+    rawSessionId: 'tool-session-42',
+    anchorSessionId: 'tool-session-42',
+    hasActiveRun: true,
+    activeRunId: 'run-routing-diagnostics',
+    messageId: 'msg-routing-1',
+    recognized: true,
+    factTypes: ['message.start'],
+  });
+  assert.equal('properties' in received.extra, false);
+  assert.equal('trackingSessionId' in received.extra, false);
 });
 
 test('provider adapter ignores detached session.updated title continuation', async () => {

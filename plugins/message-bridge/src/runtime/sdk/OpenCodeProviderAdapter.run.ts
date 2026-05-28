@@ -266,6 +266,7 @@ export class ActiveProviderRunHandle {
     logger: BridgeLogger,
     private readonly onCleanup: (input: {
       anchorSessionId: string;
+      runId: string;
       trackingSessionIds: ReadonlySet<string>;
     }) => void,
   ) {
@@ -323,6 +324,7 @@ export class ActiveProviderRunHandle {
     this.cleanedUp = true;
     this.onCleanup({
       anchorSessionId: this.anchorSessionId,
+      runId: this.runId,
       trackingSessionIds: this.trackingSessionIds,
     });
   }
@@ -338,6 +340,7 @@ export class ActiveRunRegistry {
     logger: BridgeLogger;
     onCleanup: (input: {
       anchorSessionId: string;
+      runId: string;
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
   }): ActiveProviderRunHandle {
@@ -360,7 +363,28 @@ export class ActiveRunRegistry {
     return this.handles.has(anchorSessionId);
   }
 
-  delete(anchorSessionId: string): void {
+  /**
+   * 只删除仍属于当前 runId 的 handle。
+   * @remarks runId 由 bridge-runtime-sdk 在每次 start_request_run 时生成并保证唯一。
+   */
+  deleteIfCurrentRun(
+    anchorSessionId: string,
+    runId: string,
+  ): { deleted: boolean; currentRunId?: string } {
+    const current = this.handles.get(anchorSessionId);
+    if (!current) {
+      return { deleted: false };
+    }
+    if (current.runId !== runId) {
+      return {
+        deleted: false,
+        currentRunId: current.runId,
+      };
+    }
     this.handles.delete(anchorSessionId);
+    return {
+      deleted: true,
+      currentRunId: current.runId,
+    };
   }
 }

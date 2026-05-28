@@ -458,14 +458,33 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       runId,
       initialTrackingSessionId,
       logger: this.logger,
-      onCleanup: ({ anchorSessionId: cleanupAnchorSessionId, trackingSessionIds }) => {
-        this.activeRuns.delete(cleanupAnchorSessionId);
-        for (const trackingSessionId of trackingSessionIds) {
-          this.partKinds.clearSession(trackingSessionId);
-          this.assistantMessageStates.clearSession(trackingSessionId);
-        }
+      onCleanup: (cleanup) => {
+        this.cleanupActiveRunState(cleanup);
       },
     });
+  }
+
+  private cleanupActiveRunState(input: {
+    anchorSessionId: string;
+    runId: string;
+    trackingSessionIds: ReadonlySet<string>;
+  }): void {
+    const result = this.activeRuns.deleteIfCurrentRun(input.anchorSessionId, input.runId);
+    if (!result.deleted) {
+      this.logger.debug?.('provider_adapter.active_run.cleanup_skipped', {
+        anchorSessionId: input.anchorSessionId,
+        cleanupRunId: input.runId,
+        currentRunId: result.currentRunId,
+        trackingSessionIds: [...input.trackingSessionIds],
+        cleanupSkippedReason: 'active_run_replaced',
+      });
+      return;
+    }
+
+    for (const trackingSessionId of input.trackingSessionIds) {
+      this.partKinds.clearSession(trackingSessionId);
+      this.assistantMessageStates.clearSession(trackingSessionId);
+    }
   }
 
   private async bindPromptTerminal(

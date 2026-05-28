@@ -586,6 +586,18 @@ export class SdkChatPreprocessor {
         logger,
       );
     const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
+    if (decision.kind === 'slash') {
+      logger?.debug?.('sdk_chat_preprocessor.entry_policy_decision', {
+        toolSessionId: input.toolSessionId,
+        runId: input.runId,
+        policySource: entryContext ? 'entry_policy' : 'local_default_no_entry_context',
+        allowedSlashCommands: entryContext?.policy.allowedSlashCommands,
+        decisionKind: decision.kind,
+        commandKind: decision.descriptor.kind,
+        disabledInEntry: Boolean(decision.disabledInEntry),
+        invalid: Boolean(decision.invalid),
+      });
+    }
     if (decision.kind === 'deny') {
       return {
         kind: 'synthetic_run',
