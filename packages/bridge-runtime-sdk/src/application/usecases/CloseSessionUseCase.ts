@@ -1,6 +1,5 @@
 import type { ProviderCommandHandlers } from '../../adapters/provider/provider-api-adapter.ts';
 import type { RuntimeCommand } from '../../domain/runtime-command.ts';
-import type { InteractionCoordinator } from '../coordinators/index.ts';
 import type { CloseSessionUseCase as CloseSessionUseCasePort } from '../ports/runtime-usecase.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
@@ -9,20 +8,17 @@ import type { RuntimeObservation } from '../runtime-observation/index.ts';
 export class CloseSessionUseCase implements CloseSessionUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
-  private readonly interactionCoordinator: InteractionCoordinator;
   private readonly factEnricher: ProviderFactEnricher;
   private readonly observation: RuntimeObservation;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
-    interactionCoordinator: InteractionCoordinator,
     factEnricher: ProviderFactEnricher,
     observation: RuntimeObservation,
   ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
-    this.interactionCoordinator = interactionCoordinator;
     this.factEnricher = factEnricher;
     this.observation = observation;
   }
@@ -35,8 +31,6 @@ export class CloseSessionUseCase implements CloseSessionUseCasePort {
         traceId: command.traceId,
         toolSessionId: command.source.payload.toolSessionId,
       });
-      this.sessionRegistry.markClosed(command.source.payload.toolSessionId);
-      this.interactionCoordinator.clearSession(command.source.payload.toolSessionId);
       this.factEnricher.clearSession(command.source.payload.toolSessionId);
       this.sessionRegistry.delete(command.source.payload.toolSessionId);
       this.observation.usecaseSucceeded('close_session', command.traceId, context);

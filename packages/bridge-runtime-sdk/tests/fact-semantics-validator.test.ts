@@ -22,7 +22,6 @@ class RecordingObservationPort implements RuntimeObservationPort {
 test('classifyFact returns stable application semantics for representative fact types', () => {
   assert.deepEqual(classifyFact('message.start'), {
     requiresOpenMessage: false,
-    rejectInAbortingSession: true,
     marksOutboundTerminal: false,
     emitsDerivedEvent: true,
     projectsFactEvent: false,
@@ -30,7 +29,6 @@ test('classifyFact returns stable application semantics for representative fact 
 
   assert.deepEqual(classifyFact('message.done'), {
     requiresOpenMessage: false,
-    rejectInAbortingSession: false,
     marksOutboundTerminal: true,
     emitsDerivedEvent: true,
     projectsFactEvent: false,
@@ -38,7 +36,6 @@ test('classifyFact returns stable application semantics for representative fact 
 
   assert.deepEqual(classifyFact('tool.update'), {
     requiresOpenMessage: true,
-    rejectInAbortingSession: false,
     marksOutboundTerminal: false,
     emitsDerivedEvent: false,
     projectsFactEvent: true,
@@ -46,7 +43,6 @@ test('classifyFact returns stable application semantics for representative fact 
 
   assert.deepEqual(classifyFact('question.ask'), {
     requiresOpenMessage: true,
-    rejectInAbortingSession: true,
     marksOutboundTerminal: false,
     emitsDerivedEvent: false,
     projectsFactEvent: true,
@@ -54,37 +50,14 @@ test('classifyFact returns stable application semantics for representative fact 
 
   assert.deepEqual(classifyFact('permission.ask'), {
     requiresOpenMessage: false,
-    rejectInAbortingSession: true,
     marksOutboundTerminal: false,
     emitsDerivedEvent: false,
     projectsFactEvent: true,
   });
 });
 
-test('FactSequenceValidator enforces lifecycle, order, and tool.update fail-closed rules', () => {
+test('FactSequenceValidator enforces order and tool.update fail-closed rules without session lifecycle', () => {
   const validator = new FactSequenceValidator();
-
-  assert.throws(
-    () => validator.consume(
-      'tool-1',
-      { type: 'message.start', messageId: 'msg-1' },
-      validator.createState(),
-      { kind: 'request_run' },
-      'closed',
-    ),
-    /closed session must reject all facts/,
-  );
-
-  assert.throws(
-    () => validator.consume(
-      'tool-1',
-      { type: 'message.start', messageId: 'msg-1' },
-      validator.createState(),
-      { kind: 'request_run' },
-      'aborting',
-    ),
-    /aborting session rejects new activity facts/,
-  );
 
   const invalidToolUpdateState = validator.createState();
   validator.consume(
@@ -92,7 +65,6 @@ test('FactSequenceValidator enforces lifecycle, order, and tool.update fail-clos
     { type: 'message.start', messageId: 'msg-1' },
     invalidToolUpdateState,
     { kind: 'request_run' },
-    'active',
   );
 
   assert.throws(
@@ -109,7 +81,6 @@ test('FactSequenceValidator enforces lifecycle, order, and tool.update fail-clos
       },
       invalidToolUpdateState,
       { kind: 'request_run' },
-      'active',
     ),
     /tool\.update input\/output must not be blank strings/,
   );
@@ -120,14 +91,12 @@ test('FactSequenceValidator enforces lifecycle, order, and tool.update fail-clos
     { type: 'message.start', messageId: 'msg-1' },
     outboundState,
     { kind: 'outbound' },
-    'active',
   );
   validator.consume(
     'tool-1',
     { type: 'message.done', messageId: 'msg-1' },
     outboundState,
     { kind: 'outbound' },
-    'active',
   );
 
   assert.throws(
@@ -136,10 +105,21 @@ test('FactSequenceValidator enforces lifecycle, order, and tool.update fail-clos
       { type: 'session.error', error: { message: 'late' } },
       outboundState,
       { kind: 'outbound' },
-      'active',
     ),
     /facts after terminal are not allowed/,
   );
+});
+
+test('FactSequenceValidator accepts new activity after abort because lifecycle is provider-owned', () => {
+  const validator = new FactSequenceValidator();
+  const state = validator.createState();
+
+  assert.doesNotThrow(() => validator.consume(
+    'tool-1',
+    { type: 'message.start', messageId: 'msg-after-abort' },
+    state,
+    { kind: 'request_run' },
+  ));
 });
 
 test('OutboundCoordinator keeps derived event and uplink projection observation split', async () => {

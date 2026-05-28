@@ -104,8 +104,16 @@ test('application ports own runtime orchestration contracts without duplicate lo
   assert.equal(dispatcherSource.includes("from './ports/runtime-usecase.ts'"), true);
   assert.equal(sessionRegistrySource.includes('export interface SessionRuntimeRegistry'), true);
   assert.equal(pendingRegistrySource.includes('export interface PendingInteractionRegistry'), true);
+  assert.equal(pendingRegistrySource.includes('clearSession'), false);
   assert.equal(infrastructureIndexSource.includes("./registries/in-memory-session-runtime-registry.ts"), false);
   assert.equal(infrastructureIndexSource.includes("./registries/in-memory-pending-interaction-registry.ts"), false);
+});
+
+test('runtime trace interaction contract does not expose session-level clearing', async () => {
+  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+
+  assert.equal(publicContractSource.includes("action: 'register' | 'consume' | 'clear';"), false);
+  assert.equal(publicContractSource.includes("action: 'register' | 'consume';"), true);
 });
 
 test('package publish contract keeps gateway-client internal to the SDK facade', async () => {

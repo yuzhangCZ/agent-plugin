@@ -31,7 +31,7 @@ export interface RuntimeTraceTerminal {
 }
 
 export interface RuntimeTraceInteraction {
-  action: 'register' | 'consume' | 'clear';
+  action: 'register' | 'consume';
   kind?: 'question' | 'permission';
   toolSessionId: string;
   tokenId?: string;

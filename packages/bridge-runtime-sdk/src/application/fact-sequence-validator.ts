@@ -1,7 +1,6 @@
-import { classifyFact } from './fact-semantics.ts';
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
-import type { SessionLifecycleState } from './ports/session-runtime-registry.ts';
+import { classifyFact } from './fact-semantics.ts';
 
 export type LifecycleProfileKind = 'request_run' | 'outbound';
 
@@ -38,50 +37,22 @@ export class FactSequenceValidator {
   }
 
   consume(
-    toolSessionId: string,
+    _toolSessionId: string,
     fact: ProviderFact,
     state: ValidationSessionState,
     profile: LifecycleProfile,
-    sessionLifecycle: SessionLifecycleState,
   ): void {
-    this.assertSessionLifecycle(toolSessionId, fact, state, sessionLifecycle);
+    this.assertTerminal(fact, state);
     this.assertFactOrder(fact, state, profile);
   }
 
-  private assertSessionLifecycle(
-    toolSessionId: string,
+  private assertTerminal(
     fact: ProviderFact,
     state: ValidationSessionState,
-    sessionLifecycle: SessionLifecycleState,
   ): void {
-    if (sessionLifecycle === 'closed') {
-      throw new RuntimeContractError('fact_sequence_invalid', 'closed session must reject all facts', {
-        factType: fact.type,
-        toolSessionId,
-      });
-    }
-
     if (state.terminalReached) {
       throw new RuntimeContractError('fact_sequence_invalid', 'facts after terminal are not allowed', {
         factType: fact.type,
-      });
-    }
-
-    if (sessionLifecycle !== 'aborting') {
-      return;
-    }
-
-    const classification = classifyFact(fact.type);
-
-    if (classification.rejectInAbortingSession) {
-      throw new RuntimeContractError('fact_sequence_invalid', 'aborting session rejects new activity facts', {
-        factType: fact.type,
-      });
-    }
-
-    if (fact.type === 'tool.update' && !state.knownToolCallIds.has(fact.toolCallId)) {
-      throw new RuntimeContractError('fact_sequence_invalid', 'aborting session rejects new toolCallId', {
-        toolCallId: fact.toolCallId,
       });
     }
   }

@@ -34,14 +34,6 @@ export class InMemoryPendingInteractionRegistry implements PendingInteractionReg
     return record;
   }
 
-  clearSession(toolSessionId: string): void {
-    for (const [key, record] of this.records.entries()) {
-      if (record.toolSessionId === toolSessionId) {
-        this.records.delete(key);
-      }
-    }
-  }
-
   private toKey(kind: PendingInteractionRecord['kind'], tokenId: string): string {
     return `${kind}:${tokenId}`;
   }

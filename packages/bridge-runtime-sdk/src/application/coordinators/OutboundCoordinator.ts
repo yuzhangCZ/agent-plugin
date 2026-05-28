@@ -39,7 +39,7 @@ export class OutboundCoordinator {
     messageId: string;
     facts: AsyncIterable<ProviderFact>;
   }): Promise<{ applied: true }> {
-    const acquired = this.sessionRegistry.acquireActiveOutbound(input.toolSessionId, input.messageId);
+    const acquired = this.sessionRegistry.acquireOutboundEmission(input.toolSessionId, input.messageId);
     if (!acquired.ok) {
       throw new RuntimeContractError('outbound_already_active', 'toolSessionId already has an active outbound', {
         toolSessionId: input.toolSessionId,
@@ -61,9 +61,8 @@ export class OutboundCoordinator {
             );
             continue;
           }
-          const sessionLifecycle = this.sessionRegistry.get(input.toolSessionId)?.lifecycle ?? 'active';
           const classification = classifyFact(fact.type);
-          this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE, sessionLifecycle);
+          this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE);
           this.interactionCoordinator.registerFromFact(input.toolSessionId, fact);
           const envelopeFields = this.toToolEventEnvelopeFields(fact);
           const events = this.pipeline.factProjector.project(enriched.fact);
@@ -86,7 +85,7 @@ export class OutboundCoordinator {
       }
       return { applied: true };
     } finally {
-      this.sessionRegistry.releaseActiveOutbound(input.toolSessionId, input.messageId);
+      this.sessionRegistry.releaseOutboundEmission(input.toolSessionId, input.messageId);
     }
   }
 

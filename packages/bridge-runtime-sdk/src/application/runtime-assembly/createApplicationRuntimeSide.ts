@@ -60,7 +60,6 @@ export function createApplicationRuntimeSide(
   );
   const interactionCoordinator = new InteractionCoordinator(pendingInteractionRegistry, observation);
   const requestRunCoordinator = new RequestRunCoordinator(
-    sessionRegistry,
     interactionCoordinator,
     validator,
     {
@@ -105,7 +104,6 @@ export function createApplicationRuntimeSide(
     close_session: new CloseSessionUseCase(
       providerHandlers,
       sessionRegistry,
-      interactionCoordinator,
       factEnricher,
       observation,
     ),

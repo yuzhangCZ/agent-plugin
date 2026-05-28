@@ -33,7 +33,6 @@ export class InteractionCoordinator {
           fact.questionId,
           result.conflict.existing.toolSessionId,
         );
-        this.registry.clearSession(toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
           'question interaction reply target must be globally unique',
@@ -65,7 +64,6 @@ export class InteractionCoordinator {
           fact.permissionId,
           result.conflict.existing.toolSessionId,
         );
-        this.registry.clearSession(toolSessionId);
         throw new RuntimeContractError(
           'pending_interaction_conflict',
           'permission interaction reply target must be globally unique',
@@ -90,10 +88,5 @@ export class InteractionCoordinator {
 
     this.observation.interactionConsumed(kind, interaction.toolSessionId, tokenId);
     return interaction.toolSessionId;
-  }
-
-  clearSession(toolSessionId: string): void {
-    this.registry.clearSession(toolSessionId);
-    this.observation.interactionCleared(toolSessionId);
   }
 }

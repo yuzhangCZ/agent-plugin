@@ -35,58 +35,57 @@ class StubSessionRuntimeRegistry implements SessionRuntimeRegistry {
     return {
       toolSessionId: input.toolSessionId,
       welinkSessionId: input.welinkSessionId,
-      lifecycle: 'active' as const,
+      requestRun: { status: 'idle' as const },
+      outbound: { status: 'idle' as const },
     };
   }
 
   get(toolSessionId: string) {
     return {
       toolSessionId,
-      lifecycle: 'active' as const,
-      activeRunId: 'run-active',
+      requestRun: { status: 'running' as const, runId: 'run-active' },
+      outbound: { status: 'idle' as const },
     };
   }
 
   delete(): void {}
 
-  acquireActiveRun(toolSessionId: string, runId: string) {
+  acquireRequestRun(toolSessionId: string, runId: string) {
     return {
       ok: true as const,
       record: {
         toolSessionId,
-        lifecycle: 'active' as const,
-        activeRunId: runId,
+        requestRun: { status: 'running' as const, runId },
+        outbound: { status: 'idle' as const },
       },
     };
   }
 
-  releaseActiveRun(): void {}
+  releaseRequestRun(): void {}
 
-  acquireActiveOutbound(toolSessionId: string, messageId: string) {
+  getRequestRunState() {
+    return { status: 'running' as const, runId: 'run-active' };
+  }
+
+  getActiveRequestRunId() {
+    return 'run-active';
+  }
+
+  acquireOutboundEmission(toolSessionId: string, messageId: string) {
     return {
       ok: true as const,
       record: {
         toolSessionId,
-        lifecycle: 'active' as const,
-        activeOutboundMessageId: messageId,
+        requestRun: { status: 'idle' as const },
+        outbound: { status: 'emitting' as const, messageId },
       },
     };
   }
 
-  releaseActiveOutbound(): void {}
+  releaseOutboundEmission(): void {}
 
-  markAborting(toolSessionId: string) {
-    return {
-      toolSessionId,
-      lifecycle: 'aborting' as const,
-    };
-  }
-
-  markClosed(toolSessionId: string) {
-    return {
-      toolSessionId,
-      lifecycle: 'closed' as const,
-    };
+  getOutboundEmissionState() {
+    return { status: 'idle' as const };
   }
 }
 
@@ -102,8 +101,6 @@ class StubPendingInteractionRegistry implements PendingInteractionRegistry {
   register() {
     return { ok: true as const };
   }
-
-  clearSession(): void {}
 }
 
 type RecordedLog = {
@@ -667,7 +664,6 @@ test('usecases emit failed observation events for non request-run failures', asy
       },
     },
     new StubSessionRuntimeRegistry(),
-    interactionCoordinator,
     factEnricher,
     closeObservation,
   );
