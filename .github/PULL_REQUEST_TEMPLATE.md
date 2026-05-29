@@ -26,6 +26,7 @@
 
 ```bash
 # 示例
+pnpm lint:changed
 pnpm test
 pnpm verify:workspace
 pnpm verify:integration:fixture

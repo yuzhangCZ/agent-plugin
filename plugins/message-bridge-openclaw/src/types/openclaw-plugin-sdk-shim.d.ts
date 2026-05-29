@@ -14,8 +14,6 @@ declare module "openclaw/plugin-sdk" {
     formatAgentEnvelope?(input: unknown): unknown;
     finalizeInboundContext?(input: unknown): unknown;
     dispatchReplyWithBufferedBlockDispatcher?(input: unknown): Promise<void>;
-    abortRun?(params: { sessionKey: string; runId?: string }): Promise<void>;
-    cancelRun?(params: { sessionKey: string; runId?: string }): Promise<void>;
   }
 
   export interface SessionRuntimeLike {

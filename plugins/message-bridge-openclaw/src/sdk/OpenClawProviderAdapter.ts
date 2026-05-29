@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 import type {
   ProviderFact,
-  ProviderCommandError,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRuntimeContext,
@@ -14,10 +13,8 @@ import type {
 
 import { reconcileFinalText } from "../reconcileFinalText.js";
 import { resolveEffectiveReplyConfig } from "../resolveEffectiveReplyConfig.js";
-import type { BridgeLogger, MessageBridgeResolvedAccount } from "../types.js";
 import { ApprovalRegistry } from "../runtime/ApprovalRegistry.js";
 import { RuntimeApprovalPort } from "../runtime/InteractionPorts.js";
-import { SessionRegistry } from "../session/SessionRegistry.js";
 import {
   buildMessageDoneFact,
   buildMessageStartFact,
@@ -31,322 +28,33 @@ import {
   buildToolUpdateFact,
   createToolSessionId,
 } from "../session/facts.js";
+import { asRecord, asTrimmedString } from "../utils/type-guards.js";
+import { createAsyncQueue } from "./async-queue.js";
+import { createDeferred } from "./deferred.js";
+import { extractAssistantText } from "./message-extraction.js";
+import type {
+  ActiveRunState,
+  ActiveToolState,
+  MessageBridgeRoute,
+  OpenClawProviderAdapterOptions,
+  RuntimeGatewayEvent,
+  ToolAgentEvent,
+} from "./provider-adapter-types.js";
+import { createProviderCommandError } from "./provider-command-error.js";
+import {
+  asReadyReplyRuntime,
+  asReadySessionRuntime,
+  callRuntimeMethod,
+  loadOpenClawPluginSdk,
+  type ReplyAbortRuntime,
+} from "./runtime-helpers.js";
+import {
+  extractToolSessionIdFromRuntimePayload,
+  pickRecord,
+  pickToolPayload,
+} from "./runtime-payload.js";
 
-type SubagentRuntime = {
-  run(params: {
-    sessionKey: string;
-    message: string;
-    deliver: boolean;
-    idempotencyKey: string;
-  }): Promise<{ runId: string }>;
-  waitForRun(params: { runId: string; timeoutMs: number }): Promise<{ status: string; error?: string }>;
-  getSessionMessages(params: { sessionKey: string; limit: number }): Promise<{ messages: unknown[] }>;
-  deleteSession?(params: { sessionKey: string }): Promise<void>;
-};
-
-type ToolAgentEvent = {
-  runId?: string;
-  sessionKey?: string;
-  stream?: string;
-  data?: unknown;
-};
-
-type RuntimeGatewayEvent = {
-  event?: string;
-  type?: string;
-  payload?: unknown;
-  data?: unknown;
-};
-
-type ReplyRuntime = {
-  abortRun?(params: { sessionKey: string; runId?: string }): Promise<void>;
-  cancelRun?(params: { sessionKey: string; runId?: string }): Promise<void>;
-};
-
-type OpenClawPluginSdkModule = {
-  createReplyPrefixOptions(input: unknown): {
-    onModelSelected?: (selection: { provider: string; model: string; thinkLevel?: string }) => void;
-    [key: string]: unknown;
-  };
-  normalizeOutboundReplyPayload(input: unknown): Record<string, unknown>;
-};
-
-type UsableReplyRuntime = ReplyRuntime & {
-  resolveEnvelopeFormatOptions(config: unknown): unknown;
-  formatAgentEnvelope(input: unknown): unknown;
-  finalizeInboundContext(input: unknown): unknown;
-  dispatchReplyWithBufferedBlockDispatcher(input: unknown): Promise<void>;
-};
-
-type RuntimeSessionRecord = {
-  resolveStorePath(store: string | undefined, opts: { agentId: string }): string;
-  recordInboundSession(input: {
-    storePath: string;
-    sessionKey: string;
-    ctx: Record<string, unknown>;
-    createIfMissing?: boolean;
-    onRecordError: (err: unknown) => void;
-  }): Promise<void>;
-  readSessionUpdatedAt?(params: { storePath: string; sessionKey: string }): number | undefined;
-};
-
-type MessageBridgeRoute = {
-  accountId: string;
-  agentId: string;
-  sessionKey?: string;
-  raw: Record<string, unknown>;
-};
-
-interface AsyncQueueController<T> {
-  iterable: AsyncIterable<T>;
-  push(value: T): void;
-  close(): void;
-  fail(error: unknown): void;
-}
-
-interface ActiveToolState {
-  toolCallId: string;
-  toolName: string;
-  partId: string;
-  title?: string;
-  status: "pending" | "running" | "completed" | "error";
-  input?: unknown;
-  output?: unknown;
-  error?: unknown;
-}
-
-interface ActiveRunState {
-  toolSessionId: string;
-  sessionKey: string;
-  runId: string;
-  messageId: string;
-  textPartId: string;
-  thinkingPartId: string;
-  queue: AsyncQueueController<ProviderFact>;
-  result: {
-    promise: Promise<ProviderTerminalResult>;
-    resolve(value: ProviderTerminalResult): void;
-    reject(error: unknown): void;
-  };
-  started: boolean;
-  completed: boolean;
-  abortRequested: boolean;
-  accumulatedText: string;
-  accumulatedThinking: string;
-  textDeltaCount: number;
-  pendingFinalText: string | null;
-  pendingToolResultTarget: string | null;
-  streamingEnabled: boolean;
-  replyDispatcherOwnsAssistantText: boolean;
-  titleEmitted: boolean;
-  toolStates: Map<string, ActiveToolState>;
-}
-
-export interface OpenClawProviderAdapterOptions {
-  account: MessageBridgeResolvedAccount;
-  config: OpenClawConfig;
-  runtime: PluginRuntime;
-  logger: BridgeLogger;
-  sessionRegistry: SessionRegistry;
-  getSubagentRuntime: () => SubagentRuntime | null;
-  isOnline: () => boolean;
-  onStreamingOutcome?: (outcome: {
-    executionPath: "runtime_reply" | "subagent_fallback";
-    streamingEnabled: boolean;
-    observedRealChunk: boolean;
-  }) => void;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function asTrimmedString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function pickRecord(value: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
-  return asRecord(value[key]);
-}
-
-function hasOwnDefinedProperty(value: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key) && value[key] !== undefined;
-}
-
-function pickToolPayload(value: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    if (hasOwnDefinedProperty(value, key)) {
-      return value[key];
-    }
-  }
-  return undefined;
-}
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-  return { promise, resolve, reject };
-}
-
-function createProviderCommandError(
-  code: ProviderCommandError["code"],
-  message: string,
-  details?: Record<string, unknown>,
-): Error & ProviderCommandError {
-  const error = new Error(message) as Error & ProviderCommandError;
-  error.name = "ProviderCommandError";
-  error.code = code;
-  error.details = details;
-  return error;
-}
-
-function createAsyncQueue<T>(): AsyncQueueController<T> {
-  const values: T[] = [];
-  const waiters: Array<{
-    resolve(value: IteratorResult<T>): void;
-    reject(error: unknown): void;
-  }> = [];
-  let closed = false;
-  let failure: unknown;
-
-  const flush = () => {
-    while (waiters.length > 0 && values.length > 0) {
-      const waiter = waiters.shift();
-      if (!waiter) {
-        continue;
-      }
-      waiter.resolve({ value: values.shift() as T, done: false });
-    }
-
-    if (failure !== undefined) {
-      while (waiters.length > 0) {
-        waiters.shift()?.reject(failure);
-      }
-      return;
-    }
-
-    if (closed) {
-      while (waiters.length > 0) {
-        waiters.shift()?.resolve({ value: undefined, done: true });
-      }
-    }
-  };
-
-  return {
-    iterable: {
-      [Symbol.asyncIterator]() {
-        return {
-          next() {
-            if (values.length > 0) {
-              return Promise.resolve({ value: values.shift() as T, done: false });
-            }
-            if (failure !== undefined) {
-              return Promise.reject(failure);
-            }
-            if (closed) {
-              return Promise.resolve({ value: undefined, done: true });
-            }
-            return new Promise<IteratorResult<T>>((resolve, reject) => {
-              waiters.push({ resolve, reject });
-            });
-          },
-        };
-      },
-    },
-    push(value: T) {
-      if (closed || failure !== undefined) {
-        return;
-      }
-      values.push(value);
-      flush();
-    },
-    close() {
-      if (failure !== undefined) {
-        return;
-      }
-      closed = true;
-      flush();
-    },
-    fail(error: unknown) {
-      if (closed || failure !== undefined) {
-        return;
-      }
-      failure = error;
-      flush();
-    },
-  };
-}
-
-function extractAssistantText(messages: unknown[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = asRecord(messages[index]);
-    if (!message || message.role !== "assistant") {
-      continue;
-    }
-
-    if (typeof message.content === "string" && message.content.trim().length > 0) {
-      return message.content;
-    }
-
-    if (!Array.isArray(message.content)) {
-      continue;
-    }
-
-    const chunks = message.content
-      .map((part) => {
-        const item = asRecord(part);
-        if (!item) {
-          return "";
-        }
-        if (item.type === "text" && typeof item.text === "string") {
-          return item.text;
-        }
-        if (typeof item.content === "string") {
-          return item.content;
-        }
-        return "";
-      })
-      .filter(Boolean);
-    if (chunks.length > 0) {
-      return chunks.join("");
-    }
-  }
-
-  return "";
-}
-
-async function callRuntimeMethod<TArgs>(
-  runtime: ReplyRuntime,
-  candidates: Array<keyof ReplyRuntime>,
-  args: TArgs,
-): Promise<boolean> {
-  for (const key of candidates) {
-    const candidate = runtime[key];
-    if (typeof candidate !== "function") {
-      continue;
-    }
-    await (candidate as (input: TArgs) => Promise<void>)(args);
-    return true;
-  }
-  return false;
-}
-
-async function loadOpenClawPluginSdk(): Promise<OpenClawPluginSdkModule> {
-  const [channelRuntime, replyPayload] = await Promise.all([
-    import("openclaw/plugin-sdk/channel-runtime"),
-    import("openclaw/plugin-sdk/reply-payload"),
-  ]);
-  return {
-    createReplyPrefixOptions: channelRuntime.createReplyPrefixOptions,
-    normalizeOutboundReplyPayload: replyPayload.normalizeOutboundReplyPayload,
-  } as OpenClawPluginSdkModule;
-}
+export type { OpenClawProviderAdapterOptions } from "./provider-adapter-types.js";
 
 /**
  * OpenClaw 宿主能力到 SDK Provider SPI 的适配层。
@@ -358,7 +66,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   private readonly options: OpenClawProviderAdapterOptions;
   private readonly approvalRegistry = new ApprovalRegistry();
   private readonly approvalPort: RuntimeApprovalPort;
+  // OpenClaw 事件可能只携带 sessionKey；这里用 canonical sessionKey 定位正在运行的 SDK run。
   private readonly activeRunsBySessionKey = new Map<string, ActiveRunState>();
+  // 部分宿主事件只携带 runId，run 启动后需要反查到 canonical sessionKey。
   private readonly sessionKeyByRunId = new Map<string, string>();
   private outbound: ProviderRuntimeContext["outbound"] | null = null;
   private unsubscribeAgentEvents: (() => boolean) | null = null;
@@ -404,6 +114,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { toolSessionId };
   }
 
+  /**
+   * 启动一次 SDK request_run，并立即返回 fact 流与终态 promise。
+   * @remarks OpenClaw 的实际执行在后台完成；这里先建立本地输出边界，
+   * 这样 abort、宿主晚到事件和错误收口都能落到同一个 `ActiveRunState`。
+   */
   async runMessage(input: {
     traceId: string;
     runId: string;
@@ -449,10 +164,18 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     };
   }
 
+  /**
+   * OpenClaw 当前没有稳定的问题回复宿主接口。
+   * @remarks 这里显式 fail-closed，避免 SDK 误以为交互请求已被宿主接收。
+   */
   async replyQuestion(_input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
     throw createProviderCommandError("not_supported", "OpenClaw plugin does not support question replies");
   }
 
+  /**
+   * 把 SDK permission_reply 映射到 OpenClaw exec approval 决议。
+   * @remarks `permissionId` 作为 opaque id 透传给宿主，registry 只负责本地 pending/resolved 状态门禁。
+   */
   async replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }> {
     const gatewayApproval = this.approvalRegistry.get(input.permissionId);
     if (!gatewayApproval) {
@@ -481,6 +204,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { applied: true };
   }
 
+  /**
+   * 关闭会话并清理本地映射。
+   * @remarks close_session 是会话生命周期收口；它会删除 subagent 会话，但不再向 SDK 输出 run 终态。
+   */
   async closeSession(input: { traceId: string; toolSessionId: string }): Promise<{ applied: true }> {
     const record = this.options.sessionRegistry.get(input.toolSessionId);
     if (!record) {
@@ -502,6 +229,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { applied: true };
   }
 
+  /**
+   * 取消当前会话内的活跃 run。
+   * @remarks 本地先关闭 fact 流，再 best-effort 调宿主 abort/cancel；
+   * 这样即使宿主取消失败，也不会继续向 SDK 投影晚到增量。
+   */
   async abortSession(input: { traceId: string; toolSessionId: string; runId?: string }): Promise<{ applied: true }> {
     const record = this.options.sessionRegistry.get(input.toolSessionId);
     if (!record) {
@@ -515,7 +247,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
     this.approvalRegistry.clearSession(input.toolSessionId);
 
-    const replyRuntime = this.options.runtime.channel?.reply ?? {};
+    const replyRuntime = (this.options.runtime.channel?.reply ?? {}) as ReplyAbortRuntime;
     let runtimeHandled = false;
     try {
       runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
@@ -548,10 +280,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     input: { text: string; assistantId?: string; runId: string; toolSessionId: string },
   ): Promise<void> {
     try {
+      // 新宿主路径优先走 reply runtime；缺路由或缺 dispatcher 能力时退回 subagent 兼容路径。
       const hasRouteResolver = !!this.options.runtime.channel?.routing?.resolveAgentRoute;
-      const hasReplyRuntime = this.hasUsableReplyRuntime();
-      if (hasRouteResolver && hasReplyRuntime) {
-        await this.runWithReplyRuntime(state, input.text);
+      const replyRuntime = asReadyReplyRuntime(this.options.runtime.channel?.reply);
+      if (hasRouteResolver && replyRuntime) {
+        await this.runWithReplyRuntime(state, input.text, replyRuntime);
       } else {
         await this.runWithSubagentFallback(state, input.text);
       }
@@ -578,29 +311,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
   }
 
-  private hasUsableReplyRuntime(): boolean {
-    const reply = this.options.runtime.channel?.reply;
-    return !!(
-      reply &&
-      typeof reply.resolveEnvelopeFormatOptions === "function" &&
-      typeof reply.formatAgentEnvelope === "function" &&
-      typeof reply.finalizeInboundContext === "function" &&
-      typeof reply.dispatchReplyWithBufferedBlockDispatcher === "function"
-    );
-  }
-
-  private getUsableSessionRecordRuntime(): RuntimeSessionRecord | null {
-    const session = this.options.runtime.channel?.session as RuntimeSessionRecord | undefined;
-    if (
-      session &&
-      typeof session.resolveStorePath === "function" &&
-      typeof session.recordInboundSession === "function"
-    ) {
-      return session;
-    }
-    return null;
-  }
-
   private resolveCanonicalSessionKey(
     route: Record<string, unknown>,
     fallback: string,
@@ -613,6 +323,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return routed ?? fallback;
   }
 
+  /**
+   * 将 SDK 侧临时 sessionKey 切换为 OpenClaw 路由后的 canonical sessionKey。
+   * @remarks 之后的 runtime event、abort 和 session record 都必须使用 canonical key，
+   * 否则会出现宿主事件找不到 active run 的问题。
+   */
   private bindCanonicalSessionKey(state: ActiveRunState, sessionKey: string): void {
     if (sessionKey === state.sessionKey) {
       return;
@@ -654,6 +369,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     };
   }
 
+  /**
+   * 将 OpenClaw 路由结果应用到当前 run。
+   * @remarks fallback 路径允许没有 route；reply runtime 路径必须拿到 sessionKey 才能 fail-closed。
+   */
   private applyRouteSessionKey(
     state: ActiveRunState,
     route: MessageBridgeRoute | null,
@@ -668,7 +387,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     );
   }
 
-  private async runWithReplyRuntime(state: ActiveRunState, text: string): Promise<void> {
+  private async runWithReplyRuntime(
+    state: ActiveRunState,
+    text: string,
+    replyRuntime: NonNullable<ReturnType<typeof asReadyReplyRuntime>>,
+  ): Promise<void> {
     const { createReplyPrefixOptions, normalizeOutboundReplyPayload } = await loadOpenClawPluginSdk();
     const { effectiveConfig, streamingEnabled } = resolveEffectiveReplyConfig(this.options.config);
     state.streamingEnabled = this.options.account.streaming !== false && streamingEnabled;
@@ -677,7 +400,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       throw new Error("openclaw_route_resolver_unavailable");
     }
     this.applyRouteSessionKey(state, route, { required: true });
-    const replyRuntime = this.options.runtime.channel!.reply as UsableReplyRuntime;
+    // reply dispatcher 已经负责 assistant 文本输出；agent stream 中的 assistant 事件只作为旁路观察。
     state.replyDispatcherOwnsAssistantText = true;
     const envelopeOptions = replyRuntime.resolveEnvelopeFormatOptions(effectiveConfig);
     const body = replyRuntime.formatAgentEnvelope({
@@ -715,9 +438,11 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       accountId: this.options.account.accountId,
     });
 
-    const sessionRuntime = this.getUsableSessionRecordRuntime();
+    const sessionRuntime = asReadySessionRuntime(this.options.runtime.channel?.session);
     if (sessionRuntime) {
-      const storePath = sessionRuntime.resolveStorePath(effectiveConfig.session?.store, { agentId: route.agentId });
+      const sessionConfig = asRecord(effectiveConfig.session);
+      const sessionStore = typeof sessionConfig?.store === "string" ? sessionConfig.store : undefined;
+      const storePath = sessionRuntime.resolveStorePath(sessionStore, { agentId: route.agentId });
       await sessionRuntime.recordInboundSession({
         storePath,
         sessionKey: state.sessionKey,
@@ -786,6 +511,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     if (info.kind === "tool") {
+      // dispatcher 的 tool payload 是上一条 tool result 的补充文本，必须挂回对应 tool part。
       const toolCallId = state.pendingToolResultTarget;
       if (!toolCallId) {
         return;
@@ -818,11 +544,13 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     if (info.kind === "final") {
+      // final 只暂存，最后统一和 block 累积文本 reconcile，避免重复输出。
       state.pendingFinalText = text;
       return;
     }
 
     if (!state.streamingEnabled) {
+      // 禁用流式时仍累积文本，最终只投影 text.done。
       state.accumulatedText += text;
       return;
     }
@@ -848,6 +576,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const route = this.resolveMessageBridgeRoute({ cfg: effectiveConfig, state, required: false });
     this.applyRouteSessionKey(state, route);
 
+    // fallback 只拿最终会话消息，不依赖 reply dispatcher 的 block/final 流式协议。
     const run = await subagent.run({
       sessionKey: state.sessionKey,
       message: text,
@@ -889,6 +618,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private completeTextMessage(state: ActiveRunState): void {
     this.ensureMessageStarted(state);
+    // OpenClaw 可能同时给 block 增量和 final 全量；这里集中去重/补尾。
     const reconciliation = reconcileFinalText(state.accumulatedText, state.pendingFinalText);
     const finalText = reconciliation.finalText || state.accumulatedText || "(empty response)";
     state.accumulatedText = finalText;
@@ -910,6 +640,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
     state.started = true;
     if (!state.titleEmitted) {
+      // SDK fact 流不携带 toolSessionId，title 只在首条消息开始时补一次。
       state.titleEmitted = true;
       state.queue.push(buildSessionTitleFact({
         toolSessionId: state.toolSessionId,
@@ -923,6 +654,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
   private subscribeRuntimeGatewayEvents(): (() => boolean) | null {
     const events = this.options.runtime.events;
+    // 不同 OpenClaw 版本暴露的系统事件订阅名不同，按新到旧兼容探测。
     const subscribe = events?.onGatewayEvent ?? events?.onSystemEvent ?? events?.onEvent;
     if (!subscribe) {
       return null;
@@ -953,12 +685,15 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       this.handleApprovalResolved(payload);
       return;
     }
-
   }
 
+  /**
+   * 把 OpenClaw exec approval 请求投影成 SDK permission.ask fact。
+   * @remarks approval 是会话外事件，必须走 outbound 通道，而不是当前 request_run 的 fact 队列。
+   */
   private async handleApprovalRequested(eventName: string, payload: Record<string, unknown>): Promise<void> {
     const permissionId = asTrimmedString(payload.id) ?? asTrimmedString(payload.permissionId);
-    const toolSessionId = this.extractToolSessionIdFromRuntimePayload(payload);
+    const toolSessionId = extractToolSessionIdFromRuntimePayload(payload);
     if (!permissionId || !toolSessionId) {
       return;
     }
@@ -1010,6 +745,10 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     this.approvalRegistry.markResolved(permissionId);
   }
 
+  /**
+   * 发送由宿主事件触发的 outbound fact。
+   * @remarks outbound 由 SDK runtime 统一补 session ownership 字段；adapter 不直接写 wire 消息。
+   */
   private async emitRuntimeOutboundFacts(input: {
     toolSessionId: string;
     messageId: string;
@@ -1031,23 +770,6 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     for (const fact of facts) {
       yield fact;
     }
-  }
-
-  private extractToolSessionIdFromRuntimePayload(payload: Record<string, unknown>): string | undefined {
-    const metadata = pickRecord(payload, "metadata");
-    const info = pickRecord(payload, "info");
-    const session = pickRecord(payload, "session");
-    const tool = pickRecord(payload, "tool");
-    return (
-      asTrimmedString(payload.toolSessionId) ??
-      asTrimmedString(payload.sessionID) ??
-      asTrimmedString(payload.sessionId) ??
-      asTrimmedString(info?.id) ??
-      asTrimmedString(session?.id) ??
-      asTrimmedString(metadata?.toolSessionId) ??
-      asTrimmedString(metadata?.sessionID) ??
-      asTrimmedString(tool?.sessionID)
-    );
   }
 
   private handleRuntimeAgentEvent(evt: ToolAgentEvent): void {
@@ -1082,6 +804,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
     if (evt.stream === "assistant") {
       if (state.replyDispatcherOwnsAssistantText) {
+        // reply runtime 路径下 assistant 文本由 dispatcher 投影，避免双来源重复增量。
         return;
       }
       this.handleAssistantAgentEvent(state, payload);
@@ -1104,6 +827,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const phase = asTrimmedString(payload.phase) ?? "update";
     let toolState = state.toolStates.get(toolCallId);
     if (!toolState) {
+      // 同一个 toolCallId 可能多次 update/result；本地状态用于合并 input、output、error。
       toolState = {
         toolCallId,
         toolName,
@@ -1129,6 +853,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       const directError = pickToolPayload(payload, ["error", "result"]);
       toolState.output = !isError && directOutput !== undefined ? directOutput : toolState.output;
       toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
+      // 后续 dispatcher tool 文本会补到这个 tool call 上。
       state.pendingToolResultTarget = toolCallId;
     } else {
       toolState.status = "running";
@@ -1156,6 +881,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const fullText = typeof payload.text === "string" ? payload.text : "";
     let deltaText = typeof payload.delta === "string" ? payload.delta : "";
 
+    // 宿主可能发 full text，也可能发 delta；优先从 full text 里计算未见过的 suffix。
     if (fullText.startsWith(state.accumulatedText)) {
       const suffix = fullText.slice(state.accumulatedText.length);
       if (suffix.length > 0) {
@@ -1174,15 +900,16 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const nextText = fullText || `${state.accumulatedText}${deltaText}`;
     state.accumulatedText = nextText;
     if (!state.streamingEnabled) {
+      // 非流式模式只更新累积文本，等待最终 text.done。
       return;
     }
 
     this.ensureMessageStarted(state);
     state.textDeltaCount += 1;
-      state.queue.push(buildTextDeltaFact({
-        messageId: state.messageId,
-        partId: state.textPartId,
-        content: deltaText,
+    state.queue.push(buildTextDeltaFact({
+      messageId: state.messageId,
+      partId: state.textPartId,
+      content: deltaText,
       raw: payload,
     }));
   }
@@ -1202,6 +929,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       deltaText.length > 0 &&
       (phase !== "finish" && phase !== "result" || state.accumulatedThinking.length === 0);
     if (shouldEmitReasoningDelta) {
+      // finish/result 可能只带最终 reasoning；若此前没有 delta，也要补一个 delta 保持事实完整。
       state.accumulatedThinking += deltaText;
       this.ensureMessageStarted(state);
       state.queue.push(buildThinkingDeltaFact({

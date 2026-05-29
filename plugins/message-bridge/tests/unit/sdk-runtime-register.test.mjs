@@ -73,8 +73,8 @@ function createDeferred() {
   return { promise, resolve, reject };
 }
 
-function createResolvedConfig() {
-  return {
+function createResolvedConfig(overrides = {}) {
+  const config = {
     config_version: 1,
     enabled: true,
     debug: false,
@@ -88,6 +88,22 @@ function createResolvedConfig() {
     },
     events: {
       allowlist: ['message.updated'],
+    },
+  };
+  return {
+    ...config,
+    ...overrides,
+    gateway: {
+      ...config.gateway,
+      ...(overrides.gateway ?? {}),
+    },
+    auth: {
+      ...config.auth,
+      ...(overrides.auth ?? {}),
+    },
+    events: {
+      ...config.events,
+      ...(overrides.events ?? {}),
     },
   };
 }
@@ -150,10 +166,10 @@ function installRegisterCaptureWebSocket() {
   };
 }
 
-async function startSdkRuntime(overrides = {}) {
+async function startSdkRuntime(overrides = {}, configOverrides = {}) {
   const runtime = new (class extends SdkBridgeRuntime {
     async resolveConfig() {
-      return createResolvedConfig();
+      return createResolvedConfig(configOverrides);
     }
   })({
     client: createSdkRuntimeClient(overrides),
@@ -163,6 +179,10 @@ async function startSdkRuntime(overrides = {}) {
   await runtime.start();
   await new Promise((resolve) => setTimeout(resolve, 10));
   return runtime;
+}
+
+async function flushAppLogs() {
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 function getProviderAdapter(runtime) {
@@ -302,6 +322,69 @@ test('sdk runtime logs session-isolation store file path during startup', async 
     assert.equal(storeLogs[0].extra.pathMode, 'unix_user_local_share');
     assert.equal(storeLogs[0].extra.hasOverrideDataDir, true);
     assert.match(storeLogs[0].extra.filePath, /entry-session-store\.json$/u);
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
+test('sdk runtime applies config debug to provider adapter child logger', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const logs = [];
+
+  try {
+    const runtime = await startSdkRuntime({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    }, { debug: true });
+    getProviderAdapter(runtime).logger.debug('provider_adapter.event.received', {
+      eventType: 'message.updated',
+      rawSessionId: 'ses-debug-enabled',
+    });
+    await flushAppLogs();
+
+    const received = logs.find((entry) => entry?.message === 'provider_adapter.event.received');
+    assert.equal(received?.level, 'info');
+    assert.equal(received?.extra.component, 'provider_adapter');
+    assert.equal(received?.extra.runtimeMode, 'sdk');
+    assert.equal(received?.extra.eventType, 'message.updated');
+    assert.equal(received?.extra.rawSessionId, 'ses-debug-enabled');
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
+test('sdk runtime keeps provider adapter debug logs unpromoted when final debug config is false', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const logs = [];
+
+  try {
+    const runtime = await startSdkRuntime({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    }, { debug: false });
+    getProviderAdapter(runtime).logger.debug('provider_adapter.event.received', {
+      eventType: 'message.updated',
+      rawSessionId: 'ses-debug-disabled',
+    });
+    await flushAppLogs();
+
+    const received = logs.find((entry) => entry?.message === 'provider_adapter.event.received');
+    assert.equal(received?.level, 'debug');
+    assert.equal(received?.extra.component, 'provider_adapter');
+    assert.equal(received?.extra.runtimeMode, 'sdk');
+    assert.equal(received?.extra.rawSessionId, 'ses-debug-disabled');
 
     runtime.stop();
   } finally {

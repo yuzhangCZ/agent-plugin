@@ -81,7 +81,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   private readonly rawClient;
   private readonly sdkClient;
   private readonly missingSdkCapabilities;
-  private readonly logger: BridgeLogger;
+  private logger: BridgeLogger;
   private readonly statusAdapter: BridgeRuntimeStatusAdapter;
   private readonly sessionIsolationDataDir?: string;
 
@@ -102,7 +102,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.rawClient = toHostClientLike(options.client);
     this.sdkClient = createSdkAdapter(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
-    this.logger = new AppLogger(options.client, { component: 'sdk_runtime', runtimeMode: SDK_RUNTIME_MODE }, options.runtimeTraceId);
+    this.logger = this.createRuntimeLogger({ traceId: options.runtimeTraceId });
     this.statusAdapter = createBridgeRuntimeStatusAdapter();
     this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
@@ -137,6 +137,10 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       throw disabledError;
     }
 
+    this.logger = this.createRuntimeLogger({
+      traceId: this.logger.getTraceId(),
+      debug: !!config.debug,
+    });
     this.effectiveDirectory = config.bridgeDirectory;
     this.eventFilter = new EventFilter(config.events.allowlist);
 
@@ -345,19 +349,20 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     try {
       const startPromise = this.sdkRuntime.start();
       if (options.abortSignal) {
+        const { abortSignal } = options;
         const abortPromise = new Promise<never>((_, reject) => {
           abortListener = () => {
             void this.sdkRuntime?.stop().catch(() => undefined);
             reject(new Error('runtime_start_aborted'));
           };
-          if (options.abortSignal?.aborted) {
+          if (abortSignal.aborted) {
             abortListener();
             return;
           }
-          options.abortSignal.addEventListener('abort', abortListener, { once: true });
+          abortSignal.addEventListener('abort', abortListener, { once: true });
         });
         await Promise.race([startPromise, abortPromise]);
-        if (options.abortSignal.aborted) {
+        if (abortSignal.aborted) {
           await startPromise.catch(() => undefined);
           throw new Error('runtime_start_aborted');
         }
@@ -416,6 +421,16 @@ export class SdkBridgeRuntime implements ManagedRuntime {
 
   protected async resolveConfig() {
     return loadConfig(this.workspacePath, this.logger);
+  }
+
+  private createRuntimeLogger(input: { traceId?: string; debug?: boolean } = {}): BridgeLogger {
+    return new AppLogger(
+      this.rawClient,
+      { component: 'sdk_runtime', runtimeMode: SDK_RUNTIME_MODE },
+      input.traceId,
+      undefined,
+      input.debug,
+    );
   }
 
   private async getHostSessionInfo(client: BridgeSdkClient, sessionId: string) {
