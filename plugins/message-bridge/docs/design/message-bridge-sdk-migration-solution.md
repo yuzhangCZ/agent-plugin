@@ -791,6 +791,7 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 ## 8. 双轨迁移的接口约束
 
 双轨隔离在本轮只作为接口约束保留，不作为主设计对象展开 rollout。
+截至 SDK runtime cutover，插件 singleton 已固定创建 `SdkBridgeRuntime`，不再支持 legacy runtime mode；本节双轨约束仅作为迁移期背景与回滚风险说明。
 
 ### 8.1 保留双轨的前提
 
