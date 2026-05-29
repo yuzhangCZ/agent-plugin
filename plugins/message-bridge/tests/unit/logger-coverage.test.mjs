@@ -92,6 +92,49 @@ describe('AppLogger coverage', () => {
     assert.deepStrictEqual(calls[0].body.extra.items, ['x', 'y']);
   });
 
+  test('keeps debug logs at debug level when debug mode is disabled', async () => {
+    const calls = [];
+    const logger = new AppLogger({
+      app: {
+        log: async (options) => {
+          calls.push(options);
+          return true;
+        },
+      },
+    });
+
+    logger.debug('event.received', { eventType: 'message.updated' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].body.level, 'debug');
+    assert.strictEqual(calls[0].body.message, 'event.received');
+    assert.strictEqual(calls[0].body.extra.eventType, 'message.updated');
+  });
+
+  test('promotes debug logs to info level when debug mode is enabled without changing payload', async () => {
+    process.env.BRIDGE_DEBUG = 'true';
+    const calls = [];
+    const logger = new AppLogger({
+      app: {
+        log: async (options) => {
+          calls.push(options);
+          return true;
+        },
+      },
+    });
+
+    logger.debug('event.received', { eventType: 'message.updated' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].body.level, 'info');
+    assert.strictEqual(calls[0].body.message, 'event.received');
+    assert.strictEqual(calls[0].body.extra.eventType, 'message.updated');
+    assert.strictEqual(Object.hasOwn(calls[0].body.extra, 'originalLevel'), false);
+    assert.strictEqual(Object.hasOwn(calls[0].body.extra, 'debugPromotedToInfo'), false);
+  });
+
   test('preserves presence/value shape for redacted env snapshot entries', async () => {
     const calls = [];
     const logger = new AppLogger({
