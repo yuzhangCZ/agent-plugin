@@ -217,9 +217,9 @@ runtime concept.
 
 The implementation uses a three-layer single-source-of-truth model:
 
-1. `BridgeRuntime` decides `effectiveDirectory`
-2. `ActionContext` distributes `effectiveDirectory`
-3. a shared SDK parameter helper attaches `directory` to supported requests
+1. `SdkBridgeRuntime` resolves `effectiveDirectory` during SDK runtime composition
+2. provider/control-plane adapters distribute `effectiveDirectory`
+3. SDK runtime commands attach `directory` to supported provider requests
 
 ### 8.3 Decision Rules
 

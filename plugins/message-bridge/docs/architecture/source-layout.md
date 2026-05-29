@@ -13,6 +13,7 @@
 ```text
 src/
   contracts/
+  domain/
   protocol/
     upstream/
     downstream/
@@ -21,10 +22,13 @@ src/
   usecase/
   port/
   adapter/
-  connection/
+  gateway-wire/
   config/
   error/
   event/
+  session/
+  transport/
+  utils/
   types/
 ```
 
@@ -141,13 +145,19 @@ src/
 
 - 如果代码直接接触环境变量、文件系统或 SDK，实现 Port 时，放这里
 
-### `connection/`
+### `gateway-wire/`
 
-基础设施连接层。
+gateway 线协议适配层。
 
-- `AkSkAuth`
-- `GatewayConnection`
-- `StateManager`
+- `downstream.ts`
+- `tool-event.ts`
+- `transport.ts`
+
+判断标准：
+
+- 如果代码定义 gateway 线协议消息与 SDK runtime 之间的转换形状，放这里
+
+实际 WebSocket 连接、注册、重连与上下行发送由 `packages/bridge-runtime-sdk/src/adapters/gateway/*` 负责。
 
 ### `config/`
 
@@ -199,8 +209,8 @@ protocol
   <- runtime
 
 runtime
-  -> action
-  -> connection
+  -> gateway-wire
+  -> bridge-runtime-sdk
   -> usecase
   -> adapter
 ```
@@ -228,4 +238,4 @@ runtime
 3. `contracts/transport-messages.ts`
 4. `protocol/upstream/UpstreamEventExtractor.ts`
 5. `protocol/downstream/DownstreamMessageNormalizer.ts`
-6. `runtime/BridgeRuntime.ts`
+6. `runtime/SdkBridgeRuntime.ts`

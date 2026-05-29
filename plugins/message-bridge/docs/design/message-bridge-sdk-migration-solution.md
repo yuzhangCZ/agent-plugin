@@ -80,13 +80,13 @@
 
 ## 2. 为什么要迁移
 
-当前 `message-bridge` 主链路中，`BridgeRuntime` 同时承担连接、编排、compat、投影与 OpenCode 宿主兼容职责，运行时重心过于集中。
+迁移前 `message-bridge` 主链路中，legacy runtime 同时承担连接、编排、compat、投影与 OpenCode 宿主兼容职责，运行时重心过于集中。
 
 迁移前架构如下：
 
 ```mermaid
 flowchart LR
-  GW[AI Gateway] --> RT[message-bridge BridgeRuntime]
+  GW[AI Gateway] --> RT[message-bridge legacy runtime]
   RT --> PROTOD[protocol/downstream]
   RT --> ACT[action/usecase]
   ACT --> SDKA[SdkAdapter]
@@ -101,7 +101,7 @@ flowchart LR
 
 现状问题：
 
-1. `BridgeRuntime` 同时持有连接、编排、compat 与投影职责，聚合过重。
+1. legacy runtime 同时持有连接、编排、compat 与投影职责，聚合过重。
 2. `SdkAdapter` 只负责调用兼容，不负责 runtime 语义统一。
 3. OpenCode raw event 到 gateway uplink 的收口不唯一。
 4. compat / projector 与 SDK 目标态能力重叠，容易形成双重 terminal 与双重 interaction 语义。

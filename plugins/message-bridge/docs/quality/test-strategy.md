@@ -531,94 +531,44 @@ describe('UT-EVNT-002', () => {
 #### UT-ENVL-008: `tool_event` 不携带 `sessionId` 或 `envelope`
 
 **前置条件:**
-- `BridgeRuntime` 实例已创建
-- `gatewayConnection.send()` 已 mock
+- SDK runtime 已通过 provider fact 生成 uplink
+- gateway wire message 已通过 schema 校验
 
 **测试步骤:**
-1. 将 runtime 状态置为 `READY`
-2. 设置允许 `message.*` 的事件白名单
-3. 发送一个 `message.delta` 事件
-4. 检查上行消息字段
+1. 在 `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts` 中构造 provider fact
+2. 等待 SDK runtime 生成 `tool_event`
+3. 检查 gateway uplink 的扁平协议字段
 
 **预期结果:**
 - 发送一条 `tool_event`
 - 消息仅包含当前扁平协议字段
 - `sessionId` 与 `envelope` 均不存在
 
-**测试代码:**
-```typescript
-describe('UT-ENVL-008', () => {
-  it('should forward flat tool_event fields only', async () => {
-    const runtime = new BridgeRuntime({ client: {} });
-    const sent: unknown[] = [];
-
-    runtime.gatewayConnection = { send: (msg: unknown) => sent.push(msg) };
-    runtime.eventFilter = new EventFilter(['message.*']);
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleEvent({
-      type: 'message.delta',
-      properties: { sessionId: 'tool-1' },
-      text: 'hello',
-    });
-
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ type: 'tool_event' });
-    expect((sent[0] as Record<string, unknown>).sessionId).toBeUndefined();
-    expect((sent[0] as Record<string, unknown>).envelope).toBeUndefined();
-  });
-});
-```
+**当前证据:**
+- `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts`
+- `plugins/message-bridge/tests/unit/upstream-transport-projector.test.mjs`
 
 ---
 
 #### UT-ENVL-010: allowlist 拒绝仅记录日志，不发送上行消息
 
 **前置条件:**
-- `BridgeRuntime` 实例已创建
-- 日志 sink 与 `gatewayConnection.send()` 已 mock
+- OpenCode provider adapter 已创建
+- 事件 allowlist / provider fact translation 已配置
 
 **测试步骤:**
-1. 将 runtime 状态置为 `READY`
-2. allowlist 仅允许 `session.idle`
-3. 发送一个 `session.created` 事件
-4. 检查日志与发送记录
+1. 发送不应被 provider 翻译为 SDK fact 的 raw event
+2. 检查 provider adapter 处理结果
+3. 检查 SDK runtime 没有生成 uplink
 
 **预期结果:**
 - 不发送 `tool_event`
-- 记录 `event.rejected_allowlist`
+- OpenCode 专用过滤留在 provider adapter / control-plane 层
 - 不发送 `tool_error`
 
-**测试代码:**
-```typescript
-describe('UT-ENVL-010', () => {
-  it('should log and drop rejected events', async () => {
-    const logs: unknown[] = [];
-    const sent: unknown[] = [];
-    const runtime = new BridgeRuntime({
-      client: {
-        app: {
-          log: async (entry: unknown) => {
-            logs.push(entry);
-            return true;
-          },
-        },
-      },
-    });
-
-    runtime.gatewayConnection = { send: (msg: unknown) => sent.push(msg) };
-    runtime.eventFilter = new EventFilter(['session.idle']);
-    runtime.stateManager.setState('READY');
-
-    await runtime.handleEvent({ type: 'session.created' });
-
-    expect(sent).toHaveLength(0);
-    expect(
-      logs.some((entry) => (entry as { body?: { message?: string } }).body?.message === 'event.rejected_allowlist'),
-    ).toBe(true);
-  });
-});
-```
+**当前证据:**
+- `plugins/message-bridge/tests/unit/sdk-provider-adapter.test.mjs`
+- `plugins/message-bridge/tests/unit/session-isolation-*.test.mjs`
 
 ---
 

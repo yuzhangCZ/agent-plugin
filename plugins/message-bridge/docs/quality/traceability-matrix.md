@@ -6,7 +6,7 @@
 |---|---|
 | Boundary contracts are explicit | `src/contracts/*` |
 | Schema owner is centralized | `src/protocol/*` |
-| Runtime does orchestration only | `src/runtime/BridgeRuntime.ts` |
+| Runtime orchestration is SDK-owned | `packages/bridge-runtime-sdk/src/application/**`; plugin composition root: `src/runtime/SdkBridgeRuntime.ts` |
 | Upstream transport projection is explicit | `src/transport/upstream/*` |
 | Actions are execute-only | `src/action/*` |
 | Upstream allowlist is exact | `DEFAULT_EVENT_ALLOWLIST` in `contracts/upstream-events.ts` |
@@ -16,12 +16,12 @@
 
 | Message / action | Contract | Normalizer | Action |
 |---|---|---|---|
-| `status_query` | `contracts/downstream-messages.ts` | `protocol/downstream/DownstreamMessageNormalizer.ts` | runtime direct response |
+| `status_query` | `contracts/downstream-messages.ts` + `src/gateway-wire/downstream.ts` | `packages/bridge-runtime-sdk/src/adapters/gateway/GatewayDownstreamCommandAdapter.ts` | SDK runtime status response |
 | `invoke/chat` | same | same | `action/ChatAction.ts` |
 | `invoke/create_session` | same | same | `action/CreateSessionAction.ts` |
 | `invoke/close_session` | same | same | `action/CloseSessionAction.ts` |
 | `invoke/permission_reply` | same | same | `action/PermissionReplyAction.ts` |
-| `invoke/status_query` | same | same | runtime direct response |
+| `invoke/status_query` | same | same | SDK runtime status response |
 | `invoke/abort_session` | same | same | `action/AbortSessionAction.ts` |
 | `invoke/question_reply` | same | same | `action/QuestionReplyAction.ts` |
 
@@ -76,7 +76,7 @@
 |---|---|---|
 | PRD §12 `message.updated` transport pruning keeps lightweight summary fields and drops `before/after` | `src/transport/upstream/DefaultUpstreamTransportProjector.ts` + `MessageUpdatedProjector.ts` | `tests/unit/upstream-transport-projector.test.mjs` |
 | PRD §12 transport pruning must not mutate the original upstream event | `src/transport/upstream/MessageUpdatedProjector.ts` returns a projected copy before send | `tests/unit/upstream-transport-projector.test.mjs` |
-| PRD §12 payload reduction must stay below the defined threshold | `src/runtime/BridgeRuntime.ts` forwards projected `tool_event` payload and preserves original/transport byte diagnostics | `tests/integration/protocol-message-updated-large-payload.test.mjs` |
+| PRD §12 payload reduction must stay below the defined threshold | `src/transport/upstream/*` projects `tool_event` payload before the SDK runtime sends uplink messages | `tests/unit/upstream-transport-projector.test.mjs` |
 
 Gate classification:
 
@@ -92,5 +92,5 @@ The current implementation satisfies the main refactor goal:
 
 - raw protocol parsing is isolated to `protocol/*`
 - external message shapes are isolated to `contracts/*`
-- runtime no longer owns payload schema
+- runtime orchestration is owned by `bridge-runtime-sdk`; plugin runtime only wires provider/gateway/configuration
 - actions no longer own payload schema

@@ -4,7 +4,7 @@
 **Date:** 2026-04-04
 **Status:** Active  
 **Owner:** message-bridge maintainers  
-**Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/BridgeRuntime.ts`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
+**Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/SdkBridgeRuntime.ts`, `../../../../packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
 
 ## In Scope
 
