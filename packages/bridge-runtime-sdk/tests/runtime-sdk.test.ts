@@ -277,6 +277,23 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   });
 });
 
+test('runtime responds to status_query with provider health status', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'status_query',
+    welinkSessionId: 'welink-status-1',
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'status_response',
+    opencodeOnline: true,
+  });
+});
+
 test('runtime projects subagent envelope fields from provider facts onto tool_event messages', async () => {
   const connection = new FakeGatewayClient();
   const provider: ThirdPartyAgentProvider = {
@@ -2702,8 +2719,7 @@ test('runtime diagnostics record lastReadyAt when gateway becomes ready', async 
 
 test('runtime probe short-circuits when same gateway url and ak runtime is ready', async () => {
   const runtimeConnection = new FakeGatewayClient();
-  const probeConnection = new FakeGatewayClient();
-  let probeConnectionAttempts = 0;
+  let connectionFactoryCalls = 0;
   const gatewayHost = {
     url: 'ws://gateway.local',
     auth: {
@@ -2741,15 +2757,19 @@ test('runtime probe short-circuits when same gateway url and ak runtime is ready
       },
     },
     gatewayHost,
-    connectionFactory: () => runtimeConnection,
+    connectionFactory: () => {
+      connectionFactoryCalls += 1;
+      return runtimeConnection;
+    },
   });
 
   await runtime.start();
+  assert.equal(connectionFactoryCalls, 1);
 
   const result = await runtime.probe({ timeoutMs: 50 });
 
   assert.deepEqual(result.state, 'ready');
-  assert.equal(probeConnectionAttempts, 0);
+  assert.equal(connectionFactoryCalls, 1);
 });
 
 test('different runtimes with the same gateway url and ak own separate connections', async () => {
