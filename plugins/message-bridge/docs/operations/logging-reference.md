@@ -21,8 +21,8 @@
 
 - `debug` 默认关闭
 - `config.env.snapshot` 固定使用 `info` 级输出，不受 `debug` 开关影响
-- 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文
-- 这些原始报文日志固定使用 `info` 级别，避免依赖宿主 `debug` 级过滤后丢失
+- 当 `debug=true` 时，结构化 `debug` 日志会通过 `info` 级别投递，避免依赖宿主 `debug` 级过滤后丢失
+- 当 `debug=true` 时，连接层会额外输出原始 WebSocket 报文；这些原始报文日志固定使用 `info` 级别
 
 ## 2. 字段字典
 
@@ -40,7 +40,7 @@
 | 场景 | 行为 |
 |---|---|
 | 默认（`BRIDGE_DEBUG` 未开启） | 输出脱敏后的完整字段 |
-| `BRIDGE_DEBUG=true` | 不改变 `extra` 内容；除了 fallback / send-failed 的 `console.debug` 提示外，还会在连接层额外输出 `info` 级原始 WebSocket 报文 |
+| `BRIDGE_DEBUG=true` | 不改变 `extra` 内容；结构化 `debug` 日志通过 `info` 级别投递；除了 fallback / send-failed 的 `console.debug` 提示外，还会在连接层额外输出 `info` 级原始 WebSocket 报文 |
 | 脱敏键 | key 包含 `ak/sk/token/authorization/cookie/secret/password` 时值替换为 `***` |
 | 无 `client.app.log` 能力 | 不抛错；仅在 `BRIDGE_DEBUG=true` 时 `console.debug` 提示 `log-fallback` |
 | `client.app.log` 抛错 | 吞错不影响主流程；仅在 `BRIDGE_DEBUG=true` 时 `console.debug` 提示 `log-send-failed` |

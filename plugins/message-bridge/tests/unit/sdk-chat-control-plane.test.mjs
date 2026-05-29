@@ -1023,6 +1023,7 @@ test('SdkChatPreprocessor accepts miniapp chat when assistantAccount is missing 
             controlled: false,
             allowOpencodeNativeSessions: true,
             allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+            slashPolicySource: 'entry_template',
           },
         });
         return {
@@ -1160,16 +1161,92 @@ test('SdkChatPreprocessor applies request scoped slash policy after entry contex
   }, createCapturingLogger(logs));
 
   assert.equal(result.kind, 'synthetic_run');
+  assert.equal(
+    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
+    'info',
+  );
   assert.deepEqual(
     logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
     {
       toolSessionId: 'tool-policy-slash',
       runId: 'run-policy-slash',
-      policySource: 'entry_policy',
+      policySource: 'request_payload',
       allowedSlashCommands: ['new'],
       decisionKind: 'slash',
       commandKind: 'sessions',
       disabledInEntry: true,
+      invalid: false,
+    },
+  );
+});
+
+test('SdkChatPreprocessor records entry template slash policy source without request override', async () => {
+  const logs = [];
+  const preprocessor = new SdkChatPreprocessor({
+    chatEntryPolicy: new ChatEntryPolicy({
+      slashCommandParser: new SimpleSlashCommandParser(),
+      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+    }),
+    slashExecutionUseCase: {
+      execute: async () => ({
+        runId: 'synthetic-entry-template',
+        facts: (async function* () {})(),
+        result: async () => ({ outcome: 'completed' }),
+      }),
+    },
+    contextResolver: {
+      resolveForChat: async () => {
+        throw new Error('unexpected_context_resolve');
+      },
+      resolveForControlAction: async () => {
+        throw new Error('unexpected_control_resolve');
+      },
+    },
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
+    normalChatSessionResolver: {
+      resolve: async () => ({
+        opencodeSessionId: 'ses-entry-template',
+        session: { id: 'ses-entry-template' },
+        bootstrapSource: 'existing_binding',
+      }),
+    },
+  });
+
+  const result = await preprocessor.preprocess({
+    traceId: 'trace-entry-template-slash',
+    runId: 'run-entry-template-slash',
+    toolSessionId: 'tool-entry-template-slash',
+    text: '/models',
+    context: {
+      sendUserAccount: '1',
+    },
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'miniapp',
+        businessSessionType: 'direct',
+        businessSessionId: null,
+      },
+    },
+  }, createCapturingLogger(logs));
+
+  assert.equal(result.kind, 'synthetic_run');
+  assert.equal(
+    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
+    'info',
+  );
+  assert.deepEqual(
+    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
+    {
+      toolSessionId: 'tool-entry-template-slash',
+      runId: 'run-entry-template-slash',
+      policySource: 'entry_template',
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      decisionKind: 'slash',
+      commandKind: 'models',
+      disabledInEntry: false,
       invalid: false,
     },
   );
@@ -1209,12 +1286,16 @@ test('SdkChatPreprocessor records local default slash policy source without entr
   }, createCapturingLogger(logs));
 
   assert.equal(result.kind, 'synthetic_run');
+  assert.equal(
+    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
+    'info',
+  );
   assert.deepEqual(
     logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
     {
       toolSessionId: 'tool-local-default-slash',
       runId: 'run-local-default-slash',
-      policySource: 'local_default_no_entry_context',
+      policySource: 'local_default',
       allowedSlashCommands: undefined,
       decisionKind: 'slash',
       commandKind: 'sessions',
@@ -1226,6 +1307,7 @@ test('SdkChatPreprocessor records local default slash policy source without entr
 
 test('SdkChatPreprocessor passes effective directory to formal normal chat resolver', async () => {
   const resolverCalls = [];
+  const logs = [];
   const preprocessor = new SdkChatPreprocessor({
     chatEntryPolicy: new ChatEntryPolicy({
       slashCommandParser: new SimpleSlashCommandParser(),
@@ -1272,10 +1354,14 @@ test('SdkChatPreprocessor passes effective directory to formal normal chat resol
         businessSessionId: 'group-formal-chat',
       },
     },
-  });
+  }, createCapturingLogger(logs));
 
   assert.equal(result.kind, 'normal_chat');
   assert.equal(resolverCalls[0].directory, '/workspace/formal-chat');
+  assert.equal(
+    logs.some((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision'),
+    false,
+  );
 });
 
 test('DefaultChatExecutionContextResolver allows stale real sessionId to keep acting as anchor after rebind', async () => {

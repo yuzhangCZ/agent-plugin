@@ -587,10 +587,10 @@ export class SdkChatPreprocessor {
       );
     const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
     if (decision.kind === 'slash') {
-      logger?.debug?.('sdk_chat_preprocessor.entry_policy_decision', {
+      logger?.info?.('sdk_chat_preprocessor.entry_policy_decision', {
         toolSessionId: input.toolSessionId,
         runId: input.runId,
-        policySource: entryContext ? 'entry_policy' : 'local_default_no_entry_context',
+        policySource: entryContext?.policy.slashPolicySource ?? 'local_default',
         allowedSlashCommands: entryContext?.policy.allowedSlashCommands,
         decisionKind: decision.kind,
         commandKind: decision.descriptor.kind,

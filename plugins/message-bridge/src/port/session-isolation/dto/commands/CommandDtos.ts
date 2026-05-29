@@ -6,6 +6,7 @@ export interface BusinessEntryPolicy {
   controlled: boolean;
   allowOpencodeNativeSessions: boolean;
   allowedSlashCommands: SlashCommandDescriptor['kind'][];
+  slashPolicySource?: 'entry_template' | 'request_payload';
 }
 
 export interface ChatContextQuery {

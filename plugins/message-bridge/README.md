@@ -310,7 +310,7 @@ register 元数据会在运行时自动收集：
 - `event.extraction_failed`
 - `downstream.normalization_failed`
 
-`debug` 默认关闭。启用 `debug`（例如设置 `BRIDGE_DEBUG=true`）后，bridge 除了保留原有 debug 级诊断信息，还会以 `info` 级输出可读的原始 WebSocket 上下行报文，例如 `「onMessage」===>「...」`、`「sendMessage」===>「...」`，便于联调与落盘检索。即使日志投递不可用，`BRIDGE_DEBUG=true` 仍会输出本地 `console.debug` fallback 提示。
+`debug` 默认关闭。启用 `debug`（例如设置 `BRIDGE_DEBUG=true`）后，bridge 会将结构化 debug 诊断信息通过 `info` 级投递，并以 `info` 级输出可读的原始 WebSocket 上下行报文，例如 `「onMessage」===>「...」`、`「sendMessage」===>「...」`，便于联调与落盘检索。即使日志投递不可用，`BRIDGE_DEBUG=true` 仍会输出本地 `console.debug` fallback 提示。
 
 ## 构建与测试
 

@@ -10,3 +10,7 @@
 	path = integration/openclaw
 	url = https://github.com/yuzhangCZ/openclaw.git
 	branch = feat/learn-openclaw
+[submodule "integration/skillSDK"]
+	path = integration/skillSDK
+	url = https://github.com/Abelsjcheng/skillSDK.git
+	branch = master-0605
