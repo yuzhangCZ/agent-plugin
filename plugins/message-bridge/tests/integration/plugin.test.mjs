@@ -145,12 +145,10 @@ describe('plugin contract', () => {
     __resetRuntimeForTests();
     __resetMessageBridgeStatusForTests();
     process.env.BRIDGE_ENABLED = 'false';
-    delete process.env.MESSAGE_BRIDGE_RUNTIME_MODE;
   });
 
   afterEach(() => {
     restoreInjectedPluginVersion();
-    delete process.env.MESSAGE_BRIDGE_RUNTIME_MODE;
   });
 
   test('exports named and default as same plugin function', () => {
@@ -585,7 +583,7 @@ describe('plugin contract', () => {
     }
   });
 
-  test('singleton ignores legacy runtime mode env and initializes sdk runtime', async () => {
+  test('singleton initializes sdk runtime and logs sdk runtimeMode', async () => {
     const logs = [];
     const client = createPluginClient({
       app: {
@@ -596,7 +594,6 @@ describe('plugin contract', () => {
       },
     });
 
-    process.env.MESSAGE_BRIDGE_RUNTIME_MODE = 'legacy';
     process.env.BRIDGE_ENABLED = 'true';
     process.env.BRIDGE_AUTH_AK = 'ak-test';
     process.env.BRIDGE_AUTH_SK = 'sk-test';
@@ -616,7 +613,6 @@ describe('plugin contract', () => {
       delete process.env.BRIDGE_AUTH_SK;
       delete process.env.BRIDGE_GATEWAY_URL;
       process.env.BRIDGE_ENABLED = 'false';
-      delete process.env.MESSAGE_BRIDGE_RUNTIME_MODE;
     }
   });
 
