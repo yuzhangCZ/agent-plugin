@@ -26,6 +26,7 @@ const cleanCodeRules = {
   'max-statements': ['warn', 40],
 };
 
+// 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
 const firstPassBaselineRules = {
   'no-empty': 'warn',
   'no-unused-vars': [
@@ -41,6 +42,7 @@ const firstPassBaselineRules = {
   'prefer-const': 'warn',
 };
 
+// TypeScript 文件使用 @typescript-eslint 的 unused-vars，避免核心 no-unused-vars 误判类型导入。
 const firstPassTypeScriptBaselineRules = {
   'no-unused-vars': 'off',
   '@typescript-eslint/no-empty-object-type': 'warn',
@@ -56,6 +58,7 @@ const firstPassTypeScriptBaselineRules = {
   '@typescript-eslint/prefer-as-const': 'warn',
 };
 
+// 脚本和测试允许较长流程编排，但仍保留 unused、prefer-const 等基础问题检查。
 const relaxedGeneratedAndFixtureRules = {
   complexity: 'off',
   'max-depth': 'off',
@@ -83,7 +86,7 @@ export default defineConfig([
     ],
   },
   {
-    files: ['plugins/**/*.{js,mjs,cjs}', 'packages/**/*.{js,mjs,cjs}'],
+    files: ['plugins/**/*.{js,mjs,cjs}', 'packages/**/*.{js,mjs,cjs}', 'scripts/**/*.{js,mjs,cjs}'],
     languageOptions: {
       ecmaVersion: 'latest',
       globals: globals.node,
@@ -95,18 +98,20 @@ export default defineConfig([
       ...cleanCodeRules,
     },
   },
+  // CJS 只覆盖模块类型差异，其余 JS 规则继续从上一段配置继承。
   {
-    files: ['plugins/**/*.cjs', 'packages/**/*.cjs'],
+    files: ['plugins/**/*.cjs', 'packages/**/*.cjs', 'scripts/**/*.cjs'],
     languageOptions: {
       sourceType: 'commonjs',
     },
   },
+  // 推荐 TS 配置负责 parser 和 TS 专属基础规则；下一段只补仓库级 warning baseline。
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
-    files: ['plugins/**/*.ts', 'packages/**/*.ts'],
+    files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
   })),
   {
-    files: ['plugins/**/*.ts', 'packages/**/*.ts'],
+    files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
@@ -125,6 +130,7 @@ export default defineConfig([
       'plugins/**/tests/**/*.{js,mjs,cjs,ts}',
       'packages/**/scripts/**/*.{js,mjs,cjs,ts}',
       'packages/**/tests/**/*.{js,mjs,cjs,ts}',
+      'scripts/**/*.{js,mjs,cjs,ts}',
     ],
     rules: relaxedGeneratedAndFixtureRules,
   },
