@@ -1,5 +1,5 @@
 import type { BridgeEvent } from '../types.js';
-import type { ProviderFact } from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+import type { ProviderFact } from '@wecode/bridge-runtime-sdk';
 
 export type PartKind = 'text' | 'reasoning';
 

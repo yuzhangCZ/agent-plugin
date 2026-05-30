@@ -1,7 +1,7 @@
 # message-bridge 源码目录说明
 
-**Version:** 1.0  
-**Date:** 2026-03-10  
+**Version:** 1.1  
+**Date:** 2026-05-30  
 **Status:** Active  
 **Owner:** message-bridge maintainers  
 **Related:** `./overview.md`
@@ -14,20 +14,13 @@
 src/
   contracts/
   domain/
-  protocol/
-    upstream/
-    downstream/
   runtime/
-  action/
   usecase/
   port/
   adapter/
-  gateway-wire/
   config/
-  error/
   event/
   session/
-  transport/
   utils/
   types/
 ```
@@ -56,21 +49,6 @@ src/
 
 - 如果一个类型代表“bridge 与外部如何交互”，放这里
 
-### `protocol/`
-
-协议边界层。
-
-放置内容：
-
-- raw 上下行消息解析
-- schema 校验
-- 规范化结果类型
-- 统一失败日志
-
-判断标准：
-
-- 如果一段代码需要读取 raw `properties.*`、`payload.*`、`type/action`，放这里
-
 ### `runtime/`
 
 编排层。
@@ -79,30 +57,12 @@ src/
 
 - 生命周期
 - 连接启动/停止
-- 调用 normalizer / extractor
-- action 路由
-- transport 发送
+- SDK runtime provider 适配
+- session isolation 控制面装配
 
 判断标准：
 
 - 如果代码只负责“怎么串起来执行”，放这里
-
-### `action/`
-
-业务执行层。
-
-放置内容：
-
-- `ChatAction`
-- `CreateSessionAction`
-- `CloseSessionAction`
-- `PermissionReplyAction`
-- `StatusQueryAction`
-- router / registry
-
-判断标准：
-
-- 如果代码负责 SDK 调用或业务动作执行，放这里
 
 ### `usecase/`
 
@@ -145,20 +105,6 @@ src/
 
 - 如果代码直接接触环境变量、文件系统或 SDK，实现 Port 时，放这里
 
-### `gateway-wire/`
-
-gateway 线协议适配层。
-
-- `downstream.ts`
-- `tool-event.ts`
-- `transport.ts`
-
-判断标准：
-
-- 如果代码定义 gateway 线协议消息与 SDK runtime 之间的转换形状，放这里
-
-实际 WebSocket 连接、注册、重连与上下行发送由 `packages/bridge-runtime-sdk/src/adapters/gateway/*` 负责。
-
 ### `config/`
 
 配置层。
@@ -166,14 +112,6 @@ gateway 线协议适配层。
 - 默认配置
 - 多源配置解析
 - 配置校验
-
-### `error/`
-
-错误处理层。
-
-- Fast fail
-- 错误码映射
-- `tool_error` 构造
 
 ### `types/`
 
@@ -196,20 +134,12 @@ gateway 线协议适配层。
 
 ```text
 contracts
-  <- protocol
   <- runtime
-  <- action
 
 types
-  <- protocol
-  <- runtime
-  <- action
-
-protocol
   <- runtime
 
 runtime
-  -> gateway-wire
   -> bridge-runtime-sdk
   -> usecase
   -> adapter
@@ -217,25 +147,24 @@ runtime
 
 禁止的依赖方向：
 
-- `types -> protocol`
-- `action -> raw downstream message`
-- `runtime -> raw upstream/downstream fields`
+- `runtime -> raw gateway wire implementation`
+- `usecase -> raw downstream message`
+- `types -> runtime implementation`
 
 ## 4. 规范性结论
 
 当前源码组织遵循这些约束：
 
-1. 只有 `protocol/*` 允许直接读取 raw 协议字段
-2. `runtime/*` 不允许新增 schema 解析逻辑
-3. `action/*` 不允许重新解析 raw payload
-4. `contracts/*` 是查看上下行边界契约的首选入口
-5. `types/*` 只放内部共用类型和兼容 re-export
+1. SDK runtime 负责 gateway 连接、下行归一化与上行发送。
+2. 插件 `runtime/sdk/*` 只保留 OpenCode provider 适配、raw event 到 SDK fact 的翻译和 session isolation 控制面。
+3. `contracts/*` 是查看插件仍保留的 OpenCode 事件、下行 action payload 和 tool type 契约的首选入口。
+4. `types/*` 只放内部共用类型和兼容 re-export。
 
 ## 5. 推荐阅读顺序
 
 1. `contracts/upstream-events.ts`
 2. `contracts/downstream-messages.ts`
 3. `contracts/transport-messages.ts`
-4. `protocol/upstream/UpstreamEventExtractor.ts`
-5. `protocol/downstream/DownstreamMessageNormalizer.ts`
-6. `runtime/SdkBridgeRuntime.ts`
+4. `runtime/SdkBridgeRuntime.ts`
+5. `runtime/sdk/OpenCodeProviderAdapter.ts`
+6. `runtime/sdk/OpenCodeProviderAdapter.translation.ts`

@@ -188,55 +188,13 @@ sequenceDiagram
 |---|---|---|---|---|
 | `provider_adapter.event.received` | debug | adapter 收到 OpenCode raw event 并开始翻译 | `eventType`,`toolSessionId` | `src/runtime/sdk/OpenCodeProviderAdapter.routing.ts` |
 
-### 4.4 compat.*
+### 4.4 runtime_sdk.*
 
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `compat.tool_done.sent` | info | compat 层发送 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
-| `compat.tool_done.skipped_duplicate` | debug | compat 层抑制重复 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
-| `compat.tool_done.fallback_from_idle` | info | `session.idle` 触发兜底 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
+SDK runtime cutover 后，插件侧不再维护独立 compat 完成态日志；完成态、投影和下行命令诊断统一以 `runtime_sdk.*` 观测事件为准。
 
-### 4.5 router.*
+### 4.5 action router logs
 
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `router.route.received` | info | 收到 action 路由请求 | `action`,`sessionId` | `src/action/ActionRouter.ts:23` |
-| `router.route.failed_registry_missing` | error | registry 未设置 | `action` | `src/action/ActionRouter.ts:30` |
-| `router.route.unsupported_action` | warn | action 未注册 | `action` | `src/action/ActionRouter.ts:40` |
-| `router.route.invalid_payload` | warn | action 参数校验失败 | `action`,`error` | `src/action/ActionRouter.ts:50` |
-| `router.route.completed` | info | action 执行完成 | `action`,`success`,`errorCode?` | `src/action/ActionRouter.ts:62` |
-
-### 4.6 action.*
-
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `action.chat.started` | info | chat action 开始 | `sessionId`,`messageLength` | `src/action/ChatAction.ts:57` |
-| `action.chat.rejected_state` | warn | 连接态不允许执行 chat | `state` | `src/action/ChatAction.ts:62` |
-| `action.chat.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/ChatAction.ts:110` |
-| `action.chat.failed` | error | chat 失败（可映射 code） | `error`,`errorCode?` | `src/action/ChatAction.ts:126` |
-| `action.chat.exception` | error | chat 执行抛异常 | `error`,`errorCode?` | `src/action/ChatAction.ts:139` |
-| `action.chat.finished` | debug | chat 结束（finally） | `latencyMs` | `src/action/ChatAction.ts:151` |
-| `action.create_session.started` | info | 最终创建目录解析完成后，create_session 开始 | `payloadKeys`,`resolvedDirectory`,`resolvedDirectorySource` | `src/action/CreateSessionAction.ts:192` |
-| `action.create_session.rejected_state` | warn | 连接态不允许创建会话 | `state` | `src/action/CreateSessionAction.ts:35` |
-| `action.create_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CreateSessionAction.ts:115` |
-| `action.create_session.failed` | error | create_session 失败 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:63` |
-| `action.create_session.exception` | error | create_session 抛异常 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:147` |
-| `action.create_session.finished` | debug | create_session 结束（finally） | `latencyMs` | `src/action/CreateSessionAction.ts:164` |
-| `action.close_session.started` | info | close_session 开始 | `sessionId` | `src/action/CloseSessionAction.ts:50` |
-| `action.close_session.rejected_state` | warn | 连接态不允许关闭会话 | `state` | `src/action/CloseSessionAction.ts:56` |
-| `action.close_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CloseSessionAction.ts:108` |
-| `action.close_session.failed` | error | close_session 失败 | `error`,`errorCode?` | `src/action/CloseSessionAction.ts:119` |
-| `action.close_session.exception` | error | close_session 抛异常 | `error`,`errorCode?` | `src/action/CloseSessionAction.ts:132` |
-| `action.close_session.finished` | debug | close_session 结束（finally） | `latencyMs` | `src/action/CloseSessionAction.ts:144` |
-| `action.permission_reply.started` | info | permission_reply 开始 | `permissionId`,`hasToolSessionId`,`payloadFormat` | `src/action/PermissionReplyAction.ts:99` |
-| `action.permission_reply.rejected_state` | warn | 连接态不允许权限回复 | `state` | `src/action/PermissionReplyAction.ts:107` |
-| `action.permission_reply.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/PermissionReplyAction.ts:180` |
-| `action.permission_reply.failed` | error | permission_reply 失败 | `error`,`errorCode?` | `src/action/PermissionReplyAction.ts:191` |
-| `action.permission_reply.exception` | error | permission_reply 抛异常 | `error`,`errorCode?` | `src/action/PermissionReplyAction.ts:204` |
-| `action.permission_reply.finished` | debug | permission_reply 结束（finally） | `latencyMs` | `src/action/PermissionReplyAction.ts:216` |
-| `action.status_query.started` | debug | status_query 执行开始 | `sessionId`,`state` | `src/action/StatusQueryAction.ts:49` |
-| `action.status_query.exception` | error | status_query 抛异常 | `error`,`errorCode?` | `src/action/StatusQueryAction.ts:70` |
-| `action.status_query.finished` | debug | status_query 结束（finally） | `latencyMs` | `src/action/StatusQueryAction.ts:82` |
+SDK runtime cutover 后，插件侧旧 action router 已移除；下行命令执行日志以 `runtime_sdk.*`、`provider_adapter.*` 和 `session_isolation.*` 为准。
 
 ## 5. 排障指引（推荐顺序）
 

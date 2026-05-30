@@ -13,7 +13,7 @@ import type {
   ThinkingDeltaFact,
   ThinkingDoneFact,
   ToolUpdateFact,
-} from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import { asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
 import type {
   RawEventTranslation,

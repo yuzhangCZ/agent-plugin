@@ -1,4 +1,4 @@
-import type { ProviderRuntimeContext } from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+import type { ProviderRuntimeContext } from '@wecode/bridge-runtime-sdk';
 import { getErrorMessage } from '../../utils/error.js';
 import { asTrimmedString } from '../../utils/type-guards.js';
 import type { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';

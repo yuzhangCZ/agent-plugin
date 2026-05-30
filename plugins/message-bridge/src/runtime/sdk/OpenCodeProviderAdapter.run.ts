@@ -1,7 +1,7 @@
 import type {
   ProviderFact,
   ProviderTerminalResult,
-} from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import type { BridgeLogger } from '../AppLogger.js';
 import { AsyncIterableQueue } from './AsyncIterableQueue.js';
 import type {

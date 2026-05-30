@@ -10,7 +10,7 @@ import type {
   ProviderRuntimeContext,
   ProviderTerminalResult,
   ThirdPartyAgentProvider,
-} from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
 import type { PromptSessionTerminal } from '../../port/SessionScopedActionGatewayPort.js';
 import type { BridgeLogger } from '../AppLogger.js';

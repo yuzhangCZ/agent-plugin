@@ -1,4 +1,4 @@
-import type { ProviderRunMessageInput } from '../../../../../../packages/bridge-runtime-sdk/src/index.ts';
+import type { ProviderRunMessageInput } from '@wecode/bridge-runtime-sdk';
 import type { BusinessEntryKey } from '../../../domain/session-isolation/index.js';
 import type { BusinessEntryPolicy } from '../../../port/session-isolation/dto/commands/index.js';
 import type { BusinessEntryKeyResolver } from '../../../usecase/session-isolation/index.js';

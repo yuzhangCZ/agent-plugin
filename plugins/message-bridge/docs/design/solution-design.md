@@ -2,19 +2,19 @@
 
 ## 1. Design Decision
 
-The current design uses a boundary-normalization architecture:
+The current design uses an SDK runtime composition architecture:
 
 ```text
-contracts -> protocol -> runtime -> action
+contracts -> SdkBridgeRuntime -> OpenCodeProviderAdapter -> bridge-runtime-sdk
 ```
 
-This replaces the older model where runtime and actions both interpreted raw protocol payloads.
+This replaces the older model where plugin runtime and actions both interpreted raw protocol payloads.
 
 ## 2. Why This Design
 
 This structure solves four concrete problems:
 
-1. duplicated schema ownership across runtime and actions
+1. duplicated schema ownership across plugin runtime and actions
 2. weak boundary visibility for upstream and downstream contracts
 3. inconsistent raw field parsing across modules
 4. higher regression risk when protocol fields evolve
@@ -30,14 +30,13 @@ Defines external interaction contracts only:
 - transport messages
 - envelope
 
-### 3.2 `protocol`
+### 3.2 SDK runtime
 
-Owns schema normalization:
+Owns gateway protocol normalization and transport:
 
-- `protocol/upstream` extracts and validates upstream events
-- `protocol/downstream` normalizes downstream commands
-
-This is the only layer allowed to read raw protocol fields.
+- downstream gateway command normalization
+- runtime orchestration
+- uplink transport message assembly
 
 ### 3.3 `runtime`
 
@@ -45,22 +44,20 @@ Owns:
 
 - config resolution
 - connection lifecycle
-- protocol invocation
-- action routing
-- transport message sending
+- provider adapter composition
+- session isolation control-plane composition
 
-It does not own schema.
+It does not own gateway wire schema.
 
-### 3.4 `action`
+### 3.4 OpenCode provider adapter
 
 Owns:
 
-- business execution
-- SDK calls
-- state checks
-- error mapping
+- OpenCode SDK calls
+- raw OpenCode event to SDK fact translation
+- host-specific permission/question handling
 
-It does not normalize payloads.
+It does not own gateway transport.
 
 ## 4. Upstream Design
 
@@ -69,8 +66,8 @@ The upstream path is:
 ```text
 raw OpenCode event
   -> EventFilter
-  -> extractUpstreamEvent()
-  -> runtime
+  -> OpenCodeProviderAdapter
+  -> bridge-runtime-sdk
   -> tool_event
 ```
 
@@ -82,10 +79,9 @@ The downstream path is:
 
 ```text
 raw gateway message
-  -> normalizeDownstreamMessage()
-  -> runtime
-  -> action.execute()
-  -> transport response
+  -> bridge-runtime-sdk
+  -> OpenCodeProviderAdapter / session isolation control plane
+  -> SDK runtime response
 ```
 
 Supported actions:
@@ -184,20 +180,7 @@ Non-acceptable approaches:
 
 ### Logging
 
-Compatibility logs must be explicit so they are not confused with primary protocol logs.
-
-Recommended log events:
-
-- `compat.tool_done.sent`
-- `compat.tool_done.skipped_duplicate`
-- `compat.tool_done.fallback_from_idle`
-
-Recommended fields:
-
-- `toolSessionId`
-- `source` (`invoke_complete` or `session_idle`)
-- `action`
-- `traceId`
+SDK runtime cutover 后，插件侧不再维护独立的 `tool_done` compat 日志源；完成态投影与诊断以 SDK runtime 和 provider adapter 的当前日志为准。
 
 ## 7. Config and Distribution
 

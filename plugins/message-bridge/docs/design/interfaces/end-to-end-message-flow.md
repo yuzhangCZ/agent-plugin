@@ -1,10 +1,10 @@
 # OpenCode 全链路接口与报文分层说明
 
-**Version:** 1.3
-**Date:** 2026-04-04
+**Version:** 1.4
+**Date:** 2026-05-30
 **Status:** Active  
 **Owner:** message-bridge maintainers  
-**Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/SdkBridgeRuntime.ts`, `../../../../packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`, `../../../src/protocol/downstream/DownstreamMessageNormalizer.ts`, `../../../src/protocol/upstream/UpstreamEventExtractor.ts`
+**Related:** `../../product/prd.md`, `./protocol-contract.md`, `../../../src/runtime/SdkBridgeRuntime.ts`, `../../../../packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`, `../../../src/runtime/sdk/OpenCodeProviderAdapter.ts`
 
 ## In Scope
 
@@ -64,10 +64,10 @@ flowchart LR
   A["UI 原始请求"] --> B["B1: skill-server 业务入参"]
   B --> C["B2: gateway 业务请求"]
   C --> D["B3 源数据:\ninvoke/status_query"]
-  D --> E["bridge 内部数据:\nNormalizedDownstreamMessage"]
-  E --> F["B4 输出:\nSDK 调用 / question API"]
+  D --> E["SDK runtime 内部命令"]
+  E --> F["B4 输出:\nOpenCode provider 调用 / question API"]
   F --> G["OpenCode 源事件"]
-  G --> H["bridge 内部数据:\nNormalizedUpstreamEvent"]
+  G --> H["SDK facts"]
   H --> I["B3 输出:\ntool_event/tool_done/tool_error/..."]
   I --> J["B2: 技能结果/事件"]
   J --> K["B1: UI 结果"]
@@ -75,15 +75,14 @@ flowchart LR
 
 ### 1.4 上行链路分层
 
-`message-bridge` 的上行路径不是单层“事件管控”，而是四个相互独立的边界：
+SDK runtime cutover 后，`message-bridge` 的上行路径由 SDK runtime 统一发送，插件侧只保留 OpenCode raw event 到 SDK fact 的翻译边界：
 
 ```mermaid
 flowchart LR
-  RAW["RawUpstreamEvent"] --> EXTRACT["Upstream Extraction"]
-  EXTRACT --> NORM["NormalizedUpstreamEvent"]
-  NORM --> POLICY["Event Policy"]
-  POLICY --> PROJECT["Transport Projection"]
-  PROJECT --> GATEWAY["Gateway Transport"]
+  RAW["Raw OpenCode Event"] --> PROVIDER["OpenCodeProviderAdapter"]
+  PROVIDER --> FACT["SDK Fact"]
+  FACT --> RUNTIME["bridge-runtime-sdk"]
+  RUNTIME --> GATEWAY["Gateway Transport"]
   GATEWAY --> TOOL["tool_event.event"]
 ```
 
@@ -91,14 +90,11 @@ flowchart LR
 
 | 层 | 职责 | 不负责 |
 |---|---|---|
-| `Upstream Extraction` | 读取 OpenCode 原始字段并生成标准化事件 | gateway 投影、allowlist |
-| `Event Policy` | 决定事件是否允许转发 | 字段裁剪、传输编码 |
-| `Transport Projection` | 生成 `tool_event.event` 的 gateway 传输形状 | raw 字段解析、连接管理 |
-| `Gateway Transport` | 负责 websocket 发送、重连、日志 | 业务字段裁剪 |
+| `OpenCodeProviderAdapter` | 读取 OpenCode 原始字段并生成 SDK facts | gateway 连接、重连、传输编码 |
+| `bridge-runtime-sdk` | 负责 runtime 编排、gateway 下行归一化和上行发送 | OpenCode 私有字段解析 |
+| `Gateway Transport` | 负责 websocket 发送、重连、日志 | OpenCode 事件语义翻译 |
 
-当前 `message.updated` 的大 payload 问题就发生在 `Transport Projection` 这一层，因此 heavy summary 的裁剪规则应归属这里，而不是 extractor 或 gateway transport。
-
-当前实现把这层 projection 收敛在 `src/transport/upstream/*` 中，由默认 projector 统一调度各事件的 transport 形状。
+OpenCode 事件语义翻译集中在 `src/runtime/sdk/OpenCodeProviderAdapter.translation.ts`；gateway wire 形状和发送细节由 `packages/bridge-runtime-sdk` 负责。
 
 ## 2. 全局 ID 与字段归属
 
@@ -403,14 +399,14 @@ WebSocket。
 }
 ```
 
-#### 5.3.2 内部数据：bridge 归一化对象
+#### 5.3.2 内部数据：SDK runtime command
 
-`message-bridge` 不直接在 action 层读取原始 JSON，而是先归一化为内部对象。
+SDK runtime 负责将 gateway 原始 JSON 归一化为内部 command；插件侧消费 provider input 或 session isolation command，不再保留独立 action router。
 
 内部封装类型：
 
 ```ts
-type NormalizedDownstreamMessage =
+type SdkRuntimeCommand =
   | {
       type: 'status_query';
     }
@@ -431,7 +427,7 @@ type NormalizedDownstreamMessage =
 补充约束：
 
 - `create_session` 归一化后必须携带非空 `welinkSessionId`
-- 该字段在 `message-bridge` 内部只保留到 gateway 归一化对象、SDK runtime command 与回包回写链路，不进入 `ProviderCreateSessionInput`，也不进入 session-isolation `CreateSessionCommandInput`
+- 该字段在 `message-bridge` 内部只保留到 SDK runtime command 与回包回写链路，不进入 `ProviderCreateSessionInput`，也不进入 session-isolation `CreateSessionCommandInput`
 - 其他 `invoke` action 仍允许缺省 `welinkSessionId`
 
 按 action 进一步收敛后，关键内部数据如下：
@@ -451,7 +447,7 @@ type NormalizedDownstreamMessage =
 |---|---|---|
 | `session_created` | `create_session` 成功 | `welinkSessionId`、`toolSessionId`、`session` |
 | `tool_done` | `chat` 成功 | `toolSessionId`、`welinkSessionId?` |
-| `tool_error` | 归一化失败或 action 失败 | `welinkSessionId?`、`toolSessionId?`、`error`、`reason?` |
+| `tool_error` | 归一化失败或 provider/control-plane 失败 | `welinkSessionId?`、`toolSessionId?`、`error`、`reason?` |
 | `status_response` | `status_query` 成功 | `opencodeOnline` |
 
 输出报文样例：`session_created`
@@ -485,7 +481,7 @@ type NormalizedDownstreamMessage =
 
 - `chat` 执行前先调用 `session.get`；若 `session.get` 失败，bridge 直接返回 `tool_error`，不再继续 `session.prompt`。
 - 仅当 `chat` 前置 `session.get` 命中 `NotFoundError` 时，返回 `"session_not_found"`。
-- 其余 action 失败路径，或 `session.get` 的非 NotFound 异常，不返回 `session_not_found`，避免 gateway 误判会话缺失。
+- 其余 command 失败路径，或 `session.get` 的非 NotFound 异常，不返回 `session_not_found`，避免 gateway 误判会话缺失。
 
 会话缺失样例：
 
@@ -505,15 +501,15 @@ type NormalizedDownstreamMessage =
 
 该层源数据来自两类输入：
 
-1. `B4` 上行事件提取结果
-2. `B3` 下行动作执行结果
+1. OpenCode provider 输出的 SDK facts
+2. SDK runtime 命令执行结果
 
-#### 5.4.2 内部数据：bridge 上行归一化对象
+#### 5.4.2 内部数据：SDK facts
 
 关键内部封装：
 
 ```ts
-type NormalizedUpstreamEvent = {
+type SdkFact = {
   common: {
     eventType: string;
     toolSessionId: string;
@@ -548,16 +544,16 @@ type NormalizedUpstreamEvent = {
 | `welinkSessionId` | `context.welinkSessionId` | `session_created/tool_done/tool_error.welinkSessionId` | 技能会话标识透传 |
 | `payload.toolSessionId` | `payload.toolSessionId` | `tool_done/tool_error.toolSessionId` | OpenCode 会话标识透传 |
 | `messageId` | `traceId` | 不作为业务字段输出 | 当前仅用于日志链路 |
-| `action` | `actionRouter.route(action, payload)` | 决定输出报文类型 | action 本身不回传到业务报文中 |
+| `action` | SDK runtime command routing | 决定输出报文类型 | action 本身不回传到业务报文中 |
 
 ### 5.6 B3 异常语义
 
 | 异常点 | 源数据层 | 内部层 | 输出层 |
 |---|---|---|---|
 | 原始 JSON 非法 | WS message | 无法归一化 | 丢弃 |
-| `invoke` 字段缺失/类型错误 | raw `invoke` | `normalizeDownstreamMessage` 失败 | `tool_error` |
-| Gateway 未 `READY` | raw business message | action 被状态拦截 | `tool_error` |
-| 执行动作失败 | 合法 normalized message | action result 失败 | `tool_error` |
+| `invoke` 字段缺失/类型错误 | raw `invoke` | SDK runtime 下行归一化失败 | `tool_error` |
+| Gateway 未 `READY` | raw business message | SDK runtime 状态门控 | `tool_error` |
+| 执行动作失败 | 合法 runtime command | provider/control-plane 执行失败 | `tool_error` |
 
 ## 6. 接口边界 B4: `message-bridge <-> OpenCode SDK`
 
@@ -920,21 +916,21 @@ type NormalizedUpstreamEvent = {
 
 | 异常点 | 源数据层 | 内部层 | 输出层 |
 |---|---|---|---|
-| SDK 调用失败 | normalized action | action 捕获并映射错误 | `tool_error` |
+| SDK 调用失败 | runtime command | provider/control-plane 捕获并映射错误 | `tool_error` |
 | `GET /question` 找不到唯一请求 | normalized `question_reply` | bridge 内部解析失败 | `tool_error` |
-| OpenCode 事件字段缺失 | raw event | `extractUpstreamEvent` 失败 | 事件丢弃，不发 `tool_event` |
+| OpenCode 事件字段缺失 | raw event | provider 翻译失败或忽略 | 事件丢弃，不发 `tool_event` |
 
 ### 6.8 `message.updated` 传输裁剪说明
 
 `message.updated` 在 OpenCode 本地事件中可能携带完整 `summary.diffs[*].before/after`。
-bridge 对 gateway 发送时会执行一层 transport projection：
+SDK runtime 对 gateway 发送时会执行上行 payload 组装；插件侧只负责把 OpenCode 原始事件翻译为 SDK facts。当前插件翻译需要避免把完整 `before/after` 正文作为业务语义继续扩散：
 
 - 保留消息标识、会话标识、角色、时间、模型
 - 保留 `summary.additions/deletions/files`
 - 保留每个文件的 `file/status/additions/deletions`
 - 删除 `before/after` 正文
 
-该裁剪只作用于 bridge 出站 payload，不改变 upstream extractor 的原始事件语义。
+该约束只作用于出站 payload，不改变 OpenCode provider 接收到的原始事件语义。
 
 ## 7. 推荐文档阅读顺序
 
@@ -958,7 +954,7 @@ sequenceDiagram
   UI->>SKILL: B1 源数据\n{ ak, title?, imGroupId? }
   SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'create_session', payload:{ title? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { messageId, welinkSessionId, action:'create_session', payload }
-  BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
+  BRIDGE->>BRIDGE: B3 内部封装\nSdkRuntimeCommand
   BRIDGE->>SDK: B4 下行输出\ntarget state: session.create({ title?, directory?, permission? })
   SDK-->>BRIDGE: B4 返回值\n{ sessionId, ... }
   BRIDGE->>GW: B3 上行输出\nsession_created { welinkSessionId, toolSessionId, session }
@@ -989,7 +985,7 @@ sequenceDiagram
   UI->>SKILL: B1 源数据\n{ uiSessionId, skillSessionId, type:'chat', text }
   SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'chat', payload:{ toolSessionId, text } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { messageId, welinkSessionId, action:'chat', payload }
-  BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
+  BRIDGE->>BRIDGE: B3 内部封装\nSdkRuntimeCommand
   BRIDGE->>SDK: B4 下行输出\nsession.prompt({ path:{id}, body:{parts:[text]} })
   SDK-->>BRIDGE: B4 返回值\nprompt success
   BRIDGE->>GW: B3 上行输出\ntool_done { welinkSessionId, toolSessionId }
@@ -997,7 +993,7 @@ sequenceDiagram
   SKILL->>UI: B1 中间态/完成态\n可选透传 tool_done
 
   SDK-->>BRIDGE: B4 上行源事件\nmessage.part.delta / message.updated / session.status / session.idle
-  BRIDGE->>BRIDGE: B4 内部封装\nNormalizedUpstreamEvent
+  BRIDGE->>BRIDGE: B4 内部封装\nSdkFact
   BRIDGE->>GW: B3 上行输出\ntool_event { toolSessionId, event }
   GW->>SKILL: B2 上行事件\ntool_event + welinkSessionId 路由
   SKILL->>UI: B1 流式展示/最终结果
@@ -1014,7 +1010,7 @@ sequenceDiagram
   participant UI as ui-client
 
   SDK-->>BRIDGE: B4 上行源事件\nquestion.asked { sessionID, id, questions }
-  BRIDGE->>BRIDGE: B4 内部封装\nNormalizedUpstreamEvent
+  BRIDGE->>BRIDGE: B4 内部封装\nSdkFact
   BRIDGE->>GW: B3 上行输出\ntool_event { toolSessionId, event: question.asked }
   GW->>SKILL: B2 上行事件\nquestion.asked + welinkSessionId 路由
   SKILL->>UI: B1 展示问题\n{ uiSessionId, type:'question.asked', options }
@@ -1022,7 +1018,7 @@ sequenceDiagram
   UI->>SKILL: B1 下行源数据\n{ uiSessionId, type:'question_reply', answer, questionId? / toolCallId? }
   SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'question_reply', payload:{ questionId?, answer, toolCallId? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { welinkSessionId, action:'question_reply', payload }
-  BRIDGE->>BRIDGE: B3 内部封装\nNormalizedDownstreamMessage
+  BRIDGE->>BRIDGE: B3 内部封装\nSdkRuntimeCommand
   BRIDGE->>BRIDGE: B3 内部归一\n优先取 questionId，缺失时回退 toolCallId
   BRIDGE->>SDK: B4 下行输出\nPOST /question/{requestID}/reply { answers:[[answer]] }
   SDK-->>BRIDGE: reply success

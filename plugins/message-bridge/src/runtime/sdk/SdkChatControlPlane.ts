@@ -8,7 +8,7 @@ import type {
   ProviderRunMessageInput,
   TextDeltaFact,
   TextDoneFact,
-} from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import type {
   BusinessEntryContext,
   BusinessEntryContextResolver,

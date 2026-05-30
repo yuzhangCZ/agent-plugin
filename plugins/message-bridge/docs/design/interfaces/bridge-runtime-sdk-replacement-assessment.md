@@ -62,7 +62,7 @@
 | `gateway-schema` `opencode-provider-event` | 当前 `tool_event.event` 外部兼容 shape | 字段存在不代表必须进入 SDK fact |
 | OpenCode v2 SDK / API | provider 原始事实来源 | 若字段只存在于 OpenCode v2，应标注“OpenCode 原始字段，当前 `gateway-schema` 未承接” |
 | `bridge-runtime-sdk` `ProviderFact` / command contract | SDK 稳定事实和 public contract 目标 | 所有需通知 gateway / skill-server / miniapp 的上行语义必须落入该层 |
-| `message-bridge` 当前实现 | 兼容行为和运行时策略来源 | 包括 directory、subagent 映射、`ToolDoneCompat`、错误 reason 分类 |
+| `message-bridge` 当前实现 | 兼容行为和运行时策略来源 | 包括 directory、subagent 映射、完成态兼容策略、错误 reason 分类 |
 
 ### 2.3 结论判定标准
 

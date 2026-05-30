@@ -572,81 +572,15 @@ describe('UT-EVNT-002', () => {
 
 ---
 
-### 3.4 Fast Fail 测试 (UT-FAIL)
+### 3.4 Runtime 状态失败测试 (UT-FAIL)
 
-#### UT-FAIL-001: 连接态判定 <=100ms
+SDK runtime cutover 后，连接态 fast-fail 判定由 `bridge-runtime-sdk` 的 gateway driver 与 runtime 状态机负责；插件侧只验证启动失败、配置失败和状态快照发布。
 
-**前置条件:**
-- FastFailDetector 配置 connectionCheckTimeoutMs=100
-- Mock 连接状态
+**当前证据:**
 
-**测试步骤:**
-1. 模拟 READY 状态，测量判定时间
-2. 模拟非 READY 状态，测量判定时间
-3. 验证所有判定在 100ms 内完成
-
-**预期结果:**
-- 所有状态判定耗时 < 100ms
-- READY 状态返回 null（无错误）
-- DISCONNECTED/CONNECTING 状态返回 GATEWAY_UNREACHABLE
-- CONNECTED（已连通未注册）返回 AGENT_NOT_READY
-
-**测试代码:**
-```typescript
-describe('UT-FAIL-001', () => {
-  it('should complete connection check within 100ms', async () => {
-    const detector = new FastFailDetector({
-      sdkTimeoutMs: 10000,
-      connectionCheckTimeoutMs: 100
-    });
-    
-    const start = Date.now();
-    const gatewayReachable = detector.isGatewayReachable('DISCONNECTED' as ConnectionState);
-    const duration = Date.now() - start;
-    
-    expect(duration).toBeLessThan(100);
-    expect(gatewayReachable).toBe(false);
-    expect(detector.checkReady('READY' as ConnectionState)).toBeNull();
-  });
-});
-```
-
----
-
-#### UT-FAIL-005: 状态到 Fast Fail 错误码映射
-
-**前置条件:**
-- FastFailDetector 实例已创建
-
-**测试步骤:**
-1. 测试 DISCONNECTED 状态
-2. 测试 CONNECTING 状态
-3. 测试 CONNECTED 状态（未注册）
-4. 测试 READY 状态
-
-**预期结果:**
-- DISCONNECTED -> GATEWAY_UNREACHABLE
-- CONNECTING -> GATEWAY_UNREACHABLE
-- CONNECTED -> AGENT_NOT_READY
-- READY -> null（正常）
-
-**测试代码:**
-```typescript
-describe('UT-FAIL-005', () => {
-  it('should map connection states to expected Fast Fail codes', () => {
-    const detector = new FastFailDetector(mockConfig);
-    const mapCode = (state: ConnectionState): ErrorCode | null => {
-      if (!detector.isGatewayReachable(state)) return 'GATEWAY_UNREACHABLE';
-      return detector.checkReady(state)?.code ?? null;
-    };
-    
-    expect(mapCode('DISCONNECTED')).toBe('GATEWAY_UNREACHABLE');
-    expect(mapCode('CONNECTING')).toBe('GATEWAY_UNREACHABLE');
-    expect(mapCode('CONNECTED')).toBe('AGENT_NOT_READY');
-    expect(mapCode('READY')).toBeNull();
-  });
-});
-```
+- `plugins/message-bridge/tests/unit/sdk-runtime-status-adapter.test.mjs`
+- `plugins/message-bridge/tests/unit/sdk-runtime-register.test.mjs`
+- `plugins/message-bridge/tests/unit/message-bridge-status-store.test.mjs`
 
 ---
 
@@ -746,139 +680,15 @@ describe('UT-CFG-005', () => {
 
 ---
 
-### 3.6 Action 测试 (UT-ACTN)
+### 3.6 SDK runtime command 测试 (UT-SDK-CMD)
 
-#### UT-ACTN-002: 新增 action 不修改核心引擎
+SDK runtime cutover 后，插件侧不再维护独立 action router。下行命令语义由 `packages/bridge-runtime-sdk` command adapter、OpenCode provider adapter 和 session-isolation command port 覆盖。
 
-**前置条件:**
-- ActionRegistry 实例已创建
-- 自定义 Action 类已定义
+重点覆盖：
 
-**测试步骤:**
-1. 创建自定义 Action
-2. 注册到 ActionRegistry
-3. 通过 ActionRouter 路由到自定义 Action
-4. 验证核心引擎代码未被修改
-
-**预期结果:**
-- 自定义 Action 正常注册和执行
-- 核心引擎（ActionRouter）无需修改
-- 其他 Action 不受影响
-
-**测试代码:**
-```typescript
-describe('UT-ACTN-002', () => {
-  it('should allow new action without modifying core engine', () => {
-    // 自定义 Action
-    class CustomAction extends BaseAction {
-      readonly name = 'custom_action';
-      
-      validate(payload: unknown) {
-        return { valid: true };
-      }
-      
-      async execute(payload: unknown, context: ActionContext) {
-        return { success: true, payload: { custom: true } };
-      }
-      
-      mapError(error: Error, context: ActionContext) {
-        return { type: 'tool_error', code: 'SDK_UNREACHABLE', error: error.message, welinkSessionId: context.welinkSessionId };
-      }
-    }
-    
-    const registry = new ActionRegistry();
-    const customAction = new CustomAction();
-    
-    // 注册自定义 action
-    registry.register(customAction);
-    
-    // 验证可以通过 registry 获取
-    expect(registry.get('custom_action')).toBe(customAction);
-    
-    // 验证其他 action 不受影响
-    expect(registry.get('chat')).toBeDefined();
-  });
-});
-```
-
----
-
-#### UT-PERM-003: response=once 透传到 SDK
-
-**前置条件:**
-- PermissionReplyAction 实例已创建
-- Mock SDK `postSessionIdPermissionsPermissionId` 方法
-
-**测试步骤:**
-1. 调用 execute() 传入 `response=once`
-2. 验证 SDK 被调用时 body.response 仍为 `once`
-
-**预期结果:**
-- `response=once` 直接透传，不做中间映射
-
-**测试代码:**
-```typescript
-describe('UT-PERM-003', () => {
-  it('should pass through response=once', async () => {
-    const action = new PermissionReplyAction();
-    const calls: unknown[] = [];
-    const mockSDK = {
-      postSessionIdPermissionsPermissionId: async (payload: unknown) => { calls.push(payload); }
-    };
-    
-    await action.execute(
-      { permissionId: 'perm-123', toolSessionId: 's-1', response: 'once' },
-      { client: mockSDK as any, connectionState: 'READY' } as any
-    );
-    
-    expect(calls[0]).toMatchObject({
-      path: { id: 's-1', permissionID: 'perm-123' },
-      body: { response: 'once' }
-    });
-  });
-});
-```
-
----
-
-#### UT-SESN-003: abort_session 映射到 abort
-
-**前置条件:**
-- AbortSessionAction 实例已创建
-- Mock SDK session.abort 方法
-
-**测试步骤:**
-1. 调用 execute() 传入 toolSessionId
-2. 验证 SDK session.abort 被调用
-3. 验证 `close_session` 语义不在此 action 中出现
-
-**预期结果:**
-- session.abort 被调用一次
-- 不触发 delete 路径
-
-**测试代码:**
-```typescript
-describe('UT-SESN-003', () => {
-  it('should call session.abort for abort_session', async () => {
-    const action = new AbortSessionAction();
-    let abortCalledWith: unknown = null;
-    let abortCalls = 0;
-    const mockSDK = {
-      session: {
-        abort: async (id: string) => { abortCalledWith = id; abortCalls++; }
-      }
-    };
-    
-    await action.execute(
-      { toolSessionId: 'sess-123' },
-      { opencode: mockSDK as any }
-    );
-    
-    expect(abortCalledWith).toBe('sess-123');
-    expect(abortCalls).toBe(1);
-  });
-});
-```
+- `permission_reply` 保持 `response=once` 透传到 SDK permission reply。
+- `abort_session` 映射到 SDK `session.abort`，不触发 delete 路径。
+- `chat` 经 OpenCode provider adapter 调用 `session.prompt`。
 
 ---
 
@@ -951,8 +761,8 @@ describe('INT-CONN-001', () => {
 
 **测试步骤:**
 1. Gateway 发送 invoke(chat) 消息
-2. 插件接收并路由到 ChatAction
-3. ChatAction 调用 SDK session.prompt()
+2. SDK runtime 将下行命令路由到 OpenCode provider adapter
+3. provider adapter 调用 SDK session.prompt()
 4. 模拟 SDK 返回成功
 5. 验证插件会在兼容层发送 tool_done，并保留完成态事件透传
 
@@ -1191,7 +1001,7 @@ $ curl -X POST http://skill-server/api/sessions/sess-123/chat \
 [DEBUG] Received invoke: close_session
 [DEBUG] Calling session.delete with toolSessionId: oc-xxx
 [DEBUG] session.delete completed successfully
-[DEBUG] No compat.tool_done.* log expected for close_session
+[DEBUG] No completion-state uplink expected for close_session
 ```
 
 ---

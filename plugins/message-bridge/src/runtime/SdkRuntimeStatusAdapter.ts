@@ -14,7 +14,7 @@ import {
   createUnavailableStatus,
 } from './MessageBridgeStatus.js';
 
-export interface BridgeRuntimeStatusAdapter {
+export interface SdkRuntimeStatusAdapter {
   publishConnecting(): void;
   publishDisabled(errorMessage: string): void;
   publishConfigInvalid(errorMessage: string): void;
@@ -36,13 +36,13 @@ function mapGatewayAvailabilityToReason(
   }
 }
 
-export function createBridgeRuntimeStatusAdapter(
+export function createSdkRuntimeStatusAdapter(
   deps: {
     now?: () => number;
     publish?: typeof publishMessageBridgeStatus;
     read?: typeof getMessageBridgeStatus;
   } = {},
-): BridgeRuntimeStatusAdapter {
+): SdkRuntimeStatusAdapter {
   const now = deps.now ?? Date.now;
   const publish = deps.publish ?? publishMessageBridgeStatus;
   const read = deps.read ?? readMessageBridgeStatusSnapshot;
