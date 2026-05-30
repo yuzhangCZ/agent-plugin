@@ -219,9 +219,3 @@ export interface SlashCommandCompletionPort {
     input: { anchor: ExternalConversationAnchor; welinkSessionId?: string; text: string },
   ): Promise<SlashCommandFailureDeliveryResult>;
 }
-
-/** 外层 gateway envelope 投影 seam。 */
-export interface GatewayEnvelopeProjector {
-  projectSyntheticAssistantReply(input: { anchor: ExternalConversationAnchor; text: string }): Record<string, unknown>[];
-  projectToolDone(input: { anchor: ExternalConversationAnchor; welinkSessionId?: string }): Record<string, unknown>;
-}

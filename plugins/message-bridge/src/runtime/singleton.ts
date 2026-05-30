@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto';
-import { BridgeRuntime } from './BridgeRuntime.js';
 import { SdkBridgeRuntime } from './SdkBridgeRuntime.js';
 import type { ManagedRuntime } from './ManagedRuntime.js';
 import type { BridgeEvent, PluginInput } from './types.js';
@@ -82,10 +81,6 @@ function stopRuntimeInternal(options: { lock: boolean }): void {
   clearCurrentRuntimeTraceId();
 }
 
-function resolveRuntimeMode(): 'sdk' | 'legacy' {
-  return process.env.MESSAGE_BRIDGE_RUNTIME_MODE?.trim() === 'legacy' ? 'legacy' : 'sdk';
-}
-
 function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit'): Promise<ManagedRuntime> {
   if (!runtime && !initializing && initState === 'never') {
     ensureCurrentRuntimeTraceId();
@@ -103,20 +98,13 @@ function beginRuntimeInitialization(input: PluginInput, mode: 'auto' | 'explicit
   logger.info(attemptMessage);
   logger.info('runtime.singleton.client_shape', buildClientShapeSummary(input.client));
 
-  const runtimeMode = resolveRuntimeMode();
-  const candidate: ManagedRuntime = runtimeMode === 'legacy'
-    ? new BridgeRuntime({
-        workspacePath: input.worktree || input.directory,
-        hostDirectory: input.worktree || input.directory,
-        client: input.client,
-        runtimeTraceId: ensureCurrentRuntimeTraceId(),
-      })
-    : new SdkBridgeRuntime({
-        workspacePath: input.worktree || input.directory,
-        hostDirectory: input.worktree || input.directory,
-        client: input.client,
-        runtimeTraceId: ensureCurrentRuntimeTraceId(),
-      });
+  const runtimeMode = 'sdk' as const;
+  const candidate: ManagedRuntime = new SdkBridgeRuntime({
+    workspacePath: input.worktree || input.directory,
+    hostDirectory: input.worktree || input.directory,
+    client: input.client,
+    runtimeTraceId: ensureCurrentRuntimeTraceId(),
+  });
   const token = ++generation;
   lifecycleAbortController = new AbortController();
   initState = 'initializing';

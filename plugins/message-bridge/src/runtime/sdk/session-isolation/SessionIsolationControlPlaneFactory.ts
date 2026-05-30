@@ -75,31 +75,110 @@ export interface SessionIsolationControlPlane {
   slashCommandExecutor: SessionIsolationSlashCommandExecutor;
 }
 
-/**
- * 装配正式 session-isolation 控制面对象图。
- * @remarks 这是 runtime 迁移的单一装配入口，避免在 `BridgeRuntime` 中继续散落 repository/usecase wiring。
- */
-export function createSessionIsolationControlPlane(
+type SessionIsolationRepositories = {
+  entryKeyCodec: DefaultEntryKeyCodec;
+  ownedSessionRepository: OwnedSessionRepository;
+  anchorBindingRepository: LegacyAnchorBindingRepository;
+  attachOwnerRepository: LegacyAttachOwnerRepository;
+};
+
+function createSessionIsolationRepositories(
   dependencies: SessionIsolationControlPlaneDependencies,
-): SessionIsolationControlPlane {
-  const entryKeyCodec = new DefaultEntryKeyCodec();
-  const ownedSessionRepository = dependencies.ownedSessionRepository ?? new InMemoryOwnedSessionRepository();
-  const anchorBindingRepository = new LegacyAnchorBindingRepository(dependencies.bindingStore);
-  const attachOwnerRepository = new LegacyAttachOwnerRepository(dependencies.ownershipResolver);
-  const hostSessionGateway = new LegacyHostSessionGatewayAdapter({
+): SessionIsolationRepositories {
+  return {
+    entryKeyCodec: new DefaultEntryKeyCodec(),
+    ownedSessionRepository: dependencies.ownedSessionRepository ?? new InMemoryOwnedSessionRepository(),
+    anchorBindingRepository: new LegacyAnchorBindingRepository(dependencies.bindingStore),
+    attachOwnerRepository: new LegacyAttachOwnerRepository(dependencies.ownershipResolver),
+  };
+}
+
+function createHostSessionGateway(dependencies: SessionIsolationControlPlaneDependencies): LegacyHostSessionGatewayAdapter {
+  return new LegacyHostSessionGatewayAdapter({
     hostSessionQueryPort: dependencies.hostSessionQueryPort,
     sessionCreationPort: dependencies.sessionCreationPort,
     sessionScopedActionGatewayPort: dependencies.sessionScopedActionGatewayPort,
   });
-  const ownedSessionCoordinator = new DefaultOwnedSessionCoordinator({
+}
+
+function createOwnedSessionCoordinator(
+  dependencies: SessionIsolationControlPlaneDependencies,
+  repositories: SessionIsolationRepositories,
+): DefaultOwnedSessionCoordinator {
+  return new DefaultOwnedSessionCoordinator({
     akScopeKey: dependencies.akScopeKey,
+    entryKeyCodec: repositories.entryKeyCodec,
+    ownedSessionRepository: repositories.ownedSessionRepository,
+    anchorBindingRepository: repositories.anchorBindingRepository,
+    attachOwnerRepository: repositories.attachOwnerRepository,
+    ...(dependencies.diagnostics ? { diagnostics: dependencies.diagnostics } : {}),
+    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
+  });
+}
+
+function createReplyCommandPorts(input: {
+  pendingInteractionRegistry: RuntimePendingInteractionRegistry;
+  anchorBindingRepository: LegacyAnchorBindingRepository;
+  sdkExecutionBridge: SessionScopedSdkExecutionBridge;
+}) {
+  const interactionLookupBridge = new PendingInteractionLookupBridge({
+    pendingInteractionRegistry: input.pendingInteractionRegistry,
+    anchorBindingRepository: input.anchorBindingRepository,
+  });
+  return {
+    questionReplyCommandPort: new DefaultQuestionReplyCommandUseCase({
+      interactionLookupBridge,
+      sdkExecutionBridge: input.sdkExecutionBridge,
+    }),
+    permissionReplyCommandPort: new DefaultPermissionReplyCommandUseCase({
+      interactionLookupBridge,
+      sdkExecutionBridge: input.sdkExecutionBridge,
+    }),
+  };
+}
+
+function createHostEventPort(input: {
+  attachOwnerRepository: LegacyAttachOwnerRepository;
+  ownedHostEventForwarder: OwnedHostEventForwarder;
+  ownedSessionCoordinator: DefaultOwnedSessionCoordinator;
+}): DefaultHostEventUseCase {
+  return new DefaultHostEventUseCase({
+    eventSessionLocator: new DefaultEventSessionLocator(),
+    eventOwnershipResolver: new DefaultEventOwnershipResolver({
+      attachOwnerRepository: input.attachOwnerRepository,
+    }),
+    ownedHostEventForwarder: input.ownedHostEventForwarder,
+    sessionDeletedEventHandler: new DefaultSessionDeletedEventHandler(),
+    sessionDeletedReconcileUseCase: new DefaultSessionDeletedReconcileUseCase({
+      ownedSessionCoordinator: input.ownedSessionCoordinator,
+    }),
+  });
+}
+
+function createRuntimeAnchorRepositoryFallback(): RuntimeAnchorRepository {
+  return {
+    isAnchorOnly: async () => false,
+    createAnchorOnly: async () => undefined,
+    delete: async () => undefined,
+  };
+}
+
+/**
+ * 装配正式 session-isolation 控制面对象图。
+ * @remarks 这是 runtime 迁移的单一装配入口，避免 repository/usecase wiring 散落在插件主链。
+ */
+export function createSessionIsolationControlPlane(
+  dependencies: SessionIsolationControlPlaneDependencies,
+): SessionIsolationControlPlane {
+  const repositories = createSessionIsolationRepositories(dependencies);
+  const {
     entryKeyCodec,
     ownedSessionRepository,
     anchorBindingRepository,
     attachOwnerRepository,
-    ...(dependencies.diagnostics ? { diagnostics: dependencies.diagnostics } : {}),
-    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
-  });
+  } = repositories;
+  const hostSessionGateway = createHostSessionGateway(dependencies);
+  const ownedSessionCoordinator = createOwnedSessionCoordinator(dependencies, repositories);
   const resolveEntrySessionContextUseCase = new DefaultResolveEntrySessionContextUseCase({
     akScopeKey: dependencies.akScopeKey,
     entryKeyCodec,
@@ -135,38 +214,24 @@ export function createSessionIsolationControlPlane(
   const abortSessionCommandPort = new DefaultAbortAnchoredRunUseCase({
     sdkExecutionBridge,
   });
-  const interactionLookupBridge = new PendingInteractionLookupBridge({
+  const {
+    questionReplyCommandPort,
+    permissionReplyCommandPort,
+  } = createReplyCommandPorts({
     pendingInteractionRegistry: dependencies.pendingInteractionRegistry,
     anchorBindingRepository,
-  });
-  const questionReplyCommandPort = new DefaultQuestionReplyCommandUseCase({
-    interactionLookupBridge,
     sdkExecutionBridge,
   });
-  const permissionReplyCommandPort = new DefaultPermissionReplyCommandUseCase({
-    interactionLookupBridge,
-    sdkExecutionBridge,
-  });
-  const hostEventPort = new DefaultHostEventUseCase({
-    eventSessionLocator: new DefaultEventSessionLocator(),
-    eventOwnershipResolver: new DefaultEventOwnershipResolver({
-      attachOwnerRepository,
-    }),
+  const hostEventPort = createHostEventPort({
+    attachOwnerRepository,
     ownedHostEventForwarder: dependencies.ownedHostEventForwarder,
-    sessionDeletedEventHandler: new DefaultSessionDeletedEventHandler(),
-    sessionDeletedReconcileUseCase: new DefaultSessionDeletedReconcileUseCase({
-      ownedSessionCoordinator,
-    }),
+    ownedSessionCoordinator,
   });
   const slashCommandExecutor = new SessionIsolationSlashCommandExecutor({
     resolveEntrySessionContextUseCase,
     switchAttachedSessionUseCase,
     createOwnedSessionUseCase,
-    runtimeAnchorRepository: dependencies.runtimeAnchorRepository ?? {
-      isAnchorOnly: async () => false,
-      createAnchorOnly: async () => undefined,
-      delete: async () => undefined,
-    },
+    runtimeAnchorRepository: dependencies.runtimeAnchorRepository ?? createRuntimeAnchorRepositoryFallback(),
     ...(dependencies.logger ? { logger: dependencies.logger } : {}),
   });
 

@@ -61,7 +61,7 @@
 
 目标：
 
-- `mock gateway + mock sdk + BridgeRuntime` 的协议回路
+- `mock gateway + mock sdk + SDK runtime` 的协议回路
 - 上下行消息、状态变化、补偿消息语义
 
 要求：

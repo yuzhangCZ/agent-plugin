@@ -6,7 +6,7 @@ This report reflects the integrated `message-bridge` implementation on top of th
 
 Validated areas:
 
-- contracts / protocol / runtime / action layering
+- contracts / SDK runtime / provider adapter layering
 - downstream action coverage
 - exact upstream allowlist behavior
 - config resolution and validation
@@ -18,10 +18,10 @@ Validated areas:
 
 Validated conclusion:
 
-- upstream schema owner: `protocol/upstream`
-- downstream schema owner: `protocol/downstream`
-- `runtime` no longer parses raw downstream payloads
-- `action` mainline execution no longer normalizes payloads
+- gateway schema owner: `packages/bridge-runtime-sdk/src/adapters/gateway/*`
+- OpenCode event translation owner: `src/runtime/sdk/OpenCodeProviderAdapter.translation.ts`
+- `runtime` no longer parses raw gateway payloads
+- legacy action router has been removed
 
 ### 2.2 Boundary contract visibility
 
@@ -78,7 +78,7 @@ Execution semantics:
 - Environment-dependent checks: `test:e2e`, `test:e2e:smoke`, `smoke:e2e`, `debug:e2e`, `verify:opencode-load`
 - `test:e2e:smoke` uses a single smoke-entry script to maintain the scenario set
 - `test:e2e:smoke` covers standard bridge availability and protocol activity, but does not simulate oversized `message.updated` payloads carrying full `summary.diffs[*].before/after`
-- oversized `message.updated` regression coverage is owned by the integration layer, where runtime transport projection and websocket boundary behavior are asserted together
+- oversized `message.updated` regression coverage is owned by the SDK runtime/integration layer, where provider translation and websocket boundary behavior are asserted together
 - Coverage scope: `unit+integration` (the coverage script prints `coverage_scope=unit+integration`)
 
 ## 5. Compatibility Conclusions

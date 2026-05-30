@@ -334,7 +334,7 @@
 
 ### 12.4 兼容性约束
 1. 本次变更仅影响 `message.updated` 的 bridge 出站 transport payload。
-2. 不修改 upstream extractor 的原始事件提取语义。
+2. 不修改 OpenCode provider 接收原始事件的语义。
 3. 若下游出现对 `before/after` 的运行时依赖，需重新评审，不得静默扩展回传字段。
 
 ### 12.5 验收标准

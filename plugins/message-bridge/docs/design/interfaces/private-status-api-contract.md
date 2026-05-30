@@ -18,7 +18,7 @@
 ## Out of Scope
 
 - `gateway-client` 内部状态机实现细节
-- `BridgeRuntimeStatusAdapter` 的内部输入类型
+- `SdkRuntimeStatusAdapter` 的内部输入类型
 - 动态 hooks 的内部实现细节
 - 服务端状态聚合逻辑
 - gateway wire 协议扩展

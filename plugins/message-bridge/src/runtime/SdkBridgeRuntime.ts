@@ -22,12 +22,12 @@ import type {
 import {
   createBridgeRuntime,
   type BridgeRuntime as SdkRuntimeFacade,
-} from '../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import { loadConfig } from '../config/index.js';
 import { EventFilter } from '../event/EventFilter.js';
 import { createSdkAdapter, getMissingSdkCapabilities, toHostClientLike } from './SdkAdapter.js';
 import { AppLogger, type BridgeLogger } from './AppLogger.js';
-import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
+import { createSdkRuntimeStatusAdapter, type SdkRuntimeStatusAdapter } from './SdkRuntimeStatusAdapter.js';
 import { readMessageBridgeStatusSnapshot, resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
@@ -82,7 +82,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   private readonly sdkClient;
   private readonly missingSdkCapabilities;
   private logger: BridgeLogger;
-  private readonly statusAdapter: BridgeRuntimeStatusAdapter;
+  private readonly statusAdapter: SdkRuntimeStatusAdapter;
   private readonly sessionIsolationDataDir?: string;
 
   private eventFilter: EventFilter | null = null;
@@ -103,7 +103,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.sdkClient = createSdkAdapter(options.client);
     this.missingSdkCapabilities = getMissingSdkCapabilities(options.client);
     this.logger = this.createRuntimeLogger({ traceId: options.runtimeTraceId });
-    this.statusAdapter = createBridgeRuntimeStatusAdapter();
+    this.statusAdapter = createSdkRuntimeStatusAdapter();
     this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
 

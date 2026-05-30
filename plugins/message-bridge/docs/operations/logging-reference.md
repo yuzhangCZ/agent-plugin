@@ -80,17 +80,14 @@
 ```mermaid
 sequenceDiagram
   participant P as "Plugin Runtime"
-  participant G as "GatewayConnection"
+  participant S as "bridge-runtime-sdk"
   participant GW as "Gateway"
 
   P->>P: runtime.start.requested
-  P->>G: connect()
-  G->>G: gateway.connect.started
-  G->>GW: WebSocket open
-  G->>G: gateway.open
-  G->>GW: register
-  G->>G: gateway.register.sent
-  G->>G: gateway.ready
+  P->>S: createBridgeRuntime().start()
+  S->>S: runtime_sdk.start.*
+  S->>GW: WebSocket connect/register
+  S->>S: runtime_sdk.gateway.state_changed(READY)
   P->>P: runtime.start.completed
 ```
 
@@ -99,19 +96,17 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant GW as "Gateway"
-  participant P as "BridgeRuntime"
-  participant R as "ActionRouter"
-  participant A as "Action"
+  participant P as "SdkBridgeRuntime"
+  participant S as "bridge-runtime-sdk"
+  participant A as "OpenCodeProviderAdapter"
 
   GW->>P: invoke/status_query
-  P->>P: runtime.invoke.received / runtime.status_query.received
-  P->>R: route(action, payload, context)
-  R->>R: router.route.received
-  R->>A: action.execute()
-  A->>A: action.*.started
-  A->>A: action.*.finished or action.*.failed
-  R->>R: router.route.completed
-  P->>P: runtime.invoke.completed / runtime.status_query.responded
+  P->>S: SDK runtime downstream dispatch
+  S->>S: runtime_sdk.downstream.*
+  S->>S: runtime_sdk.command.*
+  S->>A: provider command
+  A->>A: provider_adapter.*
+  S->>S: runtime_sdk.terminal.* / runtime_sdk.failure.*
 ```
 
 ### 3.3 上行 event 链路
@@ -119,22 +114,21 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant O as "OpenCode Event"
-  participant P as "BridgeRuntime"
-  participant G as "GatewayConnection"
+  participant P as "SdkBridgeRuntime"
+  participant A as "OpenCodeProviderAdapter"
+  participant S as "bridge-runtime-sdk"
   participant GW as "Gateway"
 
   O->>P: event
-  P->>P: event.received
-  alt not ready
-    P->>P: event.ignored_not_ready
-  else not allowed
-    P->>P: event.rejected_allowlist
-  else forwarding
-    P->>P: event.forwarding
-    P->>G: gateway.send(type=tool_event)
-    G->>G: gateway.send
-    G->>GW: tool_event
-    P->>P: event.forwarded
+  P->>A: raw event -> SDK fact
+  A->>A: provider_adapter.event.received
+  A->>S: fact
+  S->>S: runtime_sdk.fact.*
+  alt projected uplink
+    S->>S: runtime_sdk.uplink.*
+    S->>GW: tool_event/tool_done/tool_error
+  else unhandled but allowed
+    P->>P: runtime.event.ignored
   end
 ```
 
@@ -142,16 +136,13 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-  participant G as "GatewayConnection"
-  participant P as "BridgeRuntime"
+  participant S as "bridge-runtime-sdk"
+  participant P as "SdkBridgeRuntime"
 
-  G->>G: gateway.close or gateway.error
-  G->>G: gateway.reconnect.scheduled
-  G->>G: gateway.reconnect.attempt
-  G->>G: gateway.ready
-  P->>P: gateway.state.changed
-  P->>P: runtime.agent.rebound (when CONNECTING)
-  P->>P: runtime.tool_error.sending (action/error return path)
+  S->>S: runtime_sdk.gateway.state_changed
+  S->>S: runtime_sdk.failure.*
+  S->>S: runtime_sdk.downstream.failed
+  P->>P: runtime.stop.failed (stop error only)
 ```
 
 ## 4. 全事件清单（按前缀分组）
@@ -162,121 +153,48 @@ sequenceDiagram
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
-| `runtime.start.requested` | info | runtime 启动入口 | `workspacePath` | `src/runtime/BridgeRuntime.ts:54` |
-| `runtime.start.skipped_already_started` | debug | 重复 start 被跳过 | - | `src/runtime/BridgeRuntime.ts:56` |
-| `runtime.start.aborted_precheck` | warn | start 前检测到 abort | - | `src/runtime/BridgeRuntime.ts:61` |
-| `runtime.start.disabled_by_config` | info | `config.enabled=false` | - | `src/runtime/BridgeRuntime.ts:67` |
-| `runtime.start.failed_capabilities` | error | 启动前发现 SDK action 能力不完整 | `errorCode`,`errorMessage`,`missingCapabilities` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.start.failed_health` | error | 启动前 `global.health()` 或 raw `/global/health` 探活失败 | `errorCode`,`errorMessage`,`missingCapability?`,`cause?` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.start.failed_health_version` | error | 启动前 `global.health()` 或 raw `/global/health` 未返回可用 version | `errorCode`,`errorMessage`,`responseShape?` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.agent.rebound` | info | 连接状态转 `CONNECTING` 后重置 agentId | `agentId` | `src/runtime/BridgeRuntime.ts:103` |
-| `runtime.downstream_message_error` | error | 下行消息处理抛错 | `error`,`errorDetail`,`errorName`,`sourceErrorCode?` | `src/runtime/BridgeRuntime.ts:114` |
-| `runtime.start.aborted_before_connect` | warn | connect 前中止 | - | `src/runtime/BridgeRuntime.ts:124` |
-| `runtime.start.aborted_after_connect` | warn | connect 后中止 | - | `src/runtime/BridgeRuntime.ts:132` |
-| `runtime.start.completed` | info | 启动完成 | `agentId` | `src/runtime/BridgeRuntime.ts:137` |
-| `runtime.stop.requested` | info | stop 入口 | - | `src/runtime/BridgeRuntime.ts:141` |
-| `runtime.stop.completed` | info | stop 完成 | - | `src/runtime/BridgeRuntime.ts:148` |
-| `runtime.downstream_ignored_no_connection` | warn | 下行处理时无连接 | - | `src/runtime/BridgeRuntime.ts:198` |
-| `runtime.status_query.received` | info | 收到 status_query | `traceId`,`runtimeTraceId`,`gatewayMessageId`,`sessionId` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.status_query.responded` | info | status_response 已发送 | `traceId`,`runtimeTraceId`,`gatewayMessageId`,`sessionId`,`latencyMs` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.invoke.received` | info | 收到 invoke | `traceId`,`runtimeTraceId`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.invoke.completed` | info | invoke 成功完成（包括 `create_session` 回包后） | `traceId`,`runtimeTraceId`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId`,`latencyMs` | `src/runtime/BridgeRuntime.ts` |
-| `runtime.tool_error.skipped_no_connection` | warn | 需回传 tool_error 但无连接 | `sessionId` | `src/runtime/BridgeRuntime.ts:317` |
-| `runtime.tool_error.sending` | error | 发送 tool_error 前记录 | `traceId`,`runtimeTraceId`,`gatewayMessageId`,`sessionId`,`action`,`error` | `src/runtime/BridgeRuntime.ts` |
+| `runtime.start.requested` | info | runtime 启动入口 | `workspacePath` | `src/runtime/SdkBridgeRuntime.ts` |
+| `runtime.config.loading_failed` | error | 配置加载失败 | `error`,`workspacePath` | `src/runtime/SdkBridgeRuntime.ts` |
+| `runtime.start.completed` | info | SDK runtime 启动完成 | `runtimeMode`,`effectiveDirectory` | `src/runtime/SdkBridgeRuntime.ts` |
+| `runtime.stop.failed` | error | SDK runtime stop 抛错 | `error`,`errorDetail`,`errorName`,`sourceErrorCode?` | `src/runtime/SdkBridgeRuntime.ts` |
+| `runtime.stop.completed` | info | stop 完成 | `runtimeMode` | `src/runtime/SdkBridgeRuntime.ts` |
+| `runtime.event.ignored` | debug | provider 未消费但 allowlist 允许的事件被主链忽略 | `eventType`,`reason` | `src/runtime/SdkBridgeRuntime.ts` |
 | `runtime.singleton.reuse_existing` | debug | 复用已存在 runtime | - | `src/runtime/singleton.ts:13` |
 | `runtime.singleton.await_initializing` | debug | 等待初始化中的 runtime | - | `src/runtime/singleton.ts:18` |
 | `runtime.singleton.initialization_cancelled` | warn | 初始化过程被取消 | - | `src/runtime/singleton.ts:34` |
-| `runtime.singleton.initialized` | info | singleton 初始化完成 | - | `src/runtime/singleton.ts:38` |
+| `runtime.singleton.initialized` | info | singleton 初始化完成 | `runtimeMode=sdk` | `src/runtime/singleton.ts:38` |
 | `runtime.singleton.initialization_failed` | error | singleton 初始化失败 | `error`,`errorDetail`,`errorName`,`sourceErrorCode?` | `src/runtime/singleton.ts:43` |
 
-### 4.2 gateway.*
+### 4.2 runtime_sdk.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
-| `gateway.connect.started` | info | 开始 connect | `url`,`state` | `src/connection/GatewayConnection.ts:48` |
-| `gateway.connect.aborted_precheck` | warn | connect 前检测 abort | - | `src/connection/GatewayConnection.ts:52` |
-| `gateway.connect.aborted` | warn | connect 过程中收到 abort | - | `src/connection/GatewayConnection.ts:88` |
-| `gateway.open` | info | WebSocket onopen | - | `src/connection/GatewayConnection.ts:115` |
-| `gateway.register.sent` | info | register 消息发送后 | `toolType`,`toolVersion` | `src/connection/GatewayConnection.ts:119` |
-| `gateway.ready` | info | 状态切到 READY | - | `src/connection/GatewayConnection.ts:124` |
-| `gateway.close` | warn | WebSocket onclose | `opened`,`manuallyDisconnected`,`aborted`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
-| `gateway.error` | error | WebSocket onerror | `error`,`errorDetail`,`errorName?`,`errorType?`,`eventType?`,`readyState?` | `src/connection/GatewayConnection.ts:148` |
-| `gateway.connect.failed` | error | connect 抛异常（URL/构造等） | `error`,`errorDetail`,`errorName?`,`sourceErrorCode?` | `src/connection/GatewayConnection.ts:162` |
-| `gateway.disconnect.requested` | info | 主动 disconnect | `state` | `src/connection/GatewayConnection.ts:171` |
-| `gateway.send.rejected_not_connected` | warn | 非连接态发送消息 | - | `src/connection/GatewayConnection.ts:190` |
-| `gateway.send` | debug | send 前记录消息类型与大小 | `traceId`,`runtimeTraceId`,`messageType`,`payloadBytes`,`gatewayMessageId`,`eventType`,`action`,`opencodeMessageId`,`opencodePartId` | `src/connection/GatewayConnection.ts` |
-| `「sendMessage」===>「...」` | info | `debug=true` 时输出原始出站 WebSocket 报文 | 原始 JSON 文本 | `src/connection/GatewayConnection.ts` |
-| `gateway.heartbeat.sent` | debug | 心跳发送 | - | `src/connection/GatewayConnection.ts:225` |
-| `gateway.reconnect.scheduled` | warn | 安排重连 | `attempt`,`delayMs` | `src/connection/GatewayConnection.ts:250` |
-| `gateway.reconnect.attempt` | info | 执行一次重连 | `attempt` | `src/connection/GatewayConnection.ts:261` |
-| `gateway.reconnect.exhausted` | warn | 单轮自动重连窗口耗尽，停止后续自动重连 | `elapsedMs`,`maxElapsedMs` | `src/connection/GatewayConnection.ts` |
-| `gateway.message.received` | debug | 连接层解析到 JSON 消息 | `messageType`,`frameBytes`,`gatewayMessageId` | `src/connection/GatewayConnection.ts` |
-| `「onOpen」===>「...」` | info | `debug=true` 时输出 WebSocket `onopen` 原始事件摘要 | 原始事件摘要 | `src/connection/GatewayConnection.ts` |
-| `「onMessage」===>「...」` | info | `debug=true` 时输出原始入站 WebSocket 报文 | 原始帧文本或二进制摘要 | `src/connection/GatewayConnection.ts` |
-| `「onError」===>「...」` | info | `debug=true` 时输出 WebSocket `onerror` 原始事件摘要 | 原始错误事件摘要 | `src/connection/GatewayConnection.ts` |
-| `gateway.message.ignored_non_json` | debug | 收到非 JSON 消息被忽略 | `payloadLength`,`frameBytes` | `src/connection/GatewayConnection.ts` |
-| `gateway.state.changed` | info | runtime 监听到连接状态变化 | `state` | `src/runtime/BridgeRuntime.ts:99` |
-| `gateway.message.received` | debug | runtime 收到下行消息入口 | `traceId`,`runtimeTraceId`,`messageType`,`gatewayMessageId`,`action`,`sessionId`,`toolSessionId` | `src/runtime/BridgeRuntime.ts` |
+| `runtime_sdk.start.*` | info/error | SDK runtime 生命周期启动阶段 | `failureReason`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.stop.*` | info/error | SDK runtime 生命周期停止阶段 | `failureReason`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.gateway.state_changed` | info | gateway 连接状态变化 | `gatewayState` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.downstream.*` | info/warn/error | 下行消息校验、分发与失败 | `messageType`,`command`,`toolSessionId`,`welinkSessionId`,`error`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.command.*` | info/error | runtime command 派发与完成 | `traceId`,`command`,`toolSessionId`,`welinkSessionId`,`error`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.usecase.*` | info/warn/error | SDK usecase 执行阶段 | `traceId`,`toolSessionId`,`welinkSessionId`,`runId`,`outcome`,`error`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.provider.*` | debug/info/error | provider 调用阶段 | `traceId`,`toolSessionId`,`runId`,`error`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.fact.*` | info | provider fact 接收、投影与 uplink 投递 | `toolSessionId`,`factType`,`eventType`,`uplinkType`,`profile` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.interaction.*` | info/warn | question/permission pending interaction 注册、消费与冲突 | `kind`,`toolSessionId`,`tokenId`,`conflictingToolSessionId` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.uplink.*` | info/warn | SDK uplink 校验与发送 | `messageType`,`toolSessionId`,`welinkSessionId`,`code`,`field`,`reason` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.terminal.*` | info | terminal result 接收与发送 | `toolSessionId`,`welinkSessionId`,`runId`,`outcome` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
+| `runtime_sdk.failure.*` | warn/error | SDK runtime 统一失败事件 | `kind`,`phase`,`message`,`code` | `packages/bridge-runtime-sdk/src/adapters/observation/runtime-logger-observation.ts` |
 
-### 4.3 event.*
+### 4.3 provider_adapter.*
 
 | message | level | 触发时机 | 关键 extra | 源码位置 |
 |---|---|---|---|---|
-| `event.received` | debug | runtime handleEvent 收到事件 | `traceId`,`runtimeTraceId`,`eventType`,`toolSessionId`,`opencodeMessageId`,`opencodePartId`,`partType`,`deltaBytes`,`diffCount` | `src/runtime/BridgeRuntime.ts` |
-| `event.ignored_not_ready` | debug | runtime 未就绪时忽略事件 | `traceId`,`runtimeTraceId`,`eventType`,`toolSessionId`,`opencodeMessageId`,`opencodePartId`,`state` | `src/runtime/BridgeRuntime.ts` |
-| `event.rejected_allowlist` | warn | runtime allowlist 拒绝事件 | `traceId`,`runtimeTraceId`,`eventType`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
-| `event.forwarding` | info | runtime 上行发送前 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
-| `event.forwarded` | debug | runtime 上行发送后 | `traceId`,`runtimeTraceId`,`eventType`,`sessionId`,`toolSessionId`,`opencodeMessageId`,`opencodePartId` | `src/runtime/BridgeRuntime.ts` |
+| `provider_adapter.event.received` | debug | adapter 收到 OpenCode raw event 并开始翻译 | `eventType`,`toolSessionId` | `src/runtime/sdk/OpenCodeProviderAdapter.routing.ts` |
 
-### 4.4 compat.*
+### 4.4 runtime_sdk.*
 
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `compat.tool_done.sent` | info | compat 层发送 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
-| `compat.tool_done.skipped_duplicate` | debug | compat 层抑制重复 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`action`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
-| `compat.tool_done.fallback_from_idle` | info | `session.idle` 触发兜底 `tool_done` | `traceId`,`runtimeTraceId`,`toolSessionId`,`source` | `src/runtime/compat/ToolDoneCompat.ts` |
+SDK runtime cutover 后，插件侧不再维护独立 compat 完成态日志；完成态、投影和下行命令诊断统一以 `runtime_sdk.*` 观测事件为准。
 
-### 4.5 router.*
+### 4.5 action router logs
 
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `router.route.received` | info | 收到 action 路由请求 | `action`,`sessionId` | `src/action/ActionRouter.ts:23` |
-| `router.route.failed_registry_missing` | error | registry 未设置 | `action` | `src/action/ActionRouter.ts:30` |
-| `router.route.unsupported_action` | warn | action 未注册 | `action` | `src/action/ActionRouter.ts:40` |
-| `router.route.invalid_payload` | warn | action 参数校验失败 | `action`,`error` | `src/action/ActionRouter.ts:50` |
-| `router.route.completed` | info | action 执行完成 | `action`,`success`,`errorCode?` | `src/action/ActionRouter.ts:62` |
-
-### 4.6 action.*
-
-| message | level | 触发时机 | 关键 extra | 源码位置 |
-|---|---|---|---|---|
-| `action.chat.started` | info | chat action 开始 | `sessionId`,`messageLength` | `src/action/ChatAction.ts:57` |
-| `action.chat.rejected_state` | warn | 连接态不允许执行 chat | `state` | `src/action/ChatAction.ts:62` |
-| `action.chat.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/ChatAction.ts:110` |
-| `action.chat.failed` | error | chat 失败（可映射 code） | `error`,`errorCode?` | `src/action/ChatAction.ts:126` |
-| `action.chat.exception` | error | chat 执行抛异常 | `error`,`errorCode?` | `src/action/ChatAction.ts:139` |
-| `action.chat.finished` | debug | chat 结束（finally） | `latencyMs` | `src/action/ChatAction.ts:151` |
-| `action.create_session.started` | info | 最终创建目录解析完成后，create_session 开始 | `payloadKeys`,`resolvedDirectory`,`resolvedDirectorySource` | `src/action/CreateSessionAction.ts:192` |
-| `action.create_session.rejected_state` | warn | 连接态不允许创建会话 | `state` | `src/action/CreateSessionAction.ts:35` |
-| `action.create_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CreateSessionAction.ts:115` |
-| `action.create_session.failed` | error | create_session 失败 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:63` |
-| `action.create_session.exception` | error | create_session 抛异常 | `error`,`errorCode?` | `src/action/CreateSessionAction.ts:147` |
-| `action.create_session.finished` | debug | create_session 结束（finally） | `latencyMs` | `src/action/CreateSessionAction.ts:164` |
-| `action.close_session.started` | info | close_session 开始 | `sessionId` | `src/action/CloseSessionAction.ts:50` |
-| `action.close_session.rejected_state` | warn | 连接态不允许关闭会话 | `state` | `src/action/CloseSessionAction.ts:56` |
-| `action.close_session.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/CloseSessionAction.ts:108` |
-| `action.close_session.failed` | error | close_session 失败 | `error`,`errorCode?` | `src/action/CloseSessionAction.ts:119` |
-| `action.close_session.exception` | error | close_session 抛异常 | `error`,`errorCode?` | `src/action/CloseSessionAction.ts:132` |
-| `action.close_session.finished` | debug | close_session 结束（finally） | `latencyMs` | `src/action/CloseSessionAction.ts:144` |
-| `action.permission_reply.started` | info | permission_reply 开始 | `permissionId`,`hasToolSessionId`,`payloadFormat` | `src/action/PermissionReplyAction.ts:99` |
-| `action.permission_reply.rejected_state` | warn | 连接态不允许权限回复 | `state` | `src/action/PermissionReplyAction.ts:107` |
-| `action.permission_reply.sdk_error_payload` | error | SDK 返回 error payload | `error` | `src/action/PermissionReplyAction.ts:180` |
-| `action.permission_reply.failed` | error | permission_reply 失败 | `error`,`errorCode?` | `src/action/PermissionReplyAction.ts:191` |
-| `action.permission_reply.exception` | error | permission_reply 抛异常 | `error`,`errorCode?` | `src/action/PermissionReplyAction.ts:204` |
-| `action.permission_reply.finished` | debug | permission_reply 结束（finally） | `latencyMs` | `src/action/PermissionReplyAction.ts:216` |
-| `action.status_query.started` | debug | status_query 执行开始 | `sessionId`,`state` | `src/action/StatusQueryAction.ts:49` |
-| `action.status_query.exception` | error | status_query 抛异常 | `error`,`errorCode?` | `src/action/StatusQueryAction.ts:70` |
-| `action.status_query.finished` | debug | status_query 结束（finally） | `latencyMs` | `src/action/StatusQueryAction.ts:82` |
+SDK runtime cutover 后，插件侧旧 action router 已移除；下行命令执行日志以 `runtime_sdk.*`、`provider_adapter.*` 和 `session_isolation.*` 为准。
 
 ## 5. 排障指引（推荐顺序）
 
@@ -284,33 +202,32 @@ sequenceDiagram
 
 按顺序查：
 
-1. `gateway.connect.started`
-2. `gateway.open`
-3. `gateway.register.sent`
-4. `gateway.ready`
-5. `gateway.close` / `gateway.error`
-6. `gateway.reconnect.scheduled` / `gateway.reconnect.attempt`
-7. 若看到 `gateway.reconnect.exhausted`，表示单轮自动重连总时长已达到 `maxElapsedMs`，连接会停在 `DISCONNECTED`
+1. `runtime.start.requested`
+2. `runtime_sdk.start.*`
+3. `runtime_sdk.gateway.state_changed`
+4. `runtime_sdk.failure.*`
+5. `runtime.start.completed`
 
-若没有 `gateway.open`，优先检查网关地址、AK/SK 签名参数与网络可达性。
+若一直没有 `runtime_sdk.gateway.state_changed` 进入 `READY`，优先检查网关地址、AK/SK 签名参数与网络可达性。
 
 ### 5.2 路由未命中或参数错误
 
 按顺序查：
 
-1. `runtime.invoke.received`
-2. `router.route.received`
-3. `router.route.unsupported_action` 或 `router.route.invalid_payload`
-4. `runtime.invoke.completed`（`success=false`，关注 `errorCode`）
+1. `runtime_sdk.downstream.*`
+2. `runtime_sdk.command.*`
+3. `runtime_sdk.failure.*`
+4. `runtime_sdk.terminal.*`
 
 ### 5.3 Action 执行失败
 
 按顺序查：
 
-1. `action.<name>.started`
-2. `action.<name>.sdk_error_payload` / `action.<name>.failed` / `action.<name>.exception`
-3. `router.route.completed`
-4. `runtime.invoke.completed`
+1. `runtime_sdk.command.*`
+2. `runtime_sdk.usecase.*`
+3. `runtime_sdk.provider.*`
+4. `runtime_sdk.failure.*`
+5. `runtime_sdk.terminal.*`
 
 重点查看 `error`、`errorDetail`、`errorName`、`sourceErrorCode`、`errorCode`、`latencyMs`。
 
@@ -318,13 +235,14 @@ sequenceDiagram
 
 按顺序查：
 
-1. `runtime.tool_error.sending`
-2. `gateway.send` 或 `gateway.send.rejected_not_connected`
-3. `runtime.tool_error.skipped_no_connection`
+1. `runtime_sdk.failure.*`
+2. `runtime_sdk.uplink.validation_failed`
+3. `runtime_sdk.uplink.sent`
+4. `runtime_sdk.terminal.*`
 
 ## 6. 快速检索建议
 
-- 按事件名前缀：`runtime.*` / `gateway.*` / `router.*` / `action.*`
+- 按事件名前缀：`runtime.*` / `runtime_sdk.*` / `provider_adapter.*`
 - 按会话：筛 `sessionId`
 - 按链路：筛 `traceId`
 - 按动作：筛 `action`
