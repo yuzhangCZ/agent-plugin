@@ -629,11 +629,13 @@ sequenceDiagram
 
 ### 7.3 主要 fact 字段
 
+`type` 是 `ProviderFact` 闭集的判别字段，不是展示层可自由扩展的普通事件名。Runtime 会按 `type` 决定事实流时序校验、Gateway 事件投影、观测口径和 outbound 收口行为；集成方应只发送本节列出的类型。
+
 #### `MessageStartFact`
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'message.start'` | 是 | 事实类型。 |
+| `type` | `'message.start'` | 是 | 打开一条新的 message；同一 `messageId` 不得重复打开或重开已关闭消息。Runtime 会将其投影为派生 `step.start` 事件。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -642,7 +644,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'text.delta'` | 是 | 事实类型。 |
+| `type` | `'text.delta'` | 是 | 已打开 message 下的文本增量片段；必须出现在对应 `message.start` 之后、`message.done` 之前，并作为普通上行文本流事件投影。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
@@ -653,7 +655,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'text.done'` | 是 | 事实类型。 |
+| `type` | `'text.done'` | 是 | 已打开 message 下的文本片段收口；`content` 表示该 `partId` 的最终内容，可不依赖先前 `text.delta`。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
@@ -664,7 +666,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'thinking.delta'` | 是 | 事实类型。 |
+| `type` | `'thinking.delta'` | 是 | 已打开 message 下的思考内容增量片段；规则与 `text.delta` 相同，但语义上表示 reasoning/thinking 内容。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
@@ -675,7 +677,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'thinking.done'` | 是 | 事实类型。 |
+| `type` | `'thinking.done'` | 是 | 已打开 message 下的思考片段收口；`content` 表示该 `partId` 的最终 reasoning/thinking 内容。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
@@ -686,7 +688,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'tool.update'` | 是 | 事实类型。 |
+| `type` | `'tool.update'` | 是 | 已打开 message 下的工具调用状态更新；Runtime 会按 `toolCallId` 记录工具调用，并要求 `input`、`output` 若存在则为非空字符串。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 工具片段标识。 |
@@ -703,7 +705,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'question.ask'` | 是 | 事实类型。 |
+| `type` | `'question.ask'` | 是 | 已打开 message 下的问题挂起交互；Runtime 会登记 `questionId` 作为全局唯一回复目标，并投影为 `question` 上行事件。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 问题所在消息片段标识。 |
@@ -719,9 +721,9 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'permission.ask'` | 是 | 事实类型。 |
+| `type` | `'permission.ask'` | 是 | 权限挂起交互；不强制依附已打开 message，Runtime 会登记 `permissionId` 作为全局唯一回复目标，并保存展示上下文供后续 `permission.reply` 投影使用。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
-| `messageId` | `string` | 是 | 所属消息标识。 |
+| `messageId` | `string` | 否 | 可选消息归属上下文，仅用于展示或诊断透传。 |
 | `partId` | `string` | 是 | 权限所在消息片段标识。 |
 | `permissionId` | `string` | 是 | 直接回复目标，必须唯一。 |
 | `permissionType` | `string` | 否 | 可选权限类型。 |
@@ -733,12 +735,10 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'permission.reply'` | 是 | 事实类型。 |
+| `type` | `'permission.reply'` | 是 | 权限回复展示 fact；Runtime 会依赖前序 `permission.ask` 保存的展示上下文补齐投影所需字段，未找到上下文时记录投影失败。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `permissionId` | `string` | 是 | 已回复的权限标识。 |
 | `response` | `'once' \| 'always' \| 'reject'` | 是 | 权限回复结果。 |
-| `messageId` | `string` | 否 | 可选关联消息标识。 |
-| `partId` | `string` | 否 | 可选关联片段标识。 |
 | `permissionType` | `string` | 否 | 可选权限类型。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
@@ -746,7 +746,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'message.done'` | 是 | 事实类型。 |
+| `type` | `'message.done'` | 是 | 关闭一条已打开 message；Runtime 会将其投影为派生 `step.done` 事件。在 outbound profile 下，它还会标记本批事实流 terminal。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `reason` | `string` | 否 | 可选结束原因。 |
@@ -758,7 +758,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'session.title'` | 是 | 事实类型。 |
+| `type` | `'session.title'` | 是 | 会话标题更新 fact；不依赖 message 生命周期，投影为 `session.title` 上行事件。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `title` | `string` | 是 | 新的会话标题。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -767,7 +767,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'session.error'` | 是 | 事实类型。 |
+| `type` | `'session.error'` | 是 | 会话级错误展示 fact；不依赖 message 生命周期，投影为 `session.error` 上行事件，不等同于 `ProviderRun.result()` 的 run 终态。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `error` | `ProviderError` | 是 | 会话级错误信息。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -778,6 +778,7 @@ sequenceDiagram
 - `text.delta` 用于发送尚未收口的文本增量。
 - `text.done` 表示对应 `partId` 的文本片段已经收口。
 - `message.done` 表示该消息的 fact 流结束，但不代表 request run 终态。
+- request run 的最终结局始终以 `ProviderRun.result()` 为准。
 - 若某个片段一开始就是完整内容，可以只发送 `text.done`，不发送 `text.delta`。
 
 最小合法文本序列如下：
