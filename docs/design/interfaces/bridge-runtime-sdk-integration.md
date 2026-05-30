@@ -545,10 +545,12 @@ async runMessage(input: ProviderRunMessageInput) {
 
 #### 关联类型：`QrCodeAuthSnapshot`
 
+`type` 是调用方分支处理二维码授权快照的判别字段。`run()` 会先创建二维码会话并发出 `qrcode_generated`，随后按 `policy.pollIntervalMs` 轮询远端状态；重复快照会按 `type + qrcode` 去重，`failed` 会按 `qrcode/session + reasonCode` 去重。
+
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'qrcode_generated' \| 'scanned' \| 'expired' \| 'cancelled' \| 'confirmed' \| 'failed'` | 是 | 当前授权事件类型。 |
-| `qrcode` | `string` | 否 | 当前二维码内容。不同事件是否携带取决于具体快照。 |
+| `type` | `'qrcode_generated' \| 'scanned' \| 'expired' \| 'cancelled' \| 'confirmed' \| 'failed'` | 是 | 授权快照类型；决定该快照代表展示、轮询中间态、终态成功、终态取消或失败。 |
+| `qrcode` | `string` | 否 | 当前二维码内容。除创建会话前失败等场景外通常携带；`failed.qrcode` 可选。 |
 | `display` | `{ qrcode: string; weUrl: string; pcUrl: string }` | 否 | 仅二维码生成事件携带的展示数据。 |
 | `expiresAt` | `string` | 否 | 仅二维码生成事件携带的过期时间。 |
 | `credentials.ak` | `string` | 否 | 仅确认成功事件携带的 AK。 |
@@ -556,9 +558,21 @@ async runMessage(input: ProviderRunMessageInput) {
 | `reasonCode` | `'timeout' \| 'network_error' \| 'auth_service_error'` | 否 | 仅失败事件携带的失败原因。 |
 | `serviceError` | `QrCodeAuthServiceError` | 否 | 仅失败事件携带的服务错误信息。 |
 
+#### `QrCodeAuthSnapshot.type` 语义
+
+| 类型 | 终态 | 说明 |
+|---|---|---|
+| `qrcode_generated` | 否 | 创建二维码授权会话成功后发出；携带 `qrcode`、`display`、`expiresAt`，调用方可据此展示二维码。 |
+| `scanned` | 否 | 轮询发现当前二维码已被扫码，但授权尚未确认；Runtime 会继续轮询。 |
+| `expired` | 否 | 轮询发现当前二维码已过期。若 `policy.refreshOnExpired` 开启且未超过 `policy.maxRefreshCount`，Runtime 会创建新二维码并再次发出 `qrcode_generated`。 |
+| `cancelled` | 是 | 用户或远端取消本次二维码授权；`run()` 随后结束，不携带 credentials。 |
+| `confirmed` | 是 | 授权确认成功；携带 `credentials.ak`、`credentials.sk`，`run()` 随后结束。 |
+| `failed` | 是 | 授权流程失败；可能来自创建会话失败、查询失败、服务返回异常、确认缺少 AK/SK，或二维码过期且不可继续刷新。携带 `reasonCode`，可能携带 `serviceError`。 |
+
 - `qrcodeAuth.run()` 由调用方直接调用，不通过 `createBridgeRuntime()` 获取。
 - 调用方必须自行提供 `channel`、`mac` 和 `onSnapshot`。
 - 调用方应按 `snapshot.type` 分支处理快照，而不是假设所有字段始终存在。
+- `waiting` 是内部 service 状态，不会作为 `QrCodeAuthSnapshot.type` 暴露给调用方。
 
 ```ts
 import { qrcodeAuth } from '@wecode/bridge-runtime-sdk';
