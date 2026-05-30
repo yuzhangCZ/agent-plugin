@@ -116,15 +116,9 @@
 - 兼容逻辑必须独立封装，不能散落在 runtime/action 主流程
 
 ### Proposed Implementation Shape
-- 新增 compat 模块，建议路径：`src/runtime/compat/ToolDoneCompat.ts`
-- compat 模块只消费 runtime 已归一化后的上下文，不重新解析原始协议字段
-- compat 模块对 runtime 提供有限判定接口：
-  - 处理 invoke 成功完成
-  - 处理上游 `session.idle`
-  - 返回是否发送 `tool_done`、发送来源、是否命中重复抑制
-- `BridgeRuntime` 只在两个位置接入 compat：
-  - 下游 invoke 成功路径
-  - 上游 `session.idle` 路径
+- `tool_done` 兼容收口已迁入 `bridge-runtime-sdk` terminal 语义与 OpenCode provider adapter。
+- 插件侧不再通过旧插件内 runtime 主链接入 compat，也不再维护独立上行完成信号发送出口。
+- provider adapter 只负责将 OpenCode raw event 翻译为 SDK fact；是否发送 `tool_done`、发送来源与重复抑制由 SDK runtime terminal 收口统一决定。
 
 ### Concrete Work Items
 1. 定义 compat 层输入输出接口

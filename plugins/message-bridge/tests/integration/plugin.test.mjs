@@ -10,7 +10,6 @@ import {
 } from '../../src/index.ts';
 import * as PluginModule from '../../src/index.ts';
 import { qrcodeAuth as sourceQrCodeAuth } from '../../../../packages/skill-qrcode-auth/src/index.ts';
-import { BridgeRuntime } from '../../src/runtime/BridgeRuntime.ts';
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import { __resetRuntimeForTests, getCurrentRuntimeTraceId, getOrCreateRuntime, getRuntime, stopRuntime } from '../../src/runtime/singleton.ts';
 import { __resetMessageBridgeStatusForTests } from '../../src/runtime/MessageBridgeStatusStore.ts';
@@ -584,6 +583,39 @@ describe('plugin contract', () => {
     }
   });
 
+  test('singleton initializes sdk runtime and logs sdk runtimeMode', async () => {
+    const logs = [];
+    const client = createPluginClient({
+      app: {
+        log: async (options) => {
+          logs.push(options?.body);
+          return true;
+        },
+      },
+    });
+
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+    const readySocket = installReadyWebSocket();
+
+    try {
+      const hooks = await MessageBridgePlugin(mockInput({ client }));
+      assert.strictEqual(typeof hooks.event, 'function');
+      assert.ok(getRuntime() instanceof SdkBridgeRuntime);
+
+      const initializedLog = logs.find((entry) => entry?.message === 'runtime.singleton.initialized');
+      assert.strictEqual(initializedLog?.extra?.runtimeMode, 'sdk');
+    } finally {
+      readySocket.restore();
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'false';
+    }
+  });
+
   test('explicit start uses latest loaded input and does not auto restart on reload', async () => {
     const originalBridgeEnabled = process.env.BRIDGE_ENABLED;
     const originalBridgeAuthAk = process.env.BRIDGE_AUTH_AK;
@@ -717,13 +749,9 @@ describe('plugin contract', () => {
 
   test('explicit start config_invalid failure keeps reject message equal to lastError', async () => {
     process.env.BRIDGE_ENABLED = 'true';
-    const originalLegacyResolveConfig = BridgeRuntime.prototype.resolveConfig;
     const originalSdkResolveConfig = SdkBridgeRuntime.prototype.resolveConfig;
 
     try {
-      BridgeRuntime.prototype.resolveConfig = async function mockedResolveConfig() {
-        throw new Error('broken config');
-      };
       SdkBridgeRuntime.prototype.resolveConfig = async function mockedResolveConfig() {
         throw new Error('broken config');
       };
@@ -748,7 +776,6 @@ describe('plugin contract', () => {
       assert.strictEqual(rejection.message, getMessageBridgeStatus().lastError);
       assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'config_invalid');
     } finally {
-      BridgeRuntime.prototype.resolveConfig = originalLegacyResolveConfig;
       SdkBridgeRuntime.prototype.resolveConfig = originalSdkResolveConfig;
     }
   });

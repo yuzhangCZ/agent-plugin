@@ -12,7 +12,7 @@
 
 1. 保持对外协议行为稳定
 2. 明确边界契约归属
-3. 将原始协议字段读取限制在协议边界层
+3. 将 gateway 协议归一化收敛到 `bridge-runtime-sdk`
 4. 将运行时编排与业务执行分离
 
 整体流转如下：
@@ -20,9 +20,9 @@
 ```text
 原始事件/报文
   -> contracts
-  -> protocol
-  -> runtime
-  -> usecase / action / transport
+  -> SdkBridgeRuntime
+  -> OpenCodeProviderAdapter / bridge-runtime-sdk
+  -> usecase / adapter
 ```
 
 ## 2. 分层
@@ -37,19 +37,13 @@
 
 该层回答 bridge 与 OpenCode、gateway 之间交换什么数据。
 
-### 2.2 `protocol`
+### 2.2 `bridge-runtime-sdk`
 
-负责 schema 归一化与提取。
+负责 gateway schema 归一化、runtime 编排与上行发送。
 
-- `protocol/upstream`
-  - 校验支持的上行事件
-  - 提取 `toolSessionId`
-  - 失败时记录 `event.extraction_failed`
-- `protocol/downstream`
-  - 将 gateway 下行报文归一化为强类型命令
-  - 失败时记录 `downstream.normalization_failed`
-
-只有该层允许读取原始协议字段。
+- gateway 下行报文归一化为 SDK runtime 命令
+- OpenCode provider facts 投影为 gateway uplink
+- 连接、注册、重连与发送状态由 SDK runtime 管理
 
 ### 2.3 `runtime`
 
@@ -58,11 +52,11 @@
 - 生命周期
 - 配置加载
 - 连接管理
-- action 路由
-- gateway 发送
+- OpenCode provider adapter 装配
+- session isolation 控制面装配
 - usecase 与 adapter 装配
 
-`runtime` 不解析原始上下行 payload。
+`runtime` 不解析 gateway 原始 payload。
 
 ### 2.4 `usecase`
 
@@ -72,25 +66,22 @@
 - `chat` 的 agent 透传
 - SDK 调用前的 create-session 编排
 
-### 2.5 `action`
+### 2.5 `runtime/sdk`
 
-负责仅执行型业务逻辑：
+负责 OpenCode 宿主侧适配：
 
-- 状态门控
-- SDK 调用
-- 结果映射
-- 错误映射
-
-`action` 不再负责 payload 归一化。
+- OpenCode SDK 调用
+- raw OpenCode event 到 SDK fact 的翻译
+- permission/question 控制面桥接
 
 ## 3. 上行流
 
 ```text
 OpenCode 事件
   -> EventFilter
-  -> extractUpstreamEvent()
-  -> runtime.handleEvent()
-  -> gateway.send({ type: 'tool_event', toolSessionId, event })
+  -> OpenCodeProviderAdapter
+  -> bridge-runtime-sdk
+  -> gateway uplink
 ```
 
 当前精确白名单：
@@ -111,11 +102,9 @@ OpenCode 事件
 
 ```text
 gateway 下行消息
-  -> normalizeDownstreamMessage()
-  -> runtime.handleDownstreamMessage()
-  -> actionRouter.route()
-  -> action.execute()
-  -> runtime 发送传输层响应
+  -> bridge-runtime-sdk
+  -> OpenCodeProviderAdapter / session isolation control plane
+  -> OpenCode SDK 或 runtime 状态响应
 ```
 
 支持的下行消息类型：

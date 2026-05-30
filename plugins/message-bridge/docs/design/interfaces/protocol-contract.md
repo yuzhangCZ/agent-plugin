@@ -192,26 +192,20 @@ type QuestionReplyPayload = {
 
 - `RawUpstreamEvent`
   - SDK 接收到的原始 OpenCode 事件
-  - 原始字段路径归 upstream extractor 所有
-- `NormalizedUpstreamEvent`
-  - bridge 内部归一化后的事件
-  - 包含提取出的 `common` / `extra` 字段，以及后续投影所需的原始事件
-- `GatewayProjectedEvent`
-  - 发送到 `tool_event.event` 的传输安全形状
-  - 负责 gateway 面向的传输层投影规则，包括 `message.updated` 的裁剪规则
-  - 共享 canonical shape 已切换为：
-    - opencode：`{ type, properties }`
-    - cloud/skill：`{ protocol: 'cloud', type, properties }`
-  - `message-bridge` 只生成 opencode canonical shape，不补 `protocol`
-  - 当前实现位于 `src/transport/upstream/*`
+  - 原始字段路径归 OpenCode provider translator 所有
+- SDK fact
+  - OpenCode provider 输出给 `bridge-runtime-sdk` 的内部事实
+  - 负责表达 message、text、thinking、tool、permission、question 等语义
+  - gateway 传输形状由 `bridge-runtime-sdk` 统一生成
+  - 当前插件实现位于 `src/runtime/sdk/OpenCodeProviderAdapter.translation.ts`
 
 当前边界规则为：
 
-- upstream extraction 决定 bridge 能理解什么
-- transport projection 决定 gateway 能发送什么
-- runtime 只负责在两者之间编排
+- OpenCode provider translation 决定插件能理解什么
+- SDK runtime 决定 gateway 能发送什么
+- 插件 runtime 只负责装配 provider、配置和 session isolation 控制面
 
-bridge 会从归一化事件中提取 `toolSessionId`，然后发出：
+SDK runtime 会从 provider facts 和运行时上下文中确定 `toolSessionId`，然后发出：
 
 ```ts
 {
@@ -234,7 +228,7 @@ bridge 会从归一化事件中提取 `toolSessionId`，然后发出：
 - 保留轻量级 `summary.diffs[*].file/status/additions/deletions`
 - 丢弃 `summary.diffs[*].before/after`
 
-upstream extractor 仍返回完整原始 OpenCode 事件；裁剪仅作用于发往 gateway 的 payload。
+OpenCode provider 仍接收完整原始事件；裁剪仅作用于发往 gateway 的 payload。
 
 ## 4. 传输层契约
 

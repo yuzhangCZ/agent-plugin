@@ -6,6 +6,7 @@ import { join } from 'node:path';
 const cwd = process.cwd();
 const coverageDir = join(cwd, 'coverage');
 const lcovPath = join(coverageDir, 'lcov.info');
+const packageSrcPrefix = `${join(cwd, 'src').replaceAll('\\', '/')}/`;
 
 if (existsSync(coverageDir)) {
   rmSync(coverageDir, { recursive: true, force: true });
@@ -75,10 +76,7 @@ let branchesHit = 0;
 for (const block of lcov.split('end_of_record')) {
   const sourceFile = block.match(/^SF:(.+)$/m)?.[1];
   const normalizedSourceFile = sourceFile?.replaceAll('\\', '/');
-  if (
-    !normalizedSourceFile?.startsWith('src/') &&
-    !normalizedSourceFile?.includes('/src/')
-  ) {
+  if (!normalizedSourceFile?.startsWith('src/') && !normalizedSourceFile?.startsWith(packageSrcPrefix)) {
     continue;
   }
 
