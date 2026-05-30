@@ -1,4 +1,4 @@
-import { TOOL_TYPE_UNIASSISTANT } from '../contracts/transport-messages.js';
+import { CHANNEL_UNIASSISTANT } from '../contracts/transport-messages.js';
 import type { BridgeChannelPort } from '../port/BridgeChannelPort.js';
 
 export class EnvBridgeChannelAdapter implements BridgeChannelPort {
@@ -18,6 +18,6 @@ export class EnvBridgeChannelAdapter implements BridgeChannelPort {
   }
 
   isAssiantChannel(): boolean {
-    return this.getChannel() === TOOL_TYPE_UNIASSISTANT;
+    return this.getChannel() === CHANNEL_UNIASSISTANT;
   }
 }

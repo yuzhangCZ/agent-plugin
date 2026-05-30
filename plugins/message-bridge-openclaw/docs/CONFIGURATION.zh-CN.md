@@ -19,9 +19,9 @@
 
 - `GatewayUrl` / `gatewayUrl`（非标准别名，忽略）
 - `gateway.heartbeatIntervalMs` / `gateway.reconnect.*`（连接策略使用 gateway-client 默认值）
-- 注册元数据字段：`toolType`、`toolVersion`、`deviceName`、`macAddress`
-- 运行时默认 `toolType` 为 `openx`
-- 已知 `toolType` 列表为 `["openx"]`；注入未知值时只记录 `runtime.register.tool_type.unknown` 警告日志，不阻断启动
+- 注册元数据字段：`channel`、`toolVersion`、`deviceName`、`macAddress`
+- 运行时默认 `channel` 为 `openclaw`
+- 已知 `channel` 列表为 `["openclaw"]`；注入未知值时只记录 `runtime.register.channel.unknown` 警告日志，不阻断启动
 
 ## 2. 可以在什么地方配置
 

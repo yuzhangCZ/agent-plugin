@@ -136,7 +136,7 @@
 5. 连接层在单轮自动重连窗口内继续重连，不退出进程；超过窗口后停止自动重连并保持 `DISCONNECTED`。  
 
 ### FR-MB-08（P1）注册与状态查询
-- 连接成功发送 `register(deviceName, macAddress, os, toolType, toolVersion)`，其中 `deviceName/toolVersion/macAddress` 由运行时自动采集  
+- 连接成功发送 `register(deviceName, macAddress, os, channel, toolVersion)`，其中 `deviceName/toolVersion/macAddress` 由运行时自动采集  
 - `status_query` 不携带会话字段  
 - `status_response` 返回 `opencodeOnline:boolean`
 

@@ -103,7 +103,7 @@ async function createConnectedHarness({ maxPayload } = {}) {
       deviceName: 'integration-test',
       macAddress: '00:00:00:00:00:00',
       os: 'darwin',
-      toolType: 'opencode',
+      channel: 'opencode',
       toolVersion: '1.2.24',
       pluginVersion: '0.1.0',
     },

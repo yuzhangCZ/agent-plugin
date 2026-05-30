@@ -65,7 +65,7 @@
 | `url` | `string` | 否 | Gateway 地址。未提供时使用 SDK 默认连接配置。 |
 | `auth.ak` | `string` | 是 | Gateway 鉴权 AK。 |
 | `auth.sk` | `string` | 是 | Gateway 鉴权 SK。 |
-| `register.toolType` | `BridgeGatewayToolType` | 是 | 工具注册类型。 |
+| `register.channel` | `BridgeGatewayChannel` | 是 | 业务渠道标识。 |
 | `register.toolVersion` | `string` | 是 | 当前宿主 agent 版本。 |
 | `register.pluginVersion` | `string` | 否 | 上层插件版本。宿主无插件封装层时可省略。 |
 

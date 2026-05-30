@@ -73,7 +73,7 @@ import { SyntheticAssistantReplySender } from './SyntheticAssistantReplySender.j
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import { resolvePluginVersion } from './pluginVersion.js';
 import { resolveRegisterMetadata } from './RegisterMetadata.js';
-import { warnUnknownToolType } from './ToolTypeWarning.js';
+import { warnUnknownChannel } from './ChannelWarning.js';
 import { isBridgeStartupError, type BridgeStartupError, validateBridgeStartup } from './Startup.js';
 import { createBridgeRuntimeStatusAdapter, type BridgeRuntimeStatusAdapter } from './BridgeRuntimeStatusAdapter.js';
 import { resetMessageBridgeStatus } from './MessageBridgeStatusStore.js';
@@ -354,7 +354,7 @@ export class BridgeRuntime {
     this.sdkClient = startupValidation.sdkClient;
     this.eventFilter = new EventFilter(config.events.allowlist);
     const registerMetadata = resolveRegisterMetadata(startupValidation.health.version, this.logger);
-    warnUnknownToolType(this.logger, 'runtime.register.tool_type.unknown', config.gateway.channel, {
+    warnUnknownChannel(this.logger, 'runtime.register.channel.unknown', config.gateway.channel, {
       workspacePath: this.workspacePath,
     });
 
@@ -371,7 +371,7 @@ export class BridgeRuntime {
       registerMessage: buildGatewayRegisterMessage({
         deviceName: registerMetadata.deviceName,
         os: os.platform(),
-        toolType: config.gateway.channel,
+        channel: config.gateway.channel,
         toolVersion: registerMetadata.toolVersion,
         pluginVersion,
         macAddress: registerMetadata.macAddress,

@@ -976,7 +976,7 @@ describe('INT-CONN-001', () => {
       type: 'register',
       deviceName: expect.any(String),
       os: expect.any(String),
-      toolType: 'opencode',
+      channel: 'opencode',
       toolVersion: expect.any(String)
     });
     
@@ -1120,7 +1120,7 @@ describe('INT-FAIL-001', () => {
 
 **预期结果:**
 - 连接状态: DISCONNECTED -> CONNECTED -> READY
-- register 消息包含 deviceName/os/toolType/toolVersion
+- register 消息包含 deviceName/os/channel/toolVersion
 - 心跳每 30s 发送一次
 
 **验证方式:**

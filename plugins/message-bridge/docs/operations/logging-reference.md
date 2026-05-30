@@ -197,7 +197,7 @@ sequenceDiagram
 | `gateway.connect.aborted_precheck` | warn | connect 前检测 abort | - | `src/connection/GatewayConnection.ts:52` |
 | `gateway.connect.aborted` | warn | connect 过程中收到 abort | - | `src/connection/GatewayConnection.ts:88` |
 | `gateway.open` | info | WebSocket onopen | - | `src/connection/GatewayConnection.ts:115` |
-| `gateway.register.sent` | info | register 消息发送后 | `toolType`,`toolVersion` | `src/connection/GatewayConnection.ts:119` |
+| `gateway.register.sent` | info | register 消息发送后 | `channel`,`toolVersion` | `src/connection/GatewayConnection.ts:119` |
 | `gateway.ready` | info | 状态切到 READY | - | `src/connection/GatewayConnection.ts:124` |
 | `gateway.close` | warn | WebSocket onclose | `opened`,`manuallyDisconnected`,`aborted`,`lastMessageDirection`,`lastMessageType`,`lastMessageId`,`lastPayloadBytes`,`lastEventType`,`lastOpencodeMessageId` | `src/connection/GatewayConnection.ts` |
 | `gateway.error` | error | WebSocket onerror | `error`,`errorDetail`,`errorName?`,`errorType?`,`eventType?`,`readyState?` | `src/connection/GatewayConnection.ts:148` |

@@ -28,7 +28,7 @@ import type {
   MessageBridgeResolvedAccount,
   MessageBridgeStatusSnapshot,
 } from "./types.js";
-import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
+import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownChannel } from "./runtime/RegisterMetadata.js";
 import {
   type BridgeRuntimeConnectionFactory,
   withOptionalConnectionFactory,
@@ -98,7 +98,7 @@ type MessageBridgeRuntimeSnapshotLike = Pick<
 export type MessageBridgeAccountSnapshot = ChannelAccountSnapshot & {
   connected: boolean;
   gatewayUrl: string | null;
-  toolType: string;
+  channel: string;
   toolVersion: string;
   runTimeoutMs: number;
   tokenSource: "config" | "none";
@@ -318,7 +318,7 @@ export async function probeMessageBridgeAccount(
   }
 
   const registerMetadata = resolveRegisterMetadata(logger);
-  warnUnknownToolType(logger, registerMetadata.toolType, accountId);
+  warnUnknownChannel(logger, registerMetadata.channel, accountId);
   const { abortController } = beginProbeConnect(resourceKey, now);
   let probeRuntime: BridgeRuntime | null = null;
   const buildCancelledResult = (): MessageBridgeProbeResult => ({
@@ -399,7 +399,7 @@ export function buildMessageBridgeAccountSnapshot(params: {
     }),
     connected: runtime?.connected ?? false,
     gatewayUrl: account.gateway.url || null,
-    toolType: registerMetadata.toolType,
+    channel: registerMetadata.channel,
     toolVersion: registerMetadata.toolVersion,
     runTimeoutMs: account.runTimeoutMs,
     tokenSource: resolveTokenSource(account),
@@ -564,7 +564,7 @@ export function collectMessageBridgeStatusIssues(
           createRuntimeIssue({
             accountId: snapshot.accountId,
             message: `网关拒绝注册${reason}`,
-            fix: "检查 ai-gateway 的注册策略、toolType/toolVersion 与协议兼容性。",
+            fix: "检查 ai-gateway 的注册策略、channel/toolVersion 与协议兼容性。",
           }),
         );
       }

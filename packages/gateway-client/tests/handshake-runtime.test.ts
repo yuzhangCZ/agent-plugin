@@ -17,7 +17,7 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
         type: 'register',
         deviceName: 'dev',
         os: 'darwin',
-        toolType: 'opencode',
+        channel: 'opencode',
         toolVersion: '1.0.0',
         pluginVersion: '0.2.0',
       },

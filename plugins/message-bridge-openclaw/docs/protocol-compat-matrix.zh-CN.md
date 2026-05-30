@@ -18,7 +18,7 @@
 
 | message type | 产出路径 | 触发条件 | 关键字段 | 与 message-bridge 对齐情况 |
 |---|---|---|---|---|
-| `register` | 启动连接后发送 | 网关连接建立后 | `deviceName/macAddress/os/toolType/toolVersion` | 对齐 |
+| `register` | 启动连接后发送 | 网关连接建立后 | `deviceName/macAddress/os/channel/toolVersion` | 对齐 |
 | `heartbeat` | 连接层周期发送 | 心跳定时器触发 | `timestamp` | 对齐 |
 | `status_response` | 下行 `status_query` 响应 | 收到 `status_query` | `opencodeOnline` | 对齐（语义一致，判定来源不同） |
 | `session_created` | `invoke.create_session` 成功 | 会话 ID 已确定并映射后 | `welinkSessionId/toolSessionId/session.sessionId` | 对齐 |

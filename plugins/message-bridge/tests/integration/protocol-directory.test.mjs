@@ -741,7 +741,7 @@ describe('protocol directory-context integration', () => {
       ]);
       const ws = RegisterCaptureWebSocket.instances[0];
       assert.strictEqual(ws.sent[0].type, 'register');
-      assert.strictEqual(ws.sent[0].toolType, 'uniassistant');
+      assert.strictEqual(ws.sent[0].channel, 'uniassistant');
       assert.strictEqual(ws.sent[1].type, 'session_created');
       assert.strictEqual(ws.sent[1].toolSessionId, 'dir-assiant-1');
       assert.strictEqual(ws.sent[2].type, 'tool_done');

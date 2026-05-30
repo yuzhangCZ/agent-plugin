@@ -83,7 +83,7 @@ declare module "openclaw/plugin-sdk" {
     configured?: boolean;
     connected?: boolean;
     gatewayUrl?: string | null;
-    toolType?: string;
+    channel?: string;
     toolVersion?: string;
     runTimeoutMs?: number;
     tokenSource?: string;

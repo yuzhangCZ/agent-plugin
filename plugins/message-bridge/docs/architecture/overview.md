@@ -174,7 +174,7 @@ bridge 发往 gateway 的消息类型：
 
 - 同目录下优先读取 `.jsonc`
 - 项目级配置会从工作目录开始向父目录递归查找，直到文件系统根目录
-- `gateway.channel` 是配置侧字段名，注册报文中仍映射到协议字段 `toolType`
+- `gateway.channel` 是配置侧字段名，注册报文中仍映射到协议字段 `channel`
 - `deviceName`、`macAddress`、`toolVersion` 由运行时自动采集，不属于可配置项
 
 结构化日志在 `client.app.log()` 可用时上报。关键协议失败事件：

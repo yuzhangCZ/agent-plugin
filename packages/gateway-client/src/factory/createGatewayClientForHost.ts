@@ -7,9 +7,9 @@ import { buildGatewayRegisterMessage } from './buildGatewayRegisterMessage.ts';
 import { createGatewayClient } from './createGatewayClient.ts';
 
 /**
- * host-level `toolType` 作为接入端标识透传给网关，不在 gateway-client 层限制具体取值。
+ * host-level `channel` 作为接入端标识透传给网关，不在 gateway-client 层限制具体取值。
  */
-export type GatewayClientHostToolType = string;
+export type GatewayClientHostChannel = string;
 const LOCALHOST_DEFAULT_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
 
 function readInjectedDefaultGatewayUrl(): string | null {
@@ -37,7 +37,7 @@ export interface GatewayClientHostConfig {
     sk: string;
   };
   register: {
-    toolType: GatewayClientHostToolType;
+    channel: GatewayClientHostChannel;
     toolVersion: string;
     sdkVersion?: string;
     pluginVersion?: string;
@@ -107,7 +107,7 @@ export function buildGatewayHostRegisterMessage(
   return buildGatewayRegisterMessage({
     deviceName: resolveDeviceName(environment.hostname()),
     os: environment.platform(),
-    toolType: register.toolType,
+    channel: register.channel,
     toolVersion: register.toolVersion,
     ...(register.sdkVersion ? { sdkVersion: register.sdkVersion } : {}),
     ...(register.pluginVersion ? { pluginVersion: register.pluginVersion } : {}),

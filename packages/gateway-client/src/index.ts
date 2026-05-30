@@ -16,6 +16,6 @@ export {
   createGatewayClientForHost,
   type GatewayClientHostConfig,
   type GatewayClientHostOptions,
-  type GatewayClientHostToolType,
+  type GatewayClientHostChannel,
   resolveGatewayClientHostConfig,
 } from './factory/createGatewayClientForHost.ts';

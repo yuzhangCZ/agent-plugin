@@ -10,7 +10,7 @@ test('buildGatewayRegisterMessage returns register payload and omits blank macAd
   const message = buildGatewayRegisterMessage({
     deviceName: 'dev-box',
     os: 'darwin',
-    toolType: 'openx',
+    channel: 'openx',
     toolVersion: '1.2.3',
     pluginVersion: '0.2.0',
     macAddress: '   ',
@@ -20,7 +20,7 @@ test('buildGatewayRegisterMessage returns register payload and omits blank macAd
     type: 'register',
     deviceName: 'dev-box',
     os: 'darwin',
-    toolType: 'openx',
+    channel: 'openx',
     toolVersion: '1.2.3',
     pluginVersion: '0.2.0',
   });
@@ -30,7 +30,7 @@ test('buildGatewayRegisterMessage preserves explicit macAddress and does not der
   const message = buildGatewayRegisterMessage({
     deviceName: 'dev-box',
     os: 'linux',
-    toolType: 'channel',
+    channel: 'channel',
     toolVersion: '9.9.9',
     sdkVersion: '2.3.4',
     macAddress: ' aa:bb:cc:dd:ee:ff ',
@@ -40,7 +40,7 @@ test('buildGatewayRegisterMessage preserves explicit macAddress and does not der
     type: 'register',
     deviceName: 'dev-box',
     os: 'linux',
-    toolType: 'channel',
+    channel: 'channel',
     toolVersion: '9.9.9',
     sdkVersion: '2.3.4',
     macAddress: ' aa:bb:cc:dd:ee:ff ',
@@ -50,7 +50,7 @@ test('buildGatewayRegisterMessage preserves explicit macAddress and does not der
 test('buildGatewayHostRegisterMessage derives device identity and macAddress', () => {
   const message = buildGatewayHostRegisterMessage(
     {
-      toolType: 'openx',
+      channel: 'openx',
       toolVersion: '1.2.3',
       pluginVersion: '0.2.0',
     },
@@ -68,7 +68,7 @@ test('buildGatewayHostRegisterMessage derives device identity and macAddress', (
     type: 'register',
     deviceName: 'dev-box',
     os: 'darwin',
-    toolType: 'openx',
+    channel: 'openx',
     toolVersion: '1.2.3',
     pluginVersion: '0.2.0',
     macAddress: 'aa:bb:cc:dd:ee:ff',
@@ -78,7 +78,7 @@ test('buildGatewayHostRegisterMessage derives device identity and macAddress', (
 test('buildGatewayHostRegisterMessage omits unusable macAddress and falls back deviceName', () => {
   const message = buildGatewayHostRegisterMessage(
     {
-      toolType: 'opencode',
+      channel: 'opencode',
       toolVersion: '1.2.3',
       sdkVersion: '0.2.0',
     },
@@ -95,7 +95,7 @@ test('buildGatewayHostRegisterMessage omits unusable macAddress and falls back d
     type: 'register',
     deviceName: 'unknown-device',
     os: 'linux',
-    toolType: 'opencode',
+    channel: 'opencode',
     toolVersion: '1.2.3',
     sdkVersion: '0.2.0',
   });

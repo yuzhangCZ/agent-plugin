@@ -1,11 +1,11 @@
 export * from "../gateway-wire/transport.js";
 
-export const KNOWN_TOOL_TYPES = [
+export const KNOWN_CHANNELS = [
   "openclaw",
 ] as const;
 
-export type KnownToolType = (typeof KNOWN_TOOL_TYPES)[number];
+export type KnownChannel = (typeof KNOWN_CHANNELS)[number];
 
-export function isKnownToolType(value: string): value is KnownToolType {
-  return KNOWN_TOOL_TYPES.includes(value as KnownToolType);
+export function isKnownChannel(value: string): value is KnownChannel {
+  return KNOWN_CHANNELS.includes(value as KnownChannel);
 }

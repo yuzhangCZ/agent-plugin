@@ -79,7 +79,7 @@ function registerMessage() {
     deviceName: 'dev',
     macAddress: 'aa:bb:cc:dd:ee:ff',
     os: 'darwin',
-    toolType: 'channel',
+    channel: 'channel',
     toolVersion: '1.0.0',
     pluginVersion: '0.1.0',
   };
@@ -309,7 +309,7 @@ describe('DefaultGatewayConnection coverage', () => {
         deviceName: '   ',
         macAddress: 'aa:bb:cc:dd:ee:ff',
         os: 'darwin',
-        toolType: 'channel',
+        channel: 'channel',
         toolVersion: '1.0.0',
         pluginVersion: '0.1.0',
       },
@@ -812,7 +812,7 @@ describe('DefaultGatewayConnection coverage', () => {
     assert.ok(entries.some((entry) => entry.message === 'gateway.send'));
     assert.ok(entries.some((entry) => entry.message === 'gateway.message.received'));
     assert.strictEqual(entries.some((entry) => typeof entry.message === 'string' && entry.message.startsWith('「on')), false);
-    assert.strictEqual(entries.some((entry) => entry.message === '「sendMessage」===>「{"type":"register","deviceName":"dev","macAddress":"aa:bb:cc:dd:ee:ff","os":"darwin","toolType":"channel","toolVersion":"1.0.0","pluginVersion":"0.1.0"}」'), false);
+    assert.strictEqual(entries.some((entry) => entry.message === '「sendMessage」===>「{"type":"register","deviceName":"dev","macAddress":"aa:bb:cc:dd:ee:ff","os":"darwin","channel":"channel","toolVersion":"1.0.0","pluginVersion":"0.1.0"}」'), false);
 
     conn.disconnect();
   });

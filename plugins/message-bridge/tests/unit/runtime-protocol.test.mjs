@@ -2458,7 +2458,7 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(ws.sent[0].deviceName, hostname());
       assert.strictEqual(ws.sent[0].macAddress, '11:22:33:44:55:66');
       assert.strictEqual(typeof ws.sent[0].os, 'string');
-      assert.strictEqual(ws.sent[0].toolType, 'opencode');
+      assert.strictEqual(ws.sent[0].channel, 'opencode');
       assert.strictEqual(ws.sent[0].toolVersion, '9.9.9');
       assert.strictEqual(ws.sent[0].pluginVersion, 'unknown');
 
@@ -2471,14 +2471,14 @@ describe('runtime protocol strictness', () => {
     }
   });
 
-  test('runtime.start logs unknown toolType before register and keeps register payload', async () => {
+  test('runtime.start logs unknown channel before register and keeps register payload', async () => {
     const originalWebSocket = globalThis.WebSocket;
     const RegisterCaptureWebSocket = createRegisterCaptureWebSocket();
     globalThis.WebSocket = RegisterCaptureWebSocket;
     const logs = [];
 
     const resolvedConfig = createResolvedConfig();
-    resolvedConfig.gateway.channel = 'legacy-tool-type';
+    resolvedConfig.gateway.channel = 'legacy-channel';
 
     try {
       const runtime = createRuntimeWithResolvedConfig(resolvedConfig, {
@@ -2497,12 +2497,12 @@ describe('runtime protocol strictness', () => {
 
       const ws = RegisterCaptureWebSocket.instances[0];
       assert.strictEqual(ws.sent[0].type, 'register');
-      assert.strictEqual(ws.sent[0].toolType, 'legacy-tool-type');
+      assert.strictEqual(ws.sent[0].channel, 'legacy-channel');
 
-      const unknownLog = logs.find((entry) => entry?.body?.message === 'runtime.register.tool_type.unknown');
+      const unknownLog = logs.find((entry) => entry?.body?.message === 'runtime.register.channel.unknown');
       assert.ok(unknownLog);
-      assert.strictEqual(unknownLog.body.extra.toolType, 'legacy-tool-type');
-      assert.deepStrictEqual(unknownLog.body.extra.knownToolTypes, ['opencode', 'openx', 'uniassistant', 'codeagent']);
+      assert.strictEqual(unknownLog.body.extra.channel, 'legacy-channel');
+      assert.deepStrictEqual(unknownLog.body.extra.knownChannels, ['opencode', 'openx', 'uniassistant', 'codeagent']);
 
       runtime.stop();
     } finally {
@@ -2964,8 +2964,8 @@ describe('runtime protocol strictness', () => {
 
       assert.strictEqual(resolveCount, 2);
       assert.strictEqual(RegisterCaptureWebSocket.instances.length, 2);
-      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].toolType, 'opencode');
-      assert.strictEqual(RegisterCaptureWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+      assert.strictEqual(RegisterCaptureWebSocket.instances[0].sent[0].channel, 'opencode');
+      assert.strictEqual(RegisterCaptureWebSocket.instances[1].sent[0].channel, 'uniassistant');
 
       runtime.stop();
     } finally {
@@ -3033,7 +3033,7 @@ describe('runtime protocol strictness', () => {
       assert.strictEqual(resolveCount, 2);
       assert.strictEqual(FlakyRegisterWebSocket.instances.length, 2);
       assert.strictEqual(FlakyRegisterWebSocket.instances[0].sent.length, 0);
-      assert.strictEqual(FlakyRegisterWebSocket.instances[1].sent[0].toolType, 'uniassistant');
+      assert.strictEqual(FlakyRegisterWebSocket.instances[1].sent[0].channel, 'uniassistant');
 
       runtime.stop();
     } finally {

@@ -49,7 +49,7 @@ test('internal factory accepts overrides without leaking them through stable ent
         type: 'register',
         deviceName: 'dev',
         os: 'darwin',
-        toolType: 'opencode',
+        channel: 'opencode',
         toolVersion: '1.0.0',
         pluginVersion: '0.2.0',
       },
@@ -70,7 +70,7 @@ test('internal factory accepts overrides without leaking them through stable ent
     type: 'register',
     deviceName: 'dev',
     os: 'darwin',
-    toolType: 'opencode',
+    channel: 'opencode',
     toolVersion: '1.0.0',
     pluginVersion: '0.2.0',
   });

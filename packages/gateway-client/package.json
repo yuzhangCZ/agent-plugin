@@ -25,6 +25,7 @@
     "test": "node --experimental-strip-types --test tests/**/*.test.ts"
   },
   "devDependencies": {
-    "@types/node": "22.19.17"
+    "@types/node": "22.19.17",
+    "typescript": "^5.9.3"
   }
 }

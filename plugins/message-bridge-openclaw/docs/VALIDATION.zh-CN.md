@@ -181,7 +181,7 @@ openclaw --dev gateway run --allow-unconfigured --verbose
 预期结果：
 
 - 出现 agent 注册成功日志
-- 日志中能看到 `toolType=openx`
+- 日志中能看到 `channel=openx`
 - 能持续看到 heartbeat
 
 #### 步骤 3：验证 `status_query`
@@ -301,7 +301,7 @@ pnpm run verify:openclaw:load
 - `auth.ak`
 - `auth.sk`
 
-不支持配置 `gateway.toolType`、`gateway.toolVersion`、`gateway.deviceName`、`gateway.macAddress`。
+不支持配置 `gateway.channel`、`gateway.toolVersion`、`gateway.deviceName`、`gateway.macAddress`。
 
 先备份当前配置，再执行：
 
@@ -333,7 +333,7 @@ openclaw --dev channels add --channel message-bridge --account secondary --url w
 说明：
 
 - `name` 仅作为账号展示名，不参与注册协议
-- 注册时的 `toolType/toolVersion` 由 OpenClaw 插件侧提供，`deviceName/os/macAddress` 由 gateway-client 统一派生
+- 注册时的 `channel/toolVersion` 由 OpenClaw 插件侧提供，`deviceName/os/macAddress` 由 gateway-client 统一派生
 
 执行：
 

@@ -6,7 +6,7 @@ import {
 } from "@wecode/bridge-runtime-sdk";
 
 import type { BridgeLogger, MessageBridgeResolvedAccount, MessageBridgeStatusSnapshot } from "./types.js";
-import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownToolType } from "./runtime/RegisterMetadata.js";
+import { resolveRegisterMetadata, type RegisterMetadata, warnUnknownChannel } from "./runtime/RegisterMetadata.js";
 import { markRuntimePhase, updateRuntimeSnapshot } from "./runtime/ConnectionCoordinator.js";
 import { SessionRegistry } from "./session/SessionRegistry.js";
 import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./gateway-host.js";
@@ -62,7 +62,7 @@ export class OpenClawGatewayBridge {
     this.runtime = options.runtime;
     const registerMetadata = options.registerMetadata ?? resolveRegisterMetadata(options.logger);
     this.resourceKey = buildMessageBridgeResourceKey(options.account);
-    warnUnknownToolType(options.logger, registerMetadata.toolType, options.account.accountId);
+    warnUnknownChannel(options.logger, registerMetadata.channel, options.account.accountId);
 
     const sessionRegistry = new SessionRegistry(`${options.account.agentIdPrefix}:${options.account.accountId}`);
     const runtimeOptions = withOptionalConnectionFactory({

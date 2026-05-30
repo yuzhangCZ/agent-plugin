@@ -21,9 +21,9 @@ Not supported as user config:
 
 - `GatewayUrl` / `gatewayUrl` (non-standard aliases, ignored)
 - `gateway.heartbeatIntervalMs` / `gateway.reconnect.*` (connection policy uses gateway-client defaults)
-- register metadata fields like `toolType`, `toolVersion`, `deviceName`, `macAddress`
-- runtime default `toolType` is `openx`
-- known `toolType` list is `["openx"]`; unknown values only emit `runtime.register.tool_type.unknown` warning and do not block startup
+- register metadata fields like `channel`, `toolVersion`, `deviceName`, `macAddress`
+- runtime default `channel` is `openclaw`
+- known `channel` list is `["openclaw"]`; unknown values only emit `runtime.register.channel.unknown` warning and do not block startup
 
 ## Where to configure
 

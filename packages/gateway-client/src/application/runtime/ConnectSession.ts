@@ -193,7 +193,7 @@ class ConnectAttempt {
     try {
       this.outboundSender.sendInternalControl(this.context.options.registerMessage);
       this.context.logger?.info?.('gateway.register.sent', {
-        toolType: this.context.options.registerMessage.toolType,
+        channel: this.context.options.registerMessage.channel,
         toolVersion: this.context.options.registerMessage.toolVersion,
         sdkVersion: this.context.options.registerMessage.sdkVersion,
         pluginVersion: this.context.options.registerMessage.pluginVersion,

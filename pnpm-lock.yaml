@@ -57,6 +57,9 @@ importers:
       '@types/node':
         specifier: 22.19.17
         version: 22.19.17
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/gateway-schema:
     dependencies:

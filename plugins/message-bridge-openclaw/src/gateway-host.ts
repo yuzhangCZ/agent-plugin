@@ -16,7 +16,7 @@ export function buildBridgeGatewayHostConfig(
       sk: account.auth.sk,
     },
     register: {
-      toolType: registerMetadata.toolType,
+      channel: registerMetadata.channel,
       toolVersion: registerMetadata.toolVersion,
       pluginVersion: registerMetadata.pluginVersion,
     },

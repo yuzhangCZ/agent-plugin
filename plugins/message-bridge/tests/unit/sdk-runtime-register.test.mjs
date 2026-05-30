@@ -256,7 +256,7 @@ test('sdk runtime register falls back to pluginVersion when sdkVersion is unavai
 
     const ws = RegisterCaptureWebSocket.instances[0];
     assert.equal(ws.sent[0].type, 'register');
-    assert.equal(ws.sent[0].toolType, 'opencode');
+    assert.equal(ws.sent[0].channel, 'opencode');
     assert.equal(ws.sent[0].toolVersion, '9.9.9');
     assert.equal(ws.sent[0].pluginVersion, 'unknown');
     assert.equal('sdkVersion' in ws.sent[0], false);

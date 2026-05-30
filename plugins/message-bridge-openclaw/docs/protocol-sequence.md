@@ -78,7 +78,7 @@ sequenceDiagram
   - upstream `register`
   - upstream periodic `heartbeat`
 - Register metadata
-  - `toolType` defaults to `openx` (unknown values only warn and do not block runtime)
+  - `channel` defaults to `openx` (unknown values only warn and do not block runtime)
   - `toolVersion` is plugin-runtime-derived; `deviceName` / `os` / `macAddress` are gateway-client-derived
 - ID mapping
   - none yet; `SessionRegistry` is not populated during startup

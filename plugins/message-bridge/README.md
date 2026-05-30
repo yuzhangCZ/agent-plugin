@@ -283,7 +283,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 | `sdk.timeoutMs` | `10000` |
 | `events.allowlist` | `DEFAULT_EVENT_ALLOWLIST` |
 
-`gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `toolType` 字段。
+`gateway.channel` 会在连接 ai-gateway 时映射到 register payload 的 `channel` 字段。
 当前内置已知值集合为 `openx`、`uniassistant`、`codeagent`；如果配置了其他值，运行时会记录 `config.gateway.channel.unknown` 警告日志，但不会阻断连接。
 
 当前自动重连策略：

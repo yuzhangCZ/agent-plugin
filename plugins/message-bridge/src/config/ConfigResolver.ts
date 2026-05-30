@@ -2,7 +2,7 @@ import { dirname, join, resolve } from 'path';
 import { promises } from 'fs';
 import type { BridgeConfig } from '../types/index.js';
 import type { BridgeLogger } from '../runtime/AppLogger.js';
-import { warnUnknownToolType } from '../runtime/ToolTypeWarning.js';
+import { warnUnknownChannel } from '../runtime/ChannelWarning.js';
 import { getErrorDetailsForLog, getErrorMessage } from '../utils/error.js';
 import { JsoncParser } from './JsoncParser.js';
 import { DEFAULT_BRIDGE_CONFIG } from './default-config.js';
@@ -89,7 +89,7 @@ export class ConfigResolver {
     const normalized = this.normalizeConfig(config as BridgeConfig);
     const gatewayChannel = this.readGatewayChannel(normalized);
     if (gatewayChannel) {
-      warnUnknownToolType(this.logger, 'config.gateway.channel.unknown', gatewayChannel, {
+      warnUnknownChannel(this.logger, 'config.gateway.channel.unknown', gatewayChannel, {
         source: channelSource,
       });
     }

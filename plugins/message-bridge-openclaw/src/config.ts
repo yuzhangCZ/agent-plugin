@@ -45,7 +45,7 @@ export const DEFAULT_ACCOUNT_CONFIG: MessageBridgeAccountConfig = {
 type MessageBridgeSetupInput = Pick<ChannelSetupInput, "name" | "password" | "token" | "url" | "useEnv">;
 
 const DEPRECATED_GATEWAY_FIELDS = new Set([
-  "toolType",
+  "channel",
   "toolVersion",
   "deviceName",
   "macAddress",

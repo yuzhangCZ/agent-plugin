@@ -8,7 +8,7 @@ import type { RegisterMessage } from '@agent-plugin/gateway-schema';
 export interface GatewayRegisterMessageInput {
   deviceName: string;
   os: string;
-  toolType: string;
+  channel: string;
   toolVersion: string;
   sdkVersion?: string;
   pluginVersion?: string;
@@ -28,7 +28,7 @@ export function buildGatewayRegisterMessage(input: GatewayRegisterMessageInput):
     type: 'register',
     deviceName: input.deviceName,
     os: input.os,
-    toolType: input.toolType,
+    channel: input.channel,
     toolVersion: input.toolVersion,
     ...(input.sdkVersion ? { sdkVersion: input.sdkVersion } : {}),
     ...(input.pluginVersion ? { pluginVersion: input.pluginVersion } : {}),

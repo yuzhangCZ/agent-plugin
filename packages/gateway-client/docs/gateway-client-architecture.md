@@ -92,7 +92,7 @@ connect()
 1. `connect()` resolve 表示连接建立流程进入稳定可用状态，不代表上层拥有业务语义。
 2. READY 由控制帧和状态机共同决定，不允许业务层手动跳过。
 3. 心跳只在 READY 后启动。
-4. `register` 控制帧固定由 runtime 内部发送，当前共享协议会携带 `toolType`、`toolVersion`，以及按场景出现的 `sdkVersion` / `pluginVersion`。
+4. `register` 控制帧固定由 runtime 内部发送，当前共享协议会携带 `channel`、`toolVersion`，以及按场景出现的 `sdkVersion` / `pluginVersion`。
 
 ### 5.2 入站帧链路
 
@@ -125,7 +125,7 @@ GatewaySendPayload
 1. 出站门禁负责阻止未 READY 时发送业务消息。
 2. 控制帧由运行时内部编排，上层不直接发送 `register` 或 `heartbeat`。
 3. 出站观测统一进入 telemetry 与 logger。
-4. `gateway.register.sent` 日志应覆盖 `toolType`、`toolVersion`、`sdkVersion`、`pluginVersion`，便于排查接入端、宿主和桥接实现版本问题。
+4. `gateway.register.sent` 日志应覆盖 `channel`、`toolVersion`、`sdkVersion`、`pluginVersion`，便于排查接入端、宿主和桥接实现版本问题。
 
 ## 6. 关键约束
 

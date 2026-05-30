@@ -130,7 +130,7 @@ function createGatewayConfig(): BridgeGatewayHostConfig {
       sk: 'sk',
     },
     register: {
-      toolType: 'openx',
+      channel: 'openx',
       toolVersion: '0.0.0',
       pluginVersion: '0.1.0',
     },

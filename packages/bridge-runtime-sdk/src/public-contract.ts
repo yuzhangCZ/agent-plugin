@@ -168,9 +168,9 @@ export interface QrCodeAuth {
 }
 
 /**
- * `toolType` 由接入方定义，SDK 不对具体字面量做产品级限制。
+ * `channel` 由接入方定义，SDK 不对具体字面量做产品级限制。
  */
-export type BridgeGatewayToolType = string;
+export type BridgeGatewayChannel = string;
 
 /**
  * Bridge runtime 使用的最小日志端口。
@@ -194,7 +194,7 @@ export interface BridgeGatewayHostConfig {
     sk: string;
   };
   register: {
-    toolType: BridgeGatewayToolType;
+    channel: BridgeGatewayChannel;
     toolVersion: string;
     pluginVersion?: string;
   };

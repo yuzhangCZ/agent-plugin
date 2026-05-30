@@ -72,7 +72,7 @@ function registerMessage() {
     type: 'register',
     deviceName: 'dev',
     os: 'darwin',
-    toolType: 'opencode',
+    channel: 'opencode',
     toolVersion: '1.0.0',
     pluginVersion: '0.2.0',
   } as const;
@@ -353,7 +353,7 @@ test('connect sends register and enters READY only after register_ok', async () 
   assert.deepEqual(
     infoLogs.find((entry) => entry.message === 'gateway.register.sent')?.meta,
     {
-      toolType: 'opencode',
+      channel: 'opencode',
       toolVersion: '1.0.0',
       sdkVersion: undefined,
       pluginVersion: '0.2.0',

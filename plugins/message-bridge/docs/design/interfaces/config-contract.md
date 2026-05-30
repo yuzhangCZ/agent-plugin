@@ -60,7 +60,7 @@
 | `enabled` | `true` | 是否启用 bridge |
 | `config_version` | `1` | 配置版本 |
 | `gateway.url` | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` | Gateway WebSocket 地址 |
-| `gateway.channel` | `openx` | 配置侧字段名；注册报文中映射到 `toolType` |
+| `gateway.channel` | `openx` | 配置侧字段名；注册报文中映射到 `channel` |
 | `gateway.heartbeatIntervalMs` | `30000` | 心跳间隔，单位毫秒 |
 | `gateway.reconnect.baseMs` | `1000` | 重连基础退避，单位毫秒 |
 | `gateway.reconnect.maxMs` | `30000` | 重连最大退避，单位毫秒 |
@@ -137,7 +137,7 @@
 | `debug` | `boolean` | 否 | `false` | 调试日志开关；开启后额外以 `info` 级输出可读的原始 WebSocket 上下行报文 |
 | `config_version` | `number` | 否 | `1` | 当前只支持 `1` |
 | `gateway.url` | `string` | 否 | 默认来源于 `default-config` 链路；显式设置 `MB_DEFAULT_GATEWAY_URL` 时使用注入值，否则回退到 `ws://localhost:8081/ws/agent` | 必须以 `ws://` 或 `wss://` 开头 |
-| `gateway.channel` | `string` | 否 | `openx` | 注册消息中的 `toolType` 来源；内置已知值为 `openx`、`uniassistant`、`codeagent` |
+| `gateway.channel` | `string` | 否 | `openx` | 注册消息中的 `channel` 来源；内置已知值为 `openx`、`uniassistant`、`codeagent` |
 | `gateway.heartbeatIntervalMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.baseMs` | `number` | 否 | `1000` | 正整数 |
 | `gateway.reconnect.maxMs` | `number` | 否 | `30000` | 正整数 |
@@ -219,12 +219,12 @@ BRIDGE_EVENTS_ALLOWLIST=message.updated,session.status
 - `BRIDGE_AK` / `BRIDGE_SK` 不再支持
 - `BRIDGE_CHANNEL` 不再支持
 - `BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS` 仍兼容旧心跳变量命名
-- `BRIDGE_GATEWAY_TOOL_TYPE` 已移除，当前实现会忽略它
+- `BRIDGE_GATEWAY_TOOL_TYPE` 不再支持
 - `BRIDGE_GATEWAY_DEVICE_NAME`
 - `BRIDGE_GATEWAY_MAC_ADDRESS`
 - `BRIDGE_GATEWAY_TOOL_VERSION`
 
-上面三个 `gateway` 元数据相关环境变量已移除，当前实现会忽略它们。注册时使用的 `deviceName`、`macAddress`、`toolVersion` 由运行时自动采集，不属于可配置项。
+上面四个 `gateway` 注册元数据相关环境变量已移除，当前实现会忽略它们。注册时使用的 `channel` 来自 `BRIDGE_GATEWAY_CHANNEL` 或配置文件，`deviceName`、`macAddress`、`toolVersion` 由运行时自动采集，不属于可配置项。
 
 ## 8. 校验规则
 

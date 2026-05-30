@@ -1637,12 +1637,16 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     }
   });
 
-  test('ignores removed BRIDGE_GATEWAY_TOOL_TYPE override', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-tooltype-'));
+  test('loads gateway.channel from BRIDGE_GATEWAY_CHANNEL with env auth', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mb-json-env-channel-'));
     const fakeHome = await mkdtemp(join(tmpdir(), 'mb-home-'));
-    const originalToolType = process.env.BRIDGE_GATEWAY_TOOL_TYPE;
+    const originalChannel = process.env.BRIDGE_GATEWAY_CHANNEL;
+    const originalAuthAk = process.env.BRIDGE_AUTH_AK;
+    const originalAuthSk = process.env.BRIDGE_AUTH_SK;
     process.env.HOME = fakeHome;
-    process.env.BRIDGE_GATEWAY_TOOL_TYPE = 'legacy-tool-type';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'legacy-channel';
+    process.env.BRIDGE_AUTH_AK = 'env-ak';
+    process.env.BRIDGE_AUTH_SK = 'env-sk';
 
     await mkdir(join(workspace, '.opencode'), { recursive: true });
     await writeFile(
@@ -1653,12 +1657,24 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
 
     try {
       const config = await loadConfig(workspace);
-      assert.strictEqual(config.gateway.channel, 'openx');
+      assert.strictEqual(config.gateway.channel, 'legacy-channel');
+      assert.strictEqual(config.auth.ak, 'env-ak');
+      assert.strictEqual(config.auth.sk, 'env-sk');
     } finally {
-      if (originalToolType === undefined) {
-        delete process.env.BRIDGE_GATEWAY_TOOL_TYPE;
+      if (originalChannel === undefined) {
+        delete process.env.BRIDGE_GATEWAY_CHANNEL;
       } else {
-        process.env.BRIDGE_GATEWAY_TOOL_TYPE = originalToolType;
+        process.env.BRIDGE_GATEWAY_CHANNEL = originalChannel;
+      }
+      if (originalAuthAk === undefined) {
+        delete process.env.BRIDGE_AUTH_AK;
+      } else {
+        process.env.BRIDGE_AUTH_AK = originalAuthAk;
+      }
+      if (originalAuthSk === undefined) {
+        delete process.env.BRIDGE_AUTH_SK;
+      } else {
+        process.env.BRIDGE_AUTH_SK = originalAuthSk;
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });
@@ -1716,7 +1732,7 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     const originalAuthAk = process.env.BRIDGE_AUTH_AK;
     const originalAuthSk = process.env.BRIDGE_AUTH_SK;
     process.env.HOME = fakeHome;
-    process.env.BRIDGE_GATEWAY_CHANNEL = 'legacy-tool-type';
+    process.env.BRIDGE_GATEWAY_CHANNEL = 'legacy-channel';
     process.env.BRIDGE_AUTH_AK = 'env-ak';
     process.env.BRIDGE_AUTH_SK = 'env-sk';
 
@@ -1744,12 +1760,12 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
 
     try {
       const config = await loadConfig(workspace, logger);
-      assert.strictEqual(config.gateway.channel, 'legacy-tool-type');
+      assert.strictEqual(config.gateway.channel, 'legacy-channel');
       await new Promise((resolve) => setTimeout(resolve, 10));
       const warnLog = calls.find((entry) => entry.body.message === 'config.gateway.channel.unknown');
       assert.ok(warnLog);
-      assert.strictEqual(warnLog.body.extra.toolType, 'legacy-tool-type');
-      assert.deepStrictEqual(warnLog.body.extra.knownToolTypes, ['opencode', 'openx', 'uniassistant', 'codeagent']);
+      assert.strictEqual(warnLog.body.extra.channel, 'legacy-channel');
+      assert.deepStrictEqual(warnLog.body.extra.knownChannels, ['opencode', 'openx', 'uniassistant', 'codeagent']);
       assert.strictEqual(warnLog.body.extra.source, 'env');
     } finally {
       if (originalChannel === undefined) {
@@ -1782,7 +1798,6 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     const originalLegacyChannel = process.env.BRIDGE_CHANNEL;
     const originalBridgeAk = process.env.BRIDGE_AK;
     const originalBridgeSk = process.env.BRIDGE_SK;
-    const originalLegacyToolType = process.env.BRIDGE_GATEWAY_TOOL_TYPE;
 
     process.env.HOME = fakeHome;
     process.env.BRIDGE_DEBUG = 'true';
@@ -1792,7 +1807,6 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
     process.env.BRIDGE_CHANNEL = 'legacy-channel';
     process.env.BRIDGE_AK = 'legacy-ak';
     process.env.BRIDGE_SK = 'legacy-sk';
-    process.env.BRIDGE_GATEWAY_TOOL_TYPE = 'legacy-tool-type';
 
     await mkdir(join(workspace, '.opencode'), { recursive: true });
     await writeFile(
@@ -1870,7 +1884,6 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
       assert.strictEqual('BRIDGE_CHANNEL' in snapshot.body.extra.values, false);
       assert.strictEqual('BRIDGE_AK' in snapshot.body.extra.values, false);
       assert.strictEqual('BRIDGE_SK' in snapshot.body.extra.values, false);
-      assert.strictEqual('BRIDGE_GATEWAY_TOOL_TYPE' in snapshot.body.extra.values, false);
     } finally {
       if (originalDebug === undefined) {
         delete process.env.BRIDGE_DEBUG;
@@ -1906,11 +1919,6 @@ describe('config suffix lookup support (.jsonc + .json)', () => {
         delete process.env.BRIDGE_SK;
       } else {
         process.env.BRIDGE_SK = originalBridgeSk;
-      }
-      if (originalLegacyToolType === undefined) {
-        delete process.env.BRIDGE_GATEWAY_TOOL_TYPE;
-      } else {
-        process.env.BRIDGE_GATEWAY_TOOL_TYPE = originalLegacyToolType;
       }
       await rm(workspace, { recursive: true, force: true });
       await rm(fakeHome, { recursive: true, force: true });

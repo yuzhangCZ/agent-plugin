@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { KNOWN_TOOL_TYPES, isKnownToolType } from "../contracts/transport.js";
+import { KNOWN_CHANNELS, isKnownChannel } from "../contracts/transport.js";
 import { resolvePackageVersion } from "./packageVersion.js";
 import type { BridgeLogger } from "../types.js";
 
-export const MESSAGE_BRIDGE_TOOL_TYPE = "openclaw";
+export const MESSAGE_BRIDGE_CHANNEL = "openclaw";
 
 export interface RegisterMetadata {
-  toolType: string;
+  channel: string;
   toolVersion: string;
   pluginVersion: string;
 }
@@ -60,20 +60,20 @@ export function resolveRegisterMetadata(
     || UNKNOWN_TOOL_VERSION;
 
   return {
-    toolType: MESSAGE_BRIDGE_TOOL_TYPE,
+    channel: MESSAGE_BRIDGE_CHANNEL,
     toolVersion: resolvedHostToolVersion,
     pluginVersion: (deps.resolveClientVersion ?? resolvePackageVersion)(),
   };
 }
 
-export function warnUnknownToolType(logger: BridgeLogger, toolType: string, accountId?: string): void {
-  if (isKnownToolType(toolType)) {
+export function warnUnknownChannel(logger: BridgeLogger, channel: string, accountId?: string): void {
+  if (isKnownChannel(channel)) {
     return;
   }
 
-  logger.warn("runtime.register.tool_type.unknown", {
-    toolType,
-    knownToolTypes: [...KNOWN_TOOL_TYPES],
+  logger.warn("runtime.register.channel.unknown", {
+    channel,
+    knownChannels: [...KNOWN_CHANNELS],
     ...(accountId ? { accountId } : {}),
   });
 }
