@@ -458,7 +458,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
           trackingSessionIds: [...input.trackingSessionIds],
           cleanupSkippedReason: 'active_run_replaced',
         });
-        return;
       }
     }
 

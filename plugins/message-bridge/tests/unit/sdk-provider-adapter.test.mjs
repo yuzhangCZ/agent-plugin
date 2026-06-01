@@ -158,13 +158,12 @@ async function collect(asyncIterable) {
   return items;
 }
 
-function withTimeout(promise, message, timeoutMs = 50) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(message)), timeoutMs);
-    }),
-  ]);
+function withTimeout(promise, message, timeoutMs = 1000) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 }
 
 function createAdapter(overrides = {}) {
@@ -1267,6 +1266,64 @@ test('provider adapter keeps superseded running prompt as host head until its ta
     ['message.start', 'msg-new'],
     ['message.done', 'msg-new'],
   ]);
+});
+
+test('provider adapter clears superseded host tracking state after old prompt task finishes', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let preprocessCount = 0;
+  let promptCount = 0;
+  const adapter = createAdapter({
+    chatPreprocessor: {
+      preprocess: async () => {
+        preprocessCount += 1;
+        return {
+          kind: 'normal_chat',
+          context: {
+            opencodeSessionId: preprocessCount === 1 ? 'host-old' : 'host-new',
+            bootstrapSource: 'existing_binding',
+          },
+        };
+      },
+    },
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+  };
+
+  const firstRun = await adapter.runMessage({
+    traceId: 'trace-old-host',
+    runId: 'run-old-host',
+    toolSessionId: 'conversation-reused',
+    text: 'first',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-old-host',
+        sessionID: 'host-old',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  assert.equal(adapter.hasAssistantMessageTrackingSession('host-old'), true);
+
+  await adapter.runMessage({
+    traceId: 'trace-new-host',
+    runId: 'run-new-host',
+    toolSessionId: 'conversation-reused',
+    text: 'second',
+  });
+  assert.deepEqual(await firstRun.result(), { outcome: 'aborted' });
+
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-old-host' }));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(adapter.hasAssistantMessageTrackingSession('host-old'), false);
 });
 
 test('provider adapter starts next queued prompt after current prompt failure closes', async () => {
