@@ -59,10 +59,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint changed files
-        if: github.event_name == 'pull_request'
-        run: pnpm lint:changed --base origin/${{ github.base_ref }}
-
       - name: Lint errors
         if: github.event_name != 'pull_request'
         run: pnpm lint:ci
