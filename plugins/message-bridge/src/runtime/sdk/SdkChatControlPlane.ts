@@ -103,7 +103,11 @@ export interface ChatExecutionContextResolver {
 }
 
 export interface ExecutionSessionInvalidationPort {
-  invalidateAfterFailure(anchor: string, error: unknown): void;
+  invalidateAfterFailure(input: {
+    conversationId: string;
+    hostSessionId: string;
+    error: unknown;
+  }): void;
 }
 
 export interface EventAnchorResolver {
@@ -482,20 +486,24 @@ export class DefaultExecutionSessionInvalidationPort implements ExecutionSession
     ownershipResolver: OpencodeSessionOwnershipResolver;
   }) {}
 
-  invalidateAfterFailure(anchor: string, error: unknown): void {
-    const evidence = this.extractEvidence(error);
+  invalidateAfterFailure(input: {
+    conversationId: string;
+    hostSessionId: string;
+    error: unknown;
+  }): void {
+    const evidence = this.extractEvidence(input.error);
     if (evidence.sourceErrorCode !== 'session_not_found') {
       return;
     }
     if (evidence.sourceOperation !== 'session.get' && evidence.sourceOperation !== 'session.prompt') {
       return;
     }
-    const binding = this.dependencies.bindingStore.get(anchor);
-    if (!binding) {
+    const binding = this.dependencies.bindingStore.get(input.conversationId);
+    if (!binding || binding.activeOpencodeSessionId !== input.hostSessionId) {
       return;
     }
-    this.dependencies.bindingStore.invalidate(anchor);
-    this.dependencies.ownershipResolver.detach(binding.activeOpencodeSessionId);
+    this.dependencies.bindingStore.invalidate(input.conversationId);
+    this.dependencies.ownershipResolver.detach(input.hostSessionId);
   }
 
   private extractEvidence(error: unknown): { sourceOperation?: string; sourceErrorCode?: string } {

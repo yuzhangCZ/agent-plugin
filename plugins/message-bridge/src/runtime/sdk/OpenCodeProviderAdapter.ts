@@ -526,7 +526,11 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       });
 
       if (!promptResult.success) {
-        this.executionSessionInvalidationPort.invalidateAfterFailure(input.toolSessionId, promptResult);
+        this.executionSessionInvalidationPort.invalidateAfterFailure({
+          conversationId: input.toolSessionId,
+          hostSessionId: context.opencodeSessionId,
+          error: promptResult,
+        });
         const sourceOperation = promptResult.errorEvidence?.sourceOperation;
         const sourceErrorCode = promptResult.errorEvidence?.sourceErrorCode;
         this.logger.warn('provider_adapter.prompt.failed', {
@@ -584,7 +588,11 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       }
       activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
     } catch (error) {
-      this.executionSessionInvalidationPort.invalidateAfterFailure(input.toolSessionId, error);
+      this.executionSessionInvalidationPort.invalidateAfterFailure({
+        conversationId: input.toolSessionId,
+        hostSessionId: context.opencodeSessionId,
+        error,
+      });
       this.logger.error('provider_adapter.prompt.threw', appendTerminalSourceEvidence({
         toolSessionId: input.toolSessionId,
         opencodeSessionId: context.opencodeSessionId,
