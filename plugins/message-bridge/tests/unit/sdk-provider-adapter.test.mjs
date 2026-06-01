@@ -135,6 +135,15 @@ async function collect(asyncIterable) {
   return items;
 }
 
+function withTimeout(promise, message, timeoutMs = 50) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
 function createAdapter(overrides = {}) {
   const sdkClient = 'sdkClient' in overrides ? overrides.sdkClient : createSdkClient(overrides);
   const logger = overrides.logger ?? createLogger();
@@ -346,6 +355,32 @@ test('ActiveProviderRunHandle forceAbortAndClose is idempotent and ignores later
   assert.deepEqual(await run.result(), { outcome: 'aborted' });
   assert.equal(cleanups.length, 1);
   assert.equal(cleanups[0].runId, 'run-a');
+});
+
+test('ActiveRunRegistry aborts superseded run when same anchor creates a new run', async () => {
+  const logger = createLogger();
+  const registry = new ActiveRunRegistry();
+  const first = registry.create({
+    anchorSessionId: 'conversation-a',
+    hostSessionId: 'host-a',
+    runId: 'run-a',
+    initialTrackingSessionId: 'host-a',
+    logger,
+    onCleanup: () => undefined,
+  });
+  const second = registry.create({
+    anchorSessionId: 'conversation-a',
+    hostSessionId: 'host-a',
+    runId: 'run-b',
+    initialTrackingSessionId: 'host-a',
+    logger,
+    onCleanup: () => undefined,
+  });
+
+  assert.equal(registry.get('conversation-a'), second);
+  assert.equal(registry.getHeadByHostSession('host-a'), second);
+  assert.deepEqual(await withTimeout(first.result(), 'superseded run did not settle'), { outcome: 'aborted' });
+  assert.deepEqual(await collect(first.queue), []);
 });
 
 test('provider adapter delegates question replies to session-isolation command port', async () => {
@@ -584,6 +619,32 @@ test('provider adapter abortSession fallback closes all runs under resolved host
   assert.equal(abortCalls.length, 1);
   assert.deepEqual(await runA.result(), { outcome: 'aborted' });
   assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+});
+
+test('provider adapter abortSession overrides completed prompt while run is still draining facts', async () => {
+  const prompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a']],
+    session: {
+      prompt: async () => prompt.promise,
+      abort: async () => ({ data: true }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'hello',
+  });
+
+  prompt.resolve(createPromptResponse());
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-a' }), { applied: true });
+  assert.deepEqual(await run.result(), { outcome: 'aborted' });
+  assert.deepEqual(await collect(run.facts), []);
 });
 
 test('provider adapter tracks active runs by resolved host session id', async () => {
@@ -3435,14 +3496,11 @@ test('provider adapter closes facts by drain timeout when no terminal candidate 
   }]);
 });
 
-test('provider adapter does not let stale cleanup delete a newer active run', async () => {
-  const logs = [];
-  const logger = createCapturingLogger(logs);
+test('provider adapter aborts superseded run without deleting the newer active run', async () => {
   const firstPrompt = createDeferred();
   const secondPrompt = createDeferred();
   const promptCalls = [];
   const adapter = createAdapter({
-    logger,
     bindings: [['tool-stale-cleanup', 'tool-stale-cleanup']],
     session: {
       prompt: async () => {
@@ -3471,7 +3529,7 @@ test('provider adapter does not let stale cleanup delete a newer active run', as
   });
 
   await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.deepEqual(await firstRun.result(), { outcome: 'completed' });
+  assert.deepEqual(await firstRun.result(), { outcome: 'aborted' });
 
   await adapter.handleEvent({
     type: 'message.updated',
@@ -3494,16 +3552,6 @@ test('provider adapter does not let stale cleanup delete a newer active run', as
   assert.deepEqual(
     (await collect(secondRun.facts)).map((fact) => fact.type),
     ['message.start', 'message.done'],
-  );
-  assert.deepEqual(
-    logs.find((entry) => entry.message === 'provider_adapter.active_run.cleanup_skipped')?.extra,
-    {
-      anchorSessionId: 'tool-stale-cleanup',
-      cleanupRunId: 'run-stale-cleanup-1',
-      currentRunId: 'run-stale-cleanup-2',
-      trackingSessionIds: ['tool-stale-cleanup'],
-      cleanupSkippedReason: 'active_run_replaced',
-    },
   );
 });
 

@@ -28,6 +28,8 @@ type ActiveProviderRunHandleOptions = {
   hostSessionId?: string;
 };
 
+type ForceAbortReason = 'abort_session' | 'prompt_terminal_aborted' | 'superseded_run';
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -318,6 +320,9 @@ export class ActiveProviderRunHandle {
   }
 
   settlePromptTerminal(result: ProviderTerminalResult): void {
+    if (this.forceClosed) {
+      return;
+    }
     this.promptTerminalResolver.settle(result);
     this.factDrainTracker.onPromptSettled();
   }
@@ -325,12 +330,13 @@ export class ActiveProviderRunHandle {
   /**
    * 强制结束当前 run，用于 session abort 或宿主侧 aborted terminal 的本地收口。
    */
-  forceAbortAndClose(_reason: 'abort_session' | 'prompt_terminal_aborted'): void {
+  forceAbortAndClose(_reason: ForceAbortReason): void {
     if (this.forceClosed) {
       return;
     }
     this.forceClosed = true;
-    this.promptTerminalResolver.settle({ outcome: 'aborted' });
+    this.promptSettled = true;
+    this.terminalResult = { outcome: 'aborted' };
     this.factsClosed = true;
     this.queue.close();
     this.settleRunIfReady();
@@ -380,6 +386,7 @@ export class ActiveRunRegistry {
     const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
     const previous = this.handles.get(options.anchorSessionId);
     if (previous) {
+      previous.forceAbortAndClose('superseded_run');
       this.removeFromHostQueue(previous);
     }
     const handle = new ActiveProviderRunHandle({
