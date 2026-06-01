@@ -292,6 +292,20 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           partId: 'part-5',
           toolCallId: 'perm-1',
           permissionId: 'perm-1',
+          permType: 'file_write',
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing permType',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          permissionId: 'perm-1',
         },
       },
     },

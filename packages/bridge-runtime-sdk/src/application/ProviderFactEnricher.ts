@@ -46,7 +46,7 @@ export class ProviderFactEnricher {
       permissionId: fact.permissionId,
       partId: fact.partId,
       ...(fact.messageId ? { messageId: fact.messageId } : {}),
-      ...(fact.permissionType ? { permissionType: fact.permissionType } : {}),
+      permType: fact.permType,
       ...(fact.subagentSessionId ? { subagentSessionId: fact.subagentSessionId } : {}),
     };
     const result = this.registry.register(record);
@@ -84,8 +84,8 @@ export class ProviderFactEnricher {
       ...fact,
       partId: context.partId,
       ...(context.messageId ? { messageId: context.messageId } : {}),
-      ...(fact.permissionType === undefined && context.permissionType !== undefined
-        ? { permissionType: context.permissionType }
+      ...(fact.permType === undefined
+        ? { permType: context.permType }
         : {}),
     };
     return { ok: true, fact: enriched };

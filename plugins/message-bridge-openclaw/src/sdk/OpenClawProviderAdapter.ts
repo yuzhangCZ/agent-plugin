@@ -697,6 +697,15 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     if (!permissionId || !toolSessionId) {
       return;
     }
+    const permType = asTrimmedString(payload.type) ?? asTrimmedString(payload.permission);
+    if (!permType) {
+      this.options.logger.warn("runtime.permission_ask_missing_perm_type", {
+        toolSessionId,
+        permissionId,
+        sourceEvent: eventName,
+      });
+      return;
+    }
 
     const messageId = asTrimmedString(payload.messageId) ?? `msg_${randomUUID()}`;
     const metadata = pickRecord(payload, "metadata") ?? pickRecord(payload, "meta");
@@ -722,7 +731,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
           messageId,
           partId: `part_${randomUUID()}`,
           permissionId,
-          permissionType: asTrimmedString(payload.type) ?? asTrimmedString(payload.permission),
+          permType,
           ...(record.title ? { title: record.title } : {}),
           metadata: {
             ...(record.metadata ?? {}),

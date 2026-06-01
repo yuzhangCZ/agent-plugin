@@ -1690,8 +1690,7 @@ test('provider adapter records subagent pending interactions against parent host
     properties: {
       sessionID: 'ses-child-pending-1',
       id: 'perm-child-pending-1',
-      type: 'shell',
-      title: 'Need permission',
+      permission: 'shell',
       tool: {
         messageID: 'msg-child-permission-1',
         callID: 'call-child-permission-1',
@@ -1743,8 +1742,7 @@ test('provider adapter does not emit detached child permission.asked after sessi
     properties: {
       sessionID: 'ses-child-outbound-1',
       id: 'perm-1',
-      type: 'shell',
-      title: 'Need permission',
+      permission: 'shell',
       tool: {
         messageID: 'msg-perm-1',
         callID: 'call-perm-1',
@@ -2008,7 +2006,7 @@ test('provider adapter resolves ProviderRun.result() only after facts drain clos
   );
 });
 
-test('provider adapter maps permission.asked tool context and synthesizes compatible partId fallback', async () => {
+test('provider adapter maps permission.asked permission field and legacy type fallback', async () => {
   const promptDeferred = createDeferred();
   const pendingInteractions = [];
   const adapter = createAdapter({
@@ -2032,6 +2030,7 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     properties: {
       sessionID: 'tool-permission',
       id: 'perm-1',
+      permission: 'file_write',
       partID: 'part-permission-1',
       tool: {
         messageID: 'msg-tool-1',
@@ -2047,6 +2046,7 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     properties: {
       sessionID: 'tool-permission',
       id: 'perm-2',
+      type: 'shell',
       metadata: {
         scope: 'fallback',
       },
@@ -2062,12 +2062,14 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
     messageId: 'msg-tool-1',
     partId: 'part-permission-1',
     permissionId: 'perm-1',
+    permType: 'file_write',
     metadata: {
       scope: 'workspace',
     },
     raw: {
       sessionID: 'tool-permission',
       id: 'perm-1',
+      permission: 'file_write',
       partID: 'part-permission-1',
       tool: {
         messageID: 'msg-tool-1',
@@ -2087,12 +2089,14 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
       type: 'permission.ask',
       partId: '<generated>',
       permissionId: 'perm-2',
+      permType: 'shell',
       metadata: {
         scope: 'fallback',
       },
       raw: {
         sessionID: 'tool-permission',
         id: 'perm-2',
+        type: 'shell',
         metadata: {
           scope: 'fallback',
         },
@@ -2114,6 +2118,46 @@ test('provider adapter maps permission.asked tool context and synthesizes compat
       hostSessionId: 'tool-permission',
     },
   ]);
+});
+
+test('provider adapter drops permission.asked when neither permission nor legacy type exists', async () => {
+  const warnings = [];
+  const logger = {
+    ...createLogger(),
+    warn: (message, extra) => warnings.push({ message, extra }),
+    child: () => logger,
+  };
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    logger,
+    bindings: [['tool-permission-missing-type', 'tool-permission-missing-type']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-permission-missing-type',
+    runId: 'run-permission-missing-type',
+    toolSessionId: 'tool-permission-missing-type',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission-missing-type',
+      id: 'perm-missing-type',
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.deepEqual(facts, []);
+  assert.equal(warnings.some((entry) => entry.message === 'provider_adapter.protocol_diagnostic'
+    && entry.extra?.code === 'permission_ask_missing_perm_type'
+    && entry.extra?.toolSessionId === 'tool-permission-missing-type'
+    && entry.extra?.permissionId === 'perm-missing-type'), true);
 });
 
 test('provider adapter maps question.asked multiple to question.ask multiSelect', async () => {

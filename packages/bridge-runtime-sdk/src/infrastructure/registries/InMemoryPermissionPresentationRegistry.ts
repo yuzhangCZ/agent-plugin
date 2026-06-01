@@ -17,15 +17,8 @@ export class InMemoryPermissionPresentationRegistry implements PermissionPresent
       this.records.set(key, record);
       return { ok: true, status: 'inserted' };
     }
-    if (existing.partId === record.partId) {
-      return { ok: true, status: 'duplicate_same_part' };
-    }
-    return {
-      ok: false,
-      reason: 'conflict_same_session',
-      existing,
-      current: record,
-    };
+    // permissionId 命中即视为同一 permission；展示上下文以首次记录为真源，后续重复 ask 仅做幂等吸收。
+    return { ok: true, status: 'duplicate_same_permission' };
   }
 
   get(toolSessionId: string, permissionId: string): PermissionPresentationContext | undefined {

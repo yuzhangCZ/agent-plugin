@@ -12,7 +12,7 @@ test('permission.ask registers presentation context and permission.reply restore
     permissionId: 'perm-1',
     partId: 'part-1',
     messageId: 'msg-1',
-    permissionType: 'file_write',
+    permType: 'file_write',
   });
   assert.equal(ask.ok, true);
 
@@ -27,41 +27,61 @@ test('permission.ask registers presentation context and permission.reply restore
       type: 'permission.reply',
       permissionId: 'perm-1',
       response: 'once',
-      permissionType: 'file_write',
+      permType: 'file_write',
       messageId: 'msg-1',
       partId: 'part-1',
     },
   });
 });
 
-test('permission.ask duplicate with same partId is idempotent and conflicting partId fails closed', () => {
+test('permission.ask duplicate is idempotent by permissionId within the same session', () => {
   const enricher = new ProviderFactEnricher(new InMemoryPermissionPresentationRegistry());
 
   assert.equal(enricher.enrich('tool-1', {
     type: 'permission.ask',
     permissionId: 'perm-1',
     partId: 'part-1',
+    messageId: 'msg-1',
+    permType: 'file_write',
   }).ok, true);
 
   assert.equal(enricher.enrich('tool-1', {
     type: 'permission.ask',
     permissionId: 'perm-1',
     partId: 'part-1',
-    messageId: 'msg-2',
+    messageId: 'msg-1',
+    permType: 'file_write',
   }).ok, true);
 
-  assert.deepEqual(enricher.enrich('tool-1', {
+  assert.equal(enricher.enrich('tool-1', {
+    type: 'permission.ask',
+    permissionId: 'perm-1',
+    partId: 'part-1',
+    messageId: 'msg-1',
+    permType: 'shell',
+  }).ok, true);
+
+  assert.equal(enricher.enrich('tool-1', {
     type: 'permission.ask',
     permissionId: 'perm-1',
     partId: 'part-2',
-  }), {
-    ok: false,
-    reason: 'permission_ask_projection_conflict',
-    details: {
-      toolSessionId: 'tool-1',
+    permType: 'file_write',
+  }).ok, true);
+
+  const reply = enricher.enrich('tool-1', {
+    type: 'permission.reply',
+    permissionId: 'perm-1',
+    response: 'once',
+  });
+  assert.deepEqual(reply, {
+    ok: true,
+    fact: {
+      type: 'permission.reply',
       permissionId: 'perm-1',
-      existingPartId: 'part-1',
-      conflictingPartId: 'part-2',
+      response: 'once',
+      permType: 'file_write',
+      messageId: 'msg-1',
+      partId: 'part-1',
     },
   });
 });
