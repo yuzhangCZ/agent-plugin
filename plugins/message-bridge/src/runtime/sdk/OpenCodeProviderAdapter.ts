@@ -39,6 +39,7 @@ import {
   AssistantMessageStateStore,
   PartKindStore,
 } from './OpenCodeProviderAdapter.run.js';
+import { HostSessionRunCoordinator } from './HostSessionRunCoordinator.js';
 import {
   DefaultProtocolDiagnosticPort,
   DefaultOutboundTargetResolver,
@@ -111,6 +112,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly createdSessionBindingPort: CreatedSessionBindingPort;
 
   private readonly activeRuns = new ActiveRunRegistry();
+  private readonly runCoordinator = new HostSessionRunCoordinator();
   private readonly partKinds = new PartKindStore();
   private readonly assistantMessageStates = new AssistantMessageStateStore();
 
@@ -288,7 +290,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       runId: activeRun.runId,
       hasAssistantId: Boolean(input.assistantId),
     });
-    void bindProviderPromptTerminal({
+    this.runCoordinator.enqueue(activeRun, () => bindProviderPromptTerminal({
       activeRun,
       message: input,
       context: preprocessed.context,
@@ -297,7 +299,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       gatewayAdapter: this.opencodeSessionGatewayAdapter,
       executionSessionInvalidationPort: this.executionSessionInvalidationPort,
       activeRuns: this.activeRuns,
-    });
+    }));
 
     return {
       runId: activeRun.runId,
@@ -348,12 +350,13 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async closeSession(input: { toolSessionId: string }): Promise<{ applied: true }> {
+    const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
     if (this.closeSessionCommandPort) {
       await this.closeSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
+      this.activeRuns.abortByAnchorSession(input.toolSessionId, 'abort_session');
       return { applied: true };
     }
 
-    const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
     const result = await this.opencodeSessionGatewayAdapter.closeSession({
       sessionId: context.opencodeSessionId,
       logger: this.logger,
@@ -361,6 +364,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     if (!result.success) {
       throw new Error(result.errorMessage ?? 'close_session_failed');
     }
+    this.activeRuns.abortByAnchorSession(input.toolSessionId, 'abort_session');
     return { applied: true };
   }
 
@@ -437,19 +441,23 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
   private cleanupActiveRunState(input: {
     anchorSessionId: string;
+    hostSessionId: string;
     runId: string;
     trackingSessionIds: ReadonlySet<string>;
   }): void {
     const result = this.activeRuns.deleteIfCurrentRun(input.anchorSessionId, input.runId);
     if (!result.deleted) {
-      this.logger.debug?.('provider_adapter.active_run.cleanup_skipped', {
-        anchorSessionId: input.anchorSessionId,
-        cleanupRunId: input.runId,
-        currentRunId: result.currentRunId,
-        trackingSessionIds: [...input.trackingSessionIds],
-        cleanupSkippedReason: 'active_run_replaced',
-      });
-      return;
+      this.activeRuns.removeHostQueueEntry(input.hostSessionId, input.runId);
+      if (result.currentRunId) {
+        this.logger.debug?.('provider_adapter.active_run.cleanup_skipped', {
+          anchorSessionId: input.anchorSessionId,
+          cleanupRunId: input.runId,
+          currentRunId: result.currentRunId,
+          trackingSessionIds: [...input.trackingSessionIds],
+          cleanupSkippedReason: 'active_run_replaced',
+        });
+        return;
+      }
     }
 
     for (const trackingSessionId of input.trackingSessionIds) {

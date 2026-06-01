@@ -62,6 +62,28 @@ function createPromptResponse(overrides = {}) {
   };
 }
 
+function createPromptActionResult(overrides = {}) {
+  return {
+    success: true,
+    data: {
+      message: {
+        info: {
+          id: overrides.messageId ?? 'msg-prompt-1',
+          cost: 0.12,
+          tokens: {
+            input: 10,
+            output: 20,
+            reasoning: 3,
+            cache: { read: 0, write: 0 },
+          },
+        },
+        parts: [],
+      },
+      terminal: overrides.terminal ?? { kind: 'completed' },
+    },
+  };
+}
+
 function createLogger() {
   const noop = () => undefined;
   return {
@@ -669,6 +691,525 @@ test('provider adapter tracks active runs by resolved host session id', async ()
   });
 
   assert.equal(adapter.hasActiveHostSessionRunForTest?.('host-shared'), true);
+});
+
+test('provider adapter queues prompt start under the same host session', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.equal(promptCount, 1);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a' }));
+  assert.deepEqual(await runA.result(), { outcome: 'completed' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(promptCount, 2);
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-b',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptActionResult({ messageId: 'msg-b' }));
+  assert.deepEqual(await runB.result(), { outcome: 'completed' });
+});
+
+test('provider adapter skips queued prompt after abortSession under the same host session', async () => {
+  const firstPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'host-shared',
+      }),
+    },
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return firstPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.equal(promptCount, 1);
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-b' }), { applied: true });
+  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+  assert.equal(promptCount, 1);
+});
+
+test('provider adapter keeps aborted running prompt as host head until its task finishes', async () => {
+  const firstPrompt = createDeferred();
+  const thirdPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared'], ['conversation-c', 'host-shared']],
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'host-shared',
+      }),
+    },
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : thirdPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-b' }), { applied: true });
+  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+
+  const runC = await adapter.runMessage({
+    traceId: 'trace-c',
+    runId: 'run-c',
+    toolSessionId: 'conversation-c',
+    text: 'third',
+  });
+  assert.equal(promptCount, 1);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-old',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-old' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 2);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-new',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  thirdPrompt.resolve(createPromptActionResult({ messageId: 'msg-new' }));
+
+  assert.deepEqual(await runC.result(), { outcome: 'completed' });
+  const facts = await collect(runC.facts);
+  assert.deepEqual(facts.map((fact) => [fact.type, fact.messageId]), [
+    ['message.start', 'msg-new'],
+    ['message.done', 'msg-new'],
+  ]);
+});
+
+test('provider adapter cleans tracking state after aborted running prompt task finishes', async () => {
+  const firstPrompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared']],
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'host-shared',
+      }),
+    },
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => firstPrompt.promise;
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  assert.equal(adapter.hasAssistantMessageTrackingSession('host-shared'), true);
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-a' }), { applied: true });
+  assert.deepEqual(await run.result(), { outcome: 'aborted' });
+
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a' }));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(adapter.hasAssistantMessageTrackingSession('host-shared'), false);
+});
+
+test('provider adapter skips queued prompt after closeSession for the queued anchor', async () => {
+  const firstPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    closeSessionCommandPort: {
+      execute: async () => ({ kind: 'closed', sessionId: 'host-shared' }),
+    },
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return firstPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await adapter.closeSession({ toolSessionId: 'conversation-b' }), { applied: true });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+  assert.equal(promptCount, 1);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a' }));
+  assert.deepEqual(await runA.result(), { outcome: 'completed' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 1);
+});
+
+test('provider adapter starts prompts concurrently for different host sessions', async () => {
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a'], ['conversation-b', 'host-b']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return new Promise(() => undefined);
+  };
+
+  await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.equal(promptCount, 2);
+});
+
+test('provider adapter supersedes queued run without starting its prompt', async () => {
+  const firstPrompt = createDeferred();
+  const thirdPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : thirdPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+  const runC = await adapter.runMessage({
+    traceId: 'trace-c',
+    runId: 'run-c',
+    toolSessionId: 'conversation-b',
+    text: 'third',
+  });
+
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+  assert.equal(promptCount, 1);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a' }));
+  assert.deepEqual(await runA.result(), { outcome: 'completed' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 2);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-c',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  thirdPrompt.resolve(createPromptActionResult({ messageId: 'msg-c' }));
+  assert.deepEqual(await runC.result(), { outcome: 'completed' });
+});
+
+test('provider adapter keeps superseded running prompt as host head until its task finishes', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+  };
+
+  const firstRun = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const secondRun = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-a',
+    text: 'second',
+  });
+
+  assert.deepEqual(await firstRun.result(), { outcome: 'aborted' });
+  assert.equal(promptCount, 1);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-old',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-old' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 2);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-new',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptActionResult({ messageId: 'msg-new' }));
+
+  assert.deepEqual(await secondRun.result(), { outcome: 'completed' });
+  const facts = await collect(secondRun.facts);
+  assert.deepEqual(facts.map((fact) => [fact.type, fact.messageId]), [
+    ['message.start', 'msg-new'],
+    ['message.done', 'msg-new'],
+  ]);
+});
+
+test('provider adapter starts next queued prompt after current prompt failure closes', async () => {
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    if (promptCount === 1) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'Failed to send message: boom',
+        errorEvidence: { sourceOperation: 'session.prompt' },
+      };
+    }
+    return secondPrompt.promise;
+  };
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await runA.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'provider_unavailable',
+      message: 'Failed to send message: boom',
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 2);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-b',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptActionResult({ messageId: 'msg-b' }));
+  assert.deepEqual(await runB.result(), { outcome: 'completed' });
 });
 
 test('provider adapter routes shared host streaming events to fifo head despite later attached owner', async () => {
@@ -1363,6 +1904,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
 test('provider adapter closeSession delegates cleanup to session-isolation command port', async () => {
   const calls = [];
   const adapter = createAdapter({
+    bindings: [['tool-close-formal', 'ses-close-formal']],
     closeSessionCommandPort: {
       execute: async (input) => {
         calls.push(input);

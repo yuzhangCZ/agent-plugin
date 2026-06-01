@@ -22,6 +22,7 @@ type ActiveProviderRunHandleOptions = {
   logger: BridgeLogger;
   onCleanup: (input: {
     anchorSessionId: string;
+    hostSessionId: string;
     runId: string;
     trackingSessionIds: ReadonlySet<string>;
   }) => void;
@@ -269,6 +270,8 @@ export class ActiveProviderRunHandle {
   private readonly promptTerminalResolver: PromptTerminalResolver;
   private readonly completionResolver = new RunCompletionResolver();
   private readonly factDrainTracker: FactDrainTracker;
+  private promptStarted = false;
+  private promptTaskFinished = false;
   private promptSettled = false;
   private factsClosed = false;
   private forceClosed = false;
@@ -309,6 +312,41 @@ export class ActiveProviderRunHandle {
     this.trackingSessionIds.add(trackingSessionId);
   }
 
+  /**
+   * 标记 prompt 已进入宿主调用阶段。
+   * @remarks scheduler 必须以 handle 自身状态为准，避免 queued run 已被 abort/close/supersede 后仍启动 prompt。
+   */
+  tryStartPrompt(): boolean {
+    if (this.promptStarted || this.forceClosed || this.promptSettled || this.factsClosed) {
+      return false;
+    }
+    this.promptStarted = true;
+    return true;
+  }
+
+  /**
+   * 判断 queued run 是否仍可启动宿主 prompt。
+   */
+  canStartPrompt(): boolean {
+    return !this.promptStarted && !this.forceClosed && !this.promptSettled && !this.factsClosed;
+  }
+
+  hasPromptStarted(): boolean {
+    return this.promptStarted;
+  }
+
+  /**
+   * 标记宿主 prompt task 已返回。
+   * @remarks running run 被 supersede 时本地 result 会先 abort，但路由队首要等底层 prompt task 返回后才能释放。
+   */
+  markPromptTaskFinished(): void {
+    if (!this.promptStarted || this.promptTaskFinished) {
+      return;
+    }
+    this.promptTaskFinished = true;
+    this.tryCleanup();
+  }
+
   pushFacts(translation: RawEventTranslation): void {
     if (this.forceClosed || this.factsClosed) {
       return;
@@ -343,6 +381,22 @@ export class ActiveProviderRunHandle {
     this.tryCleanup();
   }
 
+  /**
+   * prompt task 自身异常时 fail-closed，避免 scheduler 永久卡住同一 host session。
+   */
+  forceFailAndClose(error: { code: 'internal_error'; message: string }): void {
+    if (this.forceClosed) {
+      return;
+    }
+    this.forceClosed = true;
+    this.promptSettled = true;
+    this.terminalResult = { outcome: 'failed', error };
+    this.factsClosed = true;
+    this.queue.close();
+    this.settleRunIfReady();
+    this.tryCleanup();
+  }
+
   result(): Promise<ProviderTerminalResult> {
     return this.completionResolver.result();
   }
@@ -358,9 +412,13 @@ export class ActiveProviderRunHandle {
     if (this.cleanedUp || !this.promptSettled || !this.factsClosed) {
       return;
     }
+    if (this.promptStarted && !this.promptTaskFinished) {
+      return;
+    }
     this.cleanedUp = true;
     this.onCleanup({
       anchorSessionId: this.anchorSessionId,
+      hostSessionId: this.hostSessionId,
       runId: this.runId,
       trackingSessionIds: this.trackingSessionIds,
     });
@@ -379,16 +437,13 @@ export class ActiveRunRegistry {
     logger: BridgeLogger;
     onCleanup: (input: {
       anchorSessionId: string;
+      hostSessionId: string;
       runId: string;
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
   }): ActiveProviderRunHandle {
     const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
     const previous = this.handles.get(options.anchorSessionId);
-    if (previous) {
-      previous.forceAbortAndClose('superseded_run');
-      this.removeFromHostQueue(previous);
-    }
     const handle = new ActiveProviderRunHandle({
       anchorSessionId: options.anchorSessionId,
       runId: options.runId,
@@ -401,6 +456,12 @@ export class ActiveRunRegistry {
     const queue = this.hostQueues.get(hostSessionId) ?? [];
     queue.push(handle);
     this.hostQueues.set(hostSessionId, queue);
+    if (previous) {
+      previous.forceAbortAndClose('superseded_run');
+      if (!previous.hasPromptStarted()) {
+        this.removeFromHostQueue(previous);
+      }
+    }
     return handle;
   }
 
@@ -422,10 +483,13 @@ export class ActiveRunRegistry {
   ): ActiveProviderRunHandle[] {
     const queue = [...(this.hostQueues.get(hostSessionId) ?? [])];
     for (const handle of queue) {
+      const promptStarted = handle.hasPromptStarted();
       handle.forceAbortAndClose(reason);
       this.handles.delete(handle.anchorSessionId);
+      if (!promptStarted) {
+        this.removeFromHostQueue(handle);
+      }
     }
-    this.hostQueues.delete(hostSessionId);
     return queue;
   }
 
@@ -463,5 +527,29 @@ export class ActiveRunRegistry {
       deleted: true,
       currentRunId: current.runId,
     };
+  }
+
+  abortByAnchorSession(anchorSessionId: string, reason: ForceAbortReason): ActiveProviderRunHandle | undefined {
+    const current = this.handles.get(anchorSessionId);
+    if (!current) {
+      return undefined;
+    }
+    const promptStarted = current.hasPromptStarted();
+    current.forceAbortAndClose(reason);
+    this.handles.delete(anchorSessionId);
+    if (!promptStarted) {
+      this.removeFromHostQueue(current);
+    }
+    return current;
+  }
+
+  removeHostQueueEntry(hostSessionId: string, runId: string): void {
+    const queue = this.hostQueues.get(hostSessionId) ?? [];
+    const nextQueue = queue.filter((handle) => handle.runId !== runId);
+    if (nextQueue.length > 0) {
+      this.hostQueues.set(hostSessionId, nextQueue);
+    } else {
+      this.hostQueues.delete(hostSessionId);
+    }
   }
 }
