@@ -469,6 +469,19 @@ export class PermissionAskedTranslator implements EventTranslator {
     if (!asTrimmedString(properties?.sessionID) || !permissionId) {
       return { recognized: true, facts: [] };
     }
+    const permType = asTrimmedString(properties?.permission) ?? asTrimmedString(properties?.type);
+    if (!permType) {
+      context.diagnostics.warn('permission_ask_missing_perm_type', {
+        toolSessionId: context.factSessionContext.trackingSessionId,
+        permissionId,
+      });
+      return {
+        recognized: true,
+        toolSessionId: context.factSessionContext.anchorSessionId,
+        envelopeMessageId: buildDeterministicEnvelopeMessageId('permission', permissionId),
+        facts: [],
+      };
+    }
 
     const factRoutingFields = buildFactRoutingFields(context);
     const tool = asObject(properties?.tool);
@@ -481,8 +494,7 @@ export class PermissionAskedTranslator implements EventTranslator {
       ...(messageId ? { messageId } : {}),
       partId,
       permissionId,
-      ...(asTrimmedString(properties?.type) ? { permissionType: asTrimmedString(properties?.type) } : {}),
-      ...(asTrimmedString(properties?.title) ? { title: asTrimmedString(properties?.title) } : {}),
+      permType,
       ...(asObject(properties?.metadata) ? { metadata: asObject(properties?.metadata) } : {}),
       raw: properties,
     };

@@ -5,7 +5,6 @@ import type {
   MessageDoneFact,
   MessageStartFact,
   PermissionAskFact,
-  ProviderFact,
   QuestionAskFact,
   SessionErrorFact,
   SessionTitleFact,
@@ -23,30 +22,23 @@ import { toOptionalNumericRecord } from './projector.utils.ts';
  * cloud/skill provider 默认 fact projector。
  */
 export class DefaultFactToSkillEventProjector implements FactToSkillEventProjector {
+  private readonly projectorByType: Record<ProjectableProviderFact['type'], (fact: ProjectableProviderFact) => SkillProviderEvent[]> = {
+    'text.delta': (fact) => this.projectStreamingContentFact(fact as TextDeltaFact),
+    'text.done': (fact) => this.projectStreamingContentFact(fact as TextDoneFact),
+    'thinking.delta': (fact) => this.projectStreamingContentFact(fact as ThinkingDeltaFact),
+    'thinking.done': (fact) => this.projectStreamingContentFact(fact as ThinkingDoneFact),
+    'tool.update': (fact) => this.projectToolUpdateFact(fact as ToolUpdateFact),
+    'question.ask': (fact) => this.projectQuestionAskFact(fact as QuestionAskFact),
+    'permission.ask': (fact) => this.projectPermissionAskFact(fact as PermissionAskFact),
+    'permission.reply': (fact) => this.projectPermissionReplyFact(fact as ProjectablePermissionReplyFact),
+    'message.start': (fact) => this.projectMessageStartFact(fact as MessageStartFact),
+    'message.done': (fact) => this.projectMessageDoneFact(fact as MessageDoneFact),
+    'session.title': (fact) => this.projectSessionTitleFact(fact as SessionTitleFact),
+    'session.error': (fact) => this.projectSessionErrorFact(fact as SessionErrorFact),
+  };
+
   project(fact: ProjectableProviderFact): SkillProviderEvent[] {
-    switch (fact.type) {
-      case 'text.delta':
-      case 'text.done':
-      case 'thinking.delta':
-      case 'thinking.done':
-        return this.projectStreamingContentFact(fact);
-      case 'tool.update':
-        return this.projectToolUpdateFact(fact);
-      case 'question.ask':
-        return this.projectQuestionAskFact(fact);
-      case 'permission.ask':
-        return this.projectPermissionAskFact(fact);
-      case 'permission.reply':
-        return this.projectPermissionReplyFact(fact);
-      case 'message.start':
-        return this.projectMessageStartFact(fact);
-      case 'message.done':
-        return this.projectMessageDoneFact(fact);
-      case 'session.title':
-        return this.projectSessionTitleFact(fact);
-      case 'session.error':
-        return this.projectSessionErrorFact(fact);
-    }
+    return this.projectorByType[fact.type](fact);
   }
 
   private toSingleEvent(event: SkillProviderEvent): SkillProviderEvent[] {
@@ -126,7 +118,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         partId: fact.partId,
         permissionId: fact.permissionId,
         ...(fact.messageId ? { messageId: fact.messageId } : {}),
-        ...(fact.permissionType ? { permType: fact.permissionType } : {}),
+        permType: fact.permType,
         ...(fact.title ? { title: fact.title } : {}),
         ...(fact.metadata ? { metadata: fact.metadata } : {}),
       },
@@ -140,7 +132,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       properties: {
         permissionId: fact.permissionId,
         response: fact.response,
-        ...(fact.permissionType ? { permType: fact.permissionType } : {}),
+        ...(fact.permType ? { permType: fact.permType } : {}),
         ...(fact.messageId ? { messageId: fact.messageId } : {}),
         ...(fact.partId ? { partId: fact.partId } : {}),
       },

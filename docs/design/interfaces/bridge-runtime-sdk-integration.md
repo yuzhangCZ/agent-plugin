@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
 **Version:** 1.0  
-**Date:** 2026-05-19  
+**Date:** 2026-06-01  
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -24,6 +24,13 @@
 - 消费侧展示逻辑或事件映射逻辑
 - 仓库内部代码组织、测试缝或源码定位方式
 
+## 1.1 Changelog
+
+### 2026-06-01
+
+- `PermissionAskFact`: `permissionType?: string` -> `permType: string`
+- `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
+- `PermissionReplyFact`: `messageId, partId` 移除
 ## 2. 稳定导出概览
 
 `@wecode/bridge-runtime-sdk` 根入口稳定导出 3 类能力：
@@ -737,10 +744,10 @@ sequenceDiagram
 |---|---|---|---|
 | `type` | `'permission.ask'` | 是 | 事实类型。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
-| `messageId` | `string` | 是 | 所属消息标识。 |
+| `messageId` | `string` | 否 | 可选消息归属上下文。 |
 | `partId` | `string` | 是 | 权限所在消息片段标识。 |
 | `permissionId` | `string` | 是 | 直接回复目标，必须唯一。 |
-| `permissionType` | `string` | 否 | 可选权限类型。 |
+| `permType` | `string` | 是 | 权限类型|
 | `title` | `string` | 否 | 可选权限标题。 |
 | `metadata` | `Record<string, unknown>` | 否 | 可选权限上下文。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -753,9 +760,7 @@ sequenceDiagram
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `permissionId` | `string` | 是 | 已回复的权限标识。 |
 | `response` | `'once' \| 'always' \| 'reject'` | 是 | 权限回复结果。 |
-| `messageId` | `string` | 否 | 可选关联消息标识。 |
-| `partId` | `string` | 否 | 可选关联片段标识。 |
-| `permissionType` | `string` | 否 | 可选权限类型。 |
+| `permType` | `string` | 否 | 权限类型|
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
 #### `MessageDoneFact`
