@@ -15,6 +15,22 @@ import type {
 const FACT_DRAIN_QUIET_PERIOD_MS = 40;
 const FACT_DRAIN_TIMEOUT_MS = 250;
 
+type ActiveProviderRunHandleOptions = {
+  anchorSessionId: string;
+  runId: string;
+  initialTrackingSessionId: string;
+  logger: BridgeLogger;
+  onCleanup: (input: {
+    anchorSessionId: string;
+    hostSessionId: string;
+    runId: string;
+    trackingSessionIds: ReadonlySet<string>;
+  }) => void;
+  hostSessionId?: string;
+};
+
+type ForceAbortReason = 'abort_session' | 'prompt_terminal_aborted' | 'superseded_run';
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -188,6 +204,11 @@ class FactDrainTracker {
   }
 }
 
+/**
+ * assistant message 生命周期状态表。
+ * @remarks
+ * 用于拒绝没有 open message 的 part/question 事件，避免生成顺序错误的 facts。
+ */
 export class AssistantMessageStateStore implements AssistantMessageStateStorePort {
   private readonly sessions = new Map<string, Map<string, AssistantMessageLifecycleState>>();
 
@@ -223,6 +244,11 @@ export class AssistantMessageStateStore implements AssistantMessageStateStorePor
   }
 }
 
+/**
+ * message part 类型记忆表。
+ * @remarks
+ * `message.part.delta` 不总是携带完整 part 类型，因此需要用先前的 part.updated 判断 text/reasoning。
+ */
 export class PartKindStore implements PartKindStorePort {
   private readonly sessions = new Map<string, Map<string, PartKind>>();
 
@@ -248,29 +274,39 @@ export class PartKindStore implements PartKindStorePort {
   }
 }
 
+/**
+ * 单次 provider run 的 fact 队列、prompt 启动状态和 terminal 收口句柄。
+ * @remarks
+ * run result 需要 prompt terminal 与 facts drain 都完成；cleanup 还要等待已启动的 prompt task 返回，
+ * 以便 `HostSessionRunCoordinator` 在同一 host session 内维持 FIFO prompt 调度。
+ */
 export class ActiveProviderRunHandle {
   readonly queue = new AsyncIterableQueue<ProviderFact>();
+  readonly logger: BridgeLogger;
   private readonly trackingSessionIds = new Set<string>();
   private readonly promptTerminalResolver: PromptTerminalResolver;
   private readonly completionResolver = new RunCompletionResolver();
   private readonly factDrainTracker: FactDrainTracker;
+  private promptStarted = false;
+  private promptTaskFinished = false;
   private promptSettled = false;
   private factsClosed = false;
+  private forceClosed = false;
   private cleanedUp = false;
   private terminalResult?: ProviderTerminalResult;
 
-  constructor(
-    readonly anchorSessionId: string,
-    readonly runId: string,
-    initialTrackingSessionId: string,
-    logger: BridgeLogger,
-    private readonly onCleanup: (input: {
-      anchorSessionId: string;
-      runId: string;
-      trackingSessionIds: ReadonlySet<string>;
-    }) => void,
-  ) {
-    this.trackingSessionIds.add(initialTrackingSessionId);
+  readonly anchorSessionId: string;
+  readonly runId: string;
+  readonly hostSessionId: string;
+  private readonly onCleanup: ActiveProviderRunHandleOptions['onCleanup'];
+
+  constructor(options: ActiveProviderRunHandleOptions) {
+    this.anchorSessionId = options.anchorSessionId;
+    this.runId = options.runId;
+    this.hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    this.logger = options.logger;
+    this.onCleanup = options.onCleanup;
+    this.trackingSessionIds.add(options.initialTrackingSessionId);
     this.promptTerminalResolver = new PromptTerminalResolver((result) => {
       this.promptSettled = true;
       this.terminalResult = result;
@@ -278,10 +314,10 @@ export class ActiveProviderRunHandle {
       this.tryCleanup();
     });
     this.factDrainTracker = new FactDrainTracker({
-      anchorSessionId,
-      runId,
+      anchorSessionId: options.anchorSessionId,
+      runId: options.runId,
       queue: this.queue,
-      logger,
+      logger: options.logger,
       onClosed: () => {
         this.factsClosed = true;
         this.settleRunIfReady();
@@ -294,7 +330,45 @@ export class ActiveProviderRunHandle {
     this.trackingSessionIds.add(trackingSessionId);
   }
 
+  /**
+   * 标记 prompt 已进入宿主调用阶段。
+   * @remarks scheduler 必须以 handle 自身状态为准，避免 queued run 已被 abort/close/supersede 后仍启动 prompt。
+   */
+  tryStartPrompt(): boolean {
+    if (this.promptStarted || this.forceClosed || this.promptSettled || this.factsClosed) {
+      return false;
+    }
+    this.promptStarted = true;
+    return true;
+  }
+
+  /**
+   * 判断 queued run 是否仍可启动宿主 prompt。
+   */
+  canStartPrompt(): boolean {
+    return !this.promptStarted && !this.forceClosed && !this.promptSettled && !this.factsClosed;
+  }
+
+  hasPromptStarted(): boolean {
+    return this.promptStarted;
+  }
+
+  /**
+   * 标记宿主 prompt task 已返回。
+   * @remarks running run 被 supersede 时本地 result 会先 abort，但路由队首要等底层 prompt task 返回后才能释放。
+   */
+  markPromptTaskFinished(): void {
+    if (!this.promptStarted || this.promptTaskFinished) {
+      return;
+    }
+    this.promptTaskFinished = true;
+    this.tryCleanup();
+  }
+
   pushFacts(translation: RawEventTranslation): void {
+    if (this.forceClosed || this.factsClosed) {
+      return;
+    }
     this.factDrainTracker.noteRelevantEvent(translation.terminalCandidateMessageId);
     for (const fact of translation.facts) {
       this.queue.push(fact);
@@ -302,8 +376,43 @@ export class ActiveProviderRunHandle {
   }
 
   settlePromptTerminal(result: ProviderTerminalResult): void {
+    if (this.forceClosed) {
+      return;
+    }
     this.promptTerminalResolver.settle(result);
     this.factDrainTracker.onPromptSettled();
+  }
+
+  /**
+   * 强制结束当前 run，用于 session abort 或宿主侧 aborted terminal 的本地收口。
+   */
+  forceAbortAndClose(_reason: ForceAbortReason): void {
+    if (this.forceClosed) {
+      return;
+    }
+    this.forceClosed = true;
+    this.promptSettled = true;
+    this.terminalResult = { outcome: 'aborted' };
+    this.factsClosed = true;
+    this.queue.close();
+    this.settleRunIfReady();
+    this.tryCleanup();
+  }
+
+  /**
+   * prompt task 自身异常时 fail-closed，避免 scheduler 永久卡住同一 host session。
+   */
+  forceFailAndClose(error: { code: 'internal_error'; message: string }): void {
+    if (this.forceClosed) {
+      return;
+    }
+    this.forceClosed = true;
+    this.promptSettled = true;
+    this.terminalResult = { outcome: 'failed', error };
+    this.factsClosed = true;
+    this.queue.close();
+    this.settleRunIfReady();
+    this.tryCleanup();
   }
 
   result(): Promise<ProviderTerminalResult> {
@@ -321,37 +430,75 @@ export class ActiveProviderRunHandle {
     if (this.cleanedUp || !this.promptSettled || !this.factsClosed) {
       return;
     }
+    if (this.promptStarted && !this.promptTaskFinished) {
+      return;
+    }
     this.cleanedUp = true;
     this.onCleanup({
       anchorSessionId: this.anchorSessionId,
+      hostSessionId: this.hostSessionId,
       runId: this.runId,
       trackingSessionIds: this.trackingSessionIds,
     });
   }
 }
 
+/**
+ * active run 注册表。
+ * @remarks
+ * 对外按 anchor session 管理当前 run，对内按 host session 维护事件路由队列；
+ * 已启动 prompt 的 superseded run 会保留到 task finished，未启动的 queued run 可直接移出队列。
+ */
 export class ActiveRunRegistry {
   private readonly handles = new Map<string, ActiveProviderRunHandle>();
+  private readonly hostQueues = new Map<string, ActiveProviderRunHandle[]>();
 
   create(options: {
     anchorSessionId: string;
+    hostSessionId?: string;
     runId: string;
     initialTrackingSessionId: string;
     logger: BridgeLogger;
     onCleanup: (input: {
       anchorSessionId: string;
+      hostSessionId: string;
       runId: string;
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
   }): ActiveProviderRunHandle {
-    const handle = new ActiveProviderRunHandle(
-      options.anchorSessionId,
-      options.runId,
-      options.initialTrackingSessionId,
-      options.logger,
-      options.onCleanup,
-    );
+    const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    const previous = this.handles.get(options.anchorSessionId);
+    const handle = new ActiveProviderRunHandle({
+      anchorSessionId: options.anchorSessionId,
+      runId: options.runId,
+      initialTrackingSessionId: options.initialTrackingSessionId,
+      logger: options.logger,
+      onCleanup: options.onCleanup,
+      hostSessionId,
+    });
     this.handles.set(options.anchorSessionId, handle);
+    const queue = this.hostQueues.get(hostSessionId) ?? [];
+    queue.push(handle);
+    this.hostQueues.set(hostSessionId, queue);
+    if (previous) {
+      const previousPromptStarted = previous.hasPromptStarted();
+      options.logger.debug?.('provider_adapter.active_run.superseded', {
+        anchorSessionId: options.anchorSessionId,
+        hostSessionId,
+        previousRunId: previous.runId,
+        nextRunId: options.runId,
+        previousPromptStarted,
+      });
+      previous.forceAbortAndClose('superseded_run');
+      if (!previousPromptStarted) {
+        this.removeFromHostQueue(previous);
+        options.logger.debug?.('provider_adapter.active_run.removed_unstarted_superseded_run', {
+          anchorSessionId: previous.anchorSessionId,
+          hostSessionId: previous.hostSessionId,
+          runId: previous.runId,
+        });
+      }
+    }
     return handle;
   }
 
@@ -361,6 +508,43 @@ export class ActiveRunRegistry {
 
   has(anchorSessionId: string): boolean {
     return this.handles.has(anchorSessionId);
+  }
+
+  getHeadByHostSession(hostSessionId: string): ActiveProviderRunHandle | undefined {
+    return this.hostQueues.get(hostSessionId)?.[0];
+  }
+
+  abortAllByHostSession(
+    hostSessionId: string,
+    reason: 'abort_session' | 'prompt_terminal_aborted',
+  ): ActiveProviderRunHandle[] {
+    const queue = [...(this.hostQueues.get(hostSessionId) ?? [])];
+    for (const handle of queue) {
+      const promptStarted = handle.hasPromptStarted();
+      handle.forceAbortAndClose(reason);
+      this.handles.delete(handle.anchorSessionId);
+      handle.logger.debug?.('provider_adapter.active_run.host_run_aborted', {
+        anchorSessionId: handle.anchorSessionId,
+        hostSessionId,
+        runId: handle.runId,
+        reason,
+        promptStarted,
+      });
+      if (!promptStarted) {
+        this.removeFromHostQueue(handle);
+      }
+    }
+    return queue;
+  }
+
+  private removeFromHostQueue(handle: ActiveProviderRunHandle): void {
+    const queue = this.hostQueues.get(handle.hostSessionId) ?? [];
+    const nextQueue = queue.filter((queued) => queued !== handle);
+    if (nextQueue.length > 0) {
+      this.hostQueues.set(handle.hostSessionId, nextQueue);
+    } else {
+      this.hostQueues.delete(handle.hostSessionId);
+    }
   }
 
   /**
@@ -382,9 +566,34 @@ export class ActiveRunRegistry {
       };
     }
     this.handles.delete(anchorSessionId);
+    this.removeFromHostQueue(current);
     return {
       deleted: true,
       currentRunId: current.runId,
     };
+  }
+
+  abortByAnchorSession(anchorSessionId: string, reason: ForceAbortReason): ActiveProviderRunHandle | undefined {
+    const current = this.handles.get(anchorSessionId);
+    if (!current) {
+      return undefined;
+    }
+    const promptStarted = current.hasPromptStarted();
+    current.forceAbortAndClose(reason);
+    this.handles.delete(anchorSessionId);
+    if (!promptStarted) {
+      this.removeFromHostQueue(current);
+    }
+    return current;
+  }
+
+  removeHostQueueEntry(hostSessionId: string, runId: string): void {
+    const queue = this.hostQueues.get(hostSessionId) ?? [];
+    const nextQueue = queue.filter((handle) => handle.runId !== runId);
+    if (nextQueue.length > 0) {
+      this.hostQueues.set(hostSessionId, nextQueue);
+    } else {
+      this.hostQueues.delete(hostSessionId);
+    }
   }
 }

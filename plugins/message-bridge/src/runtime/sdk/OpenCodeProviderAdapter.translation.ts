@@ -81,6 +81,11 @@ interface EventTranslator {
   translate(context: TranslationContext): RawEventTranslation;
 }
 
+/**
+ * 事件类型到 translator 的只读运行期注册表。
+ * @remarks
+ * registry 只决定是否识别事件；具体校验、状态机和 fact 生成由 translator 实现。
+ */
 export class EventTranslatorRegistry {
   private readonly translators = new Map<string, EventTranslator>();
 
@@ -102,6 +107,11 @@ export class EventTranslatorRegistry {
   }
 }
 
+/**
+ * 翻译 `message.updated` assistant 消息生命周期。
+ * @remarks
+ * 根据 created/completed 生成 `message.start` 和 `message.done`，并维护 message open/closed 状态。
+ */
 export class AssistantMessageEventTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
@@ -178,6 +188,11 @@ export class AssistantMessageEventTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `message.part.delta` 增量文本。
+ * @remarks
+ * 依赖 `PartKindStore` 区分 text/thinking；没有 open message 时 fail-closed 并记录协议诊断。
+ */
 export class MessagePartDeltaTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
@@ -232,6 +247,11 @@ export class MessagePartDeltaTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `message.part.updated` 的 part 完成态与工具状态。
+ * @remarks
+ * text/reasoning 产出 done fact，tool 产出 update fact，step-start/step-finish 只作为已识别空事件处理。
+ */
 export class MessagePartUpdatedTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
@@ -373,6 +393,11 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `question.asked` 为 `question.ask` fact。
+ * @remarks
+ * questionId 只作为 reply target；缺少 open message 时按构造参数决定是否拒绝。
+ */
 export class QuestionAskedTranslator implements EventTranslator {
   constructor(private readonly requireOpenMessage: boolean) {}
 
@@ -462,6 +487,11 @@ export class QuestionAskedTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `permission.asked` 为 `permission.ask` fact。
+ * @remarks
+ * permissionId 只作为 reply target；缺少 permission type 时不输出 fact 并记录诊断。
+ */
 export class PermissionAskedTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
@@ -508,6 +538,11 @@ export class PermissionAskedTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `permission.replied` 为 `permission.reply` fact。
+ * @remarks
+ * 只接受 `once`、`always`、`reject` 三类响应，其它响应被视为已识别空事件。
+ */
 export class PermissionRepliedTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
@@ -538,10 +573,16 @@ export class PermissionRepliedTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `session.error` 为 provider session error fact。
+ * @remarks
+ * active run 优先消费；无 active run 时由 coordinator 走 outbound fallback。
+ */
 export class SessionErrorTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
-    const errorText = asTrimmedString(properties?.error);
+    const errorObject = asObject(properties?.error);
+    const errorText = asTrimmedString(properties?.error) ?? asTrimmedString(errorObject?.message);
     const rawSessionId = asTrimmedString(properties?.sessionID);
     if (!rawSessionId || !errorText) {
       return { recognized: true, facts: [] };
@@ -567,6 +608,11 @@ export class SessionErrorTranslator implements EventTranslator {
   }
 }
 
+/**
+ * 翻译 `session.updated` 标题变更。
+ * @remarks
+ * 只有进入 active run 的 session.updated 才会产出 `session.title`；detached metadata 由 coordinator drop。
+ */
 export class SessionUpdatedTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);

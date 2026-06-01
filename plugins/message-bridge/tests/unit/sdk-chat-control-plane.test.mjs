@@ -1420,10 +1420,14 @@ test('DefaultExecutionSessionInvalidationPort only invalidates stale binding evi
     ownershipResolver,
   });
 
-  port.invalidateAfterFailure('anchor-5', {
-    errorEvidence: {
-      sourceOperation: 'session.prompt',
-      sourceErrorCode: 'session_not_found',
+  port.invalidateAfterFailure({
+    conversationId: 'anchor-5',
+    hostSessionId: 'ses-5',
+    error: {
+      errorEvidence: {
+        sourceOperation: 'session.prompt',
+        sourceErrorCode: 'session_not_found',
+      },
     },
   });
 
@@ -1432,12 +1436,46 @@ test('DefaultExecutionSessionInvalidationPort only invalidates stale binding evi
 
   bindingStore.bind('anchor-6', 'ses-6');
   ownershipResolver.attach('ses-6', 'anchor-6');
-  port.invalidateAfterFailure('anchor-6', {
-    errorEvidence: {
-      sourceOperation: 'session.prompt',
-      sourceErrorCode: 'provider_unavailable',
+  port.invalidateAfterFailure({
+    conversationId: 'anchor-6',
+    hostSessionId: 'ses-6',
+    error: {
+      errorEvidence: {
+        sourceOperation: 'session.prompt',
+        sourceErrorCode: 'provider_unavailable',
+      },
     },
   });
   assert.equal(bindingStore.get('anchor-6')?.status, 'active');
   assert.equal(ownershipResolver.resolveAttachedAnchor('ses-6'), 'anchor-6');
+});
+
+test('DefaultExecutionSessionInvalidationPort does not invalidate binding switched to another host session', () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  bindingStore.bind('conversation-a', 'host-old');
+  ownershipResolver.attach('host-old', 'conversation-a');
+  bindingStore.bind('conversation-a', 'host-new');
+  ownershipResolver.detach('host-old');
+  ownershipResolver.attach('host-new', 'conversation-a');
+
+  const port = new DefaultExecutionSessionInvalidationPort({
+    bindingStore,
+    ownershipResolver,
+  });
+
+  port.invalidateAfterFailure({
+    conversationId: 'conversation-a',
+    hostSessionId: 'host-old',
+    error: {
+      errorEvidence: {
+        sourceOperation: 'session.prompt',
+        sourceErrorCode: 'session_not_found',
+      },
+    },
+  });
+
+  assert.equal(bindingStore.get('conversation-a')?.status, 'active');
+  assert.equal(bindingStore.get('conversation-a')?.activeOpencodeSessionId, 'host-new');
+  assert.equal(ownershipResolver.resolveAttachedAnchor('host-new'), 'conversation-a');
 });

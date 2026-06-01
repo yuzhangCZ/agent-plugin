@@ -62,6 +62,7 @@ describe('SessionScopedSdkExecutionBridge', () => {
     assert.deepStrictEqual(await bridge.abort({ toolSessionId: 'tool-1' }), {
       kind: 'aborted',
       toolSessionId: 'tool-1',
+      hostSessionId: 'ses-1',
     });
     assert.deepStrictEqual(calls, [{
       method: 'abortSession',
