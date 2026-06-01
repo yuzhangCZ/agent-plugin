@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
-import { requiredTrimmedString } from '../../shared.ts';
+import { optionalLooseTrimmedStringPreservingEmpty, requiredTrimmedString } from '../../shared.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
 export const skillQuestionOptionSchema = z.object({
   label: requiredTrimmedString,
+  description: optionalLooseTrimmedStringPreservingEmpty,
 });
 
 export const skillQuestionItemSchema = z.object({

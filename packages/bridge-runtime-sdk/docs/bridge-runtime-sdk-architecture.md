@@ -110,6 +110,7 @@ ProviderFact
 1. provider facts 先过时序校验，再参与上行投影。
 2. `tool_event`、`tool_done`、`tool_error` 不应混成同一条无边界消息链。
 3. outbound sink 只发送已封装好的 gateway business message，不解释业务含义。
+4. `question.ask` 投影为 cloud `question` 时保留 `questions[].options[].description`；该字段只承担选项展示说明，不参与 `question_reply` 目标定位或答案结构。
 
 ### 5.3 Host runtime 链路
 

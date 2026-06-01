@@ -1035,7 +1035,7 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
   assertFactsOmitToolSessionId(emitted[0].facts);
   const permissionFact = emitted[0].facts.find((fact) => fact.type === "permission.ask");
   assert.equal(permissionFact.permissionId, "approval-1");
-  assert.equal(permissionFact.permissionType, "exec");
+  assert.equal(permissionFact.permType, "exec");
   assert.match(permissionFact.partId, /^part_/);
   assert.equal(permissionFact.title, "Run command?");
   assert.equal(permissionFact.metadata.command, "echo hi");
@@ -1053,6 +1053,62 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
       params: {
         id: "approval-1",
         decision: "allow-once",
+      },
+    },
+  ]);
+});
+
+test("provider adapter skips runtime approval events missing permType and records a warning", async () => {
+  let gatewayListener;
+  const warnings = [];
+  const emitted = [];
+  const provider = createAdapter({
+    logger: createLogger({
+      warn(message, extra) {
+        warnings.push({ message, extra });
+      },
+    }),
+    runtime: {
+      events: {
+        onGatewayEvent(listener) {
+          gatewayListener = listener;
+          return () => true;
+        },
+      },
+    },
+  });
+
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage(input) {
+        const facts = [];
+        for await (const fact of input.facts) {
+          facts.push(fact);
+        }
+        emitted.push({ input, facts });
+        return { applied: true };
+      },
+    },
+  });
+
+  gatewayListener({
+    event: "exec.approval.requested",
+    payload: {
+      id: "approval-missing-type-1",
+      sessionID: "ses_gateway_permission_missing_type_1",
+      title: "Run command?",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(warnings, [
+    {
+      message: "runtime.permission_ask_missing_perm_type",
+      extra: {
+        toolSessionId: "ses_gateway_permission_missing_type_1",
+        permissionId: "approval-missing-type-1",
+        sourceEvent: "exec.approval.requested",
       },
     },
   ]);

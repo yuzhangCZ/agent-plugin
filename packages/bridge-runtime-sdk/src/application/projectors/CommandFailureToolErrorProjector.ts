@@ -54,7 +54,6 @@ export class CommandFailureToolErrorProjector {
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
       ...(input.summary.toolSessionId ? { toolSessionId: input.summary.toolSessionId } : {}),
-      ...(input.summary.welinkSessionId ? { welinkSessionId: input.summary.welinkSessionId } : {}),
       error: errorMessage,
     };
   }

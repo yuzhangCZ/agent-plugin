@@ -37,7 +37,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
             question: '继续执行吗？',
             header: '确认操作',
             multiSelect: false,
-            options: [{ label: '是' }, { label: '否' }],
+            options: [{ label: '是', description: '确认继续执行' }, { label: '否' }],
           },
         ],
       },
@@ -136,6 +136,37 @@ test('validateToolEvent accepts cloud events with deprecated fields that are now
     });
     assert.equal(result.ok, true, item.type);
   }
+});
+
+test('validateToolEvent normalizes cloud question option descriptions while preserving empty strings', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'question',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-4',
+      questionId: 'question-1',
+      questions: [
+        {
+          question: '继续执行吗？',
+          options: [
+            { label: '  是  ', description: '  确认继续执行  ' },
+            { label: '否', description: '   ' },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties.questions[0]?.options, [
+    { label: '是', description: '确认继续执行' },
+    { label: '否', description: '' },
+  ]);
 });
 
 test('validateToolEvent rejects skill events outside white-list', () => {
@@ -260,6 +291,20 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           messageId: 'msg-1',
           partId: 'part-5',
           toolCallId: 'perm-1',
+          permissionId: 'perm-1',
+          permType: 'file_write',
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing permType',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
           permissionId: 'perm-1',
         },
       },

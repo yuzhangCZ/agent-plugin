@@ -19,7 +19,6 @@ export class RequestRunFailureToolErrorProjector {
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
       toolSessionId: input.toolSessionId,
-      ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
       error: this.catalog.get('request_run_failed'),
     };
   }

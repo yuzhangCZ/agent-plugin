@@ -56,7 +56,7 @@ test("session fact builders keep fact payloads free of session ownership fields"
     messageId: "msg_1",
     partId: "part_perm_1",
     permissionId: "perm_1",
-    permissionType: "exec",
+    permType: "exec",
     title: "Run command?",
     metadata: {
       command: "echo hi",
@@ -86,6 +86,7 @@ test("session fact builders keep fact payloads free of session ownership fields"
   }
 
   assert.equal(permissionAsk.partId, "part_perm_1");
+  assert.equal(permissionAsk.permType, "exec");
   assert.equal(permissionAsk.title, "Run command?");
   assert.deepEqual(permissionAsk.metadata, { command: "echo hi" });
   assert.equal(toolUpdate.input, '{"query":"docs"}');

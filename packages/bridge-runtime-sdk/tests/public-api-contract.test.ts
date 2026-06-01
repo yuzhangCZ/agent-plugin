@@ -44,9 +44,13 @@ test('stable entry source exports updated interaction and fact contracts', async
 
 test('public contract source locks interaction ids and tool.update string boundaries', async () => {
   const source = await readFile(new URL('../src/domain/provider-contract.ts', import.meta.url), 'utf8');
+  const exportedProviderSource = await readFile(new URL('../src/domain/provider.ts', import.meta.url), 'utf8');
   const factBaseBlock = source.match(/export interface ProviderFactBase \{[\s\S]*?\n\}/)?.[0] ?? '';
   const permissionAskBlock = source.match(/export interface PermissionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const permissionReplyBlock = source.match(/export interface PermissionReplyFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  const questionOptionBlock = source.match(/export interface QuestionOption[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  const exportedQuestionOptionBlock =
+    exportedProviderSource.match(/export interface QuestionOption[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const questionAskBlock = source.match(/export interface QuestionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const questionReplyBlock = source.match(/export interface ProviderQuestionReplyInput \{[\s\S]*?\n\}/)?.[0] ?? '';
   const toolUpdateBlock = source.match(/export interface ToolUpdateFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -57,13 +61,20 @@ test('public contract source locks interaction ids and tool.update string bounda
   assert.equal(factBaseBlock.includes('toolSessionId:'), false);
   assert.equal(permissionAskBlock.includes('messageId?: string;'), true);
   assert.equal(permissionAskBlock.includes('partId: string;'), true);
+  assert.equal(permissionAskBlock.includes('permType: string;'), true);
+  assert.equal(permissionAskBlock.includes('permissionType'), false);
   assert.equal(permissionAskBlock.includes('title?: string;'), true);
   assert.equal(permissionAskBlock.includes('toolCallId'), false);
   assert.equal(permissionReplyBlock.includes('permissionId: string;'), true);
   assert.equal(permissionReplyBlock.includes("response: 'once' | 'always' | 'reject';"), true);
-  assert.equal(permissionReplyBlock.includes('permissionType?: string;'), true);
+  assert.equal(permissionReplyBlock.includes('permType?: string;'), true);
+  assert.equal(permissionReplyBlock.includes('permissionType'), false);
   assert.equal(permissionReplyBlock.includes('messageId?: string;'), false);
   assert.equal(permissionReplyBlock.includes('partId'), false);
+  assert.equal(questionOptionBlock.includes('label: string;'), true);
+  assert.equal(questionOptionBlock.includes('description?: string;'), true);
+  assert.equal(exportedQuestionOptionBlock.includes('label: string;'), true);
+  assert.equal(exportedQuestionOptionBlock.includes('description?: string;'), true);
   assert.equal(questionAskBlock.includes('partId: string;'), true);
   assert.equal(questionAskBlock.includes('toolCallId?: string;'), true);
   assert.equal(questionAskBlock.includes('status?: string;'), true);

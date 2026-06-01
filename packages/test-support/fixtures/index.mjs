@@ -297,6 +297,7 @@ export function createGatewayWireQuestionAskedEvent(overrides = {}) {
           options: [
             {
               label: 'Yes',
+              description: 'Proceed with the action',
             },
           ],
         },
@@ -380,7 +381,7 @@ export function createGatewayWireQuestionEvent(overrides = {}) {
         {
           question: 'Proceed?',
           header: 'Confirm',
-          options: [{ label: 'Yes' }, { label: 'No' }],
+          options: [{ label: 'Yes', description: 'Proceed with the action' }, { label: 'No' }],
         },
       ],
     },
