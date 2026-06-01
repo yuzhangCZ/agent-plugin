@@ -20,14 +20,12 @@ export class DefaultRunTerminalSignalProjector implements RunTerminalSignalProje
       return {
         type: GATEWAY_UPLINK_MESSAGE_TYPE.toolDone,
         toolSessionId: input.toolSessionId,
-        ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
       };
     }
 
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
       toolSessionId: input.toolSessionId,
-      ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
       error: input.result.error?.message ?? DEFAULT_PROVIDER_RUN_FAILURE_MESSAGE,
       ...(input.result.error?.code === 'session_not_found' ? { reason: 'session_not_found' as const } : {}),
     };

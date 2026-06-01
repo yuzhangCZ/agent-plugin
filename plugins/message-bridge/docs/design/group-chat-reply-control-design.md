@@ -108,13 +108,13 @@ interface ChatInvokeMessage {
 2. 若 `suppressReply === true`：
    - runtime 在进入普通 `chat` 生命周期前直接短路
    - 不调用 `toolDoneCompat.handleInvokeStarted()`
-   - 不进入 `ChatAction` / `ChatUseCase`
+   - 不进入普通 chat prompt usecase
    - 不调用 `session.prompt`
    - 合成固定提示消息的 OpenCode 事件流
    - deny 分支自行发送唯一一次 `tool_done`
    - 发送完成后立即返回
 3. 否则：
-   - 走现有 `ChatAction` / `ChatUseCase`
+   - 走现有 chat prompt usecase
    - 正常调用 `session.prompt`
 
 ### deny 分支与 `tool_done` 收口
@@ -129,7 +129,7 @@ interface ChatInvokeMessage {
 
 完成态约束：
 
-- deny 分支不得向 `ToolDoneCompat` 登记 pending session
+- deny 分支不得向运行时完成态兼容层登记 pending session
 - deny 分支不得依赖后续 `session.idle` 触发兜底完成态
 - deny 分支的完成态来源只能是其自身显式发送的 `tool_done`
 - 普通允许回复分支的 `tool_done` 机制保持不变

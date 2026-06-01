@@ -12,12 +12,10 @@ const toolEventModelPath = resolve(repoRoot, 'packages/gateway-schema/src/contra
 const downstreamModelPath = resolve(repoRoot, 'packages/gateway-schema/src/contract/literals/downstream.ts');
 const upstreamModelPath = resolve(repoRoot, 'packages/gateway-schema/src/contract/literals/upstream.ts');
 const downstreamValidatorDir = resolve(repoRoot, 'packages/gateway-schema/src/adapters/validators');
-const bridgeGatewayWireDir = resolve(repoRoot, 'plugins/message-bridge/src/gateway-wire');
 const openclawGatewayWireDir = resolve(repoRoot, 'plugins/message-bridge-openclaw/src/gateway-wire');
 const packagesDir = resolve(repoRoot, 'packages');
 const pluginsDir = resolve(repoRoot, 'plugins');
 const ALLOWED_PROTOCOL_LITERAL_FACADE_FILES = new Set([
-  resolve(repoRoot, 'plugins/message-bridge/src/gateway-wire/transport.ts'),
   resolve(repoRoot, 'plugins/message-bridge-openclaw/src/gateway-wire/transport.ts'),
 ]);
 
@@ -145,7 +143,6 @@ test('boundary unknown usage must carry a Chinese explanation comment', async ()
 
 test('protocol implementation files do not retain bare protocol literals', async () => {
   const files = [
-    ...(await collectTsFiles(bridgeGatewayWireDir)),
     ...(await collectTsFiles(openclawGatewayWireDir)),
   ];
 

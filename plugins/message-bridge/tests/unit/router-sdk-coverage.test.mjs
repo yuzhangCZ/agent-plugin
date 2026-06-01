@@ -1,46 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DefaultActionRouter } from '../../src/action/ActionRouter.ts';
-import { DefaultActionRegistry } from '../../src/action/ActionRegistry.ts';
 import { createSdkAdapter, getMissingSdkCapabilities } from '../../src/runtime/SdkAdapter.ts';
-
-describe('DefaultActionRouter coverage', () => {
-  const context = {
-    client: {},
-    connectionState: 'READY',
-    sessionId: 's1',
-  };
-
-  test('returns error when registry missing', async () => {
-    const router = new DefaultActionRouter();
-    const result = await router.route('chat', {}, context);
-    assert.strictEqual(result.success, false);
-    assert.strictEqual(result.errorCode, 'SDK_UNREACHABLE');
-  });
-
-  test('returns unsupported action when action not found', async () => {
-    const router = new DefaultActionRouter();
-    router.setRegistry(new DefaultActionRegistry());
-    const result = await router.route('not_exists', {}, context);
-    assert.strictEqual(result.success, false);
-    assert.strictEqual(result.errorCode, 'UNSUPPORTED_ACTION');
-  });
-
-  test('executes registered action with typed payload routing', async () => {
-    const router = new DefaultActionRouter();
-    const registry = new DefaultActionRegistry();
-    registry.register({
-      name: 'x',
-      execute: async () => ({ success: true, data: { id: 'static-id' } }),
-    });
-    router.setRegistry(registry);
-
-    const ok = await router.route('x', { p: 1 }, context);
-    assert.strictEqual(ok.success, true);
-    assert.strictEqual(ok.data.id, 'static-id');
-  });
-});
 
 describe('createSdkAdapter coverage', () => {
   test('reports missing capabilities in fixed order', () => {

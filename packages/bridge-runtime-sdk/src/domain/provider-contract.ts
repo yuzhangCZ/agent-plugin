@@ -291,6 +291,7 @@ export interface ToolUpdateFact extends ProviderFactBase {
  */
 export interface QuestionOption {
   label: string;
+  description?: string;
 }
 
 export interface QuestionItem {
@@ -342,7 +343,7 @@ export interface PermissionAskFact extends ProviderFactBase {
    * runtime 与 provider 都只依赖它定位权限回复，不需要 `toolSessionId` 二次定位。
    */
   permissionId: string;
-  permissionType?: string;
+  permType: string;
   title?: string;
   metadata?: Record<string, unknown>;
   raw?: unknown;
@@ -355,7 +356,7 @@ export interface PermissionReplyFact extends ProviderFactBase {
   type: 'permission.reply';
   permissionId: string;
   response: 'once' | 'always' | 'reject';
-  permissionType?: string;
+  permType?: string;
   raw?: unknown;
 }
 

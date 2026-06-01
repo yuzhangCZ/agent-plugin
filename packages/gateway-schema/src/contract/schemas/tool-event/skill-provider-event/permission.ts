@@ -8,7 +8,7 @@ const skillPermissionAskEventPropertiesSchema = z
     messageId: requiredTrimmedString.optional(),
     partId: requiredTrimmedString,
     permissionId: requiredTrimmedString,
-    permType: requiredTrimmedString.optional(),
+    permType: requiredTrimmedString,
     title: requiredTrimmedString.optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
@@ -26,7 +26,7 @@ const skillPermissionAskEventPropertiesSchema = z
     ...(messageId === undefined ? {} : { messageId }),
     partId,
     permissionId,
-    ...(permType === undefined ? {} : { permType }),
+    permType,
     ...(title === undefined ? {} : { title }),
     ...(metadata === undefined ? {} : { metadata }),
   }));

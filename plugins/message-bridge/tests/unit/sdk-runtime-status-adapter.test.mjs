@@ -2,8 +2,8 @@ import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createBridgeRuntimeStatusAdapter,
-} from '../../src/runtime/BridgeRuntimeStatusAdapter.ts';
+  createSdkRuntimeStatusAdapter,
+} from '../../src/runtime/SdkRuntimeStatusAdapter.ts';
 import {
   __resetMessageBridgeStatusForTests,
   configureMessageBridgeStatusLogger,
@@ -25,13 +25,13 @@ async function flushLogs() {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-describe('bridge runtime status adapter', () => {
+describe('sdk runtime status adapter', () => {
   beforeEach(() => {
     __resetMessageBridgeStatusForTests();
   });
 
   test('maps runtime lifecycle and connection states to public snapshot', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishConnecting();
     assert.deepStrictEqual(getMessageBridgeStatus(), {
@@ -58,7 +58,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('publishes disabled, config invalid, server failure and plugin failure states', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishDisabled('message_bridge_runtime_disabled');
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'disabled');
@@ -91,7 +91,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('uses shared availability mapper semantics for handshake and transport failures', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayError({
       code: 'GATEWAY_HANDSHAKE_INVALID',
@@ -103,7 +103,7 @@ describe('bridge runtime status adapter', () => {
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
 
     __resetMessageBridgeStatusForTests();
-    const anotherAdapter = createBridgeRuntimeStatusAdapter();
+    const anotherAdapter = createSdkRuntimeStatusAdapter();
 
     anotherAdapter.publishGatewayError({
       code: 'GATEWAY_TRANSPORT_ERROR',
@@ -116,7 +116,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('keeps server failure precedence over later network failure', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayError({
       code: 'GATEWAY_HANDSHAKE_REJECTED',
@@ -140,7 +140,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('publishes network failure for transport-side gateway errors', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayState('READY');
     adapter.publishGatewayError({
@@ -159,7 +159,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('state gate errors do not overwrite current public snapshot', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayState('READY');
     const ready = getMessageBridgeStatus();
@@ -176,7 +176,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('protocol diagnostic errors do not overwrite current public snapshot', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayState('READY');
     const ready = getMessageBridgeStatus();
@@ -193,7 +193,7 @@ describe('bridge runtime status adapter', () => {
   });
 
   test('startup parameter invalid is projected to config_invalid locally', () => {
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishGatewayError({
       code: 'GATEWAY_CONNECT_PARAMETER_INVALID',
@@ -212,7 +212,7 @@ describe('bridge runtime status adapter', () => {
   test('publishing status through adapter does not log status api query noise', async () => {
     const logs = [];
     configureMessageBridgeStatusLogger(createLoggingClient(logs));
-    const adapter = createBridgeRuntimeStatusAdapter();
+    const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishConnecting();
     adapter.publishGatewayState('READY');

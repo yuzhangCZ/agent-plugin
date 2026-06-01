@@ -31,7 +31,7 @@ export interface PermissionAskFactInput {
   messageId: string;
   partId: string;
   permissionId: string;
-  permissionType?: string;
+  permType: string;
   title?: string;
   metadata?: Record<string, unknown>;
   raw?: unknown;
@@ -160,7 +160,7 @@ export function buildPermissionAskFact(input: PermissionAskFactInput): Permissio
     messageId: input.messageId,
     partId: input.partId,
     permissionId: input.permissionId,
-    ...(input.permissionType !== undefined ? { permissionType: input.permissionType } : {}),
+    permType: input.permType,
     ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     ...(input.raw !== undefined ? { raw: input.raw } : {}),

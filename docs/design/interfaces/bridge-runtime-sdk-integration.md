@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
 **Version:** 1.0  
-**Date:** 2026-05-19  
+**Date:** 2026-06-01  
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -24,6 +24,13 @@
 - 消费侧展示逻辑或事件映射逻辑
 - 仓库内部代码组织、测试缝或源码定位方式
 
+## 1.1 Changelog
+
+### 2026-06-01
+
+- `PermissionAskFact`: `permissionType?: string` -> `permType: string`
+- `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
+- `PermissionReplyFact`: `messageId, partId` 移除
 ## 2. 稳定导出概览
 
 `@wecode/bridge-runtime-sdk` 根入口稳定导出 3 类能力：
@@ -715,16 +722,32 @@ sequenceDiagram
 | `context` | `Record<string, unknown>` | 否 | 可选上下文。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
+#### `QuestionItem`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `question` | `string` | 是 | 问题正文。 |
+| `header` | `string` | 否 | 可选问题标题。 |
+| `options` | `QuestionOption[]` | 否 | 可选答案选项。 |
+| `multiSelect` | `boolean` | 否 | 是否允许多选。 |
+
+#### `QuestionOption`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `label` | `string` | 是 | 选项显示文本，也是 `question_reply.answers` 回传的答案值。 |
+| `description` | `string` | 否 | 选项展示说明，仅用于上行展示；缺失时省略，不参与回复目标、路由或答案结构。 |
+
 #### `PermissionAskFact`
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'permission.ask'` | 是 | 事实类型。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
-| `messageId` | `string` | 是 | 所属消息标识。 |
+| `messageId` | `string` | 否 | 可选消息归属上下文。 |
 | `partId` | `string` | 是 | 权限所在消息片段标识。 |
 | `permissionId` | `string` | 是 | 直接回复目标，必须唯一。 |
-| `permissionType` | `string` | 否 | 可选权限类型。 |
+| `permType` | `string` | 是 | 权限类型|
 | `title` | `string` | 否 | 可选权限标题。 |
 | `metadata` | `Record<string, unknown>` | 否 | 可选权限上下文。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -737,9 +760,7 @@ sequenceDiagram
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `permissionId` | `string` | 是 | 已回复的权限标识。 |
 | `response` | `'once' \| 'always' \| 'reject'` | 是 | 权限回复结果。 |
-| `messageId` | `string` | 否 | 可选关联消息标识。 |
-| `partId` | `string` | 否 | 可选关联片段标识。 |
-| `permissionType` | `string` | 否 | 可选权限类型。 |
+| `permType` | `string` | 否 | 权限类型|
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
 #### `MessageDoneFact`
@@ -953,7 +974,10 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
         questions: [
           {
             question: '请选择部署环境',
-            options: [{ label: 'staging' }, { label: 'production' }],
+            options: [
+              { label: 'staging', description: '部署到预发环境' },
+              { label: 'production', description: '部署到生产环境' },
+            ],
           },
         ],
       };

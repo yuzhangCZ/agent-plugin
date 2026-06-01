@@ -6,6 +6,7 @@ import type {
   PermissionAskFact,
   PermissionReplyFact,
   QuestionAskFact,
+  QuestionOption,
   SessionErrorFact,
   SessionTitleFact,
   TextDeltaFact,
@@ -13,7 +14,7 @@ import type {
   ThinkingDeltaFact,
   ThinkingDoneFact,
   ToolUpdateFact,
-} from '../../../../../packages/bridge-runtime-sdk/src/index.ts';
+} from '@wecode/bridge-runtime-sdk';
 import { asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
 import type {
   RawEventTranslation,
@@ -433,9 +434,18 @@ export class QuestionAskedTranslator implements EventTranslator {
                 options: item.options
                   .map((option) => asObject(option))
                   .filter((option): option is Record<string, unknown> => Boolean(option))
-                  .map((option) => ({
-                    label: asString(option.label) ?? '',
-                  })),
+                  .map((option) => {
+                    const label = asString(option.label);
+                    if (label === undefined) {
+                      return undefined;
+                    }
+                    const description = asString(option.description);
+                    return {
+                      label,
+                      ...(description !== undefined ? { description } : {}),
+                    };
+                  })
+                  .filter((option): option is QuestionOption => option !== undefined),
               }
             : {}),
           ...(typeof item.multiple === 'boolean' ? { multiSelect: item.multiple } : {}),
@@ -459,6 +469,19 @@ export class PermissionAskedTranslator implements EventTranslator {
     if (!asTrimmedString(properties?.sessionID) || !permissionId) {
       return { recognized: true, facts: [] };
     }
+    const permType = asTrimmedString(properties?.permission) ?? asTrimmedString(properties?.type);
+    if (!permType) {
+      context.diagnostics.warn('permission_ask_missing_perm_type', {
+        toolSessionId: context.factSessionContext.trackingSessionId,
+        permissionId,
+      });
+      return {
+        recognized: true,
+        toolSessionId: context.factSessionContext.anchorSessionId,
+        envelopeMessageId: buildDeterministicEnvelopeMessageId('permission', permissionId),
+        facts: [],
+      };
+    }
 
     const factRoutingFields = buildFactRoutingFields(context);
     const tool = asObject(properties?.tool);
@@ -471,8 +494,7 @@ export class PermissionAskedTranslator implements EventTranslator {
       ...(messageId ? { messageId } : {}),
       partId,
       permissionId,
-      ...(asTrimmedString(properties?.type) ? { permissionType: asTrimmedString(properties?.type) } : {}),
-      ...(asTrimmedString(properties?.title) ? { title: asTrimmedString(properties?.title) } : {}),
+      permType,
       ...(asObject(properties?.metadata) ? { metadata: asObject(properties?.metadata) } : {}),
       raw: properties,
     };
