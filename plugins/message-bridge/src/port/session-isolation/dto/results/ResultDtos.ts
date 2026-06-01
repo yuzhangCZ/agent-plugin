@@ -19,7 +19,7 @@ export type CloseOwnedSessionResult =
   | { kind: 'not_bound' };
 
 export type AbortAnchoredRunResult =
-  | { kind: 'aborted'; toolSessionId: string }
+  | { kind: 'aborted'; toolSessionId: string; hostSessionId: string }
   | { kind: 'not_active'; toolSessionId: string };
 
 export type QuestionReplyCommandResult = RuntimeAppliedResult;

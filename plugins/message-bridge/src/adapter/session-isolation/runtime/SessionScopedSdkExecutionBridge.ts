@@ -35,6 +35,7 @@ export class SessionScopedSdkExecutionBridge implements SdkExecutionBridge {
     return {
       kind: 'aborted',
       toolSessionId: input.toolSessionId,
+      hostSessionId: binding.sessionId,
     };
   }
 
