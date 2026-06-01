@@ -715,6 +715,22 @@ sequenceDiagram
 | `context` | `Record<string, unknown>` | 否 | 可选上下文。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
+#### `QuestionItem`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `question` | `string` | 是 | 问题正文。 |
+| `header` | `string` | 否 | 可选问题标题。 |
+| `options` | `QuestionOption[]` | 否 | 可选答案选项。 |
+| `multiSelect` | `boolean` | 否 | 是否允许多选。 |
+
+#### `QuestionOption`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `label` | `string` | 是 | 选项显示文本，也是 `question_reply.answers` 回传的答案值。 |
+| `description` | `string` | 否 | 选项展示说明，仅用于上行展示；缺失时省略，不参与回复目标、路由或答案结构。 |
+
 #### `PermissionAskFact`
 
 | 字段 | 类型 | 是否必填 | 说明 |
@@ -953,7 +969,10 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
         questions: [
           {
             question: '请选择部署环境',
-            options: [{ label: 'staging' }, { label: 'production' }],
+            options: [
+              { label: 'staging', description: '部署到预发环境' },
+              { label: 'production', description: '部署到生产环境' },
+            ],
           },
         ],
       };

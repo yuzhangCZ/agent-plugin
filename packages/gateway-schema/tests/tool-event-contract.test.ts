@@ -242,6 +242,7 @@ test('validateToolEvent accepts every supported tool_event event type with an ex
               options: [
                 {
                   label: 'Yes',
+                  description: 'Proceed with the action',
                 },
               ],
             },

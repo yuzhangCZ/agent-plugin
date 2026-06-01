@@ -246,6 +246,7 @@ test('validateToolEvent keeps the simple tool_event contract aligned with the sh
               options: [
                 {
                   label: 'Yes',
+                  description: 'Proceed with the action',
                 },
               ],
             },
@@ -448,6 +449,30 @@ test('validateToolEvent rejects malformed simple events with shared violations',
       },
     ],
     [
+      'question.asked option missing label',
+      {
+        input: {
+          type: 'question.asked',
+          properties: {
+            sessionID: 'tool-gateway-wire',
+            questions: [
+              {
+                question: 'Proceed?',
+                options: [{ description: 'Proceed with the action' }],
+              },
+            ],
+          },
+        },
+        expected: {
+          stage: 'event',
+          code: 'missing_required_field',
+          field: 'properties.questions[].options[].label',
+          messageType: 'question.asked',
+          eventType: 'question.asked',
+        },
+      },
+    ],
+    [
       'message.part.delta invalid field enum',
       {
         input: {
@@ -548,7 +573,7 @@ test('validateToolEvent preserves empty-string payloads for compatible simple op
       },
     },
     {
-      name: 'question.asked keeps empty question text and labels',
+      name: 'question.asked keeps empty question text, labels, and descriptions',
       input: createGatewayWireQuestionAskedEvent({
         properties: {
           sessionID: 'tool-gateway-wire',
@@ -557,7 +582,7 @@ test('validateToolEvent preserves empty-string payloads for compatible simple op
             {
               question: '',
               header: '',
-              options: [{ label: '' }],
+              options: [{ label: '', description: '' }],
             },
           ],
           tool: {
@@ -575,7 +600,7 @@ test('validateToolEvent preserves empty-string payloads for compatible simple op
             {
               question: '',
               header: '',
-              options: [{ label: '' }],
+              options: [{ label: '', description: '' }],
             },
           ],
           tool: {
@@ -595,7 +620,7 @@ test('validateToolEvent preserves empty-string payloads for compatible simple op
             {
               question: ' \t ',
               header: '\n ',
-              options: [{ label: '  ' }],
+              options: [{ label: '  ', description: '\t ' }],
             },
           ],
           tool: {
@@ -613,7 +638,7 @@ test('validateToolEvent preserves empty-string payloads for compatible simple op
             {
               question: '',
               header: '',
-              options: [{ label: '' }],
+              options: [{ label: '', description: '' }],
             },
           ],
           tool: {

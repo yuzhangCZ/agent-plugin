@@ -6,6 +6,7 @@ import type {
   PermissionAskFact,
   PermissionReplyFact,
   QuestionAskFact,
+  QuestionOption,
   SessionErrorFact,
   SessionTitleFact,
   TextDeltaFact,
@@ -433,9 +434,18 @@ export class QuestionAskedTranslator implements EventTranslator {
                 options: item.options
                   .map((option) => asObject(option))
                   .filter((option): option is Record<string, unknown> => Boolean(option))
-                  .map((option) => ({
-                    label: asString(option.label) ?? '',
-                  })),
+                  .map((option) => {
+                    const label = asString(option.label);
+                    if (label === undefined) {
+                      return undefined;
+                    }
+                    const description = asString(option.description);
+                    return {
+                      label,
+                      ...(description !== undefined ? { description } : {}),
+                    };
+                  })
+                  .filter((option): option is QuestionOption => option !== undefined),
               }
             : {}),
           ...(typeof item.multiple === 'boolean' ? { multiSelect: item.multiple } : {}),
