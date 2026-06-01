@@ -37,6 +37,14 @@ type EventRoutingState = {
   translationContext: TranslationContext;
 };
 
+type EventDropReason =
+  | 'missing_raw_session_id'
+  | 'missing_active_run'
+  | 'unsupported_event'
+  | 'missing_runtime_context'
+  | 'missing_outbound_target'
+  | 'empty_outbound_translation';
+
 function toAsyncFacts<T>(facts: T[]): AsyncIterable<T> {
   return {
     async *[Symbol.asyncIterator]() {
@@ -167,6 +175,11 @@ const rawSessionLocators: Partial<Record<BridgeEvent['type'], RawSessionLocator>
   'session.updated': (properties) => asTrimmedString(asObject(properties?.info)?.id) ?? undefined,
 };
 
+/**
+ * 协议诊断日志出口。
+ * @remarks
+ * translator 只报告诊断语义，日志级别和统一字段由该 port 负责收口。
+ */
 export class DefaultProtocolDiagnosticPort implements ProtocolDiagnosticPort {
   constructor(private readonly logger: BridgeLogger) {}
 
@@ -178,6 +191,11 @@ export class DefaultProtocolDiagnosticPort implements ProtocolDiagnosticPort {
   }
 }
 
+/**
+ * raw event 翻译过程中的非 fact 观察出口。
+ * @remarks
+ * 用于记录被识别但不产出 fact 的元数据事件，避免 translator 直接依赖具体日志实现。
+ */
 export class DefaultTranslationObservationPort implements TranslationObservationPort {
   constructor(private readonly logger: BridgeLogger) {}
 
@@ -188,6 +206,11 @@ export class DefaultTranslationObservationPort implements TranslationObservation
   }
 }
 
+/**
+ * 将 raw event 中不同结构的 session 字段统一抽取为宿主 session id。
+ * @remarks
+ * 这里只做身份定位，不读取消息正文，也不承担 raw event -> fact 翻译。
+ */
 export class EventRawSessionLocator {
   locate(event: BridgeEvent): string | undefined {
     const locator = rawSessionLocators[event.type];
@@ -195,6 +218,11 @@ export class EventRawSessionLocator {
   }
 }
 
+/**
+ * 将宿主 session id 解析为 fact 路由身份。
+ * @remarks
+ * 子 agent 会话映射失败时返回 fail-open 身份，保证宿主事件不会因为本地索引异常被硬丢弃。
+ */
 export class EventSessionIdentityResolver {
   constructor(private readonly dependencies: {
     subagentSessionMapper: SubagentSessionMapper;
@@ -232,6 +260,11 @@ export class EventSessionIdentityResolver {
   }
 }
 
+/**
+ * 组装 fact 上的会话路由字段。
+ * @remarks
+ * `anchorSessionId` 是对外展示会话，`trackingSessionId` 是本地生命周期状态跟踪会话。
+ */
 export class FactRoutingContextAssembler {
   assemble(input: {
     resolution: Extract<SessionIdentityResolution, { kind: 'resolved' | 'resolved_fail_open' }>;
@@ -250,6 +283,11 @@ export class FactRoutingContextAssembler {
   }
 }
 
+/**
+ * 为无 active run 的 `session.error` 查找 outbound 兜底目标。
+ * @remarks
+ * 只允许已 attach 的宿主会话 fallback 到对应 anchor，避免把游离事件发给错误会话。
+ */
 export class DefaultOutboundTargetResolver implements OutboundTargetResolverPort {
   constructor(private readonly dependencies: { eventAnchorResolver: EventAnchorResolver }) {}
 
@@ -259,8 +297,14 @@ export class DefaultOutboundTargetResolver implements OutboundTargetResolverPort
   }
 }
 
+/**
+ * 记录 `session.created` 中的父子会话关系。
+ * @remarks
+ * 该类只更新子 agent 映射，不产生 provider fact。
+ */
 export class SessionCreatedRecorder {
   constructor(private readonly dependencies: {
+    logger: BridgeLogger;
     subagentSessionMapper: SubagentSessionMapper;
   }) {}
 
@@ -270,6 +314,10 @@ export class SessionCreatedRecorder {
     const childSessionId = asTrimmedString(info?.id);
     const agentName = asTrimmedString(info?.title);
     if (!childSessionId) {
+      this.dependencies.logger.debug?.('provider_adapter.session_created_ignored', {
+        eventType: event.type,
+        reason: 'missing_child_session_id',
+      });
       return;
     }
 
@@ -279,9 +327,21 @@ export class SessionCreatedRecorder {
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(agentName ? { agentName } : {}),
     });
+    this.dependencies.logger.debug?.('provider_adapter.session_created_recorded', {
+      eventType: event.type,
+      childSessionId,
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(agentName ? { agentName } : {}),
+    });
   }
 }
 
+/**
+ * OpenCode raw event 的路由协调器。
+ * @remarks
+ * 负责 session 身份解析、active run 优先路由、`session.error` outbound fallback 和诊断日志；
+ * 具体 raw event -> fact 映射由 translator registry 完成。
+ */
 export class ProviderEventCoordinator {
   constructor(private readonly dependencies: {
     logger: BridgeLogger;
@@ -328,8 +388,27 @@ export class ProviderEventCoordinator {
   }
 
   private async resolveRoutingState(event: BridgeEvent): Promise<EventRoutingState | undefined> {
+    const eventClass = classifyEvent(event.type);
+    if (eventClass === 'unsupported') {
+      const properties = asObject(event.properties);
+      const rawSessionId = asTrimmedString(properties?.sessionID);
+      this.logEventDropped({
+        event,
+        reason: 'unsupported_event',
+        routeSummary: {
+          eventType: event.type,
+          ...(rawSessionId ? { rawSessionId } : {}),
+        },
+      });
+      return undefined;
+    }
+
     const rawSessionId = this.dependencies.rawSessionLocator.locate(event);
     if (!rawSessionId) {
+      this.logEventDropped({
+        event,
+        reason: 'missing_raw_session_id',
+      });
       return undefined;
     }
     const resolution = await this.dependencies.identityResolver.resolve(rawSessionId);
@@ -343,7 +422,6 @@ export class ProviderEventCoordinator {
       });
     }
 
-    const eventClass = classifyEvent(event.type);
     const activeRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
     const factSessionContext = this.buildFactSessionContext(resolution, activeRun);
     const runtimeContext = this.dependencies.getRuntimeContext();
@@ -418,8 +496,34 @@ export class ProviderEventCoordinator {
     });
   }
 
+  private logEventDropped(input: {
+    event: BridgeEvent;
+    reason: EventDropReason;
+    routeSummary?: Record<string, unknown>;
+  }): void {
+    this.dependencies.logger.debug?.('provider_adapter.event.dropped', {
+      ...(input.routeSummary ?? { eventType: input.event.type }),
+      dropReason: input.reason,
+    });
+  }
+
   private tryRouteToActiveRun(routingState: EventRoutingState): boolean {
-    if (!routingState.activeRun || !this.canRouteToActiveRun(routingState.eventClass)) {
+    if (!routingState.activeRun) {
+      if (routingState.eventClass !== 'run_scoped_with_outbound_fallback') {
+        this.logEventDropped({
+          event: routingState.event,
+          reason: 'missing_active_run',
+          routeSummary: routingState.eventRouteSummary,
+        });
+      }
+      return false;
+    }
+    if (!this.canRouteToActiveRun(routingState.eventClass)) {
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'unsupported_event',
+        routeSummary: routingState.eventRouteSummary,
+      });
       return false;
     }
     const translation = this.dependencies.activeRunTranslatorRegistry.translate(routingState.translationContext);
@@ -453,12 +557,25 @@ export class ProviderEventCoordinator {
   }
 
   private async tryRouteToOutbound(routingState: EventRoutingState): Promise<boolean> {
-    if (routingState.eventClass !== 'run_scoped_with_outbound_fallback' || !routingState.runtimeContext) {
+    if (routingState.eventClass !== 'run_scoped_with_outbound_fallback') {
+      return false;
+    }
+    if (!routingState.runtimeContext) {
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'missing_runtime_context',
+        routeSummary: routingState.eventRouteSummary,
+      });
       return false;
     }
 
     const outboundTarget = this.dependencies.outboundTargetResolver.resolve(routingState.resolution.hostSessionId);
     if (!outboundTarget) {
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'missing_outbound_target',
+        routeSummary: routingState.eventRouteSummary,
+      });
       return false;
     }
 
@@ -476,6 +593,16 @@ export class ProviderEventCoordinator {
       factTypes: translation.facts.map((fact) => fact.type),
     });
     if (!translation.recognized || translation.facts.length === 0 || !translation.envelopeMessageId) {
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'empty_outbound_translation',
+        routeSummary: {
+          ...routingState.eventRouteSummary,
+          recognized: translation.recognized,
+          factCount: translation.facts.length,
+          hasEnvelopeMessageId: Boolean(translation.envelopeMessageId),
+        },
+      });
       return false;
     }
 

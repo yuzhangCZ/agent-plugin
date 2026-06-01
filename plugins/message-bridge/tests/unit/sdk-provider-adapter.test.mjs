@@ -16,6 +16,7 @@ import {
   SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
+import { HostSessionRunCoordinator } from '../../src/runtime/sdk/HostSessionRunCoordinator.ts';
 import {
   ActiveRunRegistry,
 } from '../../src/runtime/sdk/OpenCodeProviderAdapter.run.ts';
@@ -403,6 +404,123 @@ test('ActiveRunRegistry aborts superseded run when same anchor creates a new run
   assert.equal(registry.getHeadByHostSession('host-a'), second);
   assert.deepEqual(await withTimeout(first.result(), 'superseded run did not settle'), { outcome: 'aborted' });
   assert.deepEqual(await collect(first.queue), []);
+});
+
+test('provider adapter records host run queue scheduling diagnostics', async () => {
+  const logs = [];
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    bindings: [
+      ['conversation-run-queue-a', 'host-run-queue-shared'],
+      ['conversation-run-queue-b', 'host-run-queue-shared'],
+    ],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    promptCount += 1;
+    return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+  };
+
+  const firstRun = await adapter.runMessage({
+    traceId: 'trace-run-queue-1',
+    runId: 'run-queue-1',
+    toolSessionId: 'conversation-run-queue-a',
+    text: 'first',
+  });
+  const secondRun = await adapter.runMessage({
+    traceId: 'trace-run-queue-2',
+    runId: 'run-queue-2',
+    toolSessionId: 'conversation-run-queue-b',
+    text: 'second',
+  });
+
+  await Promise.resolve();
+  assert.equal(promptCount, 1);
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-run-queue-1',
+        sessionID: 'host-run-queue-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-run-queue-1' }));
+  await firstRun.result();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCount, 2);
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-run-queue-2',
+        sessionID: 'host-run-queue-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptActionResult({ messageId: 'msg-run-queue-2' }));
+  await secondRun.result();
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.run_queue.enqueued'
+    && entry.extra?.hostSessionId === 'host-run-queue-shared'
+    && entry.extra?.anchorSessionId === 'conversation-run-queue-a'
+    && entry.extra?.runId === 'run-queue-1'), true);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.run_queue.enqueued'
+    && entry.extra?.hostSessionId === 'host-run-queue-shared'
+    && entry.extra?.anchorSessionId === 'conversation-run-queue-b'
+    && entry.extra?.runId === 'run-queue-2'), true);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.run_queue.drain_skipped'
+    && entry.extra?.hostSessionId === 'host-run-queue-shared'
+    && entry.extra?.reason === 'already_draining'), true);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.run_queue.prompt_started'
+    && entry.extra?.runId === 'run-queue-1'), true);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.run_queue.prompt_started'
+    && entry.extra?.runId === 'run-queue-2'), true);
+});
+
+test('HostSessionRunCoordinator logs scheduler work failure and fails run closed', async () => {
+  const logs = [];
+  const registry = new ActiveRunRegistry();
+  const run = registry.create({
+    anchorSessionId: 'tool-run-queue-failed',
+    hostSessionId: 'host-run-queue-failed',
+    runId: 'run-queue-failed',
+    initialTrackingSessionId: 'host-run-queue-failed',
+    logger: createCapturingLogger(logs),
+    onCleanup: () => undefined,
+  });
+  const coordinator = new HostSessionRunCoordinator(createCapturingLogger(logs));
+
+  coordinator.enqueue(run, async () => {
+    throw new Error('scheduler boom');
+  });
+
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'scheduler boom',
+    },
+  });
+  assert.equal(logs.some((entry) => entry.level === 'error'
+    && entry.message === 'provider_adapter.run_queue.prompt_task_failed'
+    && entry.extra?.runId === 'run-queue-failed'
+    && entry.extra?.error === 'scheduler boom'), true);
 });
 
 test('provider adapter delegates question replies to session-isolation command port', async () => {
@@ -4245,6 +4363,139 @@ test('provider adapter records received upstream event routing diagnostics', asy
   assert.equal('trackingSessionId' in received.extra, false);
 });
 
+test('provider adapter logs debug drop reason when event has no raw session identity', async () => {
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
+
+  const handled = await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-missing-session',
+        role: 'assistant',
+      },
+    },
+  });
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(handled, false);
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.eventType === 'message.updated'
+    && entry.extra?.dropReason === 'missing_raw_session_id'), true);
+});
+
+test('provider adapter records session.created diagnostics when child session mapping is captured', async () => {
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
+
+  const handled = await adapter.handleEvent({
+    type: 'session.created',
+    properties: {
+      info: {
+        id: 'child-session-1',
+        parentID: 'host-session-1',
+        title: 'subagent-1',
+      },
+    },
+  });
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(handled, true);
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.session_created_recorded'
+    && entry.extra?.eventType === 'session.created'
+    && entry.extra?.childSessionId === 'child-session-1'
+    && entry.extra?.parentSessionId === 'host-session-1'
+    && entry.extra?.agentName === 'subagent-1'), true);
+});
+
+test('provider adapter logs unsupported event before raw session identity fallback', async () => {
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
+
+  const handled = await adapter.handleEvent({
+    type: 'unknown.event',
+    properties: {
+      sessionID: 'host-unknown-event',
+    },
+  });
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(handled, false);
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.eventType === 'unknown.event'
+    && entry.extra?.rawSessionId === 'host-unknown-event'
+    && entry.extra?.dropReason === 'unsupported_event'), true);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.dropReason === 'missing_raw_session_id'), false);
+});
+
+test('provider adapter logs debug drop reason when session.error has no runtime context', async () => {
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
+
+  const handled = await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'host-no-runtime-context',
+      error: 'boom',
+    },
+  });
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(handled, false);
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.eventType === 'session.error'
+    && entry.extra?.rawSessionId === 'host-no-runtime-context'
+    && entry.extra?.dropReason === 'missing_runtime_context'), true);
+});
+
+test('provider adapter logs debug drop reason when session.error has no outbound target', async () => {
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async () => {
+        throw new Error('unexpected outbound call');
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'host-detached',
+      error: 'boom',
+    },
+  });
+
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(handled, false);
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.eventType === 'session.error'
+    && entry.extra?.rawSessionId === 'host-detached'
+    && entry.extra?.dropReason === 'missing_outbound_target'), true);
+});
+
 test('provider adapter ignores detached session.updated title continuation', async () => {
   const outboundCalls = [];
   const adapter = createAdapter({
@@ -4307,7 +4558,8 @@ test('provider adapter ignores detached session.updated without title silently',
 });
 
 test('provider adapter ignores message.updated when no active run owns it', async () => {
-  const adapter = createAdapter();
+  const logs = [];
+  const adapter = createAdapter({ logger: createCapturingLogger(logs) });
 
   const handled = await adapter.handleEvent({
     type: 'message.updated',
@@ -4326,4 +4578,14 @@ test('provider adapter ignores message.updated when no active run owns it', asyn
   });
 
   assert.strictEqual(handled, false);
+  const debugs = logs.filter((entry) => entry.level === 'debug');
+  const warnings = logs.filter((entry) => entry.level === 'warn');
+  const errors = logs.filter((entry) => entry.level === 'error');
+  assert.equal(warnings.length, 0);
+  assert.equal(errors.length, 0);
+  assert.equal(debugs.some((entry) => entry.message === 'provider_adapter.event.dropped'
+    && entry.extra?.eventType === 'message.updated'
+    && entry.extra?.rawSessionId === 'tool-session-42'
+    && entry.extra?.messageId === 'msg-42'
+    && entry.extra?.dropReason === 'missing_active_run'), true);
 });

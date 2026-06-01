@@ -204,6 +204,11 @@ class FactDrainTracker {
   }
 }
 
+/**
+ * assistant message 生命周期状态表。
+ * @remarks
+ * 用于拒绝没有 open message 的 part/question 事件，避免生成顺序错误的 facts。
+ */
 export class AssistantMessageStateStore implements AssistantMessageStateStorePort {
   private readonly sessions = new Map<string, Map<string, AssistantMessageLifecycleState>>();
 
@@ -239,6 +244,11 @@ export class AssistantMessageStateStore implements AssistantMessageStateStorePor
   }
 }
 
+/**
+ * message part 类型记忆表。
+ * @remarks
+ * `message.part.delta` 不总是携带完整 part 类型，因此需要用先前的 part.updated 判断 text/reasoning。
+ */
 export class PartKindStore implements PartKindStorePort {
   private readonly sessions = new Map<string, Map<string, PartKind>>();
 
@@ -264,8 +274,15 @@ export class PartKindStore implements PartKindStorePort {
   }
 }
 
+/**
+ * 单次 provider run 的 fact 队列、prompt 启动状态和 terminal 收口句柄。
+ * @remarks
+ * run result 需要 prompt terminal 与 facts drain 都完成；cleanup 还要等待已启动的 prompt task 返回，
+ * 以便 `HostSessionRunCoordinator` 在同一 host session 内维持 FIFO prompt 调度。
+ */
 export class ActiveProviderRunHandle {
   readonly queue = new AsyncIterableQueue<ProviderFact>();
+  readonly logger: BridgeLogger;
   private readonly trackingSessionIds = new Set<string>();
   private readonly promptTerminalResolver: PromptTerminalResolver;
   private readonly completionResolver = new RunCompletionResolver();
@@ -287,6 +304,7 @@ export class ActiveProviderRunHandle {
     this.anchorSessionId = options.anchorSessionId;
     this.runId = options.runId;
     this.hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    this.logger = options.logger;
     this.onCleanup = options.onCleanup;
     this.trackingSessionIds.add(options.initialTrackingSessionId);
     this.promptTerminalResolver = new PromptTerminalResolver((result) => {
@@ -425,6 +443,12 @@ export class ActiveProviderRunHandle {
   }
 }
 
+/**
+ * active run 注册表。
+ * @remarks
+ * 对外按 anchor session 管理当前 run，对内按 host session 维护事件路由队列；
+ * 已启动 prompt 的 superseded run 会保留到 task finished，未启动的 queued run 可直接移出队列。
+ */
 export class ActiveRunRegistry {
   private readonly handles = new Map<string, ActiveProviderRunHandle>();
   private readonly hostQueues = new Map<string, ActiveProviderRunHandle[]>();
@@ -457,9 +481,22 @@ export class ActiveRunRegistry {
     queue.push(handle);
     this.hostQueues.set(hostSessionId, queue);
     if (previous) {
+      const previousPromptStarted = previous.hasPromptStarted();
+      options.logger.debug?.('provider_adapter.active_run.superseded', {
+        anchorSessionId: options.anchorSessionId,
+        hostSessionId,
+        previousRunId: previous.runId,
+        nextRunId: options.runId,
+        previousPromptStarted,
+      });
       previous.forceAbortAndClose('superseded_run');
-      if (!previous.hasPromptStarted()) {
+      if (!previousPromptStarted) {
         this.removeFromHostQueue(previous);
+        options.logger.debug?.('provider_adapter.active_run.removed_unstarted_superseded_run', {
+          anchorSessionId: previous.anchorSessionId,
+          hostSessionId: previous.hostSessionId,
+          runId: previous.runId,
+        });
       }
     }
     return handle;
@@ -486,6 +523,13 @@ export class ActiveRunRegistry {
       const promptStarted = handle.hasPromptStarted();
       handle.forceAbortAndClose(reason);
       this.handles.delete(handle.anchorSessionId);
+      handle.logger.debug?.('provider_adapter.active_run.host_run_aborted', {
+        anchorSessionId: handle.anchorSessionId,
+        hostSessionId,
+        runId: handle.runId,
+        reason,
+        promptStarted,
+      });
       if (!promptStarted) {
         this.removeFromHostQueue(handle);
       }

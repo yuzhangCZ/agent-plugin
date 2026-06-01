@@ -112,7 +112,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly createdSessionBindingPort: CreatedSessionBindingPort;
 
   private readonly activeRuns = new ActiveRunRegistry();
-  private readonly runCoordinator = new HostSessionRunCoordinator();
+  private readonly runCoordinator: HostSessionRunCoordinator;
   private readonly partKinds = new PartKindStore();
   private readonly assistantMessageStates = new AssistantMessageStateStore();
 
@@ -121,6 +121,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
   constructor(options: ProviderAdapterOptions) {
     this.logger = options.logger;
+    this.runCoordinator = new HostSessionRunCoordinator(this.logger);
     this.rawClient = options.rawClient;
     this.opencodeSessionGatewayAdapter = options.opencodeSessionGatewayAdapter;
     this.createSessionUseCase = options.createSessionUseCase;
@@ -157,6 +158,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       }),
       factRoutingContextAssembler: new FactRoutingContextAssembler(),
       sessionCreatedRecorder: new SessionCreatedRecorder({
+        logger: this.logger,
         subagentSessionMapper: options.subagentSessionMapper,
       }),
       activeRunRegistry: this.activeRuns,
