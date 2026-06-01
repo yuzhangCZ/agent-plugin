@@ -261,7 +261,6 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
   });
   assert.equal(
     connection.sent.some(
@@ -443,7 +442,6 @@ test('abort_session forwards active run id and sends tool_done when run resolves
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
   });
 });
 
@@ -576,7 +574,6 @@ test('abort_session keeps active request run occupied until aborted run settles'
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-2',
     error: '当前会话正在处理中，请稍后再试',
   });
 
@@ -594,7 +591,6 @@ test('abort_session keeps active request run occupied until aborted run settles'
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-3',
   });
 });
 
@@ -625,7 +621,6 @@ test('start_request_run reuses session welinkSessionId when chat invoke omits it
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
   });
 });
 
@@ -1732,7 +1727,6 @@ test('question.ask rejects globally duplicated questionId across sessions withou
   }), {
     type: 'tool_error',
     toolSessionId: 'tool-2',
-    welinkSessionId: 'welink-2',
     error: '当前请求处理失败，请重试',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
@@ -1849,7 +1843,6 @@ test('permission.ask rejects globally duplicated permissionId across sessions wi
   }), {
     type: 'tool_error',
     toolSessionId: 'tool-2',
-    welinkSessionId: 'welink-2',
     error: '当前请求处理失败，请重试',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
@@ -2032,7 +2025,6 @@ test('request-level command failures stay ready and record command_execution_fai
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: 'run_failed',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
@@ -2044,7 +2036,7 @@ test('request-level command failures stay ready and record command_execution_fai
   assert.equal(runtime.getStatus().failureReason, null);
 });
 
-test('create_session command failure with routable welinkSessionId projects tool_error', async () => {
+test('create_session command failure projects tool_error without echoing welinkSessionId', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -2086,7 +2078,6 @@ test('create_session command failure with routable welinkSessionId projects tool
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
-    welinkSessionId: 'welink-create-1',
     error: 'create_session_failed',
   });
 });
@@ -2106,7 +2097,6 @@ test('question_reply missing pending interaction projects tool_error', async () 
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
-    welinkSessionId: 'welink-question-missing-1',
     error: '当前交互已失效，请刷新后重试',
   });
 });
@@ -2126,7 +2116,6 @@ test('permission_reply missing pending interaction projects tool_error', async (
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
-    welinkSessionId: 'welink-permission-missing-1',
     error: '当前交互已失效，请刷新后重试',
   });
 });
@@ -2186,7 +2175,6 @@ test('run_already_active projects routable tool_error while preserving active re
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-run-2',
     error: '当前会话正在处理中，请稍后再试',
   });
   firstRunResult.resolve({ outcome: 'completed' });
@@ -2381,7 +2369,6 @@ test('request run projects session.error exactly once before terminal tool_error
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: 'agent offline',
   });
 });
@@ -2435,7 +2422,6 @@ test('terminal tool_error carries session_not_found reason when provider returns
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: 'session missing',
     reason: 'session_not_found',
   });
@@ -2488,7 +2474,6 @@ test('invalid outbound messages stay ready and record outbound_validation_failur
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: '当前请求处理失败，请重试',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
@@ -2558,7 +2543,6 @@ test('tool.update with non-string output fails closed before uplink projection',
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: '当前请求处理失败，请重试',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {

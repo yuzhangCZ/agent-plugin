@@ -23,7 +23,6 @@ test('command failure projector maps run_already_active to catalog message', () 
   assert.deepEqual(message, {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: '当前会话正在处理中，请稍后再试',
   });
 });
@@ -42,7 +41,6 @@ test('command failure projector maps pending_interaction_not_found to catalog me
 
   assert.deepEqual(message, {
     type: 'tool_error',
-    welinkSessionId: 'welink-1',
     error: '当前交互已失效，请刷新后重试',
   });
 });
