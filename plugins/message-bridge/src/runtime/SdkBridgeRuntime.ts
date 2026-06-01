@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- SDK runtime 当前聚合启动、诊断和宿主能力适配，后续按 runtime assembly 与 host facade 拆分。 */
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -107,6 +108,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
 
+  // eslint-disable-next-line complexity, max-lines-per-function, max-statements -- 启动入口需要按固定顺序装配配置、校验、session isolation、provider 与 gateway runtime。
   async start(options: ManagedRuntimeStartOptions = {}): Promise<void> {
     const pluginVersion = resolvePluginVersion();
     this.logger.info('runtime.start.requested', {
@@ -470,28 +472,49 @@ export class SdkBridgeRuntime implements ManagedRuntime {
 
     const sessions = [];
     for (const item of payload) {
-      const session = asRecord(item);
-      const id = asTrimmedString(session?.id);
-      if (!id) {
-        continue;
-      }
-
-      const projected = {
-        id,
-        ...(asTrimmedString(session?.title) ? { title: asTrimmedString(session?.title) } : {}),
-        ...(asTrimmedString(session?.projectID) ? { projectID: asTrimmedString(session?.projectID) } : {}),
-        ...(asTrimmedString(session?.workspaceID) ? { workspaceID: asTrimmedString(session?.workspaceID) } : {}),
-        ...(asTrimmedString(session?.directory) ? { directory: asTrimmedString(session?.directory) } : {}),
-      };
-      if (scope.projectID && projected.projectID !== scope.projectID) {
-        continue;
-      }
-      if (scope.workspaceID && projected.workspaceID !== scope.workspaceID) {
+      const projected = this.projectHostSession(item);
+      if (!projected || !this.isHostSessionInScope(projected, scope)) {
         continue;
       }
       sessions.push(projected);
     }
     return sessions;
+  }
+
+  private projectHostSession(item: unknown) {
+    const session = asRecord(item);
+    const id = asTrimmedString(session?.id);
+    if (!id) {
+      return null;
+    }
+    return {
+      id,
+      ...this.projectOptionalHostSessionField(session, 'title'),
+      ...this.projectOptionalHostSessionField(session, 'projectID'),
+      ...this.projectOptionalHostSessionField(session, 'workspaceID'),
+      ...this.projectOptionalHostSessionField(session, 'directory'),
+    };
+  }
+
+  private projectOptionalHostSessionField(
+    session: Record<string, unknown> | undefined,
+    key: 'title' | 'projectID' | 'workspaceID' | 'directory',
+  ): Partial<Record<typeof key, string>> {
+    const value = asTrimmedString(session?.[key]);
+    return value ? { [key]: value } : {};
+  }
+
+  private isHostSessionInScope(
+    session: { projectID?: string; workspaceID?: string },
+    scope: { projectID?: string; workspaceID?: string },
+  ): boolean {
+    if (scope.projectID && session.projectID !== scope.projectID) {
+      return false;
+    }
+    if (scope.workspaceID && session.workspaceID !== scope.workspaceID) {
+      return false;
+    }
+    return true;
   }
 
   private async listHostModels(client: BridgeSdkClient) {

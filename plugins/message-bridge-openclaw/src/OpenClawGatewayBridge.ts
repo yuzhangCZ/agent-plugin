@@ -1,7 +1,6 @@
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 import {
   createBridgeRuntime,
-  type BridgeGatewayHostConfig,
   type BridgeRuntime,
 } from "@wecode/bridge-runtime-sdk";
 
@@ -41,6 +40,24 @@ type SubagentRuntime = PluginRuntime & {
     deleteSession(params: { sessionKey: string }): Promise<void>;
   };
 };
+
+function mapRuntimePhase(
+  state: ReturnType<BridgeRuntime["getStatus"]>["state"],
+): MessageBridgeStatusSnapshot["runtimePhase"] {
+  if (state === "ready") {
+    return "ready";
+  }
+  if (state === "starting" || state === "reconnecting") {
+    return "connecting";
+  }
+  if (state === "stopping") {
+    return "stopping";
+  }
+  if (state === "failed") {
+    return "failed";
+  }
+  return "idle";
+}
 
 export class OpenClawGatewayBridge {
   private readonly bridgeRuntime: Promise<BridgeRuntime>;
@@ -120,17 +137,7 @@ export class OpenClawGatewayBridge {
     const runtimeStatus = this.bridgeRuntimeFacade.getStatus();
     const diagnostics = this.bridgeRuntimeFacade.getDiagnostics();
     const streamingStatus = this.resolveStreamingStatus();
-    const nextRuntimePhase =
-      this.runtimePhaseOverride ??
-      (runtimeStatus.state === "ready"
-        ? "ready"
-        : runtimeStatus.state === "starting" || runtimeStatus.state === "reconnecting"
-          ? "connecting"
-          : runtimeStatus.state === "stopping"
-            ? "stopping"
-            : runtimeStatus.state === "failed"
-              ? "failed"
-              : "idle");
+    const nextRuntimePhase = this.runtimePhaseOverride ?? mapRuntimePhase(runtimeStatus.state);
 
     if (diagnostics.gatewayState && diagnostics.gatewayState !== this.lastLoggedGatewayState) {
       this.lastLoggedGatewayState = diagnostics.gatewayState;

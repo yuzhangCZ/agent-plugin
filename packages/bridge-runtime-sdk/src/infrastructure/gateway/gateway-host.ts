@@ -158,6 +158,7 @@ export function normalizeBridgeGatewayHostConfig(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- 探测流程共享单个连接生命周期，拆开会削弱 settled/teardown 边界的可读性。
 export async function probeBridgeGatewayHost(
   input: BridgeGatewayProbeInput,
   deps: {
@@ -178,6 +179,7 @@ export async function probeBridgeGatewayHost(
 
   const connection = deps.connectionFactory?.(gatewayHost) ?? createDefaultBridgeGatewayHostConnection(gatewayHost);
 
+  // eslint-disable-next-line max-lines-per-function -- Promise 内部集中管理 timer、abort、connection listener 的同一生命周期。
   return await new Promise((resolve) => {
     let settled = false;
 

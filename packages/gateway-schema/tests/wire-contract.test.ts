@@ -1,13 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  createGatewayWireMessageUpdatedEvent,
-} from '../../test-support/fixtures/index.mjs';
-import {
-  assertProjectedMessageUpdatedShape,
-  assertWireViolationShape,
-} from '../../test-support/assertions/index.mjs';
 import { RecordingProtocolFailureReporter } from '../src/adapters/reporters/recording-protocol-failure-reporter.ts';
 import {
   gatewayWireProtocolSchema,

@@ -147,17 +147,13 @@ export function getMissingRequiredConfigPaths(
   const gatewayUrl = trimOrUndefined(gatewaySection?.url) ?? trimOrUndefined(account.gateway.url);
   const authAk = trimOrUndefined(authSection?.ak) ?? trimOrUndefined(account.auth.ak);
   const authSk = trimOrUndefined(authSection?.sk) ?? trimOrUndefined(account.auth.sk);
-  const missing: string[] = [];
-  if (!gatewayUrl) {
-    missing.push(`channels.${CHANNEL_ID}.gateway.url`);
-  }
-  if (!authAk) {
-    missing.push(`channels.${CHANNEL_ID}.auth.ak`);
-  }
-  if (!authSk) {
-    missing.push(`channels.${CHANNEL_ID}.auth.sk`);
-  }
-  return missing;
+  return [
+    { path: `channels.${CHANNEL_ID}.gateway.url`, value: gatewayUrl },
+    { path: `channels.${CHANNEL_ID}.auth.ak`, value: authAk },
+    { path: `channels.${CHANNEL_ID}.auth.sk`, value: authSk },
+  ]
+    .filter((item) => !item.value)
+    .map((item) => item.path);
 }
 
 export function resolveTokenSource(account: MessageBridgeAccountConfig): "config" | "none" {

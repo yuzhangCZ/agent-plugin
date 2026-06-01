@@ -60,7 +60,7 @@ function runEslint(files) {
     console.log(`- ${relative(process.cwd(), file)}`);
   }
 
-  const result = spawnSync('pnpm', ['exec', 'eslint', '--max-warnings=0', ...files], {
+  const result = spawnSync('pnpm', ['exec', 'eslint', '--max-warnings=0', '--no-warn-ignored', ...files], {
     stdio: 'inherit',
   });
 

@@ -9,7 +9,6 @@ import {
   mapGatewayClientAvailability,
 } from '../src/index.ts';
 import { DefaultOutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
-import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import type { GatewayWireCodec } from '../src/ports/GatewayWireCodec.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';

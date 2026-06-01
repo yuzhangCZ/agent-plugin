@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- 连接会话状态机当前仍由 attempt/session 双类承载，后续按握手、关闭、重连边界继续拆分。 */
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRuntimeContracts.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
@@ -7,7 +8,7 @@ import type {
   GatewayConnectionStage,
 } from '../../domain/error-contract.ts';
 import { extractWebSocketErrorDetails, getErrorDetails } from '../telemetry/error-detail-mapper.ts';
-import type { InboundClassificationResult, InboundFrameClassifier } from './InboundFrameClassifier.ts';
+import type { InboundFrameClassifier } from './InboundFrameClassifier.ts';
 import type { HandshakeFrameProcessor, HandshakeResult } from './HandshakeFrameProcessor.ts';
 import { InboundFrameRouter } from './InboundFrameRouter.ts';
 import { OutboundSender } from './OutboundSender.ts';
@@ -73,6 +74,7 @@ class ConnectAttempt {
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
   private terminalCleanupCompleted = false;
 
+  // eslint-disable-next-line max-params -- attempt 需要显式接收传输、握手、路由、重连和心跳协作者，避免隐式服务定位。
   constructor(
     transport: GatewayTransport,
     outboundSender: OutboundSender,
@@ -267,19 +269,7 @@ class ConnectAttempt {
 
   private handleHandshakeResult(result: HandshakeResult): void {
     if (result.kind === 'ready') {
-      if (this.phase === 'ready') {
-        this.context.logger?.warn?.('gateway.register.duplicate_ok');
-        return;
-      }
-      this.clearHandshakeTimeout();
-      this.reconnectOrchestrator.reset();
-      this.state.setReconnecting(false);
-      this.context.logger?.info?.('gateway.register.accepted');
-      this.phase = 'ready';
-      this.state.setState('READY');
-      this.context.logger?.info?.('gateway.ready');
-      this.heartbeatLoop.start();
-      this.resolveHandshake();
+      this.handleReadyHandshake();
       return;
     }
 
@@ -295,6 +285,22 @@ class ConnectAttempt {
       ...error.details,
     });
     this.failBeforeReady(error, { closeTransport: true });
+  }
+
+  private handleReadyHandshake(): void {
+    if (this.phase === 'ready') {
+      this.context.logger?.warn?.('gateway.register.duplicate_ok');
+      return;
+    }
+    this.clearHandshakeTimeout();
+    this.reconnectOrchestrator.reset();
+    this.state.setReconnecting(false);
+    this.context.logger?.info?.('gateway.register.accepted');
+    this.phase = 'ready';
+    this.state.setState('READY');
+    this.context.logger?.info?.('gateway.ready');
+    this.heartbeatLoop.start();
+    this.resolveHandshake();
   }
 
   private handleError(event?: unknown): void {
@@ -695,6 +701,7 @@ export class ConnectSession {
   private readonly state: GatewayRuntimeStatePort;
   private activeAttempt: ConnectAttempt | null = null;
 
+  // eslint-disable-next-line max-params -- session 编排器显式接收 runtime 协作者，避免隐藏跨层依赖。
   constructor(
     transport: GatewayTransport,
     outboundSender: OutboundSender,
@@ -723,26 +730,9 @@ export class ConnectSession {
       state: this.state.getState(),
     });
 
-    if (this.context.abortSignal?.aborted) {
-      this.state.setManuallyDisconnected(true);
-      this.state.setState('DISCONNECTED');
-      this.context.logger?.warn?.('gateway.connect.aborted_precheck');
-      const error = new GatewayClientError({
-        code: 'GATEWAY_CONNECT_ABORTED',
-        disposition: 'cancelled',
-        stage: 'pre_open',
-        retryable: false,
-        message: 'gateway_connection_aborted',
-      });
-      return Promise.reject(error);
-    }
-
-    if (this.state.getState() === 'READY') {
-      return Promise.resolve();
-    }
-
-    if (this.activeAttempt) {
-      return this.activeAttempt.promise;
+    const preflightResult = this.resolveConnectPreflightResult();
+    if (preflightResult) {
+      return preflightResult;
     }
 
     try {
@@ -773,23 +763,34 @@ export class ConnectSession {
       this.activeAttempt = attempt;
       return attempt.promise;
     } catch (error) {
-      const clientError = error instanceof TypeError && error.message.includes('Invalid URL')
-        ? this.toClientError(
-          error,
-          'GATEWAY_CONNECT_PARAMETER_INVALID',
-          'startup_failure',
-          'pre_open',
-          false,
-        )
-        : this.toClientError(
-          error,
-          'GATEWAY_CONNECT_PARAMETER_INVALID',
-          'startup_failure',
-          'pre_open',
-          false,
-        );
+      const clientError = this.toClientError(
+        error,
+        'GATEWAY_CONNECT_PARAMETER_INVALID',
+        'startup_failure',
+        'pre_open',
+        false,
+      );
       return Promise.reject(clientError);
     }
+  }
+
+  private resolveConnectPreflightResult(): Promise<void> | null {
+    if (this.context.abortSignal?.aborted) {
+      this.state.setManuallyDisconnected(true);
+      this.state.setState('DISCONNECTED');
+      this.context.logger?.warn?.('gateway.connect.aborted_precheck');
+      return Promise.reject(new GatewayClientError({
+        code: 'GATEWAY_CONNECT_ABORTED',
+        disposition: 'cancelled',
+        stage: 'pre_open',
+        retryable: false,
+        message: 'gateway_connection_aborted',
+      }));
+    }
+    if (this.state.getState() === 'READY') {
+      return Promise.resolve();
+    }
+    return this.activeAttempt?.promise ?? null;
   }
 
   private toClientError(
