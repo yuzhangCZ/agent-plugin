@@ -2164,7 +2164,7 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
           header: 'Header',
           multiple: true,
           options: [
-            { label: 'A' },
+            { label: 'A', description: 'First option' },
             { label: 'B' },
           ],
         },
@@ -2201,7 +2201,7 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
           header: 'Header',
           multiSelect: true,
           options: [
-            { label: 'A' },
+            { label: 'A', description: 'First option' },
             { label: 'B' },
           ],
         },
@@ -2220,7 +2220,7 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
             header: 'Header',
             multiple: true,
             options: [
-              { label: 'A' },
+              { label: 'A', description: 'First option' },
               { label: 'B' },
             ],
           },
@@ -2234,6 +2234,66 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
     toolSessionId: 'tool-question',
     hostSessionId: 'tool-question',
   }]);
+});
+
+test('provider adapter drops malformed question options without required label', async () => {
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-question-label', 'tool-question-label']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-question-label',
+    runId: 'run-question-label',
+    toolSessionId: 'tool-question-label',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'tool-question-label',
+        id: 'msg-label-1',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:00.000Z',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'question.asked',
+    properties: {
+      sessionID: 'tool-question-label',
+      id: 'question-label-1',
+      partID: 'part-question-label-1',
+      tool: {
+        messageID: 'msg-label-1',
+        callID: 'call-question-label-1',
+      },
+      questions: [
+        {
+          question: 'Pick one',
+          options: [
+            { description: 'Missing label' },
+            { label: '', description: 'Empty label is preserved' },
+            { label: 'A' },
+          ],
+        },
+      ],
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+  const facts = await collect(run.facts);
+
+  assert.deepEqual(facts[1].questions[0].options, [
+    { label: '', description: 'Empty label is preserved' },
+    { label: 'A' },
+  ]);
 });
 
 test('provider adapter synthesizes question partId fallback without reusing questionId', async () => {

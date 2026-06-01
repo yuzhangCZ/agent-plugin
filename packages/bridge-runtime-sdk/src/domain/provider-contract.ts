@@ -291,6 +291,7 @@ export interface ToolUpdateFact extends ProviderFactBase {
  */
 export interface QuestionOption {
   label: string;
+  description?: string;
 }
 
 export interface QuestionItem {

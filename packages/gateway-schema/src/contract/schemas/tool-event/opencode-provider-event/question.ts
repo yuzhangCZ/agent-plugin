@@ -8,9 +8,13 @@ import {
 
 export const questionAskedOptionSchema = z
   .object({
-    label: optionalLooseTrimmedStringPreservingEmpty,
+    label: requiredLooseTrimmedStringPreservingEmpty,
+    description: optionalLooseTrimmedStringPreservingEmpty,
   })
-  .transform((option) => (option.label !== undefined ? { label: option.label } : undefined));
+  .transform((option) => ({
+    label: option.label,
+    ...(option.description !== undefined ? { description: option.description } : {}),
+  }));
 export type QuestionAskedOptionV1 = NonNullable<z.output<typeof questionAskedOptionSchema>>;
 
 export const questionAskedItemSchema = z

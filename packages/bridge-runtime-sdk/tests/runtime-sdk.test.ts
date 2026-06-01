@@ -794,7 +794,7 @@ test('runtime consumes question replies by questionId and forwards structured an
                   {
                     question: 'Pick one',
                     header: 'Header',
-                    options: [{ label: 'A' }, { label: 'B' }],
+                    options: [{ label: 'A', description: 'First option' }, { label: 'B' }],
                   },
                 ],
               },
@@ -1078,7 +1078,7 @@ test('question.ask projects cloud questions payload and omits legacy flat fields
                   {
                     question: 'Pick one',
                     header: 'Header',
-                    options: [{ label: 'A' }, { label: 'B' }],
+                    options: [{ label: 'A', description: 'First option' }, { label: 'B' }],
                     multiSelect: true,
                   },
                 ],
@@ -1142,7 +1142,7 @@ test('question.ask projects cloud questions payload and omits legacy flat fields
           {
             question: 'Pick one',
             header: 'Header',
-            options: [{ label: 'A' }, { label: 'B' }],
+            options: [{ label: 'A', description: 'First option' }, { label: 'B' }],
             multiSelect: true,
           },
         ],

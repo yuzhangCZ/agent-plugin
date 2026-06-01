@@ -110,6 +110,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         ? {
             options: question.options.map((option) => ({
               label: option.label,
+              ...(option.description !== undefined ? { description: option.description } : {}),
             })),
           }
         : {}),
