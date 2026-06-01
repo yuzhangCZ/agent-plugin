@@ -416,6 +416,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         });
         throw error;
       }
+      this.activeRuns.abortAllByHostSession(result.hostSessionId, 'abort_session');
       return { applied: true };
     }
 
@@ -427,6 +428,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     if (!result.success) {
       throw new Error(result.errorMessage ?? 'abort_session_failed');
     }
+    this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'abort_session');
     return { applied: true };
   }
 
@@ -448,15 +450,23 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     return this.assistantMessageStates.has(trackingSessionId);
   }
 
+  /**
+   * 仅用于单测/诊断，检查宿主会话是否存在 active run 队首。
+   */
+  hasActiveHostSessionRunForTest(hostSessionId: string): boolean {
+    return Boolean(this.activeRuns.getHeadByHostSession(hostSessionId));
+  }
+
   private createActiveRunHandle(
     anchorSessionId: string,
     runId: string,
-    initialTrackingSessionId: string,
+    hostSessionId: string,
   ): ActiveProviderRunHandle {
     return this.activeRuns.create({
       anchorSessionId,
+      hostSessionId,
       runId,
-      initialTrackingSessionId,
+      initialTrackingSessionId: hostSessionId,
       logger: this.logger,
       onCleanup: (cleanup) => {
         this.cleanupActiveRunState(cleanup);
@@ -564,6 +574,10 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
             }
           : {}),
       }, promptResult.data.terminal.kind === 'failed' ? promptResult.data.terminal.errorDetails : undefined));
+      if (promptResult.data.terminal.kind === 'aborted') {
+        this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'prompt_terminal_aborted');
+        return;
+      }
       activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
     } catch (error) {
       this.executionSessionInvalidationPort.invalidateAfterFailure(input.toolSessionId, error);

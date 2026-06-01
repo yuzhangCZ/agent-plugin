@@ -463,7 +463,7 @@ test('provider adapter delegates abort session to session-isolation command port
     abortSessionCommandPort: {
       execute: async (input) => {
         calls.push(input);
-        return { kind: 'aborted', toolSessionId: input.toolSessionId };
+        return { kind: 'aborted', toolSessionId: input.toolSessionId, hostSessionId: 'host-abort-port' };
       },
     },
     session: {
@@ -511,6 +511,103 @@ test('provider adapter fails closed when session-isolation abort command reports
     },
   );
   assert.equal(legacyAbortCalls, 0);
+});
+
+test('provider adapter abortSession command port closes all runs under returned host session', async () => {
+  const promptA = createDeferred();
+  const promptB = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    session: {
+      prompt: async () => {
+        promptCount += 1;
+        return promptCount === 1 ? promptA.promise : promptB.promise;
+      },
+    },
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'host-shared',
+      }),
+    },
+  });
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-b' }), { applied: true });
+  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+  assert.deepEqual(await collect(runA.facts), []);
+  assert.deepEqual(await collect(runB.facts), []);
+});
+
+test('provider adapter abortSession fallback closes all runs under resolved host session', async () => {
+  const abortCalls = [];
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    session: {
+      prompt: async () => new Promise(() => undefined),
+      abort: async (input) => {
+        abortCalls.push(input);
+        return { data: true };
+      },
+    },
+  });
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-b' }), { applied: true });
+  assert.equal(abortCalls.length, 1);
+  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+});
+
+test('provider adapter tracks active runs by resolved host session id', async () => {
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    session: {
+      prompt: async () => new Promise(() => undefined),
+    },
+  });
+
+  await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  assert.equal(adapter.hasActiveHostSessionRunForTest?.('host-shared'), true);
 });
 
 test('provider adapter observes raw host events through session-isolation port without changing routing result', async () => {
@@ -3042,14 +3139,7 @@ test('provider adapter does not let stale cleanup delete a newer active run', as
     toolSessionId: 'tool-stale-cleanup',
     text: 'first',
   });
-  firstPrompt.resolve(createPromptResponse({
-    info: {
-      error: {
-        name: 'MessageAbortedError',
-        data: { message: 'User aborted' },
-      },
-    },
-  }));
+  firstPrompt.resolve(createPromptResponse());
   await Promise.resolve();
   await Promise.resolve();
 
@@ -3061,7 +3151,7 @@ test('provider adapter does not let stale cleanup delete a newer active run', as
   });
 
   await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.deepEqual(await firstRun.result(), { outcome: 'aborted' });
+  assert.deepEqual(await firstRun.result(), { outcome: 'completed' });
 
   await adapter.handleEvent({
     type: 'message.updated',
