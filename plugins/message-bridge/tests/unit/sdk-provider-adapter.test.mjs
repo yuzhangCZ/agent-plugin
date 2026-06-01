@@ -610,6 +610,326 @@ test('provider adapter tracks active runs by resolved host session id', async ()
   assert.equal(adapter.hasActiveHostSessionRunForTest?.('host-shared'), true);
 });
 
+test('provider adapter routes shared host streaming events to fifo head despite later attached owner', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared']],
+    session: {
+      prompt: async () => {
+        promptCount += 1;
+        return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+      },
+    },
+  });
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+
+  adapter.contextResolver.dependencies.bindingStore.bind('conversation-b', 'host-shared');
+  adapter.contextResolver.dependencies.ownershipResolver.attach('host-shared', 'conversation-b');
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptResponse({ info: { id: 'msg-a' } }));
+  const factsA = await collect(runA.facts);
+  assert.equal(factsA.some((fact) => fact.type === 'message.start'), true);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-b',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptResponse({ info: { id: 'msg-b' } }));
+  const factsB = await collect(runB.facts);
+  assert.equal(factsB.some((fact) => fact.type === 'message.start'), true);
+});
+
+test('provider adapter keeps active run routing when attached owner is missing during event', async () => {
+  const prompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a']],
+    session: {
+      prompt: async () => prompt.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'hello',
+  });
+
+  adapter.contextResolver.dependencies.ownershipResolver.detach('host-a');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-a',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  prompt.resolve(createPromptResponse({ info: { id: 'msg-a' } }));
+
+  const facts = await collect(run.facts);
+  assert.equal(facts.some((fact) => fact.type === 'message.start'), true);
+});
+
+test('provider adapter routes subagent child event through parent host fifo head with child tracking', async () => {
+  const prompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-parent']],
+    session: {
+      prompt: async () => prompt.promise,
+      get: async (input) => ({
+        data: {
+          id: input?.sessionID,
+          parentID: input?.sessionID === 'host-child' ? 'host-parent' : undefined,
+          title: input?.sessionID === 'host-child' ? 'worker' : 'parent',
+          directory: '/workspace/test',
+        },
+      }),
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-child',
+        sessionID: 'host-child',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  prompt.resolve(createPromptResponse({ info: { id: 'msg-child' } }));
+
+  const facts = await collect(run.facts);
+  assert.equal(facts.some((fact) => fact.type === 'message.start'), true);
+  assert.equal(adapter.hasAssistantMessageTrackingSession('host-child'), false);
+});
+
+test('provider adapter drops assistant streaming event when no active host run exists', async () => {
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    bindings: [['conversation-a', 'host-a']],
+  });
+
+  assert.equal(await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-orphan',
+        sessionID: 'host-a',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  }), false);
+});
+
+test('provider adapter routes session.error to outbound owner when no active host run exists', async () => {
+  const outboundCalls = [];
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a']],
+  });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async (input) => {
+        outboundCalls.push({
+          toolSessionId: input.toolSessionId,
+          messageId: input.messageId,
+          facts: await collect(input.facts),
+        });
+      },
+    },
+  });
+
+  assert.equal(await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'host-a',
+      error: { message: 'boom' },
+    },
+  }), true);
+  assert.equal(outboundCalls[0].toolSessionId, 'conversation-a');
+  assert.deepEqual(outboundCalls[0].facts.map((fact) => fact.type), ['session.error']);
+});
+
+test('provider adapter routes session.error to active host run before outbound fallback', async () => {
+  const outboundCalls = [];
+  const prompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a']],
+    session: {
+      prompt: async () => prompt.promise,
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async (input) => outboundCalls.push(input),
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'host-a',
+      error: { message: 'boom' },
+    },
+  });
+  prompt.resolve(createPromptResponse());
+
+  const facts = await collect(run.facts);
+  assert.equal(facts.some((fact) => fact.type === 'session.error'), true);
+  assert.deepEqual(outboundCalls, []);
+});
+
+test('provider adapter aborts all host runs when prompt terminal is aborted', async () => {
+  let promptCount = 0;
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    session: {
+      prompt: async () => {
+        promptCount += 1;
+        return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+      },
+    },
+  });
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  firstPrompt.resolve(createPromptResponse({
+    info: {
+      error: {
+        name: 'MessageAbortedError',
+        data: { message: 'User aborted' },
+      },
+    },
+  }));
+
+  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+});
+
+test('provider adapter completed terminal only advances fifo head for current run', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  let promptCount = 0;
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
+    session: {
+      prompt: async () => {
+        promptCount += 1;
+        return promptCount === 1 ? firstPrompt.promise : secondPrompt.promise;
+      },
+    },
+  });
+
+  const runA = await adapter.runMessage({
+    traceId: 'trace-a',
+    runId: 'run-a',
+    toolSessionId: 'conversation-a',
+    text: 'first',
+  });
+  const runB = await adapter.runMessage({
+    traceId: 'trace-b',
+    runId: 'run-b',
+    toolSessionId: 'conversation-b',
+    text: 'second',
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-a',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: {
+          created: Date.now(),
+          completed: Date.now(),
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  firstPrompt.resolve(createPromptResponse({ info: { id: 'msg-a' } }));
+  await runA.result();
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: 'msg-b',
+        sessionID: 'host-shared',
+        role: 'assistant',
+        time: { created: Date.now() },
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptResponse({ info: { id: 'msg-b' } }));
+  const factsB = await collect(runB.facts);
+  assert.equal(factsB.some((fact) => fact.type === 'message.start'), true);
+});
+
 test('provider adapter observes raw host events through session-isolation port without changing routing result', async () => {
   const observed = [];
   const adapter = createAdapter({

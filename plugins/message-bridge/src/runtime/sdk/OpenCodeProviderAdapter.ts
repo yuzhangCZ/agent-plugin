@@ -45,6 +45,7 @@ import {
 } from './OpenCodeProviderAdapter.run.js';
 import {
   DefaultProtocolDiagnosticPort,
+  DefaultOutboundTargetResolver,
   EventRawSessionLocator,
   EventSessionIdentityResolver,
   FactRoutingContextAssembler,
@@ -223,6 +224,9 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         subagentSessionMapper: options.subagentSessionMapper,
       }),
       activeRunRegistry: this.activeRuns,
+      outboundTargetResolver: new DefaultOutboundTargetResolver({
+        eventAnchorResolver: options.eventAnchorResolver,
+      }),
       assistantMessageState: this.assistantMessageStates,
       partKindState: this.partKinds,
       activeRunTranslatorRegistry,

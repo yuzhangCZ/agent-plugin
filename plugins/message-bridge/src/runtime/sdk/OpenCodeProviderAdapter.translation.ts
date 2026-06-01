@@ -541,7 +541,8 @@ export class PermissionRepliedTranslator implements EventTranslator {
 export class SessionErrorTranslator implements EventTranslator {
   translate(context: TranslationContext): RawEventTranslation {
     const properties = asObject(context.event.properties);
-    const errorText = asTrimmedString(properties?.error);
+    const errorObject = asObject(properties?.error);
+    const errorText = asTrimmedString(properties?.error) ?? asTrimmedString(errorObject?.message);
     const rawSessionId = asTrimmedString(properties?.sessionID);
     if (!rawSessionId || !errorText) {
       return { recognized: true, facts: [] };

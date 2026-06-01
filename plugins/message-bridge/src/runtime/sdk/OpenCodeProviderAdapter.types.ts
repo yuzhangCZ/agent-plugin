@@ -1,5 +1,6 @@
 import type { BridgeEvent } from '../types.js';
 import type { ProviderFact } from '@wecode/bridge-runtime-sdk';
+import type { ActiveProviderRunHandle } from './OpenCodeProviderAdapter.run.js';
 
 export type PartKind = 'text' | 'reasoning';
 
@@ -16,11 +17,36 @@ export type RawEventTranslation = {
   terminalCandidateMessageId?: string;
 };
 
+export type EventSessionIdentity = {
+  rawSessionId: string;
+  trackingSessionId: string;
+  hostSessionId: string;
+  subagentSessionId?: string;
+  subagentName?: string;
+};
+
+export type ActiveRunIdentity = {
+  anchorSessionId: string;
+  hostSessionId: string;
+  runId: string;
+};
+
+export type EventRouteTarget =
+  | { kind: 'active_run'; run: ActiveProviderRunHandle; anchorSessionId: string }
+  | { kind: 'outbound'; anchorSessionId: string; reason: 'attached_owner' }
+  | {
+      kind: 'drop';
+      reason: 'missing_active_run' | 'missing_outbound_target' | 'unsupported_event' | 'missing_session_identity';
+    };
+
+export interface OutboundTargetResolverPort {
+  resolve(hostSessionId: string): { anchorSessionId: string } | undefined;
+}
+
 export type SessionIdentityResolution =
   | {
       kind: 'resolved';
       rawSessionId: string;
-      anchorSessionId: string;
       trackingSessionId: string;
       hostSessionId: string;
       subagentSessionId?: string;
@@ -29,14 +55,14 @@ export type SessionIdentityResolution =
   | {
       kind: 'resolved_fail_open';
       rawSessionId: string;
-      anchorSessionId: string;
       trackingSessionId: string;
       hostSessionId: string;
       lookupFailedCause: unknown;
     }
   | {
-      kind: 'anchor_missing';
-      rawSessionId: string;
+      kind: 'missing_session';
+      rawSessionId?: string;
+      reason: 'missing_event_session' | 'missing_parent_session';
       lookupFailedCause?: unknown;
     };
 

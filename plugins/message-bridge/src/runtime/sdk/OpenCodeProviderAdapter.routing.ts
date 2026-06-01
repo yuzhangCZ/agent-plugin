@@ -10,6 +10,7 @@ import type { BridgeEvent } from '../types.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type {
   FactSessionContext,
+  OutboundTargetResolverPort,
   PendingInteractionRecorderPort,
   ProtocolDiagnosticPort,
   SessionIdentityResolution,
@@ -118,6 +119,32 @@ function buildEventRouteSummary(input: {
   };
 }
 
+function classifyEvent(type: BridgeEvent['type']):
+  | 'run_scoped'
+  | 'run_scoped_with_outbound_fallback'
+  | 'run_adjacent_metadata'
+  | 'control_metadata'
+  | 'unsupported' {
+  switch (type) {
+    case 'message.updated':
+    case 'message.part.delta':
+    case 'message.part.updated':
+    case 'question.asked':
+    case 'permission.asked':
+      return 'run_scoped';
+    case 'session.error':
+      return 'run_scoped_with_outbound_fallback';
+    case 'session.updated':
+    case 'permission.replied':
+      return 'run_adjacent_metadata';
+    case 'session.created':
+    case 'session.deleted':
+      return 'control_metadata';
+    default:
+      return 'unsupported';
+  }
+}
+
 export class DefaultProtocolDiagnosticPort implements ProtocolDiagnosticPort {
   constructor(private readonly logger: BridgeLogger) {}
 
@@ -170,19 +197,9 @@ export class EventSessionIdentityResolver {
   async resolve(rawSessionId: string): Promise<SessionIdentityResolution> {
     const resolution = await this.dependencies.subagentSessionMapper.resolve(rawSessionId);
     if (resolution.status === 'mapped') {
-      const anchorResolution = this.dependencies.eventAnchorResolver.resolveForEvent(
-        resolution.mapping.parentSessionId,
-      );
-      if (!anchorResolution?.anchor) {
-        return {
-          kind: 'anchor_missing',
-          rawSessionId,
-        };
-      }
       return {
         kind: 'resolved',
         rawSessionId,
-        anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
         hostSessionId: resolution.mapping.parentSessionId,
         subagentSessionId: resolution.mapping.childSessionId,
@@ -191,35 +208,18 @@ export class EventSessionIdentityResolver {
     }
 
     if (resolution.status === 'lookup_failed') {
-      const anchorResolution = this.dependencies.eventAnchorResolver.resolveForEvent(rawSessionId);
-      if (!anchorResolution?.anchor) {
-        return {
-          kind: 'anchor_missing',
-          rawSessionId,
-          lookupFailedCause: resolution.error,
-        };
-      }
       return {
         kind: 'resolved_fail_open',
         rawSessionId,
-        anchorSessionId: anchorResolution.anchor,
         trackingSessionId: rawSessionId,
         hostSessionId: rawSessionId,
         lookupFailedCause: resolution.error,
       };
     }
 
-    const anchorResolution = this.dependencies.eventAnchorResolver.resolveForEvent(rawSessionId);
-    if (!anchorResolution?.anchor) {
-      return {
-        kind: 'anchor_missing',
-        rawSessionId,
-      };
-    }
     return {
       kind: 'resolved',
       rawSessionId,
-      anchorSessionId: anchorResolution.anchor,
       trackingSessionId: rawSessionId,
       hostSessionId: rawSessionId,
     };
@@ -227,19 +227,29 @@ export class EventSessionIdentityResolver {
 }
 
 export class FactRoutingContextAssembler {
-  assemble(
-    resolution: Extract<SessionIdentityResolution, { kind: 'resolved' | 'resolved_fail_open' }>,
-  ): FactSessionContext {
+  assemble(input: {
+    resolution: Extract<SessionIdentityResolution, { kind: 'resolved' | 'resolved_fail_open' }>;
+    anchorSessionId: string;
+  }): FactSessionContext {
     return {
-      anchorSessionId: resolution.anchorSessionId,
-      trackingSessionId: resolution.trackingSessionId,
-      ...('subagentSessionId' in resolution && resolution.subagentSessionId
-        ? { subagentSessionId: resolution.subagentSessionId }
+      anchorSessionId: input.anchorSessionId,
+      trackingSessionId: input.resolution.trackingSessionId,
+      ...('subagentSessionId' in input.resolution && input.resolution.subagentSessionId
+        ? { subagentSessionId: input.resolution.subagentSessionId }
         : {}),
-      ...('subagentName' in resolution && resolution.subagentName
-        ? { subagentName: resolution.subagentName }
+      ...('subagentName' in input.resolution && input.resolution.subagentName
+        ? { subagentName: input.resolution.subagentName }
         : {}),
     };
+  }
+}
+
+export class DefaultOutboundTargetResolver implements OutboundTargetResolverPort {
+  constructor(private readonly dependencies: { eventAnchorResolver: EventAnchorResolver }) {}
+
+  resolve(hostSessionId: string): { anchorSessionId: string } | undefined {
+    const resolved = this.dependencies.eventAnchorResolver.resolveForEvent(hostSessionId);
+    return resolved?.anchor ? { anchorSessionId: resolved.anchor } : undefined;
   }
 }
 
@@ -276,6 +286,7 @@ export class ProviderEventCoordinator {
     factRoutingContextAssembler: FactRoutingContextAssembler;
     sessionCreatedRecorder: SessionCreatedRecorder;
     activeRunRegistry: ActiveRunRegistry;
+    outboundTargetResolver: OutboundTargetResolverPort;
     assistantMessageState: AssistantMessageStateStore;
     partKindState: PartKindStore;
     activeRunTranslatorRegistry: EventTranslatorRegistry;
@@ -299,16 +310,17 @@ export class ProviderEventCoordinator {
     }
 
     const resolution = await this.dependencies.identityResolver.resolve(rawSessionId);
-    if (resolution.kind === 'anchor_missing') {
+    if (resolution.kind === 'missing_session') {
       if (resolution.lookupFailedCause) {
         this.dependencies.logger.warn('provider_adapter.subagent_lookup_failed', {
-          toolSessionId: resolution.rawSessionId,
+          toolSessionId: resolution.rawSessionId ?? rawSessionId,
           error: getErrorMessage(resolution.lookupFailedCause),
         });
       }
-      this.dependencies.logger.warn('provider_adapter.event_dropped_without_anchor', {
-        toolSessionId: resolution.rawSessionId,
+      this.dependencies.logger.warn('provider_adapter.event_dropped_without_session_identity', {
+        toolSessionId: resolution.rawSessionId ?? rawSessionId,
         eventType: event.type,
+        reason: resolution.reason,
       });
       return false;
     }
@@ -320,8 +332,18 @@ export class ProviderEventCoordinator {
       });
     }
 
-    const factSessionContext = this.dependencies.factRoutingContextAssembler.assemble(resolution);
-    const activeRun = this.dependencies.activeRunRegistry.get(factSessionContext.anchorSessionId);
+    const eventClass = classifyEvent(event.type);
+    const activeRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
+    const activeRunFactSessionContext = activeRun
+      ? this.dependencies.factRoutingContextAssembler.assemble({
+          resolution,
+          anchorSessionId: activeRun.anchorSessionId,
+        })
+      : undefined;
+    const factSessionContext = activeRunFactSessionContext ?? this.dependencies.factRoutingContextAssembler.assemble({
+      resolution,
+      anchorSessionId: resolution.hostSessionId,
+    });
     const runtimeContext = this.dependencies.getRuntimeContext();
     const eventRouteSummary = buildEventRouteSummary({
       event,
@@ -344,16 +366,26 @@ export class ProviderEventCoordinator {
       observation: this.dependencies.observation,
     };
 
-    if (activeRun) {
-      activeRun.observeTrackingSession(factSessionContext.trackingSessionId);
-      const translation = this.dependencies.activeRunTranslatorRegistry.translate(translationContext);
+    if (
+      activeRun
+      && eventClass !== 'control_metadata'
+      && eventClass !== 'unsupported'
+      && activeRunFactSessionContext
+    ) {
+      const activeRunTranslationContext: TranslationContext = {
+        ...translationContext,
+        factSessionContext: activeRunFactSessionContext,
+      };
+      activeRun.observeTrackingSession(activeRunFactSessionContext.trackingSessionId);
+      const translation = this.dependencies.activeRunTranslatorRegistry.translate(activeRunTranslationContext);
       this.dependencies.logger.debug?.('provider_adapter.event.translation', {
         ...eventRouteSummary,
+        anchorSessionId: activeRunFactSessionContext.anchorSessionId,
         recognized: translation.recognized,
         factTypes: translation.facts.map((fact) => fact.type),
       });
       if (translation.recognized) {
-        this.recordPendingInteractions(translation.facts, factSessionContext, resolution.hostSessionId);
+        this.recordPendingInteractions(translation.facts, activeRunFactSessionContext, resolution.hostSessionId);
         activeRun.pushFacts(translation);
         this.dependencies.logger.debug?.('provider_adapter.event.routed_to_active_run', {
           eventType: event.type,
@@ -365,22 +397,36 @@ export class ProviderEventCoordinator {
       }
     }
 
-    if (!runtimeContext) {
+    if (eventClass !== 'run_scoped_with_outbound_fallback') {
       return false;
     }
 
-    const translation = this.dependencies.outboundTranslatorRegistry.translate(translationContext);
+    const outboundTarget = this.dependencies.outboundTargetResolver.resolve(resolution.hostSessionId);
+    if (!outboundTarget || !runtimeContext) {
+      return false;
+    }
+
+    const outboundFactSessionContext = this.dependencies.factRoutingContextAssembler.assemble({
+      resolution,
+      anchorSessionId: outboundTarget.anchorSessionId,
+    });
+    const outboundTranslationContext: TranslationContext = {
+      ...translationContext,
+      factSessionContext: outboundFactSessionContext,
+    };
+    const translation = this.dependencies.outboundTranslatorRegistry.translate(outboundTranslationContext);
     this.dependencies.logger.debug?.('provider_adapter.event.translation', {
       ...eventRouteSummary,
+      anchorSessionId: outboundTarget.anchorSessionId,
       recognized: translation.recognized,
       factTypes: translation.facts.map((fact) => fact.type),
     });
-    if (!translation.recognized || !translation.toolSessionId || translation.facts.length === 0 || !translation.envelopeMessageId) {
+    if (!translation.recognized || translation.facts.length === 0 || !translation.envelopeMessageId) {
       return false;
     }
 
     await runtimeContext.outbound.emitOutboundMessage({
-      toolSessionId: translation.toolSessionId,
+      toolSessionId: outboundTarget.anchorSessionId,
       messageId: translation.envelopeMessageId,
       trigger: 'system',
       facts: toAsyncFacts(translation.facts),
@@ -388,7 +434,7 @@ export class ProviderEventCoordinator {
     this.dependencies.logger.debug?.('provider_adapter.event.routed_to_outbound', {
       eventType: event.type,
       factTypes: translation.facts.map((fact) => fact.type),
-      toolSessionId: translation.toolSessionId,
+      toolSessionId: outboundTarget.anchorSessionId,
       messageId: translation.envelopeMessageId,
     });
     return true;

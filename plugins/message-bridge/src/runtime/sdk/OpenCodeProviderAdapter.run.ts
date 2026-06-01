@@ -378,6 +378,10 @@ export class ActiveRunRegistry {
     }) => void;
   }): ActiveProviderRunHandle {
     const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    const previous = this.handles.get(options.anchorSessionId);
+    if (previous) {
+      this.removeFromHostQueue(previous);
+    }
     const handle = new ActiveProviderRunHandle({
       anchorSessionId: options.anchorSessionId,
       runId: options.runId,
@@ -418,6 +422,16 @@ export class ActiveRunRegistry {
     return queue;
   }
 
+  private removeFromHostQueue(handle: ActiveProviderRunHandle): void {
+    const queue = this.hostQueues.get(handle.hostSessionId) ?? [];
+    const nextQueue = queue.filter((queued) => queued !== handle);
+    if (nextQueue.length > 0) {
+      this.hostQueues.set(handle.hostSessionId, nextQueue);
+    } else {
+      this.hostQueues.delete(handle.hostSessionId);
+    }
+  }
+
   /**
    * 只删除仍属于当前 runId 的 handle。
    * @remarks runId 由 bridge-runtime-sdk 在每次 start_request_run 时生成并保证唯一。
@@ -437,13 +451,7 @@ export class ActiveRunRegistry {
       };
     }
     this.handles.delete(anchorSessionId);
-    const queue = this.hostQueues.get(current.hostSessionId) ?? [];
-    const nextQueue = queue.filter((handle) => handle !== current);
-    if (nextQueue.length > 0) {
-      this.hostQueues.set(current.hostSessionId, nextQueue);
-    } else {
-      this.hostQueues.delete(current.hostSessionId);
-    }
+    this.removeFromHostQueue(current);
     return {
       deleted: true,
       currentRunId: current.runId,
