@@ -15,6 +15,19 @@ import type {
 const FACT_DRAIN_QUIET_PERIOD_MS = 40;
 const FACT_DRAIN_TIMEOUT_MS = 250;
 
+type ActiveProviderRunHandleOptions = {
+  anchorSessionId: string;
+  runId: string;
+  initialTrackingSessionId: string;
+  logger: BridgeLogger;
+  onCleanup: (input: {
+    anchorSessionId: string;
+    runId: string;
+    trackingSessionIds: ReadonlySet<string>;
+  }) => void;
+  hostSessionId?: string;
+};
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -256,21 +269,21 @@ export class ActiveProviderRunHandle {
   private readonly factDrainTracker: FactDrainTracker;
   private promptSettled = false;
   private factsClosed = false;
+  private forceClosed = false;
   private cleanedUp = false;
   private terminalResult?: ProviderTerminalResult;
 
-  constructor(
-    readonly anchorSessionId: string,
-    readonly runId: string,
-    initialTrackingSessionId: string,
-    logger: BridgeLogger,
-    private readonly onCleanup: (input: {
-      anchorSessionId: string;
-      runId: string;
-      trackingSessionIds: ReadonlySet<string>;
-    }) => void,
-  ) {
-    this.trackingSessionIds.add(initialTrackingSessionId);
+  readonly anchorSessionId: string;
+  readonly runId: string;
+  readonly hostSessionId: string;
+  private readonly onCleanup: ActiveProviderRunHandleOptions['onCleanup'];
+
+  constructor(options: ActiveProviderRunHandleOptions) {
+    this.anchorSessionId = options.anchorSessionId;
+    this.runId = options.runId;
+    this.hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    this.onCleanup = options.onCleanup;
+    this.trackingSessionIds.add(options.initialTrackingSessionId);
     this.promptTerminalResolver = new PromptTerminalResolver((result) => {
       this.promptSettled = true;
       this.terminalResult = result;
@@ -278,10 +291,10 @@ export class ActiveProviderRunHandle {
       this.tryCleanup();
     });
     this.factDrainTracker = new FactDrainTracker({
-      anchorSessionId,
-      runId,
+      anchorSessionId: options.anchorSessionId,
+      runId: options.runId,
       queue: this.queue,
-      logger,
+      logger: options.logger,
       onClosed: () => {
         this.factsClosed = true;
         this.settleRunIfReady();
@@ -295,6 +308,9 @@ export class ActiveProviderRunHandle {
   }
 
   pushFacts(translation: RawEventTranslation): void {
+    if (this.forceClosed || this.factsClosed) {
+      return;
+    }
     this.factDrainTracker.noteRelevantEvent(translation.terminalCandidateMessageId);
     for (const fact of translation.facts) {
       this.queue.push(fact);
@@ -304,6 +320,21 @@ export class ActiveProviderRunHandle {
   settlePromptTerminal(result: ProviderTerminalResult): void {
     this.promptTerminalResolver.settle(result);
     this.factDrainTracker.onPromptSettled();
+  }
+
+  /**
+   * 强制结束当前 run，用于 session abort 或宿主侧 aborted terminal 的本地收口。
+   */
+  forceAbortAndClose(_reason: 'abort_session' | 'prompt_terminal_aborted'): void {
+    if (this.forceClosed) {
+      return;
+    }
+    this.forceClosed = true;
+    this.promptTerminalResolver.settle({ outcome: 'aborted' });
+    this.factsClosed = true;
+    this.queue.close();
+    this.settleRunIfReady();
+    this.tryCleanup();
   }
 
   result(): Promise<ProviderTerminalResult> {
@@ -332,9 +363,11 @@ export class ActiveProviderRunHandle {
 
 export class ActiveRunRegistry {
   private readonly handles = new Map<string, ActiveProviderRunHandle>();
+  private readonly hostQueues = new Map<string, ActiveProviderRunHandle[]>();
 
   create(options: {
     anchorSessionId: string;
+    hostSessionId?: string;
     runId: string;
     initialTrackingSessionId: string;
     logger: BridgeLogger;
@@ -344,14 +377,19 @@ export class ActiveRunRegistry {
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
   }): ActiveProviderRunHandle {
-    const handle = new ActiveProviderRunHandle(
-      options.anchorSessionId,
-      options.runId,
-      options.initialTrackingSessionId,
-      options.logger,
-      options.onCleanup,
-    );
+    const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
+    const handle = new ActiveProviderRunHandle({
+      anchorSessionId: options.anchorSessionId,
+      runId: options.runId,
+      initialTrackingSessionId: options.initialTrackingSessionId,
+      logger: options.logger,
+      onCleanup: options.onCleanup,
+      hostSessionId,
+    });
     this.handles.set(options.anchorSessionId, handle);
+    const queue = this.hostQueues.get(hostSessionId) ?? [];
+    queue.push(handle);
+    this.hostQueues.set(hostSessionId, queue);
     return handle;
   }
 
@@ -361,6 +399,23 @@ export class ActiveRunRegistry {
 
   has(anchorSessionId: string): boolean {
     return this.handles.has(anchorSessionId);
+  }
+
+  getHeadByHostSession(hostSessionId: string): ActiveProviderRunHandle | undefined {
+    return this.hostQueues.get(hostSessionId)?.[0];
+  }
+
+  abortAllByHostSession(
+    hostSessionId: string,
+    reason: 'abort_session' | 'prompt_terminal_aborted',
+  ): ActiveProviderRunHandle[] {
+    const queue = [...(this.hostQueues.get(hostSessionId) ?? [])];
+    for (const handle of queue) {
+      handle.forceAbortAndClose(reason);
+      this.handles.delete(handle.anchorSessionId);
+    }
+    this.hostQueues.delete(hostSessionId);
+    return queue;
   }
 
   /**
@@ -382,6 +437,13 @@ export class ActiveRunRegistry {
       };
     }
     this.handles.delete(anchorSessionId);
+    const queue = this.hostQueues.get(current.hostSessionId) ?? [];
+    const nextQueue = queue.filter((handle) => handle !== current);
+    if (nextQueue.length > 0) {
+      this.hostQueues.set(current.hostSessionId, nextQueue);
+    } else {
+      this.hostQueues.delete(current.hostSessionId);
+    }
     return {
       deleted: true,
       currentRunId: current.runId,

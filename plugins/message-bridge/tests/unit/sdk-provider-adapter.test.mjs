@@ -17,6 +17,9 @@ import {
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
 import {
+  ActiveRunRegistry,
+} from '../../src/runtime/sdk/OpenCodeProviderAdapter.run.ts';
+import {
   ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
   DefaultCreatedSessionBindingPort,
@@ -280,6 +283,70 @@ function createAdapter(overrides = {}) {
     subagentSessionMapper: new SubagentSessionMapper(() => sdkClient),
   });
 }
+
+test('ActiveRunRegistry returns host session head in FIFO order and ignores stale cleanup', () => {
+  const logger = createLogger();
+  const cleanups = [];
+  const registry = new ActiveRunRegistry();
+  const first = registry.create({
+    anchorSessionId: 'conversation-a',
+    hostSessionId: 'host-shared',
+    runId: 'run-a',
+    initialTrackingSessionId: 'host-shared',
+    logger,
+    onCleanup: (input) => cleanups.push(input),
+  });
+  const second = registry.create({
+    anchorSessionId: 'conversation-b',
+    hostSessionId: 'host-shared',
+    runId: 'run-b',
+    initialTrackingSessionId: 'host-shared',
+    logger,
+    onCleanup: (input) => cleanups.push(input),
+  });
+
+  assert.equal(registry.getHeadByHostSession('host-shared'), first);
+  assert.equal(registry.get('conversation-a'), first);
+  assert.equal(registry.get('conversation-b'), second);
+
+  assert.deepEqual(registry.deleteIfCurrentRun('conversation-a', 'stale-run'), {
+    deleted: false,
+    currentRunId: 'run-a',
+  });
+  assert.equal(registry.getHeadByHostSession('host-shared'), first);
+
+  assert.deepEqual(registry.deleteIfCurrentRun('conversation-a', 'run-a'), {
+    deleted: true,
+    currentRunId: 'run-a',
+  });
+  assert.equal(registry.getHeadByHostSession('host-shared'), second);
+});
+
+test('ActiveProviderRunHandle forceAbortAndClose is idempotent and ignores later facts', async () => {
+  const logger = createLogger();
+  const cleanups = [];
+  const registry = new ActiveRunRegistry();
+  const run = registry.create({
+    anchorSessionId: 'conversation-a',
+    hostSessionId: 'host-a',
+    runId: 'run-a',
+    initialTrackingSessionId: 'host-a',
+    logger,
+    onCleanup: (input) => cleanups.push(input),
+  });
+
+  run.forceAbortAndClose('abort_session');
+  run.forceAbortAndClose('abort_session');
+  run.pushFacts({
+    recognized: true,
+    facts: [{ type: 'text.delta', content: 'late' }],
+  });
+
+  assert.deepEqual(await collect(run.queue), []);
+  assert.deepEqual(await run.result(), { outcome: 'aborted' });
+  assert.equal(cleanups.length, 1);
+  assert.equal(cleanups[0].runId, 'run-a');
+});
 
 test('provider adapter delegates question replies to session-isolation command port', async () => {
   const calls = [];
