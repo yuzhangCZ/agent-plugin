@@ -1,5 +1,4 @@
 import type {
-  ProviderError,
   ProviderHealthInput,
   ProviderHealthResult,
   ProviderCreateSessionInput,
@@ -8,17 +7,15 @@ import type {
   ProviderRun,
   ProviderRunMessageInput,
   ProviderRuntimeContext,
-  ProviderTerminalResult,
   ThirdPartyAgentProvider,
 } from '@wecode/bridge-runtime-sdk';
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
-import type { PromptSessionTerminal } from '../../port/SessionScopedActionGatewayPort.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type { BridgeEvent } from '../types.js';
 import type { HostClientLike } from '../../types/index.js';
 import { CreateSessionRequestNormalizer } from '../../usecase/CreateSessionRequestNormalizer.js';
 import { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
-import { getErrorMessage, getToolErrorEvidence } from '../../utils/error.js';
+import { getErrorMessage } from '../../utils/error.js';
 import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js';
 import type {
   AbortSessionCommandPort,
@@ -29,7 +26,6 @@ import type {
   QuestionReplyCommandPort,
 } from '../../port/session-isolation/inbound/index.js';
 import type {
-  ChatExecutionContext,
   ChatExecutionContextResolver,
   CreatedSessionBindingPort,
   EventAnchorResolver,
@@ -64,6 +60,11 @@ import {
   SessionErrorTranslator,
   SessionUpdatedTranslator,
 } from './OpenCodeProviderAdapter.translation.js';
+import {
+  buildImmediateFailedRun,
+  hasPlatformBusinessSessionId,
+} from './OpenCodeProviderAdapter.helpers.js';
+import { bindProviderPromptTerminal } from './OpenCodeProviderAdapter.prompt.js';
 
 type ProviderAdapterOptions = {
   rawClient: HostClientLike;
@@ -85,72 +86,6 @@ type ProviderAdapterOptions = {
   hostEventPort?: HostEventPort;
   pendingInteractionRecorder?: PendingInteractionRecorderPort;
 };
-
-function fromFacts<T>(facts: T[]): AsyncIterable<T> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const fact of facts) {
-        yield fact;
-      }
-    },
-  };
-}
-
-function toProviderTerminalResult(terminal: PromptSessionTerminal): ProviderTerminalResult {
-  switch (terminal.kind) {
-    case 'completed':
-      return { outcome: 'completed' };
-    case 'aborted':
-      return { outcome: 'aborted' };
-    case 'failed':
-      return {
-        outcome: 'failed',
-        error: {
-          code: terminal.errorCode,
-          message: terminal.errorMessage,
-          ...(terminal.errorDetails ? { details: terminal.errorDetails } : {}),
-        },
-      };
-  }
-}
-
-function buildImmediateFailedRun(
-  toolSessionId: string,
-  error: ProviderError,
-): ProviderRun {
-  return {
-    runId: `immediate-${toolSessionId}`,
-    facts: fromFacts([]),
-    async result() {
-      return {
-        outcome: 'failed',
-        error,
-      };
-    },
-  };
-}
-
-function appendTerminalSourceEvidence(extra: Record<string, unknown>, errorDetails: unknown): Record<string, unknown> {
-  const evidence = getToolErrorEvidence(errorDetails);
-  return {
-    ...extra,
-    ...(evidence?.sourceOperation ? { sourceOperation: evidence.sourceOperation } : {}),
-    ...(evidence?.sourceErrorCode ? { sourceErrorCode: evidence.sourceErrorCode } : {}),
-    ...(evidence?.httpStatus !== undefined ? { httpStatus: evidence.httpStatus } : {}),
-  };
-}
-
-function hasPlatformBusinessSessionId(extParameters: unknown): boolean {
-  if (typeof extParameters !== 'object' || extParameters === null || Array.isArray(extParameters)) {
-    return false;
-  }
-  const platformExtParam = (extParameters as Record<string, unknown>).platformExtParam;
-  if (typeof platformExtParam !== 'object' || platformExtParam === null || Array.isArray(platformExtParam)) {
-    return false;
-  }
-  const businessSessionId = (platformExtParam as Record<string, unknown>).businessSessionId;
-  return typeof businessSessionId === 'string' && businessSessionId.trim().length > 0;
-}
 
 /**
  * OpenCode provider adapter。
@@ -217,7 +152,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       rawSessionLocator: new EventRawSessionLocator(),
       identityResolver: new EventSessionIdentityResolver({
         subagentSessionMapper: options.subagentSessionMapper,
-        eventAnchorResolver: options.eventAnchorResolver,
       }),
       factRoutingContextAssembler: new FactRoutingContextAssembler(),
       sessionCreatedRecorder: new SessionCreatedRecorder({
@@ -248,33 +182,47 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
   async createSession(input: ProviderCreateSessionInput): Promise<{ toolSessionId: string; title?: string }> {
     if (this.createSessionCommandPort) {
-      const normalized = this.createSessionRequestNormalizer.fromChatContext({
-        assistantId: input.assistantId,
-      });
-      const prepared = await this.createSessionUseCase.resolveCreateSession({
-        ...normalized,
-        title: input.title,
-        directory: this.effectiveDirectory,
-        ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
-      });
-      const result = await this.createSessionCommandPort.execute({
-        ...(input.title ? { title: input.title } : {}),
-        ...(input.assistantId ? { assistantId: input.assistantId } : {}),
-        ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),
-        ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
-      });
-      this.logger.info('runtime_sdk.provider.createSession.session_isolation_resolved', {
-        resultKind: result.kind,
-        toolSessionId: result.toolSessionId,
-        hasExtParameters: input.extParameters !== undefined,
-        hasPlatformBusinessSessionId: hasPlatformBusinessSessionId(input.extParameters),
-      });
-      return {
-        toolSessionId: result.toolSessionId,
-        ...(input.title ? { title: input.title } : {}),
-      };
+      return this.createSessionThroughCommandPort(input);
     }
+    return this.createSessionThroughLegacyUseCase(input);
+  }
 
+  private async createSessionThroughCommandPort(
+    input: ProviderCreateSessionInput,
+  ): Promise<{ toolSessionId: string; title?: string }> {
+    const normalized = this.createSessionRequestNormalizer.fromChatContext({
+      assistantId: input.assistantId,
+    });
+    const prepared = await this.createSessionUseCase.resolveCreateSession({
+      ...normalized,
+      title: input.title,
+      directory: this.effectiveDirectory,
+      ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
+    });
+    const result = await this.createSessionCommandPort?.execute({
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.assistantId ? { assistantId: input.assistantId } : {}),
+      ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),
+      ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+    });
+    if (!result) {
+      throw new Error('create_session_command_port_missing');
+    }
+    this.logger.info('runtime_sdk.provider.createSession.session_isolation_resolved', {
+      resultKind: result.kind,
+      toolSessionId: result.toolSessionId,
+      hasExtParameters: input.extParameters !== undefined,
+      hasPlatformBusinessSessionId: hasPlatformBusinessSessionId(input.extParameters),
+    });
+    return {
+      toolSessionId: result.toolSessionId,
+      ...(input.title ? { title: input.title } : {}),
+    };
+  }
+
+  private async createSessionThroughLegacyUseCase(
+    input: ProviderCreateSessionInput,
+  ): Promise<{ toolSessionId: string; title?: string }> {
     const normalized = this.createSessionRequestNormalizer.fromChatContext({
       assistantId: input.assistantId,
     });
@@ -340,7 +288,16 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       runId: activeRun.runId,
       hasAssistantId: Boolean(input.assistantId),
     });
-    void this.bindPromptTerminal(activeRun, input, preprocessed.context);
+    void bindProviderPromptTerminal({
+      activeRun,
+      message: input,
+      context: preprocessed.context,
+      ...(this.effectiveDirectory ? { effectiveDirectory: this.effectiveDirectory } : {}),
+      logger: this.logger,
+      gatewayAdapter: this.opencodeSessionGatewayAdapter,
+      executionSessionInvalidationPort: this.executionSessionInvalidationPort,
+      activeRuns: this.activeRuns,
+    });
 
     return {
       runId: activeRun.runId,
@@ -501,114 +458,4 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     }
   }
 
-  private async bindPromptTerminal(
-    activeRun: ActiveProviderRunHandle,
-    input: ProviderRunMessageInput,
-    context: ChatExecutionContext,
-  ): Promise<void> {
-    const startedAt = Date.now();
-    this.logger.info('provider_adapter.prompt.started', {
-      toolSessionId: input.toolSessionId,
-      opencodeSessionId: context.opencodeSessionId,
-      runId: activeRun.runId,
-      hasAssistantId: Boolean(input.assistantId),
-      textLength: input.text.length,
-    });
-
-    try {
-      const promptResult = await this.opencodeSessionGatewayAdapter.promptSession({
-        sessionId: context.opencodeSessionId,
-        text: input.text,
-        ...(this.effectiveDirectory ? { directory: this.effectiveDirectory } : {}),
-        agent: input.assistantId,
-        modelOverride: context.modelOverride,
-        logger: this.logger,
-      });
-
-      if (!promptResult.success) {
-        this.executionSessionInvalidationPort.invalidateAfterFailure({
-          conversationId: input.toolSessionId,
-          hostSessionId: context.opencodeSessionId,
-          error: promptResult,
-        });
-        const sourceOperation = promptResult.errorEvidence?.sourceOperation;
-        const sourceErrorCode = promptResult.errorEvidence?.sourceErrorCode;
-        this.logger.warn('provider_adapter.prompt.failed', {
-          toolSessionId: input.toolSessionId,
-          opencodeSessionId: context.opencodeSessionId,
-          runId: activeRun.runId,
-          durationMs: Math.max(0, Date.now() - startedAt),
-          providerOutcome: 'failed',
-          mappedProviderErrorCode: sourceOperation === 'session.get' && sourceErrorCode === 'session_not_found'
-            ? 'session_not_found'
-            : 'provider_unavailable',
-          error: promptResult.errorMessage ?? 'provider_unavailable',
-          sourceOperation,
-          sourceErrorCode,
-          httpStatus: promptResult.errorEvidence?.httpStatus,
-        });
-        const error: ProviderError = sourceOperation === 'session.get' && sourceErrorCode === 'session_not_found'
-          ? {
-              code: 'session_not_found',
-              message: promptResult.errorMessage ?? 'session_not_found',
-            }
-          : {
-              code: 'provider_unavailable',
-              message: promptResult.errorMessage ?? 'provider_unavailable',
-            };
-        activeRun.settlePromptTerminal({
-          outcome: 'failed',
-          error,
-        });
-        return;
-      }
-
-      this.logger.info('provider_adapter.prompt.completed', appendTerminalSourceEvidence({
-        toolSessionId: input.toolSessionId,
-        opencodeSessionId: context.opencodeSessionId,
-        runId: activeRun.runId,
-        durationMs: Math.max(0, Date.now() - startedAt),
-        terminalKind: promptResult.data.terminal.kind,
-        providerOutcome: promptResult.data.terminal.kind === 'failed'
-          ? 'failed'
-          : promptResult.data.terminal.kind === 'aborted'
-            ? 'aborted'
-            : 'completed',
-        ...(promptResult.data.terminal.kind === 'failed'
-          ? {
-              terminalErrorCode: promptResult.data.terminal.errorCode,
-              terminalErrorMessage: promptResult.data.terminal.errorMessage,
-              terminalErrorDetails: promptResult.data.terminal.errorDetails,
-            }
-          : {}),
-      }, promptResult.data.terminal.kind === 'failed' ? promptResult.data.terminal.errorDetails : undefined));
-      if (promptResult.data.terminal.kind === 'aborted') {
-        this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'prompt_terminal_aborted');
-        return;
-      }
-      activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
-    } catch (error) {
-      this.executionSessionInvalidationPort.invalidateAfterFailure({
-        conversationId: input.toolSessionId,
-        hostSessionId: context.opencodeSessionId,
-        error,
-      });
-      this.logger.error('provider_adapter.prompt.threw', appendTerminalSourceEvidence({
-        toolSessionId: input.toolSessionId,
-        opencodeSessionId: context.opencodeSessionId,
-        runId: activeRun.runId,
-        durationMs: Math.max(0, Date.now() - startedAt),
-        error: getErrorMessage(error),
-        providerOutcome: 'failed',
-        mappedProviderErrorCode: 'internal_error',
-      }, error));
-      activeRun.settlePromptTerminal({
-        outcome: 'failed',
-        error: {
-          code: 'internal_error',
-          message: getErrorMessage(error),
-        },
-      });
-    }
-  }
 }

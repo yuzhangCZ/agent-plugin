@@ -1,22 +1,13 @@
-import { randomUUID } from 'node:crypto';
-
 import type {
-  MessageDoneFact,
-  MessageStartFact,
-  ProviderFact,
   ProviderRun,
   ProviderRunMessageInput,
-  TextDeltaFact,
-  TextDoneFact,
 } from '@wecode/bridge-runtime-sdk';
 import type {
   BusinessEntryContext,
-  BusinessEntryContextResolver,
 } from './session-isolation/index.js';
 import type { BusinessEntryPolicy } from '../../port/session-isolation/dto/commands/index.js';
 
 import type {
-  HostModelCatalogPort,
   HostSessionCreateContext,
   HostSessionCreationPort,
   HostSessionQueryPort,
@@ -34,54 +25,10 @@ import type {
 } from '../../port/SlashCommandControlPlanePort.js';
 import { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
 import type { BridgeLogger } from '../AppLogger.js';
+import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
+export { SdkChatPreprocessor } from './SdkChatPreprocessor.js';
 
 const GROUP_CHAT_DENY_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
-
-function fromFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const fact of facts) {
-        yield fact;
-      }
-    },
-  };
-}
-
-function buildSyntheticRun(toolSessionId: string, text: string): ProviderRun {
-  const messageId = `msg_${randomUUID().replaceAll('-', '')}`;
-  const partId = `prt_${randomUUID().replaceAll('-', '')}`;
-  const facts: ProviderFact[] = [
-    {
-      type: 'message.start',
-      messageId,
-    } satisfies MessageStartFact,
-    {
-      type: 'text.delta',
-      messageId,
-      partId,
-      content: text,
-    } satisfies TextDeltaFact,
-    {
-      type: 'text.done',
-      messageId,
-      partId,
-      content: text,
-    } satisfies TextDoneFact,
-    {
-      type: 'message.done',
-      messageId,
-      reason: 'stop',
-    } satisfies MessageDoneFact,
-  ];
-
-  return {
-    runId: `synthetic-${toolSessionId}`,
-    facts: fromFacts(facts),
-    async result() {
-      return { outcome: 'completed' };
-    },
-  };
-}
 
 export interface ChatExecutionContext {
   opencodeSessionId: string;
@@ -546,97 +493,5 @@ export class DefaultCreatedSessionBindingPort implements CreatedSessionBindingPo
   register(anchor: string, opencodeSessionId: string): void {
     this.dependencies.bindingStore.bind(anchor, opencodeSessionId);
     this.dependencies.ownershipResolver.attach(opencodeSessionId, anchor);
-  }
-}
-
-type PreprocessResult =
-  | { kind: 'synthetic_run'; run: ProviderRun }
-  | { kind: 'normal_chat'; context: ChatExecutionContext };
-
-/**
- * SDK chat 入口预处理编排器。
- */
-export class SdkChatPreprocessor {
-  constructor(private readonly dependencies: {
-    chatEntryPolicy: ChatEntryPolicy;
-    slashExecutionUseCase: SdkSlashExecutionUseCase;
-    contextResolver: ChatExecutionContextResolver;
-    normalChatSessionResolver?: NormalChatSessionResolver;
-    businessEntryContextResolver?: BusinessEntryContextResolver;
-    effectiveDirectory?: string;
-  }) {}
-
-  async preprocess(input: ProviderRunMessageInput, logger?: BridgeLogger): Promise<PreprocessResult> {
-    const suppressDecision = this.dependencies.chatEntryPolicy.decide(input);
-    if (suppressDecision.kind === 'deny') {
-      return {
-        kind: 'synthetic_run',
-        run: buildSyntheticRun(input.toolSessionId, suppressDecision.text),
-      };
-    }
-
-    const entryContext = this.dependencies.businessEntryContextResolver
-      ? this.dependencies.businessEntryContextResolver.resolveForChatMessage(input)
-      : undefined;
-    const ensuredContext = this.dependencies.normalChatSessionResolver
-      ? await this.dependencies.normalChatSessionResolver.resolve({
-        message: input,
-        entryContext,
-        ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
-        logger,
-      })
-      : await this.dependencies.contextResolver.resolveForChat(
-        input.toolSessionId,
-        {
-          assistantId: input.assistantId,
-          imGroupId: input.context?.imGroupId,
-        },
-        logger,
-      );
-    const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
-    if (decision.kind === 'slash') {
-      logger?.info?.('sdk_chat_preprocessor.entry_policy_decision', {
-        toolSessionId: input.toolSessionId,
-        runId: input.runId,
-        policySource: entryContext?.policy.slashPolicySource ?? 'local_default',
-        allowedSlashCommands: entryContext?.policy.allowedSlashCommands,
-        decisionKind: decision.kind,
-        commandKind: decision.descriptor.kind,
-        disabledInEntry: Boolean(decision.disabledInEntry),
-        invalid: Boolean(decision.invalid),
-      });
-    }
-    if (decision.kind === 'deny') {
-      return {
-        kind: 'synthetic_run',
-        run: buildSyntheticRun(input.toolSessionId, decision.text),
-      };
-    }
-
-    if (decision.kind === 'slash') {
-      return {
-        kind: 'synthetic_run',
-        run: await this.dependencies.slashExecutionUseCase.execute({
-          anchor: input.toolSessionId,
-          descriptor: decision.descriptor,
-          command: decision.command,
-          entryContext,
-          disabledInEntry: decision.disabledInEntry,
-          invalid: decision.invalid,
-          createContext: {
-            assistantId: input.assistantId,
-            imGroupId: input.context?.imGroupId,
-          },
-          ensuredContext,
-          ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),
-          logger,
-        }),
-      };
-    }
-
-    return {
-      kind: 'normal_chat',
-      context: ensuredContext,
-    };
   }
 }
