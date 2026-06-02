@@ -3,41 +3,20 @@ import {
   type GatewayClientHostConfig,
   resolveGatewayClientHostConfig,
 } from '@agent-plugin/gateway-client';
+import type {
+  BridgeGatewayHostConfig,
+  BridgeGatewayLogger,
+  BridgeGatewayProbeResult,
+} from '../../public-contract.ts';
 import { resolvePackageVersion } from '../../packageVersion.ts';
 
-/**
- * `channel` 是接入方定义的业务渠道标识，SDK 不对具体字面量做产品级限制。
- */
-export type BridgeGatewayChannel = string;
-
-/**
- * Bridge runtime 使用的最小日志端口。
- */
-export interface BridgeGatewayLogger {
-  debug?: (message: string, meta?: Record<string, unknown>) => void;
-  info?: (message: string, meta?: Record<string, unknown>) => void;
-  warn?: (message: string, meta?: Record<string, unknown>) => void;
-  error?: (message: string, meta?: Record<string, unknown>) => void;
-  child?: (meta: Record<string, unknown>) => BridgeGatewayLogger;
-  getTraceId?: () => string;
-}
-
-/**
- * Gateway host bootstrap 所需的最小稳定输入。
- * @remarks 宿主只声明连接身份与工具版本；deviceName、os、macAddress 由 gateway-client 统一装配。
- */
-export interface BridgeGatewayHostConfig {
-  url?: string;
-  auth: {
-    ak: string;
-    sk: string;
-  };
-  register: {
-    channel: BridgeGatewayChannel;
-    toolVersion: string;
-    pluginVersion?: string;
-  };
-}
+export type {
+  BridgeGatewayChannel,
+  BridgeGatewayHostConfig,
+  BridgeGatewayLogger,
+  BridgeGatewayProbeResult,
+  BridgeGatewayProbeState,
+} from '../../public-contract.ts';
 
 interface InternalBridgeGatewayHostConfig extends GatewayClientHostConfig {
   url: string;
@@ -84,20 +63,6 @@ export interface BridgeGatewayProbeInput {
   gatewayHost: InternalBridgeGatewayHostConfig;
   timeoutMs: number;
   abortSignal?: AbortSignal;
-}
-
-export type BridgeGatewayProbeState =
-  | 'ready'
-  | 'rejected'
-  | 'connect_error'
-  | 'timeout'
-  | 'connecting'
-  | 'cancelled';
-
-export interface BridgeGatewayProbeResult {
-  state: BridgeGatewayProbeState;
-  latencyMs: number;
-  reason?: string;
 }
 
 function elapsedMs(startedAt: number, now: () => number): number {

@@ -38,7 +38,7 @@ export type {
   BridgeGatewayChannel,
   BridgeGatewayHostConfig,
   BridgeGatewayProbeResult,
-} from './infrastructure/gateway/gateway-host.ts';
+} from './public-contract.ts';
 export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
 export type {
   RuntimeDiagnostics,
