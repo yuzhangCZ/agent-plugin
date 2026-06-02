@@ -1108,7 +1108,7 @@ test("executeRelease fails fast on missing packages without install flags", () =
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
 });
 
-test("executeRelease installs missing packages with frozen lockfile mode", () => {
+test("executeRelease installs missing packages without a lockfile", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1145,7 +1145,7 @@ test("executeRelease installs missing packages with frozen lockfile mode", () =>
     stdout: stdout.stream,
     inspectDependencies: () => {
       const installAttempted = execDouble.calls.some(
-        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && entry.args.includes("--frozen-lockfile"),
+        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && entry.args.includes("--no-lockfile"),
       );
       return installAttempted ? { missingPackages: [], ok: true, targetId: "message-bridge" } : missingDependencyResult("message-bridge", ["esbuild"]);
     },
@@ -1158,13 +1158,13 @@ test("executeRelease installs missing packages with frozen lockfile mode", () =>
         entry.command === "pnpm" &&
         entry.cwd === repoRoot &&
         entry.args[0] === "install" &&
-        entry.args.includes("--frozen-lockfile"),
+        entry.args.includes("--no-lockfile"),
     ),
   );
   assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
 });
 
-test("executeRelease installs missing packages with update-lockfile mode", () => {
+test("executeRelease installs missing packages with legacy install alias", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1201,7 +1201,7 @@ test("executeRelease installs missing packages with update-lockfile mode", () =>
     stdout: stdout.stream,
     inspectDependencies: () => {
       const installAttempted = execDouble.calls.some(
-        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && !entry.args.includes("--frozen-lockfile"),
+        (entry) => entry.command === "pnpm" && entry.args[0] === "install" && entry.args.includes("--no-lockfile"),
       );
       return installAttempted ? { missingPackages: [], ok: true, targetId: "message-bridge" } : missingDependencyResult("message-bridge", ["esbuild"]);
     },
@@ -1213,13 +1213,14 @@ test("executeRelease installs missing packages with update-lockfile mode", () =>
       (entry) =>
         entry.command === "pnpm" &&
         entry.cwd === repoRoot &&
-        entry.args.length === 1 &&
-        entry.args[0] === "install",
+        entry.args.length === 2 &&
+        entry.args[0] === "install" &&
+        entry.args[1] === "--no-lockfile",
     ),
   );
 });
 
-test("executeRelease installs before dependency check with update-lockfile mode even when dependencies resolve", () => {
+test("executeRelease installs before dependency check with legacy install alias even when dependencies resolve", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1267,14 +1268,15 @@ test("executeRelease installs before dependency check with update-lockfile mode 
       (entry) =>
         entry.command === "pnpm" &&
         entry.cwd === repoRoot &&
-        entry.args.length === 1 &&
-        entry.args[0] === "install",
+        entry.args.length === 2 &&
+        entry.args[0] === "install" &&
+        entry.args[1] === "--no-lockfile",
     ),
   );
-  assert.match(stdout.toString(), /dependency presence install: pnpm install/);
+  assert.match(stdout.toString(), /dependency presence install: pnpm install --no-lockfile/);
 });
 
-test("executeRelease only installs once when update-lockfile mode still fails dependency checks", () => {
+test("executeRelease only installs once when legacy install alias still fails dependency checks", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1320,8 +1322,9 @@ test("executeRelease only installs once when update-lockfile mode still fails de
     (entry) =>
       entry.command === "pnpm" &&
       entry.cwd === repoRoot &&
-      entry.args.length === 1 &&
-      entry.args[0] === "install",
+      entry.args.length === 2 &&
+      entry.args[0] === "install" &&
+      entry.args[1] === "--no-lockfile",
   );
   assert.equal(installCalls.length, 1);
 });
@@ -1409,7 +1412,11 @@ test("executeRelease stops if packages are still missing after install", () => {
       }),
     /dependency presence sanity check failed before build/i,
   );
-  assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "install"));
+  assert.ok(
+    execDouble.calls.some(
+      (entry) => entry.command === "pnpm" && entry.args[0] === "install" && entry.args.includes("--no-lockfile"),
+    ),
+  );
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args[0] === "--dir"));
 });
 
@@ -1912,7 +1919,8 @@ test("main prints help output", async () => {
   assert.match(stdout.toString(), /--install-deps/);
   assert.match(stdout.toString(), /presence sanity check/i);
   assert.match(stdout.toString(), /gateway-dependent targets require --default-gateway-url/i);
-  assert.match(stdout.toString(), /pnpm install --frozen-lockfile/);
+  assert.match(stdout.toString(), /pnpm install --no-lockfile/);
+  assert.doesNotMatch(stdout.toString(), /pnpm install --frozen-lockfile/);
   assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
   assert.match(formatHelp(), /remote push only runs with --push/i);
 });

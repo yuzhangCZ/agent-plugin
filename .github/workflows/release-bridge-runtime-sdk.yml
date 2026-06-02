@@ -32,10 +32,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-lockfile
 
       - name: Validate release version
         run: node ./scripts/assert-release-version.mjs packages/bridge-runtime-sdk "${{ github.ref_name }}"
@@ -96,12 +95,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
           registry-url: ${{ vars.NPM_REGISTRY_URL }}
           scope: '@agent-plugin'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-lockfile
 
       - name: Validate release version
         run: node ./scripts/assert-release-version.mjs packages/bridge-runtime-sdk "${{ github.ref_name }}"

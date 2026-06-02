@@ -361,7 +361,7 @@ function assertRemoteRefExists(refName) {
 }
 
 async function installDependencies() {
-  run("pnpm", ["install", "--frozen-lockfile"], { cwd: sourceCopyDir, stdio: "inherit" });
+  run("pnpm", ["install"], { cwd: sourceCopyDir, stdio: "inherit" });
 }
 
 async function recreateIsolatedWorkspace({ resetRemote = false } = {}) {

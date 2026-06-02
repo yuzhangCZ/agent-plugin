@@ -34,10 +34,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-lockfile
 
       - name: Run OpenClaw runtime smoke
         run: pnpm run test:openclaw:runtime
