@@ -7,8 +7,11 @@ import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.t
 import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
+import type { RunTerminalSignalProjector } from '../projectors/index.ts';
 
 const OUTBOUND_PROFILE: LifecycleProfile = { kind: 'outbound' };
+// outbound_run 复用 request_run 的多消息生命周期校验，只在 observation 口径上区分来源。
+const OUTBOUND_RUN_PROFILE: LifecycleProfile = { kind: 'outbound_run' };
 
 /**
  * outbound 协调器。
@@ -19,6 +22,7 @@ export class OutboundCoordinator {
   private readonly validator: FactSequenceValidator;
   private readonly pipeline: EventPipeline;
   private readonly factEnricher: ProviderFactEnricher;
+  private readonly terminalProjector: RunTerminalSignalProjector;
 
   constructor(
     sessionRegistry: SessionRuntimeRegistry,
@@ -26,12 +30,14 @@ export class OutboundCoordinator {
     validator: FactSequenceValidator,
     pipeline: EventPipeline,
     factEnricher: ProviderFactEnricher,
+    terminalProjector: RunTerminalSignalProjector,
   ) {
     this.sessionRegistry = sessionRegistry;
     this.interactionCoordinator = interactionCoordinator;
     this.validator = validator;
     this.pipeline = pipeline;
     this.factEnricher = factEnricher;
+    this.terminalProjector = terminalProjector;
   }
 
   async emitOutbound(input: {
@@ -49,44 +55,88 @@ export class OutboundCoordinator {
 
     const state = this.validator.createState();
     try {
-        for await (const fact of input.facts) {
-          this.pipeline.observation.factReceived(input.toolSessionId, fact, OUTBOUND_PROFILE.kind);
-          const enriched = this.factEnricher.enrich(input.toolSessionId, fact);
-          if (!enriched.ok) {
-            this.pipeline.observation.failureRecorded(
-              RUNTIME_FAILURE_KIND.outboundValidation,
-              RUNTIME_FAILURE_PHASE.runtime,
-              enriched.reason,
-              enriched.reason,
-            );
-            continue;
-          }
-          const classification = classifyFact(fact.type);
-          this.validator.consume(input.toolSessionId, fact, state, OUTBOUND_PROFILE);
-          this.interactionCoordinator.registerFromFact(input.toolSessionId, fact);
-          const envelopeFields = this.toToolEventEnvelopeFields(fact);
-          const events = this.pipeline.factProjector.project(enriched.fact);
-
-        for (const event of events) {
-          const uplink = this.pipeline.eventProjector.project(input.toolSessionId, event, envelopeFields);
-          if (classification.emitsDerivedEvent) {
-            this.pipeline.observation.derivedEventProjected(
-              input.toolSessionId,
-              fact.type,
-              event,
-              OUTBOUND_PROFILE.kind,
-            );
-          } else if (classification.projectsFactEvent) {
-            this.pipeline.observation.uplinkProjected(input.toolSessionId, fact.type, uplink.type, OUTBOUND_PROFILE.kind);
-          }
-          this.pipeline.observation.uplinkEmitted(uplink);
-          await this.pipeline.sink.send(uplink);
-        }
-      }
+      await this.consumeFacts(input.toolSessionId, input.facts, OUTBOUND_PROFILE, state);
       return { applied: true };
     } finally {
       this.sessionRegistry.releaseOutboundEmission(input.toolSessionId, input.messageId);
     }
+  }
+
+  async emitOutboundRun(input: {
+    toolSessionId: string;
+    runId: string;
+    facts: AsyncIterable<ProviderFact>;
+  }): Promise<{ applied: true }> {
+    const acquired = this.sessionRegistry.acquireOutboundEmission(input.toolSessionId, input.runId);
+    if (!acquired.ok) {
+      throw new RuntimeContractError('outbound_already_active', 'toolSessionId already has an active outbound', {
+        toolSessionId: input.toolSessionId,
+        runId: input.runId,
+      });
+    }
+
+    const state = this.validator.createState();
+    try {
+      await this.consumeFacts(input.toolSessionId, input.facts, OUTBOUND_RUN_PROFILE, state);
+      await this.emitOutboundRunDone(input.toolSessionId, input.runId);
+      return { applied: true };
+    } finally {
+      this.sessionRegistry.releaseOutboundEmission(input.toolSessionId, input.runId);
+    }
+  }
+
+  private async consumeFacts(
+    toolSessionId: string,
+    facts: AsyncIterable<ProviderFact>,
+    profile: LifecycleProfile,
+    state: ReturnType<FactSequenceValidator['createState']>,
+  ): Promise<void> {
+    for await (const fact of facts) {
+      this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
+      const enriched = this.factEnricher.enrich(toolSessionId, fact);
+      if (!enriched.ok) {
+        this.pipeline.observation.failureRecorded(
+          RUNTIME_FAILURE_KIND.outboundValidation,
+          RUNTIME_FAILURE_PHASE.runtime,
+          enriched.reason,
+          enriched.reason,
+        );
+        continue;
+      }
+      const classification = classifyFact(fact.type);
+      this.validator.consume(toolSessionId, fact, state, profile);
+      this.interactionCoordinator.registerFromFact(toolSessionId, fact);
+      const envelopeFields = this.toToolEventEnvelopeFields(fact);
+      const events = this.pipeline.factProjector.project(enriched.fact);
+
+      for (const event of events) {
+        const uplink = this.pipeline.eventProjector.project(toolSessionId, event, envelopeFields);
+        if (classification.emitsDerivedEvent) {
+          this.pipeline.observation.derivedEventProjected(
+            toolSessionId,
+            fact.type,
+            event,
+            profile.kind,
+          );
+        } else if (classification.projectsFactEvent) {
+          this.pipeline.observation.uplinkProjected(toolSessionId, fact.type, uplink.type, profile.kind);
+        }
+        this.pipeline.observation.uplinkEmitted(uplink);
+        await this.pipeline.sink.send(uplink);
+      }
+    }
+  }
+
+  private async emitOutboundRunDone(toolSessionId: string, runId: string): Promise<void> {
+    const result = { outcome: 'completed' } as const;
+    this.pipeline.observation.terminalReceived(toolSessionId, result, { runId });
+    const uplink = this.terminalProjector.project({
+      toolSessionId,
+      result,
+    });
+    this.pipeline.observation.terminalProjected(toolSessionId, result, { runId });
+    this.pipeline.observation.uplinkEmitted(uplink);
+    await this.pipeline.sink.send(uplink);
   }
 
   private toToolEventEnvelopeFields(

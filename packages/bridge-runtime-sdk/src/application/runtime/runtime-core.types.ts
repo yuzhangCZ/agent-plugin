@@ -9,6 +9,11 @@ export interface RuntimeOutboundEmitter {
     messageId: string;
     facts: AsyncIterable<import('../../domain/provider.ts').ProviderFact>;
   }): Promise<{ applied: true }>;
+  emitOutboundRun(input: {
+    toolSessionId: string;
+    runId: string;
+    facts: AsyncIterable<import('../../domain/provider.ts').ProviderFact>;
+  }): Promise<{ applied: true }>;
 }
 
 export interface RuntimeCoreOptions {

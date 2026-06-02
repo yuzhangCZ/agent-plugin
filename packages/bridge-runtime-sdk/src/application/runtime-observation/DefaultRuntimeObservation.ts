@@ -1,6 +1,7 @@
 import type { GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
 
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
+import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 import type { RuntimeObservation, RuntimeObservationPort } from './runtime-observation.port.ts';
 import type {
   FailureRecordedObservationEvent,
@@ -218,7 +219,7 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
     });
   }
 
-  factReceived(toolSessionId: string, fact: ProviderFact, profile: 'request_run' | 'outbound'): void {
+  factReceived(toolSessionId: string, fact: ProviderFact, profile: LifecycleProfileKind): void {
     this.port.record({
       type: 'fact_processed',
       phase: 'received',
@@ -232,7 +233,7 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
     toolSessionId: string,
     factType: ProviderFact['type'],
     event: SkillProviderEvent,
-    profile: 'request_run' | 'outbound',
+    profile: LifecycleProfileKind,
   ): void {
     this.port.record({
       type: 'fact_processed',
@@ -248,7 +249,7 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
     toolSessionId: string,
     factType: ProviderFact['type'],
     uplinkType: GatewayUplinkBusinessMessage['type'],
-    profile: 'request_run' | 'outbound',
+    profile: LifecycleProfileKind,
   ): void {
     this.port.record({
       type: 'fact_processed',

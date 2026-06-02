@@ -45,6 +45,12 @@ export interface ProviderCommandError {
  */
 export interface RuntimeOutboundEmitter {
   emitOutboundMessage(input: EmitOutboundMessageInput): Promise<RuntimeAppliedResult>;
+  /**
+   * 发送一轮 provider 主动产生的 facts 流。
+   * @remarks
+   * 新版 SDK 会注入该能力；保持可选是为了不破坏只使用 `emitOutboundMessage` 的既有 provider 类型实现。
+   */
+  emitOutboundRun?(input: EmitOutboundRunInput): Promise<RuntimeAppliedResult>;
 }
 
 /**
@@ -168,6 +174,16 @@ export interface EmitOutboundMessageInput {
   trigger: 'scheduled' | 'webhook' | 'system' | string;
   facts: AsyncIterable<OutboundFact>;
   assistantId?: string;
+}
+
+/**
+ * outbound run 批次输入。
+ */
+export interface EmitOutboundRunInput {
+  toolSessionId: string;
+  runId: string;
+  trigger: 'scheduled' | 'webhook' | 'system' | string;
+  facts: AsyncIterable<OutboundFact>;
 }
 
 /**

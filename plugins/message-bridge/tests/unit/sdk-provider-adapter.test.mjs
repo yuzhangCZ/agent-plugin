@@ -17,6 +17,7 @@ import {
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
 import { HostSessionRunCoordinator } from '../../src/runtime/sdk/HostSessionRunCoordinator.ts';
+import { TuiOutboundRunRegistry } from '../../src/runtime/sdk/OpenCodeProviderAdapter.outbound-run.ts';
 import {
   ActiveRunRegistry,
 } from '../../src/runtime/sdk/OpenCodeProviderAdapter.run.ts';
@@ -166,6 +167,45 @@ function withTimeout(promise, message, timeoutMs = 1000) {
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 }
 
+async function queuePermissionBehindBlockedTuiOutboundRun(adapter, input) {
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: input.hostSessionId,
+        id: input.messageId,
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: input.hostSessionId,
+        id: input.messageId,
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await withTimeout(input.firstRunCollected.promise, 'expected first outbound run to reach emission');
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: input.hostSessionId,
+      id: input.permissionId,
+      permission: 'shell',
+      tool: {
+        messageID: input.queuedMessageId,
+      },
+    },
+  });
+}
+
 function createAdapter(overrides = {}) {
   const sdkClient = 'sdkClient' in overrides ? overrides.sdkClient : createSdkClient(overrides);
   const logger = overrides.logger ?? createLogger();
@@ -296,6 +336,7 @@ function createAdapter(overrides = {}) {
     ...(overrides.permissionReplyCommandPort ? { permissionReplyCommandPort: overrides.permissionReplyCommandPort } : {}),
     ...(overrides.hostEventPort ? { hostEventPort: overrides.hostEventPort } : {}),
     ...(overrides.pendingInteractionRecorder ? { pendingInteractionRecorder: overrides.pendingInteractionRecorder } : {}),
+    ...(overrides.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: overrides.finalIdleTimeoutMs } : {}),
     effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
     opencodeSessionGatewayAdapter,
     chatPreprocessor,
@@ -758,6 +799,61 @@ test('provider adapter abortSession fallback closes all runs under resolved host
   assert.equal(abortCalls.length, 1);
   assert.deepEqual(await runA.result(), { outcome: 'aborted' });
   assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+});
+
+test('provider adapter abortSession clears queued TUI outbound run events for aborted host session', async () => {
+  const emittedRuns = [];
+  const pendingRecords = [];
+  const firstRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-abort-outbound', 'ses-abort-outbound']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'ses-abort-outbound',
+      }),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        emittedRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        firstRunCollected.resolve();
+        await releaseFirstEmit.promise;
+        return { applied: true };
+      },
+    },
+  });
+
+  await queuePermissionBehindBlockedTuiOutboundRun(adapter, {
+    hostSessionId: 'ses-abort-outbound',
+    messageId: 'msg-abort-outbound',
+    queuedMessageId: 'msg-abort-outbound-queued',
+    permissionId: 'permission-abort-outbound',
+    firstRunCollected,
+  });
+  assert.deepEqual(pendingRecords, []);
+
+  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'tool-abort-outbound' }), { applied: true });
+  releaseFirstEmit.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(emittedRuns.length, 1);
+  assert.deepEqual(emittedRuns[0].facts.map((fact) => fact.type), ['message.start', 'message.done']);
+  assert.deepEqual(pendingRecords, []);
 });
 
 test('provider adapter abortSession overrides completed prompt while run is still draining facts', async () => {
@@ -1543,7 +1639,43 @@ test('provider adapter drops assistant streaming event when no active host run e
   }), false);
 });
 
-test('provider adapter routes session.error to outbound owner when no active host run exists', async () => {
+test('provider adapter routes session.error to outbound run when no active host run exists', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['conversation-a', 'host-a']],
+  });
+  await adapter.initialize({
+    outbound: {
+      emitOutboundMessage: async () => {
+        throw new Error('unexpected outbound message call');
+      },
+      emitOutboundRun: async (input) => {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  assert.equal(await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'host-a',
+      error: { message: 'boom' },
+    },
+  }), true);
+  await withTimeout(outboundRunCollected.promise, 'expected session.error outbound run to close');
+  assert.equal(outboundRuns[0].toolSessionId, 'conversation-a');
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.type), ['session.error']);
+});
+
+test('provider adapter routes session.error to legacy outbound message when outbound run is unavailable', async () => {
   const outboundCalls = [];
   const adapter = createAdapter({
     bindings: [['conversation-a', 'host-a']],
@@ -2098,6 +2230,142 @@ test('provider adapter closeSession delegates cleanup to session-isolation comma
     toolSessionId: 'tool-close-formal',
   }), { applied: true });
   assert.deepEqual(calls, [{ toolSessionId: 'tool-close-formal' }]);
+});
+
+test('provider adapter closeSession clears queued TUI outbound run events for closed host session', async () => {
+  const emittedRuns = [];
+  const pendingRecords = [];
+  const firstRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-close-outbound', 'ses-close-outbound']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+    closeSessionCommandPort: {
+      execute: async () => ({ kind: 'closed', sessionId: 'ses-close-outbound' }),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        emittedRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        firstRunCollected.resolve();
+        await releaseFirstEmit.promise;
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'ses-close-outbound',
+        id: 'msg-close-outbound',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'ses-close-outbound',
+        id: 'msg-close-outbound',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await withTimeout(firstRunCollected.promise, 'expected first outbound run to reach emission');
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'ses-close-outbound',
+      id: 'permission-close-outbound',
+      permission: 'shell',
+      tool: {
+        messageID: 'msg-close-outbound-queued',
+      },
+    },
+  });
+  assert.deepEqual(pendingRecords, []);
+
+  assert.deepEqual(await adapter.closeSession({ toolSessionId: 'tool-close-outbound' }), { applied: true });
+  releaseFirstEmit.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(emittedRuns.length, 1);
+  assert.deepEqual(emittedRuns[0].facts.map((fact) => fact.type), ['message.start', 'message.done']);
+  assert.deepEqual(pendingRecords, []);
+});
+
+test('provider adapter closeSession legacy fallback clears queued TUI outbound run events', async () => {
+  const emittedRuns = [];
+  const pendingRecords = [];
+  const closeCalls = [];
+  const firstRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-close-legacy-outbound', 'ses-close-legacy-outbound']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+    session: {
+      delete: async (input) => {
+        closeCalls.push(input);
+        return { data: true };
+      },
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        emittedRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        firstRunCollected.resolve();
+        await releaseFirstEmit.promise;
+        return { applied: true };
+      },
+    },
+  });
+
+  await queuePermissionBehindBlockedTuiOutboundRun(adapter, {
+    hostSessionId: 'ses-close-legacy-outbound',
+    messageId: 'msg-close-legacy-outbound',
+    queuedMessageId: 'msg-close-legacy-outbound-queued',
+    permissionId: 'permission-close-legacy-outbound',
+    firstRunCollected,
+  });
+  assert.deepEqual(pendingRecords, []);
+
+  assert.deepEqual(await adapter.closeSession({ toolSessionId: 'tool-close-legacy-outbound' }), { applied: true });
+  releaseFirstEmit.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(closeCalls.length, 1);
+  assert.equal(emittedRuns.length, 1);
+  assert.deepEqual(emittedRuns[0].facts.map((fact) => fact.type), ['message.start', 'message.done']);
+  assert.deepEqual(pendingRecords, []);
 });
 
 test('provider adapter maps missing business entry to invalid_input failed run', async () => {
@@ -4213,6 +4481,67 @@ test('provider adapter closes facts by drain timeout when no terminal candidate 
   }]);
 });
 
+test('provider adapter times out active run after final idle when prompt never settles', async () => {
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  const promptCalls = [];
+  const adapter = createAdapter({
+    finalIdleTimeoutMs: 100,
+    bindings: [
+      ['tool-active-final-idle-a', 'host-active-final-idle'],
+      ['tool-active-final-idle-b', 'host-active-final-idle'],
+    ],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => {
+    const deferred = promptCalls.length === 0 ? firstPrompt : secondPrompt;
+    promptCalls.push(deferred);
+    return deferred.promise;
+  };
+
+  const firstRun = await adapter.runMessage({
+    traceId: 'trace-active-final-idle-1',
+    runId: 'run-active-final-idle-1',
+    toolSessionId: 'tool-active-final-idle-a',
+    text: 'first',
+  });
+  const secondRun = await adapter.runMessage({
+    traceId: 'trace-active-final-idle-2',
+    runId: 'run-active-final-idle-2',
+    toolSessionId: 'tool-active-final-idle-b',
+    text: 'second',
+  });
+
+  assert.deepEqual(await withTimeout(firstRun.result(), 'expected first run to timeout'), {
+    outcome: 'failed',
+    error: {
+      code: 'timeout',
+      message: 'provider_run_final_idle_timeout',
+      retryable: true,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(promptCalls.length, 2);
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-active-final-idle',
+        id: 'msg-active-final-idle-2',
+        role: 'assistant',
+        time: {
+          created: '2026-05-22T12:00:02.000Z',
+          completed: '2026-05-22T12:00:03.000Z',
+        },
+        finish: 'stop',
+      },
+    },
+  });
+  secondPrompt.resolve(createPromptActionResult({ messageId: 'msg-active-final-idle-2' }));
+
+  assert.deepEqual(await secondRun.result(), { outcome: 'completed' });
+});
+
 test('provider adapter aborts superseded run without deleting the newer active run', async () => {
   const firstPrompt = createDeferred();
   const secondPrompt = createDeferred();
@@ -4644,5 +4973,1062 @@ test('provider adapter ignores message.updated when no active run owns it', asyn
     && entry.extra?.eventType === 'message.updated'
     && entry.extra?.rawSessionId === 'tool-session-42'
     && entry.extra?.messageId === 'msg-42'
-    && entry.extra?.dropReason === 'missing_active_run'), true);
+    && entry.extra?.dropReason === 'missing_runtime_context'), true);
+});
+
+test('provider adapter routes detached TUI assistant messages through outbound run', async () => {
+  const outboundRuns = [];
+  const pendingRecords = [];
+  const outboundRunCollected = createDeferred();
+  const secondOutboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-outbound', 'host-tui-outbound']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (outboundRuns.length === 1) {
+          outboundRunCollected.resolve();
+        }
+        if (outboundRuns.length === 2) {
+          secondOutboundRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-outbound',
+        id: 'msg-tui-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'host-tui-outbound',
+      messageID: 'msg-tui-1',
+      partID: 'part-tui-1',
+      delta: 'hello',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'question.asked',
+    properties: {
+      sessionID: 'host-tui-outbound',
+      id: 'question-tui-1',
+      tool: {
+        messageID: 'msg-tui-1',
+      },
+      questions: [{ question: 'Continue?', options: [{ label: 'Yes' }] }],
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-tui-outbound',
+      id: 'permission-tui-1',
+      permission: 'shell',
+      tool: {
+        messageID: 'msg-tui-1',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-outbound',
+        id: 'msg-tui-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-outbound',
+        id: 'msg-tui-2',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'host-tui-outbound',
+      messageID: 'msg-tui-2',
+      partID: 'part-tui-2',
+      delta: 'again',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-outbound',
+        id: 'msg-tui-2',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close');
+  await withTimeout(secondOutboundRunCollected.promise, 'expected second outbound run to close');
+  const [firstOutboundRun, secondOutboundRun] = outboundRuns;
+  assert.equal(outboundRuns.length, 2);
+  assert.equal(firstOutboundRun.toolSessionId, 'tool-tui-outbound');
+  assert.equal(secondOutboundRun.toolSessionId, 'tool-tui-outbound');
+  assert.deepEqual(firstOutboundRun.facts.map((fact) => fact.type), [
+    'message.start',
+    'text.delta',
+    'question.ask',
+    'permission.ask',
+    'message.done',
+  ]);
+  assert.deepEqual(secondOutboundRun.facts.map((fact) => fact.type), [
+    'message.start',
+    'text.delta',
+    'message.done',
+  ]);
+  assert.deepEqual(firstOutboundRun.facts.map((fact) => fact.messageId), [
+    'msg-tui-1',
+    'msg-tui-1',
+    'msg-tui-1',
+    'msg-tui-1',
+    'msg-tui-1',
+  ]);
+  assert.deepEqual(secondOutboundRun.facts.map((fact) => fact.messageId), [
+    'msg-tui-2',
+    'msg-tui-2',
+    'msg-tui-2',
+  ]);
+  assert.deepEqual(pendingRecords, [
+    {
+      kind: 'question',
+      tokenId: 'question-tui-1',
+      toolSessionId: 'tool-tui-outbound',
+      hostSessionId: 'host-tui-outbound',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'permission-tui-1',
+      toolSessionId: 'tool-tui-outbound',
+      hostSessionId: 'host-tui-outbound',
+    },
+  ]);
+});
+
+test('provider adapter routes detached permission.replied through outbound run', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-permission-reply', 'host-tui-permission-reply']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  const handled = await adapter.handleEvent({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'host-tui-permission-reply',
+      requestID: 'permission-reply-tui-1',
+      reply: 'once',
+    },
+  });
+
+  assert.equal(handled, true);
+  await withTimeout(outboundRunCollected.promise, 'expected permission reply outbound run to close');
+  assert.equal(outboundRuns.length, 1);
+  assert.equal(outboundRuns[0].toolSessionId, 'tool-tui-permission-reply');
+  assert.deepEqual(outboundRuns[0].facts, [{
+    type: 'permission.reply',
+    permissionId: 'permission-reply-tui-1',
+    response: 'once',
+    raw: {
+      sessionID: 'host-tui-permission-reply',
+      requestID: 'permission-reply-tui-1',
+      reply: 'once',
+    },
+  }]);
+});
+
+test('provider adapter buffers outbound handoff until previous emitOutboundRun settles', async () => {
+  const outboundRuns = [];
+  const firstRunCollected = createDeferred();
+  const secondRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-closed-window', 'host-tui-closed-window']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (outboundRuns.length === 1) {
+          firstRunCollected.resolve();
+          await releaseFirstEmit.promise;
+        } else {
+          secondRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-closed-window',
+        id: 'msg-window-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-closed-window',
+        id: 'msg-window-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await withTimeout(firstRunCollected.promise, 'expected first outbound run to close');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-closed-window',
+        id: 'msg-window-2',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-closed-window',
+        id: 'msg-window-2',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => withTimeout(secondRunCollected.promise, 'second outbound run should wait for first emit to settle', 80),
+    /second outbound run should wait for first emit to settle/,
+  );
+  releaseFirstEmit.resolve();
+  await withTimeout(secondRunCollected.promise, 'expected buffered outbound run to close after first emit settles');
+  assert.equal(outboundRuns.length, 2);
+  assert.deepEqual(outboundRuns.map((run) => run.facts.map((fact) => fact.messageId)), [
+    ['msg-window-1', 'msg-window-1'],
+    ['msg-window-2', 'msg-window-2'],
+  ]);
+});
+
+test('provider adapter records queued interaction with accepted anchor while handoff run stays open', async () => {
+  const outboundRuns = [];
+  const pendingRecords = [];
+  const firstRunCollected = createDeferred();
+  const secondRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-handoff-a', 'host-tui-handoff-anchor']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (outboundRuns.length === 1) {
+          firstRunCollected.resolve();
+          await releaseFirstEmit.promise;
+        } else {
+          secondRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor',
+        id: 'msg-handoff-old',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor',
+        id: 'msg-handoff-old',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await withTimeout(firstRunCollected.promise, 'expected first outbound run to close');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor',
+        id: 'msg-handoff-a-open',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+
+  adapter.contextResolver.dependencies.ownershipResolver.attach('host-tui-handoff-anchor', 'tool-tui-handoff-b');
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-tui-handoff-anchor',
+      id: 'permission-handoff-b-joins-a',
+      permission: 'shell',
+      tool: {
+        messageID: 'msg-handoff-a-open',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor',
+        id: 'msg-handoff-a-open',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  releaseFirstEmit.resolve();
+  await withTimeout(secondRunCollected.promise, 'expected queued open run to flush');
+
+  assert.equal(outboundRuns.length, 2);
+  assert.equal(outboundRuns[1].toolSessionId, 'tool-tui-handoff-a');
+  assert.deepEqual(outboundRuns[1].facts.map((fact) => [fact.type, fact.messageId]), [
+    ['message.start', 'msg-handoff-a-open'],
+    ['permission.ask', 'msg-handoff-a-open'],
+    ['message.done', 'msg-handoff-a-open'],
+  ]);
+  assert.deepEqual(pendingRecords, [{
+    kind: 'permission',
+    tokenId: 'permission-handoff-b-joins-a',
+    toolSessionId: 'tool-tui-handoff-a',
+    hostSessionId: 'host-tui-handoff-anchor',
+  }]);
+});
+
+test('provider adapter records queued interaction with next owner after handoff run closes', async () => {
+  const outboundRuns = [];
+  const pendingRecords = [];
+  const firstRunCollected = createDeferred();
+  const thirdRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-handoff-a-closed', 'host-tui-handoff-anchor-closed']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (outboundRuns.length === 1) {
+          firstRunCollected.resolve();
+          await releaseFirstEmit.promise;
+        }
+        if (outboundRuns.length === 3) {
+          thirdRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-closed-old',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-closed-old',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+  await withTimeout(firstRunCollected.promise, 'expected first outbound run to close');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-a-closed',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-a-closed',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  adapter.contextResolver.dependencies.ownershipResolver.attach('host-tui-handoff-anchor-closed', 'tool-tui-handoff-b-closed');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-b-open',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:04.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-tui-handoff-anchor-closed',
+      id: 'permission-handoff-b-new-run',
+      permission: 'shell',
+      tool: {
+        messageID: 'msg-handoff-b-open',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-handoff-anchor-closed',
+        id: 'msg-handoff-b-open',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:05.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  releaseFirstEmit.resolve();
+  await withTimeout(thirdRunCollected.promise, 'expected queued next-owner run to flush');
+
+  assert.equal(outboundRuns.length, 3);
+  assert.equal(outboundRuns[1].toolSessionId, 'tool-tui-handoff-a-closed');
+  assert.deepEqual(outboundRuns[1].facts.map((fact) => fact.messageId), [
+    'msg-handoff-a-closed',
+    'msg-handoff-a-closed',
+  ]);
+  assert.equal(outboundRuns[2].toolSessionId, 'tool-tui-handoff-b-closed');
+  assert.deepEqual(outboundRuns[2].facts.map((fact) => [fact.type, fact.messageId]), [
+    ['message.start', 'msg-handoff-b-open'],
+    ['permission.ask', 'msg-handoff-b-open'],
+    ['message.done', 'msg-handoff-b-open'],
+  ]);
+  assert.deepEqual(pendingRecords, [{
+    kind: 'permission',
+    tokenId: 'permission-handoff-b-new-run',
+    toolSessionId: 'tool-tui-handoff-b-closed',
+    hostSessionId: 'host-tui-handoff-anchor-closed',
+  }]);
+});
+
+test('TuiOutboundRunRegistry drops queued translations on host close before accept', async () => {
+  const accepted = [];
+  const emittedRuns = [];
+  const firstRunCollected = createDeferred();
+  const releaseFirstEmit = createDeferred();
+  const registry = new TuiOutboundRunRegistry({
+    logger: createLogger(),
+    onFinalIdleTimeout: () => undefined,
+    onTranslationAccepted: (input) => accepted.push(input),
+  });
+  const runtimeContext = {
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        emittedRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        firstRunCollected.resolve();
+        await releaseFirstEmit.promise;
+        return { applied: true };
+      },
+    },
+  };
+
+  registry.push({
+    hostSessionId: 'host-tui-registry-close',
+    anchorSessionId: 'tool-tui-registry-close-a',
+    factSessionContext: {
+      anchorSessionId: 'tool-tui-registry-close-a',
+      trackingSessionId: 'host-tui-registry-close',
+    },
+    runtimeContext,
+    translation: {
+      recognized: true,
+      envelopeMessageId: 'msg-registry-close-old',
+      facts: [
+        { type: 'message.start', messageId: 'msg-registry-close-old' },
+        { type: 'message.done', messageId: 'msg-registry-close-old' },
+      ],
+      terminalCandidateMessageId: 'msg-registry-close-old',
+    },
+  });
+  await withTimeout(firstRunCollected.promise, 'expected first registry outbound run to close');
+
+  registry.push({
+    hostSessionId: 'host-tui-registry-close',
+    anchorSessionId: 'tool-tui-registry-close-b',
+    factSessionContext: {
+      anchorSessionId: 'tool-tui-registry-close-b',
+      trackingSessionId: 'host-tui-registry-close',
+    },
+    runtimeContext,
+    translation: {
+      recognized: true,
+      envelopeMessageId: 'permission-registry-close',
+      facts: [{
+        type: 'permission.ask',
+        permissionId: 'permission-registry-close',
+        messageId: 'msg-registry-close-b',
+        permission: 'shell',
+        raw: {},
+      }],
+    },
+  });
+  registry.closeByHostSession('host-tui-registry-close');
+  releaseFirstEmit.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(emittedRuns.length, 1);
+  assert.deepEqual(accepted.map((input) => input.facts.map((fact) => fact.type)), [
+    ['message.start', 'message.done'],
+  ]);
+});
+
+test('provider adapter keeps outbound run open after non-terminal message done', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-non-terminal', 'host-tui-non-terminal']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-non-terminal',
+        id: 'msg-non-terminal-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-non-terminal',
+        id: 'msg-non-terminal-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'tool-calls',
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-non-terminal',
+        id: 'msg-non-terminal-2',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-non-terminal',
+        id: 'msg-non-terminal-2',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close after terminal candidate');
+  assert.equal(outboundRuns.length, 1);
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.messageId), [
+    'msg-non-terminal-1',
+    'msg-non-terminal-1',
+    'msg-non-terminal-2',
+    'msg-non-terminal-2',
+  ]);
+});
+
+test('provider adapter keeps outbound run open while assistant message is open across drain timeout', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-open-message-timeout', 'host-tui-open-message-timeout']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (facts.some((fact) => fact.type === 'message.done')) {
+          outboundRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-open-message-timeout',
+        id: 'msg-open-timeout-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'host-tui-open-message-timeout',
+      messageID: 'msg-open-timeout-1',
+      partID: 'part-open-timeout-1',
+      delta: 'late',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-open-message-timeout',
+        id: 'msg-open-timeout-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close after delayed message done');
+  assert.equal(outboundRuns.length, 1);
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.type), [
+    'message.start',
+    'text.delta',
+    'message.done',
+  ]);
+});
+
+test('provider adapter closes outbound run after final idle when assistant message stays open', async () => {
+  const logs = [];
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    finalIdleTimeoutMs: 40,
+    logger: createCapturingLogger(logs),
+    bindings: [['tool-tui-final-idle', 'host-tui-final-idle']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-final-idle',
+        id: 'msg-tui-final-idle-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close by final idle');
+  assert.equal(outboundRuns.length, 1);
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.type), ['message.start']);
+  assert.equal(logs.some((entry) => entry.level === 'warn'
+    && entry.message === 'provider_adapter.protocol_diagnostic'
+    && entry.extra?.code === 'outbound_open_message_idle_timeout'
+    && entry.extra?.messageIds?.includes('msg-tui-final-idle-1')), true);
+});
+
+test('provider adapter keeps outbound run open when terminal candidate arrives while another assistant message is open', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-overlap-message', 'host-tui-overlap-message']],
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        if (facts.some((fact) => fact.messageId === 'msg-overlap-2' && fact.type === 'message.done')) {
+          outboundRunCollected.resolve();
+        }
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-overlap-message',
+        id: 'msg-overlap-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-overlap-message',
+        id: 'msg-overlap-2',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:01.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-overlap-message',
+        id: 'msg-overlap-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:02.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  await adapter.handleEvent({
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'host-tui-overlap-message',
+      messageID: 'msg-overlap-2',
+      partID: 'part-overlap-2',
+      delta: 'still open',
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-overlap-message',
+        id: 'msg-overlap-2',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close after second message done');
+  assert.equal(outboundRuns.length, 1);
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => [fact.type, fact.messageId]), [
+    ['message.start', 'msg-overlap-1'],
+    ['message.start', 'msg-overlap-2'],
+    ['message.done', 'msg-overlap-1'],
+    ['text.delta', 'msg-overlap-2'],
+    ['message.done', 'msg-overlap-2'],
+  ]);
+});
+
+test('provider adapter keeps outbound run anchor locked after attached owner changes', async () => {
+  const logs = [];
+  const outboundRuns = [];
+  const pendingRecords = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    bindings: [['tool-tui-anchor-a', 'host-tui-anchor-lock']],
+    pendingInteractionRecorder: {
+      record: (input) => pendingRecords.push(input),
+    },
+  });
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-anchor-lock',
+        id: 'msg-anchor-lock-1',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-tui-anchor-lock',
+      id: 'permission-anchor-lock-1',
+      permission: 'shell',
+      tool: {
+        messageID: 'msg-anchor-lock-2',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-anchor-lock',
+        id: 'msg-anchor-lock-1',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'tool-calls',
+      },
+    },
+  });
+
+  adapter.contextResolver.dependencies.ownershipResolver.attach('host-tui-anchor-lock', 'tool-tui-anchor-b');
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-anchor-lock',
+        id: 'msg-anchor-lock-2',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:02.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-anchor-lock',
+        id: 'msg-anchor-lock-2',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:03.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to close after terminal candidate');
+  assert.equal(outboundRuns.length, 1);
+  assert.equal(outboundRuns[0].toolSessionId, 'tool-tui-anchor-a');
+  assert.equal(outboundRuns[0].facts.some((fact) => fact.type === 'permission.ask'
+    && fact.permissionId === 'permission-anchor-lock-1'
+    && fact.messageId === 'msg-anchor-lock-2'), true);
+  assert.deepEqual(pendingRecords, [{
+    kind: 'permission',
+    tokenId: 'permission-anchor-lock-1',
+    toolSessionId: 'tool-tui-anchor-a',
+    hostSessionId: 'host-tui-anchor-lock',
+  }]);
+  assert.equal(logs.some((entry) => entry.level === 'debug'
+    && entry.message === 'provider_adapter.tui_outbound_run_anchor_locked'
+    && entry.extra?.hostSessionId === 'host-tui-anchor-lock'
+    && entry.extra?.lockedAnchorSessionId === 'tool-tui-anchor-a'
+    && entry.extra?.resolvedAnchorSessionId === 'tool-tui-anchor-b'), true);
 });

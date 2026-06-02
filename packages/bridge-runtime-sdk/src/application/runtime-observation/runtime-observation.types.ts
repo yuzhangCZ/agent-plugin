@@ -2,6 +2,7 @@ import type { GatewayDownstreamBusinessRequest, GatewayUplinkBusinessMessage, Sk
 
 import type { RuntimeFailureKind, RuntimeFailurePhase } from '../constants/runtime.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
+import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 
 /**
  * runtime command 名称闭集。
@@ -141,7 +142,7 @@ export type FactProcessedObservationEvent =
       phase: 'received';
       toolSessionId: string;
       fact: ProviderFact;
-      profile: 'request_run' | 'outbound';
+      profile: LifecycleProfileKind;
     }
   | {
       type: 'fact_processed';
@@ -149,7 +150,7 @@ export type FactProcessedObservationEvent =
       toolSessionId: string;
       factType: ProviderFact['type'];
       event: SkillProviderEvent;
-      profile: 'request_run' | 'outbound';
+      profile: LifecycleProfileKind;
     }
   | {
       type: 'fact_processed';
@@ -157,7 +158,7 @@ export type FactProcessedObservationEvent =
       toolSessionId: string;
       factType: ProviderFact['type'];
       uplinkType: GatewayUplinkBusinessMessage['type'];
-      profile: 'request_run' | 'outbound';
+      profile: LifecycleProfileKind;
     };
 
 /**

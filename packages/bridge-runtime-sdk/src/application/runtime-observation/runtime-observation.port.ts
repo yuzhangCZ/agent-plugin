@@ -11,6 +11,7 @@ import type {
 } from './runtime-observation.types.ts';
 import type { GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
+import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 
 /**
  * 面向 application core 的阶段化观测 API。
@@ -96,18 +97,18 @@ export interface RuntimeObservation {
     code?: string,
     context?: RuntimeObservationProviderContext,
   ): void;
-  factReceived(toolSessionId: string, fact: ProviderFact, profile: 'request_run' | 'outbound'): void;
+  factReceived(toolSessionId: string, fact: ProviderFact, profile: LifecycleProfileKind): void;
   derivedEventProjected(
     toolSessionId: string,
     factType: ProviderFact['type'],
     event: SkillProviderEvent,
-    profile: 'request_run' | 'outbound',
+    profile: LifecycleProfileKind,
   ): void;
   uplinkProjected(
     toolSessionId: string,
     factType: ProviderFact['type'],
     uplinkType: GatewayUplinkBusinessMessage['type'],
-    profile: 'request_run' | 'outbound',
+    profile: LifecycleProfileKind,
   ): void;
   interactionRegistered(kind: 'question' | 'permission', toolSessionId: string, tokenId: string): void;
   interactionConsumed(kind: 'question' | 'permission', toolSessionId: string, tokenId: string): void;

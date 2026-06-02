@@ -83,6 +83,7 @@ export function createApplicationRuntimeSide(
       observation,
     },
     factEnricher,
+    terminalProjector,
   );
   const dispatcher = new RuntimeCommandDispatcher({
     query_status: new QueryStatusUseCase(providerHandlers, sink, commandResultProjector, observation),
