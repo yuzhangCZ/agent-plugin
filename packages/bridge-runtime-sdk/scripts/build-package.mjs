@@ -54,6 +54,7 @@ async function main() {
     {
       cwd: packageDir,
       stdio: 'inherit',
+      shell: true,
     },
   );
 

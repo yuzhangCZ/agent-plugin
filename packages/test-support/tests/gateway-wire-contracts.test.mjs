@@ -43,7 +43,6 @@ const legacyArchitectureDocPath = resolve(repoRoot, 'docs/architecture/gateway-w
 const legacyModuleDesignDocPath = resolve(repoRoot, 'docs/design/gateway-wire-v1-module-design.md');
 const legacyEventContractDocPath = resolve(repoRoot, 'docs/design/interfaces/gateway-wire-v1-event-contract.md');
 const pluginPackageJsonPath = resolve(repoRoot, 'plugins/message-bridge/package.json');
-const lockfilePath = resolve(repoRoot, 'pnpm-lock.yaml');
 
 function extractToolEventSectionHeadings(markdown) {
   return [...markdown.matchAll(/^##\s+`?([^`\n]+)`?\s*$/gm)]
@@ -186,19 +185,16 @@ test('gateway schema docs must declare the reference host version and field-tabl
   assert.doesNotMatch(docsArchitecturePath, /gateway-wire-v1/);
   assert.doesNotMatch(docsEventContractPath, /gateway-wire-v1/);
 
-  const [architectureDoc, eventDoc, packageJson, lockfile] = await Promise.all([
+  const [architectureDoc, eventDoc, packageJson] = await Promise.all([
     readFile(docsArchitecturePath, 'utf8'),
     readFile(docsEventContractPath, 'utf8'),
     readFile(pluginPackageJsonPath, 'utf8'),
-    readFile(lockfilePath, 'utf8'),
   ]);
 
   const manifest = JSON.parse(packageJson);
 
   assert.strictEqual(manifest.devDependencies['@opencode-ai/plugin'], '1.2.15');
   assert.strictEqual(manifest.devDependencies['@opencode-ai/sdk'], '1.2.15');
-  assert.match(lockfile, /@opencode-ai\/plugin@1\.2\.15/);
-  assert.match(lockfile, /@opencode-ai\/sdk@1\.2\.15/);
   assert.match(architectureDoc, /@opencode-ai\/plugin@1\.2\.15/);
   assert.match(architectureDoc, /@opencode-ai\/sdk@1\.2\.15/);
   assert.match(eventDoc, /@opencode-ai\/plugin@1\.2\.15/);

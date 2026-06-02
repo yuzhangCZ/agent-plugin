@@ -178,10 +178,6 @@ function formatCommand(command) {
     .join(" ");
 }
 
-function cloneCommand(command) {
-  return [...command];
-}
-
 function resolveExecutable(command) {
   if (process.platform !== "win32") {
     return command;
@@ -852,7 +848,7 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
 
     if (check.type === "manifest-version-match") {
       const manifestPath = path.resolve(publishRoot, relativePath);
-      let ok = false;
+      let ok;
       try {
         const manifest = fs.readJson(manifestPath);
         ok = isObject(manifest) && manifest.version === targetPlan.targetVersion;
@@ -1108,8 +1104,8 @@ Options:
   --skip-verify                   Build and evaluate readiness, but skip verify:release
   --skip-git                      Publish without local commit/tag
   --push                          Push branch and new tags after local commit/tag
-  --install-deps                  Auto-install packages for the dependency presence sanity check with pnpm install --frozen-lockfile
-  --install-deps-update-lockfile  Auto-install packages for the dependency presence sanity check with pnpm install
+  --install-deps                  Auto-install packages for the dependency presence sanity check with pnpm install --no-lockfile
+  --install-deps-update-lockfile  Legacy alias for --install-deps; no pnpm lockfile is written
   --allow-dirty                   Allow running from a dirty worktree
   --help, -h                      Print this help
 
@@ -1124,7 +1120,7 @@ Defaults:
   - --skip-verify only skips verify:release; it does not skip build or readiness checks
   - release correctness is enforced by build, readiness, and verify unless you explicitly skip verify
   - missing packages fail fast unless an install flag is provided
-  - --install-deps preserves the lockfile; --install-deps-update-lockfile may modify it
+  - dependency installs run without a committed pnpm lockfile
   - gateway-dependent targets require --default-gateway-url so MB_DEFAULT_GATEWAY_URL is injected before build
   - skill-qrcode-auth publishes from packages/skill-qrcode-auth
   - skill-plugin-cli publishes from packages/skill-plugin-cli/.tmp/release-pack/<package-version>.tgz
@@ -1277,14 +1273,13 @@ function formatMissingDependenciesMessage(failures) {
     .map((failure) => `${failure.targetId}: ${failure.missingPackages.slice(0, 5).join(", ")}`)
     .join("; ");
 
-  return `dependency presence sanity check failed before build; unresolved packages: ${summary}. This preflight only verifies package presence before build. Prefer rerunning with --install-deps, run pnpm install --frozen-lockfile manually, or use --install-deps-update-lockfile if updating the lockfile is intentional.`;
+  return `dependency presence sanity check failed before build; unresolved packages: ${summary}. This preflight only verifies package presence before build. Prefer rerunning with --install-deps or run pnpm install --no-lockfile manually.`;
 }
 
 function prepareDependencies(plan, ports, stdout) {
   const installMode = getDependencyInstallMode(plan.parsed);
   const inspectDependencies = ports.inspectDependencies ?? ((target) => inspectManifestDependencies(target, ports.fs, ports.exec));
-  const installCommand =
-    installMode === "frozen-lockfile" ? ["pnpm", "install", "--frozen-lockfile"] : ["pnpm", "install"];
+  const installCommand = ["pnpm", "install", "--no-lockfile"];
   let installAttempted = false;
 
   if (installMode === "update-lockfile") {

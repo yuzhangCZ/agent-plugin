@@ -68,6 +68,11 @@ const relaxedGeneratedAndFixtureRules = {
   'max-statements': 'off',
 };
 
+const nodeRuntimeGlobals = {
+  ...globals.node,
+  WebSocket: 'readonly',
+};
+
 export default defineConfig([
   {
     linterOptions: {
@@ -89,7 +94,7 @@ export default defineConfig([
     files: ['plugins/**/*.{js,mjs,cjs}', 'packages/**/*.{js,mjs,cjs}', 'scripts/**/*.{js,mjs,cjs}'],
     languageOptions: {
       ecmaVersion: 'latest',
-      globals: globals.node,
+      globals: nodeRuntimeGlobals,
       sourceType: 'module',
     },
     rules: {
@@ -113,7 +118,7 @@ export default defineConfig([
   {
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
-      globals: globals.node,
+      globals: nodeRuntimeGlobals,
     },
     rules: {
       'no-empty': 'warn',
