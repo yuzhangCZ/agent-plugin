@@ -55,10 +55,10 @@
     "plugins/**/*.{js,mjs,cjs,ts}": "eslint --max-warnings=0"
   },
   "devDependencies": {
-    "@eslint/js": "9.6.0",
-    "eslint": "9.39.2",
+    "@eslint/js": "9.25.1",
+    "eslint": "9.25.1",
     "globals": "13.21.0",
     "lint-staged": "9.4.3",
-    "typescript-eslint": "8.55.0"
+    "typescript-eslint": "8.33.0"
   }
 }
