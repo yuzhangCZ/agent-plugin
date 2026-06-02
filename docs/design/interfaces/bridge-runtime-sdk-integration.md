@@ -549,7 +549,7 @@ async runMessage(input: ProviderRunMessageInput) {
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `environment` | `'uat' \| 'prod'` | 否 | 授权环境。未提供时默认 `prod`。 |
-| `channel` | `string` | 是 | 授权渠道标识。 |
+| `channel` | `string` | 是 | 授权业务渠道标识。|
 | `mac` | `string` | 是 | 设备标识。 |
 | `policy.refreshOnExpired` | `boolean` | 否 | 二维码过期后是否自动刷新。 |
 | `policy.maxRefreshCount` | `number` | 否 | 最大自动刷新次数。 |
@@ -568,6 +568,26 @@ async runMessage(input: ProviderRunMessageInput) {
 | `credentials.sk` | `string` | 否 | 仅确认成功事件携带的 SK。 |
 | `reasonCode` | `'timeout' \| 'network_error' \| 'auth_service_error'` | 否 | 仅失败事件携带的失败原因。 |
 | `serviceError` | `QrCodeAuthServiceError` | 否 | 仅失败事件携带的服务错误信息。 |
+
+#### `QrCodeAuthSnapshot.type` 语义
+
+| `type` | 语义 |
+|---|---|
+| `qrcode_generated` | 已成功创建新的二维码授权会话；携带 `qrcode`、`display`、`expiresAt`，调用方应展示二维码。 |
+| `scanned` | 当前二维码已被扫码，但用户尚未确认授权；流程继续轮询，不是终态。 |
+| `expired` | 当前二维码已过期；如果 `policy.refreshOnExpired` 允许且未超过 `policy.maxRefreshCount`，SDK 会创建新二维码并再次发出 `qrcode_generated`。 |
+| `cancelled` | 用户取消授权；这是终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `failed` | 授权流程失败；携带 `reasonCode`，可能携带 `serviceError`，这是失败终态。 |
+
+- 内部等待轮询态不会作为 `QrCodeAuthSnapshot` 暴露给调用方。
+- `qrcodeAuth.run()` 会先发出终态快照，再 resolve。
+- 同一个二维码、同一种状态的重复轮询结果会去重；不同二维码的同类事件仍会继续发出。
+- `expired` 本身不是最终失败；只有刷新关闭或刷新次数耗尽时，才会再发出 `failed`，且 `reasonCode` 为 `timeout`。
+- `failed.reasonCode` 取值含义：
+  - `timeout`：二维码过期且无法继续刷新。
+  - `network_error`：请求授权服务失败。
+  - `auth_service_error`：授权服务返回异常、缺字段或不可识别状态。
 
 - `qrcodeAuth.run()` 由调用方直接调用，不通过 `createBridgeRuntime()` 获取。
 - 调用方必须自行提供 `channel`、`mac` 和 `onSnapshot`。
