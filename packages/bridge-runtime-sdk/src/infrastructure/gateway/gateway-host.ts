@@ -6,9 +6,9 @@ import {
 import { resolvePackageVersion } from '../../packageVersion.ts';
 
 /**
- * `toolType` 由接入方定义，SDK 不对具体字面量做产品级限制。
+ * `channel` 是接入方定义的业务渠道标识，SDK 不对具体字面量做产品级限制。
  */
-export type BridgeGatewayToolType = string;
+export type BridgeGatewayChannel = string;
 
 /**
  * Bridge runtime 使用的最小日志端口。
@@ -33,13 +33,13 @@ export interface BridgeGatewayHostConfig {
     sk: string;
   };
   register: {
-    toolType: BridgeGatewayToolType;
+    channel: BridgeGatewayChannel;
     toolVersion: string;
     pluginVersion?: string;
   };
 }
 
-interface InternalBridgeGatewayHostConfig extends BridgeGatewayHostConfig {
+interface InternalBridgeGatewayHostConfig extends GatewayClientHostConfig {
   url: string;
   connectionKey: string;
   debug?: boolean;
@@ -134,6 +134,17 @@ export function buildBridgeGatewayConnectionKey(gatewayHost: BridgeGatewayHostCo
   return `${gatewayHost.url}:${gatewayHost.auth.ak}`;
 }
 
+function toGatewayClientHostConfig(gatewayHost: BridgeGatewayHostConfig): GatewayClientHostConfig {
+  return {
+    ...gatewayHost,
+    register: {
+      toolType: gatewayHost.register.channel,
+      toolVersion: gatewayHost.register.toolVersion,
+      ...(gatewayHost.register.pluginVersion ? { pluginVersion: gatewayHost.register.pluginVersion } : {}),
+    },
+  };
+}
+
 export function normalizeBridgeGatewayHostConfig(
   gatewayHost: BridgeGatewayHostConfig,
   options: {
@@ -142,7 +153,7 @@ export function normalizeBridgeGatewayHostConfig(
     abortSignal?: AbortSignal;
   } = {},
 ): InternalBridgeGatewayHostConfig {
-  const resolvedGatewayHost = resolveGatewayClientHostConfig(gatewayHost as GatewayClientHostConfig);
+  const resolvedGatewayHost = resolveGatewayClientHostConfig(toGatewayClientHostConfig(gatewayHost));
   const sdkVersion = resolvePackageVersion();
 
   return {
@@ -151,7 +162,7 @@ export function normalizeBridgeGatewayHostConfig(
       ...resolvedGatewayHost.register,
       ...(sdkVersion ? { sdkVersion } : {}),
     },
-    connectionKey: buildBridgeGatewayConnectionKey(resolvedGatewayHost),
+    connectionKey: buildBridgeGatewayConnectionKey(gatewayHost),
     debug: options.debug,
     abortSignal: options.abortSignal,
     logger: options.logger,
@@ -161,7 +172,7 @@ export function normalizeBridgeGatewayHostConfig(
 export async function probeBridgeGatewayHost(
   input: BridgeGatewayProbeInput,
   deps: {
-    connectionFactory?: (config: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+    connectionFactory?: (config: InternalBridgeGatewayHostConfig) => BridgeGatewayHostConnection;
     now?: () => number;
   } = {},
 ): Promise<BridgeGatewayProbeResult> {

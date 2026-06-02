@@ -121,7 +121,7 @@ function createRuntimeOptions(
         sk: 'sk',
       },
       register: {
-        toolType: 'openx',
+        channel: 'openx',
         toolVersion: '0.0.0',
         pluginVersion: '0.1.0',
       },
@@ -2623,7 +2623,7 @@ test('probe passes the same public gatewayHost contract to connectionFactory as 
       sk: 'sk',
     },
     register: {
-      toolType: 'openx',
+      channel: 'openx',
       toolVersion: '0.0.0',
       pluginVersion: '0.1.0',
     },
@@ -2716,7 +2716,7 @@ test('runtime probe short-circuits when same gateway url and ak runtime is ready
       sk: 'shared-sk',
     },
     register: {
-      toolType: 'openx',
+      channel: 'openx',
       toolVersion: '0.0.0',
       pluginVersion: '0.1.0',
     },
@@ -2816,7 +2816,7 @@ test('different runtimes with the same gateway url and ak own separate connectio
           sk: 'shared-sk',
         },
         register: {
-          toolType: 'openx',
+          channel: 'openx',
           toolVersion: '0.0.0',
           pluginVersion: '0.1.0',
         },
@@ -2833,7 +2833,7 @@ test('different runtimes with the same gateway url and ak own separate connectio
           sk: 'shared-sk',
         },
         register: {
-          toolType: 'openx',
+          channel: 'openx',
           toolVersion: '0.0.0',
           pluginVersion: '0.1.0',
         },

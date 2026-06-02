@@ -334,7 +334,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
           sk: config.auth.sk,
         },
         register: {
-          toolType: config.gateway.channel,
+          channel: config.gateway.channel,
           toolVersion: registerMetadata.toolVersion,
           pluginVersion,
         },

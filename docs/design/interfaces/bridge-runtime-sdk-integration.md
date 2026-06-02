@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
-**Version:** 1.0  
-**Date:** 2026-06-01  
+**Version:** 1.1
+**Date:** 2026-06-02
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -26,11 +26,17 @@
 
 ## 1.1 Changelog
 
+### 2026-06-02
+
+- Breaking change: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
+- 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
+
 ### 2026-06-01
 
 - `PermissionAskFact`: `permissionType?: string` -> `permType: string`
 - `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
 - `PermissionReplyFact`: `messageId, partId` 移除
+
 ## 2. 稳定导出概览
 
 `@wecode/bridge-runtime-sdk` 根入口稳定导出 3 类能力：
@@ -72,7 +78,7 @@
 | `url` | `string` | 否 | Gateway 地址。未提供时使用 SDK 默认连接配置。 |
 | `auth.ak` | `string` | 是 | Gateway 鉴权 AK。 |
 | `auth.sk` | `string` | 是 | Gateway 鉴权 SK。 |
-| `register.toolType` | `BridgeGatewayToolType` | 是 | 工具注册类型。 |
+| `register.channel` | `BridgeGatewayChannel` | 是 | 业务渠道标识名称。 |
 | `register.toolVersion` | `string` | 是 | 当前宿主 agent 版本。 |
 | `register.pluginVersion` | `string` | 否 | 上层插件版本。宿主无插件封装层时可省略。 |
 
