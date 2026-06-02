@@ -178,10 +178,6 @@ function formatCommand(command) {
     .join(" ");
 }
 
-function cloneCommand(command) {
-  return [...command];
-}
-
 function resolveExecutable(command) {
   if (process.platform !== "win32") {
     return command;
@@ -852,7 +848,7 @@ export function evaluatePublishReadiness(targetPlan, options = {}) {
 
     if (check.type === "manifest-version-match") {
       const manifestPath = path.resolve(publishRoot, relativePath);
-      let ok = false;
+      let ok;
       try {
         const manifest = fs.readJson(manifestPath);
         ok = isObject(manifest) && manifest.version === targetPlan.targetVersion;

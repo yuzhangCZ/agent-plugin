@@ -678,7 +678,7 @@ test("formatReleasePlan shows skip-verify in dry-run output", () => {
   const rendered = formatReleasePlan(plan);
   assert.match(rendered, /verify: no/i);
   assert.match(rendered, /default gateway url: wss:\/\/gateway\.example\.com\/ws\/agent/i);
-  assert.match(rendered, /verify step: skipped \(\-\-skip-verify\)/i);
+  assert.match(rendered, /verify step: skipped \(--skip-verify\)/i);
   assert.match(rendered, /verify was skipped by user request/i);
   assert.match(
     rendered,
@@ -1055,7 +1055,7 @@ test("executeRelease skips verify and still runs build readiness and publish", (
   assert.ok(execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
   assert.ok(execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
-  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(--skip-verify\)/);
   assert.match(stdout.toString(), /publish readiness: ready/i);
 });
 
@@ -1497,7 +1497,7 @@ test("executeRelease still blocks publish when readiness fails under skip-verify
   assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.0.0");
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
   assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
-  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(--skip-verify\)/);
   assert.match(stdout.toString(), /publish readiness: blocked/i);
 });
 
@@ -1577,7 +1577,7 @@ test("executeRelease preserves existing recovery semantics when publish fails un
     /publish failed/i,
   );
   assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.1.0");
-  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(--skip-verify\)/);
 });
 
 test("executeRelease resolves scoped registry and publishes against that registry", () => {
@@ -1717,8 +1717,8 @@ test("executeRelease skips verify for both targets in dual mode", () => {
 
   assert.equal(result.exitCode, 0);
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
-  assert.match(stdout.toString(), /Skipping verify for message-bridge \(\-\-skip-verify\)/);
-  assert.match(stdout.toString(), /Skipping verify for message-bridge-openclaw \(\-\-skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge \(--skip-verify\)/);
+  assert.match(stdout.toString(), /Skipping verify for message-bridge-openclaw \(--skip-verify\)/);
 });
 
 test("executeRelease fails before build when default gateway url is missing", () => {

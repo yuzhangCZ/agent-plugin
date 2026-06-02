@@ -171,7 +171,9 @@ async function waitForRegistry(registry, timeoutMs = 60_000) {
       if (response.ok) {
         return;
       }
-    } catch {}
+    } catch {
+      // Registry may not be ready yet; keep polling until timeout.
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
