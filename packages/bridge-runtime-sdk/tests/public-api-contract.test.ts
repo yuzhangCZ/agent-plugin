@@ -127,6 +127,15 @@ test('runtime trace interaction contract does not expose session-level clearing'
   assert.equal(publicContractSource.includes("action: 'register' | 'consume';"), true);
 });
 
+test('gateway host config contract is declared once in public contract', async () => {
+  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+  const gatewayHostSource = await readFile(new URL('../src/infrastructure/gateway/gateway-host.ts', import.meta.url), 'utf8');
+
+  assert.match(publicContractSource, /export interface BridgeGatewayHostConfig \{/);
+  assert.doesNotMatch(gatewayHostSource, /export interface BridgeGatewayHostConfig \{/);
+  assert.match(gatewayHostSource, /import type \{[\s\S]*BridgeGatewayHostConfig[\s\S]*\} from '..\/..\/public-contract\.ts';/);
+});
+
 test('package publish contract keeps gateway-client internal to the SDK facade', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 

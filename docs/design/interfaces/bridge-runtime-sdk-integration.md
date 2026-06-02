@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
-**Version:** 1.0  
-**Date:** 2026-06-01  
+**Version:** 1.1
+**Date:** 2026-06-02
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -26,11 +26,17 @@
 
 ## 1.1 Changelog
 
+### 2026-06-02
+
+- Breaking change: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
+- 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
+
 ### 2026-06-01
 
 - `PermissionAskFact`: `permissionType?: string` -> `permType: string`
 - `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
 - `PermissionReplyFact`: `messageId, partId` 移除
+
 ## 2. 稳定导出概览
 
 `@wecode/bridge-runtime-sdk` 根入口稳定导出 3 类能力：
@@ -72,7 +78,7 @@
 | `url` | `string` | 否 | Gateway 地址。未提供时使用 SDK 默认连接配置。 |
 | `auth.ak` | `string` | 是 | Gateway 鉴权 AK。 |
 | `auth.sk` | `string` | 是 | Gateway 鉴权 SK。 |
-| `register.toolType` | `BridgeGatewayToolType` | 是 | 工具注册类型。 |
+| `register.channel` | `BridgeGatewayChannel` | 是 | 业务渠道标识名称。 |
 | `register.toolVersion` | `string` | 是 | 当前宿主 agent 版本。 |
 | `register.pluginVersion` | `string` | 否 | 上层插件版本。宿主无插件封装层时可省略。 |
 
@@ -543,7 +549,7 @@ async runMessage(input: ProviderRunMessageInput) {
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `environment` | `'uat' \| 'prod'` | 否 | 授权环境。未提供时默认 `prod`。 |
-| `channel` | `string` | 是 | 授权渠道标识。 |
+| `channel` | `string` | 是 | 授权业务渠道标识。|
 | `mac` | `string` | 是 | 设备标识。 |
 | `policy.refreshOnExpired` | `boolean` | 否 | 二维码过期后是否自动刷新。 |
 | `policy.maxRefreshCount` | `number` | 否 | 最大自动刷新次数。 |
@@ -562,6 +568,26 @@ async runMessage(input: ProviderRunMessageInput) {
 | `credentials.sk` | `string` | 否 | 仅确认成功事件携带的 SK。 |
 | `reasonCode` | `'timeout' \| 'network_error' \| 'auth_service_error'` | 否 | 仅失败事件携带的失败原因。 |
 | `serviceError` | `QrCodeAuthServiceError` | 否 | 仅失败事件携带的服务错误信息。 |
+
+#### `QrCodeAuthSnapshot.type` 语义
+
+| `type` | 语义 |
+|---|---|
+| `qrcode_generated` | 已成功创建新的二维码授权会话；携带 `qrcode`、`display`、`expiresAt`，调用方应展示二维码。 |
+| `scanned` | 当前二维码已被扫码，但用户尚未确认授权；流程继续轮询，不是终态。 |
+| `expired` | 当前二维码已过期；如果 `policy.refreshOnExpired` 允许且未超过 `policy.maxRefreshCount`，SDK 会创建新二维码并再次发出 `qrcode_generated`。 |
+| `cancelled` | 用户取消授权；这是终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `failed` | 授权流程失败；携带 `reasonCode`，可能携带 `serviceError`，这是失败终态。 |
+
+- 内部等待轮询态不会作为 `QrCodeAuthSnapshot` 暴露给调用方。
+- `qrcodeAuth.run()` 会先发出终态快照，再 resolve。
+- 同一个二维码、同一种状态的重复轮询结果会去重；不同二维码的同类事件仍会继续发出。
+- `expired` 本身不是最终失败；只有刷新关闭或刷新次数耗尽时，才会再发出 `failed`，且 `reasonCode` 为 `timeout`。
+- `failed.reasonCode` 取值含义：
+  - `timeout`：二维码过期且无法继续刷新。
+  - `network_error`：请求授权服务失败。
+  - `auth_service_error`：授权服务返回异常、缺字段或不可识别状态。
 
 - `qrcodeAuth.run()` 由调用方直接调用，不通过 `createBridgeRuntime()` 获取。
 - 调用方必须自行提供 `channel`、`mac` 和 `onSnapshot`。
@@ -636,11 +662,13 @@ sequenceDiagram
 
 ### 7.3 主要 fact 字段
 
+`type` 是 `ProviderFact` 的语义标签，用于声明当前事实在运行时中的生命周期含义，而不是仅表示“事实类型”。Runtime 会按该字段判断消息作用域、内容流收口、交互回复目标和会话级事件边界。
+
 #### `MessageStartFact`
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'message.start'` | 是 | 事实类型。 |
+| `type` | `'message.start'` | 是 | 打开一条 provider message；后续消息内容事实必须归属到这个 `messageId`，同一 `messageId` 不可重复打开或关闭后重开。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -649,7 +677,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'text.delta'` | 是 | 事实类型。 |
+| `type` | `'text.delta'` | 是 | 发送文本片段的流式增量；必须归属到已打开的 message，`content` 是本次新增文本，不代表最终全文。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
@@ -660,7 +688,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'text.done'` | 是 | 事实类型。 |
+| `type` | `'text.done'` | 是 | 收口文本片段；必须归属到已打开的 message，`content` 是该 `partId` 的最终文本内容。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
@@ -671,7 +699,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'thinking.delta'` | 是 | 事实类型。 |
+| `type` | `'thinking.delta'` | 是 | 发送思考或 reasoning 片段的流式增量；必须归属到已打开的 message，`content` 是本次新增思考内容。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
@@ -682,7 +710,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'thinking.done'` | 是 | 事实类型。 |
+| `type` | `'thinking.done'` | 是 | 收口思考或 reasoning 片段；必须归属到已打开的 message，`content` 是该 `partId` 的最终思考内容。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
@@ -693,7 +721,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'tool.update'` | 是 | 事实类型。 |
+| `type` | `'tool.update'` | 是 | 更新一次工具调用的展示状态；必须归属到已打开的 message，同一 `toolCallId` 可通过多次更新表达 pending、running、completed 或 error。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 工具片段标识。 |
@@ -710,7 +738,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'question.ask'` | 是 | 事实类型。 |
+| `type` | `'question.ask'` | 是 | 发起需要外部回复的问题交互；必须归属到已打开的 message，并通过全局唯一的 `questionId` 等待后续 `question_reply`。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 问题所在消息片段标识。 |
@@ -742,7 +770,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'permission.ask'` | 是 | 事实类型。 |
+| `type` | `'permission.ask'` | 是 | 发起需要外部确认的权限交互；不强制要求 message 作用域，`permissionId` 是全局唯一的权限回复目标。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 否 | 可选消息归属上下文。 |
 | `partId` | `string` | 是 | 权限所在消息片段标识。 |
@@ -756,7 +784,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'permission.reply'` | 是 | 事实类型。 |
+| `type` | `'permission.reply'` | 是 | 记录某个权限请求已经得到回复；通过 `permissionId` 关联此前的 `permission.ask`。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `permissionId` | `string` | 是 | 已回复的权限标识。 |
 | `response` | `'once' \| 'always' \| 'reject'` | 是 | 权限回复结果。 |
@@ -767,7 +795,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'message.done'` | 是 | 事实类型。 |
+| `type` | `'message.done'` | 是 | 关闭一条 provider message；表示该 `messageId` 的消息事实流结束，但不代表整个 request run 终态。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `reason` | `string` | 否 | 可选结束原因。 |
@@ -779,7 +807,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'session.title'` | 是 | 事实类型。 |
+| `type` | `'session.title'` | 是 | 更新会话标题；不要求归属到某条已打开的 message。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `title` | `string` | 是 | 新的会话标题。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
@@ -788,7 +816,7 @@ sequenceDiagram
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `type` | `'session.error'` | 是 | 事实类型。 |
+| `type` | `'session.error'` | 是 | 发送会话级或 provider 级错误事件；不要求归属到某条已打开的 message，也不等同于 request run 终态。 |
 | `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `error` | `ProviderError` | 是 | 会话级错误信息。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |

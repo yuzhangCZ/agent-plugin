@@ -65,7 +65,7 @@ function createGatewayConfig(): BridgeGatewayHostConfig {
       sk: 'sk',
     },
     register: {
-      toolType: 'openx',
+      channel: 'openx',
       toolVersion: '0.0.0',
       pluginVersion: '0.1.0',
     },
@@ -75,6 +75,7 @@ function createGatewayConfig(): BridgeGatewayHostConfig {
 test('normalizeBridgeGatewayHostConfig auto injects sdkVersion while preserving pluginVersion', () => {
   const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
 
+  assert.equal((normalized.register as { toolType?: string }).toolType, 'openx');
   assert.equal(normalized.register.sdkVersion, resolvePackageVersion());
   assert.equal(normalized.register.pluginVersion, '0.1.0');
 });

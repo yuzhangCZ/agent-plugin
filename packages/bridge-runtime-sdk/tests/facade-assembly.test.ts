@@ -81,7 +81,7 @@ test('createBridgeRuntime assembles a host runtime facade', async () => {
         sk: 'sk',
       },
       register: {
-        toolType: 'openx',
+        channel: 'openx',
         toolVersion: '0.0.0',
         pluginVersion: '0.1.0',
       },
@@ -139,7 +139,7 @@ test('createBridgeRuntime does not create gateway connection during construction
         sk: 'sk',
       },
       register: {
-        toolType: 'openx',
+        channel: 'openx',
         toolVersion: '0.0.0',
         pluginVersion: '0.1.0',
       },
