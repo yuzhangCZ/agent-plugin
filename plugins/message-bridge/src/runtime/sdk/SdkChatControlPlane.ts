@@ -364,6 +364,9 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
     try {
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
+      // 普通 chat 命中已有 binding 也代表该 anchor 最近使用了此 host session；
+      // TUI detached outbound run 会依赖 attached owner 选择回流目标。
+      this.dependencies.ownershipResolver.attach(existing.activeOpencodeSessionId, anchor);
       return {
         opencodeSessionId: existing.activeOpencodeSessionId,
         session,

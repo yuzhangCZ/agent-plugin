@@ -5176,6 +5176,72 @@ test('provider adapter routes detached TUI assistant messages through outbound r
   ]);
 });
 
+test('provider adapter refreshes attached owner when existing binding is used by normal chat', async () => {
+  const outboundRuns = [];
+  const outboundRunCollected = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-tui-owner-a', 'host-tui-owner-refresh']],
+  });
+  adapter.contextResolver.dependencies.bindingStore.bind('tool-tui-owner-b', 'host-tui-owner-refresh');
+  adapter.contextResolver.dependencies.ownershipResolver.attach('host-tui-owner-refresh', 'tool-tui-owner-b');
+  await adapter.initialize({
+    outbound: {
+      async emitOutboundMessage() {
+        throw new Error('unexpected outbound message call');
+      },
+      async emitOutboundRun(input) {
+        const facts = await collect(input.facts);
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          facts,
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-owner-refresh',
+    runId: 'run-owner-refresh',
+    toolSessionId: 'tool-tui-owner-a',
+    text: 'refresh owner',
+  });
+  assert.deepEqual(await run.result(), { outcome: 'completed' });
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-owner-refresh',
+        id: 'msg-owner-refresh-tui',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-tui-owner-refresh',
+        id: 'msg-owner-refresh-tui',
+        role: 'assistant',
+        time: { completed: '2026-05-22T12:00:01.000Z' },
+        finish: 'stop',
+      },
+    },
+  });
+
+  await withTimeout(outboundRunCollected.promise, 'expected outbound run to route to refreshed owner');
+  assert.equal(outboundRuns.length, 1);
+  assert.equal(outboundRuns[0].toolSessionId, 'tool-tui-owner-a');
+  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.type), [
+    'message.start',
+    'message.done',
+  ]);
+});
+
 test('provider adapter routes detached permission.replied through outbound run', async () => {
   const outboundRuns = [];
   const outboundRunCollected = createDeferred();
