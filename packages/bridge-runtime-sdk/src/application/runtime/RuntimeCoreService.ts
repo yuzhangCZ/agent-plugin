@@ -25,6 +25,13 @@ export class RuntimeCoreService implements RuntimeCore {
             facts: input.facts,
           });
         },
+        emitOutboundRun: async (input) => {
+          return this.options.outboundEmitter.emitOutboundRun({
+            toolSessionId: input.toolSessionId,
+            runId: input.runId,
+            facts: input.facts,
+          });
+        },
       },
     });
     this.initialized = true;

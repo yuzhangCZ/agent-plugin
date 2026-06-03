@@ -8,7 +8,11 @@ import { ProviderFactEnricher } from '../src/application/ProviderFactEnricher.ts
 import { OutboundCoordinator, InteractionCoordinator } from '../src/application/coordinators/index.ts';
 import { classifyFact } from '../src/application/fact-semantics.ts';
 import { FactSequenceValidator } from '../src/application/fact-sequence-validator.ts';
-import { DefaultFactToSkillEventProjector, DefaultSkillEventToGatewayMessageProjector } from '../src/application/projectors/index.ts';
+import {
+  DefaultFactToSkillEventProjector,
+  DefaultRunTerminalSignalProjector,
+  DefaultSkillEventToGatewayMessageProjector,
+} from '../src/application/projectors/index.ts';
 import { DefaultRuntimeObservation, type RuntimeObservationEvent, type RuntimeObservationPort } from '../src/application/runtime-observation/index.ts';
 
 class RecordingObservationPort implements RuntimeObservationPort {
@@ -142,6 +146,7 @@ test('OutboundCoordinator keeps derived event and uplink projection observation 
       observation,
     },
     factEnricher,
+    new DefaultRunTerminalSignalProjector(),
   );
 
   await coordinator.emitOutbound({
@@ -170,4 +175,54 @@ test('OutboundCoordinator keeps derived event and uplink projection observation 
     [{ factType: 'text.delta', uplinkType: 'tool_event' }],
   );
   assert.equal(sinkMessages.length, 3);
+});
+
+test('OutboundCoordinator records terminal observation when outbound run completes', async () => {
+  const port = new RecordingObservationPort();
+  const observation = new DefaultRuntimeObservation(port);
+  const sinkMessages: Array<{ type: string; toolSessionId: string }> = [];
+  const factEnricher = new ProviderFactEnricher(new InMemoryPermissionPresentationRegistry());
+  const coordinator = new OutboundCoordinator(
+    new InMemorySessionRuntimeRegistry(),
+    new InteractionCoordinator(new InMemoryPendingInteractionRegistry(), observation),
+    new FactSequenceValidator(),
+    {
+      sink: {
+        send(message) {
+          sinkMessages.push({ type: message.type, toolSessionId: 'toolSessionId' in message ? message.toolSessionId : '' });
+        },
+      },
+      factProjector: new DefaultFactToSkillEventProjector(),
+      eventProjector: new DefaultSkillEventToGatewayMessageProjector(),
+      observation,
+    },
+    factEnricher,
+    new DefaultRunTerminalSignalProjector(),
+  );
+
+  await coordinator.emitOutboundRun({
+    toolSessionId: 'tool-1',
+    runId: 'outbound-run-1',
+    facts: (async function* () {
+      yield { type: 'message.start', messageId: 'msg-1' } as const;
+      yield { type: 'message.done', messageId: 'msg-1' } as const;
+    })(),
+  });
+
+  const terminalEvents = port.events.filter(
+    (event): event is Extract<RuntimeObservationEvent, { type: 'terminal_progress' }> => event.type === 'terminal_progress',
+  );
+  assert.deepEqual(
+    terminalEvents.map((event) => ({
+      phase: event.phase,
+      toolSessionId: event.toolSessionId,
+      runId: event.runId,
+      outcome: event.result.outcome,
+    })),
+    [
+      { phase: 'received', toolSessionId: 'tool-1', runId: 'outbound-run-1', outcome: 'completed' },
+      { phase: 'projected', toolSessionId: 'tool-1', runId: 'outbound-run-1', outcome: 'completed' },
+    ],
+  );
+  assert.deepEqual(sinkMessages.map((message) => message.type), ['tool_event', 'tool_event', 'tool_done']);
 });

@@ -22,6 +22,7 @@ import type {
   ActiveRunRegistry,
 } from './OpenCodeProviderAdapter.run.js';
 import { EventTranslatorRegistry } from './OpenCodeProviderAdapter.translation.js';
+import type { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.js';
 
 type EventClass = 'run_scoped' | 'run_scoped_with_outbound_fallback' | 'run_adjacent_metadata' | 'control_metadata' | 'unsupported';
 
@@ -146,11 +147,10 @@ function classifyEvent(type: BridgeEvent['type']): EventClass {
     case 'message.part.updated':
     case 'question.asked':
     case 'permission.asked':
-      return 'run_scoped';
+    case 'permission.replied':
     case 'session.error':
       return 'run_scoped_with_outbound_fallback';
     case 'session.updated':
-    case 'permission.replied':
       return 'run_adjacent_metadata';
     case 'session.created':
     case 'session.deleted':
@@ -284,7 +284,7 @@ export class FactRoutingContextAssembler {
 }
 
 /**
- * 为无 active run 的 `session.error` 查找 outbound 兜底目标。
+ * 为无 active run 的 TUI fallback 事件查找 outbound 兜底目标。
  * @remarks
  * 只允许已 attach 的宿主会话 fallback 到对应 anchor，避免把游离事件发给错误会话。
  */
@@ -339,7 +339,7 @@ export class SessionCreatedRecorder {
 /**
  * OpenCode raw event 的路由协调器。
  * @remarks
- * 负责 session 身份解析、active run 优先路由、`session.error` outbound fallback 和诊断日志；
+ * 负责 session 身份解析、active run 优先路由、TUI outbound fallback 和诊断日志；
  * 具体 raw event -> fact 映射由 translator registry 完成。
  */
 export class ProviderEventCoordinator {
@@ -355,6 +355,7 @@ export class ProviderEventCoordinator {
     outboundTargetResolver: OutboundTargetResolverPort;
     assistantMessageState: AssistantMessageStateStore;
     partKindState: PartKindStore;
+    tuiOutboundRunRegistry: TuiOutboundRunRegistry;
     activeRunTranslatorRegistry: EventTranslatorRegistry;
     outboundTranslatorRegistry: EventTranslatorRegistry;
     sessionIsolationHostEventPort?: HostEventPort;
@@ -568,6 +569,15 @@ export class ProviderEventCoordinator {
       });
       return false;
     }
+    const emitOutboundRun = routingState.runtimeContext.outbound.emitOutboundRun;
+    if (typeof emitOutboundRun !== 'function' && routingState.event.type !== 'session.error') {
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'missing_runtime_context',
+        routeSummary: routingState.eventRouteSummary,
+      });
+      return false;
+    }
 
     const outboundTarget = this.dependencies.outboundTargetResolver.resolve(routingState.resolution.hostSessionId);
     if (!outboundTarget) {
@@ -606,12 +616,24 @@ export class ProviderEventCoordinator {
       return false;
     }
 
-    await routingState.runtimeContext.outbound.emitOutboundMessage({
-      toolSessionId: outboundTarget.anchorSessionId,
-      messageId: translation.envelopeMessageId,
-      trigger: 'system',
-      facts: toAsyncFacts(translation.facts),
-    });
+    if (typeof emitOutboundRun === 'function') {
+      // 新 outbound run 通道具备一轮多消息语义；TUI fallback 统一进入该队列，保持顺序和锁语义一致。
+      this.dependencies.tuiOutboundRunRegistry.push({
+        hostSessionId: routingState.resolution.hostSessionId,
+        anchorSessionId: outboundTarget.anchorSessionId,
+        factSessionContext,
+        runtimeContext: routingState.runtimeContext,
+        translation,
+      });
+    } else {
+      // 兼容旧 SDK：只有单 fact 的 session.error 可以降级到 message 级 outbound。
+      await routingState.runtimeContext.outbound.emitOutboundMessage({
+        toolSessionId: outboundTarget.anchorSessionId,
+        messageId: translation.envelopeMessageId,
+        trigger: 'system',
+        facts: toAsyncFacts(translation.facts),
+      });
+    }
     this.dependencies.logger.debug?.('provider_adapter.event.routed_to_outbound', {
       eventType: routingState.event.type,
       factTypes: translation.facts.map((fact) => fact.type),

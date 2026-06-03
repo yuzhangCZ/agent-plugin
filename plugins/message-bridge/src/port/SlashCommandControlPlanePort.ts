@@ -126,7 +126,12 @@ export interface ToolSessionBindingStore {
   invalidate(anchor: ExternalConversationAnchor): void;
 }
 
-/** 维护宿主会话到外部锚点的回流归属。 */
+/**
+ * 维护宿主会话到外部锚点的回流归属。
+ * @remarks 一个 host session 当前只解析到一个 attached owner；当多个 anchor 绑定同一
+ * host session 时，attached owner 表示最近一次成功使用该 session 的 anchor。TUI
+ * detached outbound run 创建时会锁定当时 owner，后续 owner 变化不影响已创建 run。
+ */
 export interface OpencodeSessionOwnershipResolver {
   attach(opencodeSessionId: string, anchor: ExternalConversationAnchor): void;
   detach(opencodeSessionId: string): void;

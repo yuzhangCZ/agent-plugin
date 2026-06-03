@@ -2,6 +2,7 @@ import type { ProviderCommandError, ProviderError } from './domain/errors.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './application/constants/runtime.ts';
 import type {
   EmitOutboundMessageInput,
+  EmitOutboundRunInput,
   MessageDoneFact,
   MessageStartFact,
   OutboundFact,
@@ -37,6 +38,7 @@ import type {
 
 export type {
   EmitOutboundMessageInput,
+  EmitOutboundRunInput,
   MessageDoneFact,
   MessageStartFact,
   OutboundFact,

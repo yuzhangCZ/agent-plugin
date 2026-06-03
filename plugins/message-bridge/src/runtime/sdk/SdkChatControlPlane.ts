@@ -364,6 +364,9 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
     try {
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
+      // 普通 chat 命中已有 binding 也代表该 anchor 最近使用了此 host session；
+      // TUI detached outbound run 会依赖 attached owner 选择回流目标。
+      await this.refreshAttachedOwner(anchor, existing.activeOpencodeSessionId);
       return {
         opencodeSessionId: existing.activeOpencodeSessionId,
         session,
@@ -383,6 +386,17 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
       });
       return undefined;
     }
+  }
+
+  private async refreshAttachedOwner(anchor: string, sessionId: string): Promise<void> {
+    if (this.dependencies.sessionAttachmentPort) {
+      await this.dependencies.sessionAttachmentPort.switchAttachedSession({
+        toolSessionId: anchor,
+        sessionId,
+      });
+      return;
+    }
+    this.dependencies.ownershipResolver.attach(sessionId, anchor);
   }
 
   private async rebind(anchor: string, previousSessionId: string | undefined, nextSessionId: string): Promise<void> {

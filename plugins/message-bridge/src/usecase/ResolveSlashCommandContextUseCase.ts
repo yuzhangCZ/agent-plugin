@@ -29,6 +29,8 @@ export class ResolveSlashCommandContextUseCase implements SlashCommandContextRes
     const existing = this.dependencies.bindingStore.get(anchor);
     if (existing && existing.status === 'active') {
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
+      // existing binding 的普通 chat 也刷新最近使用者，供 TUI detached outbound run 解析回流目标。
+      this.dependencies.ownershipResolver.attach(existing.activeOpencodeSessionId, anchor);
       return {
         anchor,
         activeOpencodeSessionId: existing.activeOpencodeSessionId,

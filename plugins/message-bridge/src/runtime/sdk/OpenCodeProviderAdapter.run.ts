@@ -4,6 +4,7 @@ import type {
 } from '@wecode/bridge-runtime-sdk';
 import type { BridgeLogger } from '../AppLogger.js';
 import { AsyncIterableQueue } from './AsyncIterableQueue.js';
+import { FactDrainTracker } from './OpenCodeProviderAdapter.fact-drain.js';
 import type {
   AssistantMessageLifecycleState,
   AssistantMessageStateStorePort,
@@ -11,9 +12,6 @@ import type {
   PartKindStorePort,
   RawEventTranslation,
 } from './OpenCodeProviderAdapter.types.js';
-
-const FACT_DRAIN_QUIET_PERIOD_MS = 40;
-const FACT_DRAIN_TIMEOUT_MS = 250;
 
 type ActiveProviderRunHandleOptions = {
   anchorSessionId: string;
@@ -27,6 +25,7 @@ type ActiveProviderRunHandleOptions = {
     trackingSessionIds: ReadonlySet<string>;
   }) => void;
   hostSessionId?: string;
+  finalIdleTimeoutMs?: number;
 };
 
 type ForceAbortReason = 'abort_session' | 'prompt_terminal_aborted' | 'superseded_run';
@@ -84,123 +83,6 @@ class RunCompletionResolver {
     }
     this.settled = true;
     this.deferred.resolve(result);
-  }
-}
-
-/**
- * run 内 fact drain 收口器。
- * @remarks
- * 它只关心 raw event 已被解释后的“相关事件到达”和 `facts` 何时 close，
- * 不负责 terminal outcome 映射。
- */
-class FactDrainTracker {
-  private promptSettled = false;
-  private closed = false;
-  private lastRelevantEventAt = 0;
-  private lastTerminalCandidateMessageId?: string;
-  private quietTimer: NodeJS.Timeout | null = null;
-  private drainTimer: NodeJS.Timeout | null = null;
-
-  constructor(
-    private readonly options: {
-      anchorSessionId: string;
-      runId: string;
-      queue: AsyncIterableQueue<ProviderFact>;
-      logger: BridgeLogger;
-      onClosed: () => void;
-      quietPeriodMs?: number;
-      drainTimeoutMs?: number;
-    },
-  ) {}
-
-  noteRelevantEvent(terminalCandidateMessageId?: string): void {
-    if (this.closed) {
-      return;
-    }
-
-    this.lastRelevantEventAt = Date.now();
-    if (terminalCandidateMessageId) {
-      this.lastTerminalCandidateMessageId = terminalCandidateMessageId;
-    }
-
-    if (!this.promptSettled || !this.lastTerminalCandidateMessageId) {
-      return;
-    }
-
-    this.armQuietTimer();
-  }
-
-  onPromptSettled(): void {
-    if (this.closed || this.promptSettled) {
-      return;
-    }
-
-    this.promptSettled = true;
-    if (this.lastTerminalCandidateMessageId) {
-      this.armQuietTimer();
-    }
-    this.armDrainTimer();
-  }
-
-  closeFacts(reason: 'quiet_period' | 'drain_timeout'): void {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    if (this.quietTimer) {
-      clearTimeout(this.quietTimer);
-      this.quietTimer = null;
-    }
-    if (this.drainTimer) {
-      clearTimeout(this.drainTimer);
-      this.drainTimer = null;
-    }
-    this.options.logger.debug?.('provider_adapter.fact_drain.closed', {
-      toolSessionId: this.options.anchorSessionId,
-      runId: this.options.runId,
-      reason,
-      lastTerminalCandidateMessageId: this.lastTerminalCandidateMessageId,
-    });
-    this.options.queue.close();
-    this.options.onClosed();
-  }
-
-  private armQuietTimer(): void {
-    if (this.quietTimer) {
-      clearTimeout(this.quietTimer);
-    }
-    const quietPeriodMs = this.options.quietPeriodMs ?? FACT_DRAIN_QUIET_PERIOD_MS;
-    const elapsedMs = Math.max(0, Date.now() - this.lastRelevantEventAt);
-    const delayMs = Math.max(0, quietPeriodMs - elapsedMs);
-    this.quietTimer = setTimeout(() => {
-      if (!this.promptSettled || !this.lastTerminalCandidateMessageId) {
-        return;
-      }
-      this.closeFacts('quiet_period');
-    }, delayMs);
-  }
-
-  private armDrainTimer(): void {
-    if (this.drainTimer) {
-      return;
-    }
-    this.drainTimer = setTimeout(() => {
-      if (this.lastTerminalCandidateMessageId) {
-        this.options.logger.warn('provider_adapter.protocol_diagnostic', {
-          toolSessionId: this.options.anchorSessionId,
-          runId: this.options.runId,
-          code: 'facts_drain_timeout_after_terminal_candidate',
-          lastTerminalCandidateMessageId: this.lastTerminalCandidateMessageId,
-        });
-      } else {
-        this.options.logger.warn('provider_adapter.protocol_diagnostic', {
-          toolSessionId: this.options.anchorSessionId,
-          runId: this.options.runId,
-          code: 'facts_drain_timeout_without_terminal_candidate',
-        });
-      }
-      this.closeFacts('drain_timeout');
-    }, this.options.drainTimeoutMs ?? FACT_DRAIN_TIMEOUT_MS);
   }
 }
 
@@ -286,6 +168,7 @@ export class ActiveProviderRunHandle {
   private readonly trackingSessionIds = new Set<string>();
   private readonly promptTerminalResolver: PromptTerminalResolver;
   private readonly completionResolver = new RunCompletionResolver();
+  private readonly finalIdleTimeoutResolver = createDeferred<void>();
   private readonly factDrainTracker: FactDrainTracker;
   private promptStarted = false;
   private promptTaskFinished = false;
@@ -314,10 +197,15 @@ export class ActiveProviderRunHandle {
       this.tryCleanup();
     });
     this.factDrainTracker = new FactDrainTracker({
+      mode: 'active_run',
       anchorSessionId: options.anchorSessionId,
       runId: options.runId,
       queue: this.queue,
       logger: options.logger,
+      ...(options.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: options.finalIdleTimeoutMs } : {}),
+      onFinalIdleTimeout: () => {
+        this.forceTimeoutAndClose();
+      },
       onClosed: () => {
         this.factsClosed = true;
         this.settleRunIfReady();
@@ -339,6 +227,7 @@ export class ActiveProviderRunHandle {
       return false;
     }
     this.promptStarted = true;
+    this.factDrainTracker.startFinalIdleWatchdog();
     return true;
   }
 
@@ -369,6 +258,9 @@ export class ActiveProviderRunHandle {
     if (this.forceClosed || this.factsClosed) {
       return;
     }
+    if (this.isEffectiveTranslation(translation)) {
+      this.factDrainTracker.refreshEffectiveEventIdleTimer();
+    }
     this.factDrainTracker.noteRelevantEvent(translation.terminalCandidateMessageId);
     for (const fact of translation.facts) {
       this.queue.push(fact);
@@ -393,9 +285,7 @@ export class ActiveProviderRunHandle {
     this.forceClosed = true;
     this.promptSettled = true;
     this.terminalResult = { outcome: 'aborted' };
-    this.factsClosed = true;
-    this.queue.close();
-    this.settleRunIfReady();
+    this.factDrainTracker.closeFacts('manual');
     this.tryCleanup();
   }
 
@@ -409,14 +299,47 @@ export class ActiveProviderRunHandle {
     this.forceClosed = true;
     this.promptSettled = true;
     this.terminalResult = { outcome: 'failed', error };
-    this.factsClosed = true;
-    this.queue.close();
-    this.settleRunIfReady();
+    this.factDrainTracker.closeFacts('manual');
+    this.tryCleanup();
+  }
+
+  /**
+   * prompt 长时间无有效事件时 fail-closed，避免同一 host session 的队列永久阻塞。
+   */
+  forceTimeoutAndClose(): void {
+    if (this.forceClosed) {
+      return;
+    }
+    this.logger.warn('provider_adapter.active_run_final_idle_timeout', {
+      anchorSessionId: this.anchorSessionId,
+      hostSessionId: this.hostSessionId,
+      runId: this.runId,
+    });
+    this.forceClosed = true;
+    this.promptSettled = true;
+    this.promptTaskFinished = true;
+    this.terminalResult = {
+      outcome: 'failed',
+      error: {
+        code: 'timeout',
+        message: 'provider_run_final_idle_timeout',
+        retryable: true,
+      },
+    };
+    this.finalIdleTimeoutResolver.resolve();
     this.tryCleanup();
   }
 
   result(): Promise<ProviderTerminalResult> {
     return this.completionResolver.result();
+  }
+
+  waitPromptFinalIdleTimeout(): Promise<void> {
+    return this.finalIdleTimeoutResolver.promise;
+  }
+
+  hasForceClosed(): boolean {
+    return this.forceClosed;
   }
 
   private settleRunIfReady(): void {
@@ -440,6 +363,10 @@ export class ActiveProviderRunHandle {
       runId: this.runId,
       trackingSessionIds: this.trackingSessionIds,
     });
+  }
+
+  private isEffectiveTranslation(translation: RawEventTranslation): boolean {
+    return translation.facts.length > 0 || Boolean(translation.terminalCandidateMessageId);
   }
 }
 
@@ -465,6 +392,7 @@ export class ActiveRunRegistry {
       runId: string;
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
+    finalIdleTimeoutMs?: number;
   }): ActiveProviderRunHandle {
     const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
     const previous = this.handles.get(options.anchorSessionId);
@@ -475,6 +403,7 @@ export class ActiveRunRegistry {
       logger: options.logger,
       onCleanup: options.onCleanup,
       hostSessionId,
+      ...(options.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: options.finalIdleTimeoutMs } : {}),
     });
     this.handles.set(options.anchorSessionId, handle);
     const queue = this.hostQueues.get(hostSessionId) ?? [];

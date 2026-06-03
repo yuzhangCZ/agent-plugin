@@ -88,22 +88,53 @@ export class HostSessionRunCoordinator {
   }
 
   private async runStartedPromptTask(task: HostSessionRunTask): Promise<void> {
-    try {
-      await task.work();
-    } catch (error) {
-      this.logger?.error?.('provider_adapter.run_queue.prompt_task_failed', {
+    let workFinished = false;
+    const workPromise = task.work()
+      .then(() => {
+        workFinished = true;
+      })
+      .catch((error) => {
+        workFinished = true;
+        if (task.handle.hasForceClosed()) {
+          this.logger?.debug?.('provider_adapter.run_queue.prompt_task_late_failure_ignored', {
+            hostSessionId: task.handle.hostSessionId,
+            anchorSessionId: task.handle.anchorSessionId,
+            runId: task.handle.runId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+        this.handlePromptTaskFailure(task, error);
+      })
+      .finally(() => {
+        task.handle.markPromptTaskFinished();
+      });
+
+    await Promise.race([
+      workPromise,
+      task.handle.waitPromptFinalIdleTimeout(),
+    ]);
+
+    if (!workFinished && task.handle.hasForceClosed()) {
+      this.logger?.warn?.('provider_adapter.run_queue.prompt_task_detached_after_final_idle', {
         hostSessionId: task.handle.hostSessionId,
         anchorSessionId: task.handle.anchorSessionId,
         runId: task.handle.runId,
-        error: error instanceof Error ? error.message : String(error),
       });
-      task.handle.forceFailAndClose({
-        code: 'internal_error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      task.handle.markPromptTaskFinished();
     }
+  }
+
+  private handlePromptTaskFailure(task: HostSessionRunTask, error: unknown): void {
+    this.logger?.error?.('provider_adapter.run_queue.prompt_task_failed', {
+      hostSessionId: task.handle.hostSessionId,
+      anchorSessionId: task.handle.anchorSessionId,
+      runId: task.handle.runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    task.handle.forceFailAndClose({
+      code: 'internal_error',
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   private closeUnexpectedStartableTask(handle: ActiveProviderRunHandle): void {

@@ -2,7 +2,7 @@ import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
 import { classifyFact } from './fact-semantics.ts';
 
-export type LifecycleProfileKind = 'request_run' | 'outbound';
+export type LifecycleProfileKind = 'request_run' | 'outbound' | 'outbound_run';
 
 export interface LifecycleProfile {
   kind: LifecycleProfileKind;
