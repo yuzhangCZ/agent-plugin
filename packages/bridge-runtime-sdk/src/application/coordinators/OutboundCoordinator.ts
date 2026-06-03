@@ -1,4 +1,4 @@
-import type { ProviderFact } from '../../domain/provider.ts';
+import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
 import { classifyFact } from '../fact-semantics.ts';
@@ -77,7 +77,12 @@ export class OutboundCoordinator {
 
     const state = this.validator.createState();
     try {
-      await this.consumeFacts(input.toolSessionId, input.facts, OUTBOUND_RUN_PROFILE, state);
+      try {
+        await this.consumeFacts(input.toolSessionId, input.facts, OUTBOUND_RUN_PROFILE, state);
+      } catch (error) {
+        await this.emitOutboundRunFailed(input.toolSessionId, input.runId, error);
+        throw error;
+      }
       await this.emitOutboundRunDone(input.toolSessionId, input.runId);
       return { applied: true };
     } finally {
@@ -129,6 +134,30 @@ export class OutboundCoordinator {
 
   private async emitOutboundRunDone(toolSessionId: string, runId: string): Promise<void> {
     const result = { outcome: 'completed' } as const;
+    await this.emitOutboundRunTerminal(toolSessionId, runId, result);
+  }
+
+  private async emitOutboundRunFailed(toolSessionId: string, runId: string, error: unknown): Promise<void> {
+    const result: ProviderTerminalResult = {
+      outcome: 'failed',
+      error: {
+        code: 'internal_error',
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof RuntimeContractError ? { details: { runtimeCode: error.code, ...error.details } } : {}),
+      },
+    };
+    try {
+      await this.emitOutboundRunTerminal(toolSessionId, runId, result);
+    } catch {
+      // 保留原始 facts 流错误；终态发送失败会由 sink/gateway 侧观测记录。
+    }
+  }
+
+  private async emitOutboundRunTerminal(
+    toolSessionId: string,
+    runId: string,
+    result: ProviderTerminalResult,
+  ): Promise<void> {
     this.pipeline.observation.terminalReceived(toolSessionId, result, { runId });
     const uplink = this.terminalProjector.project({
       toolSessionId,

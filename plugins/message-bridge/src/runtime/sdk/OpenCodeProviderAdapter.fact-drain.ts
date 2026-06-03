@@ -124,11 +124,11 @@ export class FactDrainTracker {
     const elapsedMs = Math.max(0, Date.now() - this.lastRelevantEventAt);
     const delayMs = Math.max(0, quietPeriodMs - elapsedMs);
     this.quietTimer = setTimeout(() => {
+      this.quietTimer = null;
       if (!this.canArmQuietTimer()) {
         return;
       }
       if (!this.canCloseFactsNow()) {
-        this.armQuietTimer();
         return;
       }
       this.closeFacts('quiet_period');
@@ -146,7 +146,6 @@ export class FactDrainTracker {
     this.drainTimer = setTimeout(() => {
       this.drainTimer = null;
       if (!this.canCloseFactsNow()) {
-        this.armDrainTimer(true);
         return;
       }
       if (this.lastTerminalCandidateMessageId) {

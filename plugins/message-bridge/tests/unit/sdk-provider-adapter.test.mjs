@@ -17,6 +17,7 @@ import {
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
 import { HostSessionRunCoordinator } from '../../src/runtime/sdk/HostSessionRunCoordinator.ts';
+import { FactDrainTracker } from '../../src/runtime/sdk/OpenCodeProviderAdapter.fact-drain.ts';
 import { TuiOutboundRunRegistry } from '../../src/runtime/sdk/OpenCodeProviderAdapter.outbound-run.ts';
 import {
   ActiveRunRegistry,
@@ -418,6 +419,38 @@ test('ActiveProviderRunHandle forceAbortAndClose is idempotent and ignores later
   assert.deepEqual(await run.result(), { outcome: 'aborted' });
   assert.equal(cleanups.length, 1);
   assert.equal(cleanups[0].runId, 'run-a');
+});
+
+test('FactDrainTracker does not repeatedly rearm timers while close gate is false', async () => {
+  let canCloseChecks = 0;
+  let closeCalls = 0;
+  const tracker = new FactDrainTracker({
+    mode: 'outbound_run',
+    anchorSessionId: 'tool-fact-drain-gate',
+    runId: 'run-fact-drain-gate',
+    queue: {
+      close: () => {
+        closeCalls += 1;
+      },
+    },
+    logger: createLogger(),
+    onClosed: () => undefined,
+    canCloseFacts: () => {
+      canCloseChecks += 1;
+      return false;
+    },
+    quietPeriodMs: 1,
+    drainTimeoutMs: 1,
+    finalIdleTimeoutMs: 10_000,
+  });
+
+  tracker.noteRelevantEvent('msg-fact-drain-gate');
+  tracker.startDrainTimeout();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(closeCalls, 0);
+  assert.equal(canCloseChecks <= 2, true);
+  tracker.closeFacts('manual');
 });
 
 test('ActiveRunRegistry aborts superseded run when same anchor creates a new run', async () => {

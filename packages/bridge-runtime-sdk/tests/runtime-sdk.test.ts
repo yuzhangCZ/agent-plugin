@@ -2592,6 +2592,40 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
   ]);
 });
 
+test('emitOutboundRun emits tool_error when facts fail validation', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  let outbound: ProviderRuntimeContext['outbound'];
+  provider.initialize = async (context) => {
+    outbound = context.outbound;
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    () => outbound.emitOutboundRun({
+      toolSessionId: 'tool-outbound-run-invalid',
+      runId: 'outbound-run-invalid',
+      trigger: 'system',
+      facts: createAsyncFacts([
+        { type: 'text.delta', messageId: 'msg-invalid', partId: 'part-invalid', content: 'orphan' },
+      ]),
+    }),
+    (error) => error instanceof Error && 'code' in error && error.code === 'fact_sequence_invalid',
+  );
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-outbound-run-invalid',
+    error: 'text.delta requires an open message',
+  });
+  assert.deepEqual(runtime.getDiagnostics().terminals.at(-1), {
+    toolSessionId: 'tool-outbound-run-invalid',
+    outcome: 'failed',
+  });
+});
+
 test('outbound run and outbound message are mutually exclusive per tool session', async () => {
   const connection = new FakeGatewayClient();
   const provider = createProvider();
