@@ -11,9 +11,9 @@ function createAdapter(overrides = {}) {
         calls.push({ method: 'getSession', sessionId });
         return { id: sessionId, directory: '/repo' };
       },
-      listSessions: async (scope) => {
-        calls.push({ method: 'listSessions', scope });
-        return [{ id: 'ses-1', directory: scope.directory }];
+      listSessions: async (query) => {
+        calls.push({ method: 'listSessions', query });
+        return [{ id: 'ses-1', directory: query.directory }];
       },
       ...overrides.hostSessionQueryPort,
     },
@@ -50,10 +50,17 @@ describe('LegacyHostSessionGatewayAdapter', () => {
     const { adapter, calls } = createAdapter();
 
     assert.deepStrictEqual(await adapter.get('ses-1'), { id: 'ses-1', directory: '/repo' });
-    assert.deepStrictEqual(await adapter.list({ directory: '/repo' }), [{ id: 'ses-1', directory: '/repo' }]);
+    assert.deepStrictEqual(await adapter.list({
+      directory: '/repo',
+      roots: true,
+      start: 1_777_766_400_000,
+    }), [{ id: 'ses-1', directory: '/repo' }]);
     assert.deepStrictEqual(calls, [
       { method: 'getSession', sessionId: 'ses-1' },
-      { method: 'listSessions', scope: { directory: '/repo' } },
+      {
+        method: 'listSessions',
+        query: { directory: '/repo', roots: true, start: 1_777_766_400_000 },
+      },
     ]);
   });
 

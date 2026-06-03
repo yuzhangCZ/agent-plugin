@@ -14,6 +14,8 @@ export interface ChatContextQuery {
   entryKey: BusinessEntryKey;
   policy: BusinessEntryPolicy;
   directory?: string;
+  roots?: boolean;
+  start?: number;
 }
 
 export interface CreateSessionCommandInput {

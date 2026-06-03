@@ -80,9 +80,14 @@ function buildLegacySessionTarget(parameters: { sessionID: string; directory?: s
   };
 }
 
-function buildLegacyScopedQuery(parameters?: { directory?: string }): Record<string, unknown> {
+function buildLegacyScopedQuery(parameters?: { directory?: string; roots?: boolean; start?: number }): Record<string, unknown> {
+  const query = {
+    ...(parameters?.directory ? { directory: parameters.directory } : {}),
+    ...(parameters?.roots !== undefined ? { roots: parameters.roots } : {}),
+    ...(parameters?.start !== undefined ? { start: parameters.start } : {}),
+  };
   return {
-    ...(parameters?.directory ? { query: { directory: parameters.directory } } : {}),
+    ...(Object.keys(query).length > 0 ? { query } : {}),
   };
 }
 

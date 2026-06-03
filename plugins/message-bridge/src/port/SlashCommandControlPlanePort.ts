@@ -23,6 +23,13 @@ export interface SessionScope {
   directory?: string;
 }
 
+/** 宿主会话列表查询条件，只表达传给 host session.list 的筛选参数。 */
+export interface HostSessionListQuery {
+  directory?: string;
+  roots?: boolean;
+  start?: number;
+}
+
 /** 上行事件归属事实。 */
 export interface SessionOwnership {
   opencodeSessionId: string;
@@ -157,7 +164,7 @@ export interface SlashCommandContextResolver {
 /** 宿主会话查询接口。 */
 export interface HostSessionQueryPort {
   getSession(sessionId: string): Promise<HostSessionInfo>;
-  listSessions(scope: SessionScope): Promise<HostSessionInfo[]>;
+  listSessions(query: HostSessionListQuery): Promise<HostSessionInfo[]>;
 }
 
 /** 宿主会话创建接口。 */

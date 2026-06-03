@@ -141,13 +141,18 @@ describe('DefaultResolveEntrySessionContextUseCase', () => {
         allowedSlashCommands: ['new', 'models', 'model'],
       },
       directory: '/repo',
+      roots: true,
+      start: 1_777_766_400_000,
     }), {
       toolSessionId: 'tool-1',
       bindingSessionId: 'ses-1',
       session: { id: 'ses-1', directory: '/repo' },
       visibleSessions: [{ id: 'ses-1', directory: '/repo' }],
     });
-    assert.deepStrictEqual(host.calls, [{ method: 'list', input: { directory: '/repo' } }]);
+    assert.deepStrictEqual(host.calls, [{
+      method: 'list',
+      input: { directory: '/repo', roots: true, start: 1_777_766_400_000 },
+    }]);
     assert.deepStrictEqual(logEntries[0], {
       level: 'info',
       message: 'session_isolation.context.resolved',

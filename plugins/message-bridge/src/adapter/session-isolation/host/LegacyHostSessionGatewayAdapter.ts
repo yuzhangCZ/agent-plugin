@@ -42,9 +42,11 @@ export class LegacyHostSessionGatewayAdapter implements HostSessionGateway {
     return this.dependencies.hostSessionQueryPort.getSession(sessionId);
   }
 
-  list(input: { directory?: string }): Promise<HostSessionRecord[]> {
+  list(input: { directory?: string; roots?: boolean; start?: number }): Promise<HostSessionRecord[]> {
     return this.dependencies.hostSessionQueryPort.listSessions({
       ...(input.directory ? { directory: input.directory } : {}),
+      ...(input.roots !== undefined ? { roots: input.roots } : {}),
+      ...(input.start !== undefined ? { start: input.start } : {}),
     });
   }
 

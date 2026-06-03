@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 
 import { SessionIsolationSlashCommandExecutor } from '../../src/runtime/sdk/session-isolation/index.ts';
 
+const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 const entryContext = {
   entryKey: {
     businessSessionDomain: 'im',
@@ -79,48 +82,56 @@ function createExecutor(overrides = {}) {
 }
 
 test('SessionIsolationSlashCommandExecutor lists visible sessions from entry context only', async () => {
+  const originalNow = Date.now;
+  Date.now = () => FIXED_NOW;
   const { executor, calls, logs } = createExecutor();
 
-  const result = await executor.execute({
-    command: { kind: 'sessions' },
-    anchor: 'tool-a',
-    ensuredContext: {
-      opencodeSessionId: 'ses-current',
-      session: { id: 'ses-current', title: '当前会话', directory: '/repo' },
-      bootstrapSource: 'existing_binding',
-    },
-    entryContext,
-    directory: '/repo',
-  });
-
-  assert.deepEqual(result, {
-    kind: 'sessions',
-    activeSessionId: 'ses-current',
-    sessions: [
-      { id: 'ses-current', title: '当前会话', directory: '/repo' },
-      { id: 'ses-target', title: '目标会话', directory: '/repo' },
-    ],
-  });
-  assert.deepEqual(calls, [{
-    method: 'resolve',
-    input: {
-      toolSessionId: 'tool-a',
-      entryKey: entryContext.entryKey,
-      policy: entryContext.policy,
-      directory: '/repo',
-    },
-  }]);
-  assert.deepEqual(logs[0], {
-    level: 'info',
-    message: 'session_isolation.slash.sessions.resolved',
-    extra: {
+  try {
+    const result = await executor.execute({
+      command: { kind: 'sessions' },
       anchor: 'tool-a',
-      activeSessionId: 'ses-current',
-      visibleSessionIds: ['ses-current', 'ses-target'],
-      visibleSessionCount: 2,
+      ensuredContext: {
+        opencodeSessionId: 'ses-current',
+        session: { id: 'ses-current', title: '当前会话', directory: '/repo' },
+        bootstrapSource: 'existing_binding',
+      },
+      entryContext,
       directory: '/repo',
-    },
-  });
+    });
+
+    assert.deepEqual(result, {
+      kind: 'sessions',
+      activeSessionId: 'ses-current',
+      sessions: [
+        { id: 'ses-current', title: '当前会话', directory: '/repo' },
+        { id: 'ses-target', title: '目标会话', directory: '/repo' },
+      ],
+    });
+    assert.deepEqual(calls, [{
+      method: 'resolve',
+      input: {
+        toolSessionId: 'tool-a',
+        entryKey: entryContext.entryKey,
+        policy: entryContext.policy,
+        directory: '/repo',
+        roots: true,
+        start: FIXED_NOW - THIRTY_DAYS_MS,
+      },
+    }]);
+    assert.deepEqual(logs[0], {
+      level: 'info',
+      message: 'session_isolation.slash.sessions.resolved',
+      extra: {
+        anchor: 'tool-a',
+        activeSessionId: 'ses-current',
+        visibleSessionIds: ['ses-current', 'ses-target'],
+        visibleSessionCount: 2,
+        directory: '/repo',
+      },
+    });
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('SessionIsolationSlashCommandExecutor switches only to a visible session and clears anchor-only state', async () => {

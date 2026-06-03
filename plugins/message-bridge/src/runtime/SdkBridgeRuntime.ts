@@ -17,6 +17,7 @@ import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import type {
   HostModelCatalogPort,
   HostSessionCreationPort,
+  HostSessionListQuery,
   HostSessionQueryPort,
 } from '../port/SlashCommandControlPlanePort.js';
 import {
@@ -210,8 +211,8 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       getSession: async (sessionId: string) => {
         return this.getHostSessionInfo(startupValidation.sdkClient, sessionId);
       },
-      listSessions: async (scope: { directory?: string; projectID?: string; workspaceID?: string }) => {
-        return this.listHostSessions(startupValidation.sdkClient, scope);
+      listSessions: async (query: HostSessionListQuery) => {
+        return this.listHostSessions(startupValidation.sdkClient, query);
       },
     };
     const hostModelCatalogPort: HostModelCatalogPort = {
@@ -458,10 +459,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
 
   private async listHostSessions(
     client: BridgeSdkClient,
-    scope: { directory?: string; projectID?: string; workspaceID?: string },
+    query: HostSessionListQuery,
   ) {
     const result = await client.session.list({
-      ...(scope.directory ? { directory: scope.directory } : {}),
+      ...(query.directory ? { directory: query.directory } : {}),
+      ...(query.roots !== undefined ? { roots: query.roots } : {}),
+      ...(query.start !== undefined ? { start: query.start } : {}),
     });
     const payload = this.unwrapSdkData(result);
     if (!Array.isArray(payload)) {
@@ -483,12 +486,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         ...(asTrimmedString(session?.workspaceID) ? { workspaceID: asTrimmedString(session?.workspaceID) } : {}),
         ...(asTrimmedString(session?.directory) ? { directory: asTrimmedString(session?.directory) } : {}),
       };
-      if (scope.projectID && projected.projectID !== scope.projectID) {
-        continue;
-      }
-      if (scope.workspaceID && projected.workspaceID !== scope.workspaceID) {
-        continue;
-      }
       sessions.push(projected);
     }
     return sessions;

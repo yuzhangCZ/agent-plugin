@@ -76,7 +76,7 @@ describe('createSdkAdapter coverage', () => {
     const adapted = createSdkAdapter(raw);
     const r1 = await adapted.session.create({ title: 'session-1', directory: '/tmp/bridge' });
     const r2 = await adapted.session.get({ sessionID: 's1', directory: '/tmp/bridge' });
-    const r2b = await adapted.session.list({ directory: '/tmp/bridge' });
+    const r2b = await adapted.session.list({ directory: '/tmp/bridge', roots: true, start: 1_777_766_400_000 });
     const r3 = await adapted.session.abort({ sessionID: 's1', directory: '/tmp/bridge' });
     const r4 = await adapted.session.delete({ sessionID: 's1', directory: '/tmp/bridge' });
     const r5 = await adapted.session.prompt({
@@ -102,7 +102,7 @@ describe('createSdkAdapter coverage', () => {
       query: { directory: '/tmp/bridge' },
     });
     assert.deepStrictEqual(r2b.data, {
-      query: { directory: '/tmp/bridge' },
+      query: { directory: '/tmp/bridge', roots: true, start: 1_777_766_400_000 },
     });
     assert.deepStrictEqual(r4.data, {
       path: { id: 's1' },

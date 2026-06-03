@@ -31,6 +31,8 @@ export interface BridgeSessionClient {
   get(options: { sessionID: string; directory?: string }): Promise<unknown>;
   list(options?: {
     directory?: string;
+    roots?: boolean;
+    start?: number;
   }): Promise<unknown>;
   abort(options: { sessionID: string; directory?: string }): Promise<unknown>;
   delete(options: { sessionID: string; directory?: string }): Promise<unknown>;
