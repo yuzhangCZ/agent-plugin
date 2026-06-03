@@ -620,7 +620,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     this.ensureMessageStarted(state);
     // OpenClaw 可能同时给 block 增量和 final 全量；这里集中去重/补尾。
     const reconciliation = reconcileFinalText(state.accumulatedText, state.pendingFinalText);
-    const finalText = reconciliation.finalText || state.accumulatedText || "(empty response)";
+    const finalText = reconciliation.finalText || state.accumulatedText || "";
     state.accumulatedText = finalText;
     state.queue.push(buildTextDoneFact({
       messageId: state.messageId,
