@@ -2,6 +2,7 @@ import type {
   HostModelCatalogPort,
   HostSessionCreateContext,
   HostSessionCreationPort,
+  HostSessionListQuery,
   HostSessionQueryPort,
   OpencodeSessionOwnershipResolver,
   SessionModelOverrideStore,
@@ -12,6 +13,8 @@ import type {
   SlashCommandResult,
   ToolSessionBindingStore,
 } from '../port/SlashCommandControlPlanePort.js';
+
+const TUI_SESSION_LIST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * slash 命令执行器。
@@ -41,7 +44,9 @@ export class SlashCommandExecutor {
         return { kind: 'new', session, previousSessionId };
       }
       case 'sessions': {
-        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(context.scope ?? {});
+        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(
+          this.buildTuiVisibleSessionListQuery(context),
+        );
         return {
           kind: 'sessions',
           sessions,
@@ -49,7 +54,9 @@ export class SlashCommandExecutor {
         };
       }
       case 'session': {
-        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(context.scope ?? {});
+        const sessions = await this.dependencies.hostSessionQueryPort.listSessions(
+          this.buildTuiVisibleSessionListQuery(context),
+        );
         const target = sessions.find((session) => session.id === command.sessionId);
         if (!target) {
           throw this.asFailure('session_out_of_scope');
@@ -124,6 +131,14 @@ export class SlashCommandExecutor {
     }
     this.dependencies.bindingStore.bind(anchor, nextSessionId);
     this.dependencies.ownershipResolver.attach(nextSessionId, anchor);
+  }
+
+  private buildTuiVisibleSessionListQuery(context: SlashCommandContext): HostSessionListQuery {
+    return {
+      ...(context.scope?.directory ? { directory: context.scope.directory } : {}),
+      roots: true,
+      start: Date.now() - TUI_SESSION_LIST_WINDOW_MS,
+    };
   }
 
   private asFailure(code: SlashCommandFailureCode): SlashCommandFailure {

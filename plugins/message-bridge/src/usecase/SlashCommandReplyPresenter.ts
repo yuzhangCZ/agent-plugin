@@ -73,7 +73,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
         return this.presentGroupDisabledReason(command);
       case 'target_session_out_of_scope':
       case 'session_out_of_scope':
-        return '目标会话不在当前 project/workspace 可切换范围内';
+        return '目标会话不在当前可切换范围内';
       case 'target_model_unavailable':
       case 'model_not_found':
         return '目标模型不存在或当前宿主不可用';

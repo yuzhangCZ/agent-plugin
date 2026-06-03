@@ -451,18 +451,24 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
   }
 });
 
-test('sdk runtime slash session keeps legacy scope filtering and rejects out-of-scope targets', async () => {
+test('sdk runtime slash session uses TUI query and trusts host project workspace filtering', async () => {
   const { restore } = installRegisterCaptureWebSocket();
+  const originalNow = Date.now;
+  Date.now = () => Date.parse('2026-06-03T00:00:00.000Z');
+  const listCalls = [];
 
   try {
     const runtime = await startSdkRuntime({
       session: {
-        list: async () => ({
-          data: [
-            { id: 'ses-match', title: '当前会话', projectID: 'proj-a', workspaceID: 'ws-a', directory: '/workspace/a' },
-            { id: 'ses-out', title: '越界会话', projectID: 'proj-b', workspaceID: 'ws-b', directory: '/workspace/b' },
-          ],
-        }),
+        list: async (options) => {
+          listCalls.push(options);
+          return {
+            data: [
+              { id: 'ses-match', title: '当前会话', projectID: 'proj-a', workspaceID: 'ws-a', directory: '/workspace/a' },
+              { id: 'ses-out', title: '越界会话', projectID: 'proj-b', workspaceID: 'ws-b', directory: '/workspace/b' },
+            ],
+          };
+        },
       },
     });
     const slashCommandExecutor = getSlashCommandExecutor(runtime);
@@ -470,30 +476,42 @@ test('sdk runtime slash session keeps legacy scope filtering and rejects out-of-
     bindingStore.bind('anchor-scope', 'ses-match');
     ownershipResolver.attach('ses-match', 'anchor-scope');
 
-    await assert.rejects(
-      async () => slashCommandExecutor.execute(
-        { kind: 'session', sessionId: 'ses-out' },
-        {
-          anchor: 'anchor-scope',
-          activeOpencodeSessionId: 'ses-match',
-          scope: { projectID: 'proj-a', workspaceID: 'ws-a' },
-          bootstrapSource: 'existing_binding',
-        },
-      ),
-      (error) => {
-        assert.deepStrictEqual(error, { code: 'session_out_of_scope' });
-        return true;
+    const result = await slashCommandExecutor.execute(
+      { kind: 'session', sessionId: 'ses-out' },
+      {
+        anchor: 'anchor-scope',
+        activeOpencodeSessionId: 'ses-match',
+        scope: { projectID: 'proj-a', workspaceID: 'ws-a' },
+        bootstrapSource: 'existing_binding',
       },
     );
 
+    assert.deepStrictEqual(result, {
+      kind: 'session',
+      previousSessionId: 'ses-match',
+      session: {
+        id: 'ses-out',
+        title: '越界会话',
+        projectID: 'proj-b',
+        workspaceID: 'ws-b',
+        directory: '/workspace/b',
+      },
+    });
     assert.deepStrictEqual(bindingStore.get('anchor-scope'), {
       anchor: 'anchor-scope',
-      activeOpencodeSessionId: 'ses-match',
+      activeOpencodeSessionId: 'ses-out',
       status: 'active',
+    });
+    assert.deepStrictEqual(listCalls.at(-1), {
+      query: {
+        roots: true,
+        start: Date.parse('2026-06-03T00:00:00.000Z') - 30 * 24 * 60 * 60 * 1000,
+      },
     });
 
     runtime.stop();
   } finally {
+    Date.now = originalNow;
     restore();
   }
 });

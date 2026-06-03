@@ -13,6 +13,9 @@ import {
   ResolveSlashCommandContextUseCase,
 } from '../../src/usecase/index.ts';
 
+const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 function createLoggerRecorder() {
   const errors = [];
   const infos = [];
@@ -95,14 +98,11 @@ function createControlPlaneDependencies(options = {}) {
       }
       return session;
     },
-    listSessions: async (scope) => sessions.filter((session) => {
-      if (scope.directory && session.directory !== scope.directory) {
+    listSessions: async (query) => sessions.filter((session) => {
+      if (query.directory && session.directory !== query.directory) {
         return false;
       }
-      if (scope.projectID && session.projectID !== scope.projectID) {
-        return false;
-      }
-      if (scope.workspaceID && session.workspaceID !== scope.workspaceID) {
+      if (query.start && session.time?.updated && session.time.updated < query.start) {
         return false;
       }
       return true;
@@ -192,7 +192,7 @@ describe('slash command control plane', () => {
         { kind: 'session' },
         { code: 'session_out_of_scope' },
       ),
-      '切换会话失败, 目标会话不在当前 project/workspace 可切换范围内',
+      '切换会话失败, 目标会话不在当前可切换范围内',
     );
     assert.strictEqual(
       presenter.presentFailure(
@@ -279,6 +279,92 @@ describe('slash command control plane', () => {
     assert.strictEqual(deps.bindingStore.get('tool-switch').activeOpencodeSessionId, 'ses-2');
     assert.strictEqual(deps.ownershipResolver.resolveAttachedAnchor('ses-1'), undefined);
     assert.strictEqual(deps.ownershipResolver.resolveAttachedAnchor('ses-2'), 'tool-switch');
+  });
+
+  test('sessions command lists root sessions updated in the TUI 30 day window', async () => {
+    const originalNow = Date.now;
+    Date.now = () => FIXED_NOW;
+    try {
+      const listCalls = [];
+      const deps = createControlPlaneDependencies({
+        hostSessionQueryPort: {
+          getSession: async () => ({ id: 'ses-1', directory: '/workspace' }),
+          listSessions: async (query) => {
+            listCalls.push(query);
+            return [{ id: 'ses-1', title: '会话一', directory: '/workspace' }];
+          },
+        },
+      });
+      const completion = createCompletionPort();
+      const orchestrator = createOrchestrator(deps, completion.port);
+
+      await orchestrator.execute({
+        command: { kind: 'sessions' },
+        context: {
+          anchor: 'tool-sessions',
+          activeOpencodeSessionId: 'ses-1',
+          scope: {
+            projectID: 'proj-ignored',
+            workspaceID: 'workspace-ignored',
+            directory: '/workspace',
+          },
+          bootstrapSource: 'existing_binding',
+        },
+        welinkSessionId: 'welink-1',
+      });
+
+      assert.deepStrictEqual(listCalls, [{
+        directory: '/workspace',
+        roots: true,
+        start: FIXED_NOW - THIRTY_DAYS_MS,
+      }]);
+      assert.strictEqual(completion.calls[0].kind, 'success');
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  test('session command uses the same TUI visible session window as sessions command', async () => {
+    const originalNow = Date.now;
+    Date.now = () => FIXED_NOW;
+    try {
+      const listCalls = [];
+      const deps = createControlPlaneDependencies({
+        hostSessionQueryPort: {
+          getSession: async () => ({ id: 'ses-current', directory: '/workspace' }),
+          listSessions: async (query) => {
+            listCalls.push(query);
+            return [{ id: 'ses-target', title: '目标会话', directory: '/workspace' }];
+          },
+        },
+      });
+      deps.bindingStore.bind('tool-switch-window', 'ses-current');
+      deps.ownershipResolver.attach('ses-current', 'tool-switch-window');
+      const completion = createCompletionPort();
+      const orchestrator = createOrchestrator(deps, completion.port);
+
+      await orchestrator.execute({
+        command: { kind: 'session', sessionId: 'ses-target' },
+        context: {
+          anchor: 'tool-switch-window',
+          activeOpencodeSessionId: 'ses-current',
+          scope: {
+            directory: '/workspace',
+          },
+          bootstrapSource: 'existing_binding',
+        },
+        welinkSessionId: 'welink-1',
+      });
+
+      assert.deepStrictEqual(listCalls, [{
+        directory: '/workspace',
+        roots: true,
+        start: FIXED_NOW - THIRTY_DAYS_MS,
+      }]);
+      assert.strictEqual(deps.bindingStore.get('tool-switch-window').activeOpencodeSessionId, 'ses-target');
+    } finally {
+      Date.now = originalNow;
+    }
   });
 
   test('orchestrator completes failure with normalized reason', async () => {

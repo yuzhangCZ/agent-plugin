@@ -40,7 +40,11 @@ export class DefaultResolveEntrySessionContextUseCase implements ResolveEntrySes
         entryKey,
       }),
       this.dependencies.anchorBindingRepository.get(input.toolSessionId),
-      this.dependencies.hostSessionGateway.list({ ...(input.directory ? { directory: input.directory } : {}) }),
+      this.dependencies.hostSessionGateway.list({
+        ...(input.directory ? { directory: input.directory } : {}),
+        ...(input.roots !== undefined ? { roots: input.roots } : {}),
+        ...(input.start !== undefined ? { start: input.start } : {}),
+      }),
     ]);
 
     const ownedSessionIds = new Set(ownedRecords.map((record) => record.sessionId));

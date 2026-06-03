@@ -11,12 +11,16 @@ import type { BridgeLogger } from '../../AppLogger.js';
 import type { BusinessEntryContext } from './BusinessEntryContextResolver.js';
 import type { ChatExecutionContext } from '../SdkChatControlPlane.js';
 
+const TUI_SESSION_LIST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 type ResolveEntrySessionContextUseCase = {
   execute(input: {
     toolSessionId: string;
     entryKey: BusinessEntryContext['entryKey'];
     policy: BusinessEntryContext['policy'];
     directory?: string;
+    roots?: boolean;
+    start?: number;
   }): Promise<ResolvedEntrySessionContext>;
 };
 
@@ -146,6 +150,8 @@ export class SessionIsolationSlashCommandExecutor {
       entryKey: input.entryContext.entryKey,
       policy: input.entryContext.policy,
       ...(input.directory ? { directory: input.directory } : {}),
+      roots: true,
+      start: Date.now() - TUI_SESSION_LIST_WINDOW_MS,
     });
   }
 
