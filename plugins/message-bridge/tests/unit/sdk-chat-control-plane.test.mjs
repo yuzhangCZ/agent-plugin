@@ -551,6 +551,45 @@ test('DefaultChatExecutionContextResolver delegates newly-created session attach
   assert.deepEqual(attachmentCalls, [{ toolSessionId: 'anchor-created-formal', sessionId: 'ses-created-formal' }]);
 });
 
+test('DefaultChatExecutionContextResolver delegates existing binding owner refresh to session-isolation port', async () => {
+  const bindingStore = new InMemoryToolSessionBindingStore();
+  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
+  const modelOverrideStore = new InMemorySessionModelOverrideStore();
+  const attachmentCalls = [];
+  bindingStore.bind('anchor-existing-formal', 'ses-existing-formal');
+
+  const resolver = new DefaultChatExecutionContextResolver({
+    bindingStore,
+    ownershipResolver,
+    modelOverrideStore,
+    hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
+    hostSessionQueryPort: {
+      getSession: async (sessionId) => ({ id: sessionId, directory: '/workspace/existing' }),
+      listSessions: async () => {
+        throw new Error('should not list sessions when binding is active');
+      },
+    },
+    sessionAttachmentPort: {
+      switchAttachedSession: async (input) => {
+        attachmentCalls.push(input);
+        return { applied: true };
+      },
+    },
+  });
+
+  const resolved = await resolver.resolveForChat('anchor-existing-formal', undefined, createLogger());
+
+  assert.deepEqual(resolved, {
+    opencodeSessionId: 'ses-existing-formal',
+    session: { id: 'ses-existing-formal', directory: '/workspace/existing' },
+    scope: { directory: '/workspace/existing' },
+    modelOverride: undefined,
+    bootstrapSource: 'existing_binding',
+  });
+  assert.deepEqual(attachmentCalls, [{ toolSessionId: 'anchor-existing-formal', sessionId: 'ses-existing-formal' }]);
+  assert.equal(ownershipResolver.resolveAttachedAnchor('ses-existing-formal'), undefined);
+});
+
 test('EntryAwareChatSessionResolver reuses visible session for the same business entry only', async () => {
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
   const switchCalls = [];
@@ -649,6 +688,7 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
 
 test('EntryAwareChatSessionResolver logs existing binding separately from visible session reuse', async () => {
   const logs = [];
+  const switchCalls = [];
   const resolver = new EntryAwareChatSessionResolver({
     businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
     resolveEntrySessionContextUseCase: {
@@ -660,8 +700,9 @@ test('EntryAwareChatSessionResolver logs existing binding separately from visibl
       }),
     },
     switchAttachedSessionUseCase: {
-      execute: async () => {
-        throw new Error('should not switch when binding already resolves');
+      execute: async (input) => {
+        switchCalls.push(input);
+        return { applied: true };
       },
     },
     createOwnedSessionUseCase: {
@@ -701,6 +742,7 @@ test('EntryAwareChatSessionResolver logs existing binding separately from visibl
   assert.equal(existingBindingLog.extra.entryKey, 'im:group:group-existing');
   assert.deepEqual(existingBindingLog.extra.visibleSessionIds, ['ses-bound']);
   assert.equal(existingBindingLog.extra.bindingSessionId, 'ses-bound');
+  assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-existing-binding', sessionId: 'ses-bound' }]);
   assert.equal(logs.some((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session'), false);
 });
 
