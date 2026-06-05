@@ -2478,6 +2478,37 @@ test('request run sends terminal tool_error without compatibility delay', async 
   });
 });
 
+test('request run skips terminal tool_done delay when compatibility delay is disabled', async () => {
+  const connection = new FakeGatewayClient();
+  const delayCalls: number[] = [];
+  const provider = createProvider();
+  provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return Promise.resolve();
+      },
+      delayMs: 0,
+    },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(delayCalls, []);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_done',
+    toolSessionId: 'tool-1',
+  });
+});
+
 test('terminal tool_error carries session_not_found reason when provider returns structured stale-session error', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(

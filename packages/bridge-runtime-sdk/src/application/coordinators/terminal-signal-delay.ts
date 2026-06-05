@@ -10,7 +10,7 @@ export async function delayBeforeTerminalToolDone(
     delayMs: number;
   },
 ): Promise<void> {
-  if (uplink.type !== 'tool_done') {
+  if (uplink.type !== 'tool_done' || options.delayMs <= 0) {
     return;
   }
 
