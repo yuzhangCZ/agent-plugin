@@ -7,4 +7,6 @@ export interface EventPipeline {
   factProjector: FactToSkillEventProjector;
   eventProjector: SkillEventToGatewayMessageProjector;
   observation: RuntimeObservation;
+  terminalSignalDelay?: (ms: number) => Promise<void>;
+  terminalToolDoneDelayMs?: number;
 }
