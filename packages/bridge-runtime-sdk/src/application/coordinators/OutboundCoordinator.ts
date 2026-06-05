@@ -166,10 +166,7 @@ export class OutboundCoordinator {
       result,
     });
     this.pipeline.observation.terminalProjected(toolSessionId, result, { runId });
-    await delayBeforeTerminalToolDone(uplink, {
-      delay: this.pipeline.terminalSignalDelay,
-      delayMs: this.pipeline.terminalToolDoneDelayMs,
-    });
+    await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }

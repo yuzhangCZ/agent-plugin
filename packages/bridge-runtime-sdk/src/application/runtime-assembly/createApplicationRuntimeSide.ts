@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+
 import {
   ObservedProviderCommandHandlers,
   ProviderApiAdapter,
@@ -35,12 +37,6 @@ import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayO
 import type { BridgeRuntimeInternalOptions } from './runtime-options.types.ts';
 import { DEFAULT_TOOL_DONE_COMPAT_DELAY_MS } from '../constants/runtime.ts';
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 // eslint-disable-next-line max-lines-per-function -- composition root 需要集中表达 runtime 依赖装配关系。
 export function createApplicationRuntimeSide(
   options: BridgeRuntimeOptions,
@@ -59,8 +55,10 @@ export function createApplicationRuntimeSide(
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
   const terminalProjector = new DefaultRunTerminalSignalProjector();
-  const terminalSignalDelay = internalOptions.terminalSignalDelay ?? sleep;
-  const terminalToolDoneDelayMs = internalOptions.terminalToolDoneDelayMs ?? DEFAULT_TOOL_DONE_COMPAT_DELAY_MS;
+  const toolDoneCompatDelay = {
+    sleep: internalOptions.toolDoneCompatDelay?.sleep ?? sleep,
+    delayMs: internalOptions.toolDoneCompatDelay?.delayMs ?? DEFAULT_TOOL_DONE_COMPAT_DELAY_MS,
+  };
   const toolErrorMessageCatalog = new ToolErrorMessageCatalog();
   const commandFailureToolErrorProjector = new CommandFailureToolErrorProjector(toolErrorMessageCatalog);
   const requestRunFailureToolErrorProjector = new RequestRunFailureToolErrorProjector(toolErrorMessageCatalog);
@@ -79,8 +77,7 @@ export function createApplicationRuntimeSide(
       factProjector,
       eventProjector,
       observation,
-      terminalSignalDelay,
-      terminalToolDoneDelayMs,
+      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,
@@ -95,8 +92,7 @@ export function createApplicationRuntimeSide(
       factProjector,
       eventProjector,
       observation,
-      terminalSignalDelay,
-      terminalToolDoneDelayMs,
+      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,

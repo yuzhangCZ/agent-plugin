@@ -126,7 +126,10 @@ function createRuntimeOptions(
   provider: ThirdPartyAgentProvider,
   connection: FakeGatewayClient,
   extra?: Partial<BridgeRuntimeOptions> & {
-    terminalSignalDelay?: (ms: number) => Promise<void>;
+    toolDoneCompatDelay?: {
+      sleep?: (ms: number) => Promise<void>;
+      delayMs?: number;
+    };
   },
 ): BridgeRuntimeOptions {
   return {
@@ -145,7 +148,9 @@ function createRuntimeOptions(
     } satisfies BridgeGatewayHostConfig,
     connectionFactory: () => connection,
     traceIdFactory: () => 'trace-fixed',
-    terminalSignalDelay: async () => {},
+    toolDoneCompatDelay: {
+      sleep: async () => {},
+    },
     ...extra,
   };
 }
@@ -2403,9 +2408,11 @@ test('request run delays terminal tool_done by 100ms', async () => {
   const provider = createProvider();
   provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
   const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
-    terminalSignalDelay(ms) {
-      delayCalls.push(ms);
-      return delay.promise;
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return delay.promise;
+      },
     },
   }));
 
@@ -2446,9 +2453,11 @@ test('request run sends terminal tool_error without compatibility delay', async 
     },
   });
   const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
-    terminalSignalDelay(ms) {
-      delayCalls.push(ms);
-      return Promise.resolve();
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return Promise.resolve();
+      },
     },
   }));
 

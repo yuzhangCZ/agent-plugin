@@ -13,6 +13,8 @@ import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 export type BridgeRuntimeInternalOptions = BridgeRuntimeOptions & {
   connectionFactory?: (config: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
   onGatewayConnectionCreated?: (connection: BridgeGatewayHostConnection) => void;
-  terminalSignalDelay?: (ms: number) => Promise<void>;
-  terminalToolDoneDelayMs?: number;
+  toolDoneCompatDelay?: {
+    sleep?: (ms: number) => Promise<void>;
+    delayMs?: number;
+  };
 };
