@@ -26,7 +26,7 @@ export class ResolveInstallContextUseCase {
       registry,
       url: command.url?.trim() || undefined,
       mac: this.macAddressResolver.resolve(),
-      channel: "openx",
+      channel: command.host,
       verbose: command.verbose ?? false,
     };
   }

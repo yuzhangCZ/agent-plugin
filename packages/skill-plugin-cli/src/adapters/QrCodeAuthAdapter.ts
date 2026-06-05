@@ -52,7 +52,11 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
     this.runtime = runtime;
   }
 
-  async run(context: InstallContext, onSnapshot: (snapshot: CliQrSnapshot) => void) {
+  async run(
+    context: InstallContext,
+    onSnapshot: (snapshot: CliQrSnapshot) => void,
+    onDiagnostic?: (snapshot: unknown) => void,
+  ) {
     let credentials: { ak: string; sk: string } | null = null;
     let refreshIndex = 0;
     let latestFailure: InstallCliError | null = null;
@@ -65,6 +69,9 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
         maxRefreshCount: DEFAULT_MAX_REFRESH_COUNT,
       },
       onSnapshot(snapshot) {
+        if (context.verbose) {
+          onDiagnostic?.(snapshot);
+        }
         switch (snapshot.type) {
           case "qrcode_generated":
             onSnapshot({
@@ -96,6 +103,7 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
             });
             break;
           case "scanned":
+            onSnapshot({ type: "scanned" });
             break;
         }
       },

@@ -5,6 +5,8 @@ import type { Presenter } from "../domain/ports.ts";
 import { INSTALL_STAGE_LABELS } from "../domain/stages.ts";
 import type { CliQrFailureSummary, CliQrSnapshot, HostAvailabilityResult, InstalledPluginArtifact, PresenterFailure } from "../domain/types.ts";
 
+const SENSITIVE_SNAPSHOT_EXACT_FIELDS = new Set(["ak", "sk"]);
+
 function writeStdout(message = "") {
   process.stdout.write(`${message}\n`);
 }
@@ -121,6 +123,41 @@ function formatArtifactSummary(artifact: InstalledPluginArtifact) {
   return `[skill-plugin-cli] fallback 产物已解析：package=${artifact.packageName}`
     + `${artifact.packageVersion ? ` version=${artifact.packageVersion}` : ""}`
     + `${artifact.localTarballPath ? ` tarball=${artifact.localTarballPath}` : ""}`;
+}
+
+function normalizeSnapshotFieldName(key: string) {
+  return key.toLowerCase().replace(/[^a-z0-9]/gu, "");
+}
+
+function isSensitiveSnapshotField(key: string) {
+  const normalized = normalizeSnapshotFieldName(key);
+  return SENSITIVE_SNAPSHOT_EXACT_FIELDS.has(normalized) || normalized.includes("token");
+}
+
+function redactSnapshotValue(value: unknown, key?: string): unknown {
+  if (key && isSensitiveSnapshotField(key)) {
+    return "<redacted>";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSnapshotValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
+        entryKey,
+        redactSnapshotValue(entryValue, entryKey),
+      ]),
+    );
+  }
+  return value;
+}
+
+function formatRedactedSnapshot(snapshot: unknown) {
+  try {
+    return JSON.stringify(redactSnapshotValue(snapshot));
+  } catch {
+    return "<unserializable>";
+  }
 }
 
 /**
@@ -244,10 +281,21 @@ export class TerminalCliPresenter implements Presenter {
         writeStdout();
         return;
       case "confirmed":
+        writeStdout("[skill-plugin-cli] 二维码状态：已确认");
+        return;
       case "cancelled":
+        writeStdout("[skill-plugin-cli] 二维码状态：已取消");
+        return;
+      case "scanned":
+        writeStdout("[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理");
+        return;
       case "failed":
         return;
     }
+  }
+
+  qrSnapshotDiagnostic(snapshot: unknown) {
+    writeStdout(`[skill-plugin-cli][verbose] qrcode snapshot: ${formatRedactedSnapshot(snapshot)}`);
   }
 
   assistantCreated(input: { host: "opencode" | "openclaw"; primaryConfigPath: string; additionalConfigPaths: string[] }) {

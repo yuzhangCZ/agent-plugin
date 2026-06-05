@@ -12,9 +12,11 @@ import type { QrCodeAuthRuntime } from "../../src/domain/qrcode-types.ts";
 
 function createFakeQrCodeRuntime(
   scenario: "confirmed" | "cancelled" | "network_error" | "refresh",
+  options: { onRun?: (input: Parameters<QrCodeAuthRuntime["run"]>[0]) => void } = {},
 ): QrCodeAuthRuntime {
   return {
     async run(input) {
+      options.onRun?.(input);
       if (scenario === "network_error") {
         input.onSnapshot({
           type: "failed",
@@ -51,6 +53,8 @@ function createFakeQrCodeRuntime(
           expiresAt: "2026-04-28T08:05:00.000Z",
         });
       }
+
+      input.onSnapshot({ type: "scanned", qrcode: "qr-1" });
 
       if (scenario === "cancelled") {
         input.onSnapshot({ type: "cancelled", qrcode: "qr-1" });
@@ -145,6 +149,7 @@ test("default openclaw success flow matches output spec", async () => {
   const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-openclaw-success-"));
   const originalEnv = { ...process.env };
   const io = captureIo();
+  const channels: string[] = [];
   try {
     const logPath = join(dir, "openclaw.log");
     await createFakeCommand(
@@ -178,9 +183,16 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "openclaw", "--url", "wss://gateway.example.com/ws/agent"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
+    const result = await createInstallCliUseCase({
+      qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed", {
+        onRun(input) {
+          channels.push(input.channel);
+        },
+      }),
+    }).execute(parsed);
 
     assert.equal(result.status, "success");
+    assert.deepEqual(channels, ["openclaw"]);
     assert.equal(io.stderr.join(""), "");
     assert.equal(
       normalizeTerminalOutput(io.stdout.join("")),
@@ -194,6 +206,8 @@ exit 0`,
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
@@ -214,6 +228,7 @@ test("default opencode success flow matches output spec", async () => {
   const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-success-"));
   const originalEnv = { ...process.env };
   const io = captureIo();
+  const channels: string[] = [];
   try {
     const configDir = join(dir, ".config", "opencode");
     await mkdir(configDir, { recursive: true });
@@ -237,9 +252,16 @@ exit 0`,
 
     const parsed = parseInstallArgv(["install", "--host", "opencode"]);
     assert.ok(!("help" in parsed));
-    const result = await createInstallCliUseCase({ qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed") }).execute(parsed);
+    const result = await createInstallCliUseCase({
+      qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed", {
+        onRun(input) {
+          channels.push(input.channel);
+        },
+      }),
+    }).execute(parsed);
 
     assert.equal(result.status, "success");
+    assert.deepEqual(channels, ["opencode"]);
     assert.equal(io.stderr.join(""), "");
     assert.equal(
       normalizeTerminalOutput(io.stdout.join("")),
@@ -252,6 +274,8 @@ exit 0`,
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 opencode 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：opencode 已完成插件安装、助理创建与 gateway 配置
@@ -315,6 +339,13 @@ exit 0`,
     assert.match(output, /Installing plugin @wecode\/skill-openclaw-plugin\.\.\.\nDone\./);
     assert.match(output, /\[skill-plugin-cli\] 命令执行结束：openclaw plugins install @wecode\/skill-openclaw-plugin/);
     assert.match(output, /\[skill-plugin-cli\]\[openclaw\] 开始：检查连接可用性/);
+    const snapshotLines = output
+      .split("\n")
+      .filter((line) => line.includes("[skill-plugin-cli][verbose] qrcode snapshot:"));
+    const confirmedSnapshotLine = snapshotLines.find((line) => line.includes("\"type\":\"confirmed\"")) ?? "";
+    assert.match(confirmedSnapshotLine, /"ak":"<redacted>"/);
+    assert.match(confirmedSnapshotLine, /"sk":"<redacted>"/);
+    assert.doesNotMatch(confirmedSnapshotLine, /"ak":"ak-1"|"sk":"sk-1"/);
   } finally {
     io.restore();
     process.env = originalEnv;
@@ -521,6 +552,8 @@ exit 0`,
     assert.match(output, /\[skill-plugin-cli\] ========= 已刷新二维码（第 1\/3 次） =========/);
     assert.match(output, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-2/);
     assert.match(output, /\[skill-plugin-cli\] 二维码有效期至: 2026-04-28 08:05:00 UTC/);
+    assert.match(output, /\[skill-plugin-cli\] 二维码状态：已扫码，请在 WeLink 中创建助理/);
+    assert.match(output, /\[skill-plugin-cli\] 二维码状态：已确认/);
   } finally {
     io.restore();
     process.env = originalEnv;

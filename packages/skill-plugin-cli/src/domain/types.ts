@@ -25,7 +25,7 @@ export interface InstallContext {
   registry: string;
   url?: string;
   mac: string;
-  channel: "openx";
+  channel: InstallHost;
   verbose: boolean;
 }
 
@@ -97,6 +97,7 @@ export type CliQrSnapshot =
       expiresAt: string;
       refresh?: { index: number; max: number };
     }
+  | { type: "scanned" }
   | { type: "expired" }
   | { type: "confirmed" }
   | { type: "cancelled"; message: string }

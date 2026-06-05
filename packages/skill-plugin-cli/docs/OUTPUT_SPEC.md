@@ -45,6 +45,7 @@
 - 默认模式与 `--verbose` 使用同一时间格式。
 - 不直接输出原始 ISO 8601 字符串。
 - 不按本地时区差异化展示。
+- 本轮不定义不可识别时间的额外兜底；实现仍按当前时间格式化逻辑输出。
 
 ### 2.5 二维码块占位规则
 
@@ -95,6 +96,11 @@
   - `pc WeLink 创建助理地址: <pcUrl>`
   - `二维码有效期至: <formattedTime>`
   - `请在 WeLink 中创建助理`
+- 二维码状态：
+  - 已扫码：`二维码状态：已扫码，请在 WeLink 中创建助理`
+  - 已确认：`二维码状态：已确认`
+  - 已取消：`二维码状态：已取消`
+  - 等待态不输出，避免轮询刷屏。
 - 助理创建完成：
   - `助理创建完成，正在写入 <host> 连接配置`
 - 可用性检查完成：
@@ -160,6 +166,20 @@
 - 当进入 reinstall 路径时，`--verbose` 允许通过命令边界暴露安装前探测、卸载旧插件和重新安装等额外命令；这些输出属于诊断边界，不新增额外中文过程文案。
 - warning 输出固定为：
   - `[skill-plugin-cli][warning] <message>`
+
+### 4.5 二维码 snapshot 诊断输出
+
+- `--verbose` 模式在收到二维码授权 `onSnapshot` 原始事件时输出诊断行：
+  - `[skill-plugin-cli][verbose] qrcode snapshot: <json>`
+- `<json>` 为单行 JSON，尽量保持原始 snapshot 结构。
+- 该脱敏规则仅适用于 `qrcode snapshot` 诊断行，不代表所有 `--verbose` 输出都脱敏。
+- 敏感字段值必须替换为 `<redacted>`：
+  - 字段名归一化后等于 `ak` 或 `sk` 时脱敏。
+  - 字段名归一化后包含 `token` 时脱敏。
+  - 归一化规则为：转小写并移除非字母数字字符。
+  - 该规则覆盖 `accessToken`、`refreshToken`、`access_token`、`qrcode-token` 等 token 字段。
+- JSON 序列化失败时输出：
+  - `[skill-plugin-cli][verbose] qrcode snapshot: <unserializable>`
 
 ## 5. 错误摘要与二维码刷新规则
 
@@ -251,6 +271,8 @@ skill-plugin-cli
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
@@ -269,6 +291,8 @@ skill-plugin-cli
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 opencode 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：opencode 已完成插件安装、助理创建与 gateway 配置
@@ -291,6 +315,8 @@ skill-plugin-cli
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
@@ -311,6 +337,8 @@ skill-plugin-cli
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置
 [skill-plugin-cli] 已完成连接可用性检查
 [skill-plugin-cli] 接入完成：openclaw 已完成插件安装、助理创建与 gateway 配置
@@ -386,6 +414,7 @@ skill-plugin-cli
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli] 二维码状态：已取消
 [skill-plugin-cli] 接入已取消：WeLink 创建助理已取消
 ```
 
@@ -476,6 +505,10 @@ Done.
 [skill-plugin-cli] pc WeLink 创建助理地址: https://pc.example/qr-1
 [skill-plugin-cli] 二维码有效期至: 2026-04-28 08:00:00 UTC
 [skill-plugin-cli] 请在 WeLink 中创建助理
+[skill-plugin-cli][verbose] qrcode snapshot: {"type":"scanned","qrcode":"qr-1"}
+[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理
+[skill-plugin-cli][verbose] qrcode snapshot: {"type":"confirmed","qrcode":"qr-1","credentials":{"ak":"<redacted>","sk":"<redacted>"}}
+[skill-plugin-cli] 二维码状态：已确认
 [skill-plugin-cli] 完成：执行 WeLink 创建助理
 [skill-plugin-cli][openclaw] 开始：写入 openclaw 连接配置
 [skill-plugin-cli] 助理创建完成，正在写入 openclaw 连接配置

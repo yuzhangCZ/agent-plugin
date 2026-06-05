@@ -135,7 +135,7 @@ test("OpencodeHostAdapter configureHost keeps existing gateway url when context 
         environment: "prod",
         registry: "https://npm.example.com",
         mac: "",
-        channel: "openx",
+        channel: "opencode",
         verbose: false,
       },
       { ak: "ak-1", sk: "sk-1" },
@@ -175,7 +175,7 @@ test("OpencodeHostAdapter fallback install reconciles plugin spec to local path"
       environment: "prod",
       registry: "https://npm.example.com",
       mac: "",
-      channel: "openx",
+      channel: "opencode",
       verbose: false,
     });
 
