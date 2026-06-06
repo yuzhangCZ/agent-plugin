@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+
 import {
   ObservedProviderCommandHandlers,
   ProviderApiAdapter,
@@ -32,9 +34,13 @@ import {
 } from '../usecases/index.ts';
 import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
+import type { BridgeRuntimeInternalOptions } from './runtime-options.types.ts';
+import { DEFAULT_TOOL_DONE_COMPAT_DELAY_MS } from '../constants/runtime.ts';
 
+// eslint-disable-next-line max-lines-per-function -- composition root 需要集中表达 runtime 依赖装配关系。
 export function createApplicationRuntimeSide(
   options: BridgeRuntimeOptions,
+  internalOptions: BridgeRuntimeInternalOptions,
   observation: DefaultRuntimeObservation,
   sink: GatewayOutboundSinkAdapter,
 ): {
@@ -49,6 +55,10 @@ export function createApplicationRuntimeSide(
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
   const terminalProjector = new DefaultRunTerminalSignalProjector();
+  const toolDoneCompatDelay = {
+    sleep: internalOptions.toolDoneCompatDelay?.sleep ?? sleep,
+    delayMs: internalOptions.toolDoneCompatDelay?.delayMs ?? DEFAULT_TOOL_DONE_COMPAT_DELAY_MS,
+  };
   const toolErrorMessageCatalog = new ToolErrorMessageCatalog();
   const commandFailureToolErrorProjector = new CommandFailureToolErrorProjector(toolErrorMessageCatalog);
   const requestRunFailureToolErrorProjector = new RequestRunFailureToolErrorProjector(toolErrorMessageCatalog);
@@ -67,6 +77,7 @@ export function createApplicationRuntimeSide(
       factProjector,
       eventProjector,
       observation,
+      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,
@@ -81,6 +92,7 @@ export function createApplicationRuntimeSide(
       factProjector,
       eventProjector,
       observation,
+      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,

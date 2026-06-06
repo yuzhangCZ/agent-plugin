@@ -144,6 +144,10 @@ test('OutboundCoordinator keeps derived event and uplink projection observation 
       factProjector: new DefaultFactToSkillEventProjector(),
       eventProjector: new DefaultSkillEventToGatewayMessageProjector(),
       observation,
+      toolDoneCompatDelay: {
+        sleep: async () => {},
+        delayMs: 100,
+      },
     },
     factEnricher,
     new DefaultRunTerminalSignalProjector(),
@@ -195,6 +199,10 @@ test('OutboundCoordinator records terminal observation when outbound run complet
       factProjector: new DefaultFactToSkillEventProjector(),
       eventProjector: new DefaultSkillEventToGatewayMessageProjector(),
       observation,
+      toolDoneCompatDelay: {
+        sleep: async () => {},
+        delayMs: 100,
+      },
     },
     factEnricher,
     new DefaultRunTerminalSignalProjector(),

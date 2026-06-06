@@ -8,6 +8,7 @@ import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
+import { delayBeforeTerminalToolDone } from './terminal-signal-delay.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 
@@ -22,6 +23,7 @@ export class RequestRunCoordinator {
   private readonly requestRunFailureProjector: RequestRunFailureToolErrorProjector;
   private readonly factEnricher: ProviderFactEnricher;
 
+  // eslint-disable-next-line max-params -- 应用层协调器显式接收运行时端口，避免隐藏装配依赖。
   constructor(
     interactionCoordinator: InteractionCoordinator,
     validator: FactSequenceValidator,
@@ -80,6 +82,7 @@ export class RequestRunCoordinator {
       welinkSessionId: input.welinkSessionId,
       runId: input.runId,
     });
+    await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }
