@@ -5,7 +5,6 @@ import type {
   BridgeGatewayHostConfig,
   BridgeGatewayHostConnection,
   BridgeGatewayLogger,
-  BridgeGatewayProbeResult,
 } from '../../infrastructure/gateway/gateway-host.ts';
 import type {
   GatewayRuntimeDriver as GatewayRuntimeDriverPort,
@@ -16,7 +15,6 @@ import type { RuntimeObservation } from '../../application/runtime-observation/i
 import {
   createDefaultBridgeGatewayHostConnection,
   normalizeBridgeGatewayHostConfig,
-  probeBridgeGatewayHost,
 } from '../../infrastructure/gateway/gateway-host.ts';
 import { attachGatewayRuntimeObservers } from './gateway-runtime-observers.ts';
 
@@ -32,7 +30,7 @@ interface GatewayRuntimeDriverOptions {
 }
 
 /**
- * gateway connection / probe 驱动适配器。
+ * gateway runtime 主连接驱动适配器。
  */
 export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
   private readonly options: GatewayRuntimeDriverOptions;
@@ -71,21 +69,6 @@ export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
       throw new Error('gateway_client_not_connected');
     }
     this.currentClient.send(message);
-  }
-
-  probe(input: { timeoutMs: number; abortSignal?: AbortSignal }): Promise<BridgeGatewayProbeResult> {
-    return probeBridgeGatewayHost(
-      {
-        gatewayHost: this.normalizedGatewayHost,
-        timeoutMs: input.timeoutMs,
-        abortSignal: input.abortSignal,
-      },
-      {
-        connectionFactory: this.options.connectionFactory
-          ? () => this.options.connectionFactory!(this.options.gatewayHost)
-          : undefined,
-      },
-    );
   }
 
   isReady(): boolean {

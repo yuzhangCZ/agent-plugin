@@ -34,6 +34,8 @@ export type {
   ToolUpdateFact,
 } from './domain/provider.ts';
 export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
+export { BridgeRuntimeError } from './application/runtime-error.ts';
+export type { BridgeRuntimeErrorCode } from './application/runtime-error.ts';
 export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
 export type {
   BridgeGatewayChannel,

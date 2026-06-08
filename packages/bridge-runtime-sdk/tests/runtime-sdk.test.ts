@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type {
+  BridgeRuntimeError,
   BridgeGatewayHostConfig,
   BridgeRuntimeOptions,
   ProviderFact,
@@ -16,7 +17,21 @@ import type {
   BridgeGatewayHostError,
   BridgeGatewayHostState,
 } from '../src/infrastructure/gateway/gateway-host.ts';
+import { BridgeGatewayLoggerObservationAdapter } from '../src/adapters/observation/runtime-logger-observation.ts';
+import { GatewayProbeDriver } from '../src/adapters/gateway/GatewayProbeDriver.ts';
+import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
+import type { RuntimeObservationEvent } from '../src/application/runtime-observation/index.ts';
 import { createBridgeRuntime } from '../src/index.ts';
+
+function assertBridgeRuntimeError(
+  error: unknown,
+  expected: { code: BridgeRuntimeError['code']; message: string },
+): void {
+  assert.equal(error instanceof Error, true);
+  assert.equal((error as Error).name, 'BridgeRuntimeError');
+  assert.equal((error as BridgeRuntimeError).code, expected.code);
+  assert.equal((error as Error).message, expected.message);
+}
 
 function createAsyncFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
   return {
@@ -46,6 +61,18 @@ function createDeferred<T>() {
     reject = nextReject;
   });
   return { promise, resolve, reject };
+}
+
+function createTestObservation() {
+  const events: RuntimeObservationEvent[] = [];
+  return {
+    events,
+    observation: new DefaultRuntimeObservation({
+      record(event) {
+        events.push(event);
+      },
+    }),
+  };
 }
 
 function createHangingFacts(
@@ -160,6 +187,81 @@ function flushEvents(): Promise<void> {
     setImmediate(resolve);
   });
 }
+
+test('default runtime observation maps gateway probe events', () => {
+  const { events, observation } = createTestObservation();
+
+  observation.gatewayProbeRequested('ws://gateway.local', 50);
+  observation.gatewayProbeCompleted('ws://gateway.local', 'connect_error', 12, 'gateway_not_connected');
+
+  assert.deepEqual(events, [
+    {
+      type: 'gateway_probe',
+      phase: 'requested',
+      gatewayUrl: 'ws://gateway.local',
+      timeoutMs: 50,
+    },
+    {
+      type: 'gateway_probe',
+      phase: 'completed',
+      gatewayUrl: 'ws://gateway.local',
+      state: 'connect_error',
+      latencyMs: 12,
+      reason: 'gateway_not_connected',
+    },
+  ]);
+});
+
+test('logger observation adapter projects gateway probe events', () => {
+  const records: Array<{ level: string; message: string; meta: Record<string, unknown> }> = [];
+  const adapter = new BridgeGatewayLoggerObservationAdapter({
+    info(message, meta) {
+      records.push({ level: 'info', message, meta: meta ?? {} });
+    },
+    warn(message, meta) {
+      records.push({ level: 'warn', message, meta: meta ?? {} });
+    },
+    error(message, meta) {
+      records.push({ level: 'error', message, meta: meta ?? {} });
+    },
+  });
+
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'requested',
+    gatewayUrl: 'ws://gateway.local',
+    timeoutMs: 50,
+  });
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: 'ws://gateway.local',
+    state: 'connect_error',
+    latencyMs: 12,
+    reason: 'gateway_not_connected',
+  });
+
+  assert.deepEqual(records, [
+    {
+      level: 'info',
+      message: 'runtime_sdk.gateway_probe.requested',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        timeoutMs: 50,
+      },
+    },
+    {
+      level: 'error',
+      message: 'runtime_sdk.gateway_probe.completed',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        state: 'connect_error',
+        latencyMs: 12,
+        reason: 'gateway_not_connected',
+      },
+    },
+  ]);
+});
 
 function createProvider(): ThirdPartyAgentProvider {
   return {
@@ -1963,8 +2065,131 @@ test('runtime start rejects and enters failed when provider initialize fails', a
     kind: 'startup_failure',
     phase: 'start',
     message: 'provider_init_failed',
-    code: undefined,
+    code: 'runtime_start_failed',
   });
+});
+
+test('runtime start wraps provider initialize failure as BridgeRuntimeError', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async initialize() {
+          throw new Error('provider_init_failed');
+        },
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_start_failed',
+        message: 'provider_init_failed',
+      });
+      return true;
+    },
+  );
+});
+
+test('runtime start preserves original message when disconnect cleanup throws', async () => {
+  const connection = new FakeGatewayClient();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTED';
+    this.emit('stateChange', this.state);
+    throw new Error('connect_failed_after_open');
+  };
+  connection.disconnect = function disconnect(): void {
+    throw new Error('disconnect_cleanup_failed');
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_start_failed',
+        message: 'connect_failed_after_open',
+      });
+      return true;
+    },
+  );
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'connect_failed_after_open',
+  });
+});
+
+test('runtime stop wraps dispose failure as BridgeRuntimeError', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    throw new Error('provider_dispose_failed');
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_stop_failed',
+        message: 'provider_dispose_failed',
+      });
+      return true;
+    },
+  );
+});
+
+test('runtime stop still disposes provider when disconnect throws', async () => {
+  const connection = new FakeGatewayClient();
+  let disposeCalls = 0;
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeCalls += 1;
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.disconnect = function disconnect(): void {
+    throw new Error('disconnect_failed');
+  };
+
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_stop_failed',
+        message: 'disconnect_failed',
+      });
+      return true;
+    },
+  );
+  assert.equal(disposeCalls, 1);
 });
 
 test('runtime reflects reconnecting and returns to ready after gateway reconnects', async () => {
@@ -2981,6 +3206,29 @@ test('failed start does not drift back to reconnecting or ready after later gate
   });
 });
 
+test('gateway runtime error preserves original gateway failure code in diagnostics', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitError({
+    code: 'GATEWAY_FATAL',
+    message: 'gateway_runtime_failed',
+    retryable: false,
+  });
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'gateway_runtime_failed',
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'gateway_runtime_failure',
+    phase: 'runtime',
+    message: 'gateway_runtime_failed',
+    code: 'GATEWAY_FATAL',
+  });
+});
+
 test('runtime diagnostics record lastReadyAt when gateway becomes ready', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
@@ -3189,6 +3437,64 @@ test('concurrent start on one runtime creates and connects once', async () => {
   assert.equal(runtime.getStatus().state, 'ready');
 });
 
+test('start waits for in-flight stop before reconnecting', async () => {
+  const connection = new FakeGatewayClient();
+  let connectCalls = 0;
+  let disposeStarted = false;
+  const disposeGate = createDeferred<void>();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeStarted = true;
+    await disposeGate.promise;
+  };
+  connection.connect = async function connect(): Promise<void> {
+    connectCalls += 1;
+    this.state = 'READY';
+    this.emit('stateChange', this.state);
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  const stopPromise = runtime.stop();
+  while (!disposeStarted) {
+    await flushEvents();
+  }
+  const restartPromise = runtime.start();
+  await flushEvents();
+
+  assert.equal(connectCalls, 1);
+  disposeGate.resolve();
+  await stopPromise;
+  await restartPromise;
+
+  assert.equal(connectCalls, 2);
+  assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('stop during start settles to idle', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emit('stateChange', this.state);
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emit('stateChange', this.state);
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const stopPromise = runtime.stop();
+  connectGate.resolve();
+  await Promise.all([startPromise, stopPromise]);
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+});
+
 test('concurrent probe on one runtime creates one temporary connection', async () => {
   const connection = new FakeGatewayClient();
   let factoryCalls = 0;
@@ -3219,6 +3525,78 @@ test('concurrent probe on one runtime creates one temporary connection', async (
   assert.equal(connectCalls, 1);
   assert.equal(first.state, 'ready');
   assert.deepEqual(second, first);
+});
+
+test('probe during starting returns connecting without waiting for startPromise', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  let probeConnectionCreated = false;
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emit('stateChange', this.state);
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emit('stateChange', this.state);
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), connection, {
+      connectionFactory: () => {
+        if (connection.state === 'CONNECTING') {
+          probeConnectionCreated = true;
+        }
+        return connection;
+      },
+    }),
+  );
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const probeResult = await runtime.probe({ timeoutMs: 5_000 });
+  connectGate.resolve();
+  await startPromise;
+
+  assert.deepEqual(probeResult, {
+    state: 'connecting',
+    latencyMs: probeResult.latencyMs,
+    reason: 'runtime_lifecycle_busy_probe_skipped',
+  });
+  assert.equal(probeConnectionCreated, false);
+});
+
+test('probe during stopping returns connecting without temporary connection', async () => {
+  const connection = new FakeGatewayClient();
+  let disposeStarted = false;
+  const disposeGate = createDeferred<void>();
+  let factoryCalls = 0;
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeStarted = true;
+    await disposeGate.promise;
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(provider, connection, {
+      connectionFactory: () => {
+        factoryCalls += 1;
+        return connection;
+      },
+    }),
+  );
+
+  await runtime.start();
+  const stopPromise = runtime.stop();
+  while (!disposeStarted) {
+    await flushEvents();
+  }
+  const probeResult = await runtime.probe({ timeoutMs: 50 });
+  disposeGate.resolve();
+  await stopPromise;
+
+  assert.deepEqual(probeResult, {
+    state: 'connecting',
+    latencyMs: probeResult.latencyMs,
+    reason: 'runtime_lifecycle_busy_probe_skipped',
+  });
+  assert.equal(factoryCalls, 1);
 });
 
 test('start cancels in-flight probe before creating runtime connection', async () => {
@@ -3255,8 +3633,139 @@ test('start cancels in-flight probe before creating runtime connection', async (
 
   assert.deepEqual(createdConnections, ['probe', 'runtime']);
   assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
   assert.equal(runtimeConnectCalls, 1);
   assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('start cancels same-tick in-flight probe before temporary probe becomes ready', async () => {
+  const probeConnection = new FakeGatewayClient();
+  const runtimeConnection = new FakeGatewayClient();
+  const createdConnections: string[] = [];
+  let runtimeConnectCalls = 0;
+  probeConnection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emit('stateChange', this.state);
+    await flushEvents();
+    this.state = 'READY';
+    this.emit('stateChange', this.state);
+  };
+  runtimeConnection.connect = async function connect(): Promise<void> {
+    runtimeConnectCalls += 1;
+    this.state = 'READY';
+    this.emit('stateChange', this.state);
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), runtimeConnection, {
+      connectionFactory: () => {
+        if (createdConnections.length === 0) {
+          createdConnections.push('probe');
+          return probeConnection;
+        }
+        createdConnections.push('runtime');
+        return runtimeConnection;
+      },
+    }),
+  );
+
+  const probe = runtime.probe({ timeoutMs: 5_000 });
+  await runtime.start();
+  const probeResult = await probe;
+
+  assert.deepEqual(createdConnections, ['probe', 'runtime']);
+  assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
+  assert.equal(runtimeConnectCalls, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('stop cancels in-flight probe without starting runtime lifecycle', async () => {
+  const probeConnection = new FakeGatewayClient();
+  probeConnection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emit('stateChange', this.state);
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), probeConnection, {
+      connectionFactory: () => probeConnection,
+    }),
+  );
+
+  const probe = runtime.probe({ timeoutMs: 5_000 });
+  await flushEvents();
+  await runtime.stop();
+  const probeResult = await probe;
+
+  assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+});
+
+test('gateway probe returns cancelled for pre-aborted signal without creating connection', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('probe_pre_cancelled'));
+  let factoryCalls = 0;
+  const options = createRuntimeOptions(createProvider(), new FakeGatewayClient());
+  const { observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => {
+      factoryCalls += 1;
+      return new FakeGatewayClient();
+    },
+  });
+
+  const result = await driver.probe({
+    timeoutMs: 5_000,
+    abortSignal: controller.signal,
+  });
+
+  assert.deepEqual(result, {
+    state: 'cancelled',
+    latencyMs: result.latencyMs,
+    reason: 'probe_pre_cancelled',
+  });
+  assert.equal(factoryCalls, 0);
+});
+
+test('gateway probe maps synchronous connect throw to result and disconnects connection', async () => {
+  const connection = new FakeGatewayClient();
+  let disconnectCalls = 0;
+  connection.connect = function connect(): Promise<void> {
+    throw new Error('gateway_websocket_error');
+  };
+  connection.disconnect = function disconnect(): void {
+    disconnectCalls += 1;
+    this.state = 'DISCONNECTED';
+  };
+  const options = createRuntimeOptions(createProvider(), connection);
+  const { events, observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => connection,
+  });
+
+  const result = await driver.probe({ timeoutMs: 5_000 });
+
+  assert.deepEqual(result, {
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'gateway_websocket_error',
+  });
+  assert.equal(disconnectCalls, 1);
+  assert.deepEqual(events.at(-1), {
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: options.gatewayHost.url,
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'gateway_websocket_error',
+  });
 });
 
 test('probe waits for connect rejection before classifying startup rejection', async () => {
@@ -3289,4 +3798,27 @@ test('probe waits for connect rejection before classifying startup rejection', a
     reason: 'gateway_register_rejected',
   });
   assert.equal(result.latencyMs >= 0, true);
+  assert.equal(runtime.getDiagnostics().failures.length, 0);
+});
+
+test('probe unexpected rejection wraps as BridgeRuntimeError', async () => {
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), new FakeGatewayClient(), {
+      connectionFactory: () => {
+        throw new Error('probe_factory_failed');
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.probe({ timeoutMs: 50 }),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_probe_failed',
+        message: 'probe_factory_failed',
+      });
+      return true;
+    },
+  );
+  assert.equal(runtime.getDiagnostics().failures.length, 0);
 });

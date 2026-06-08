@@ -269,6 +269,18 @@ export interface RuntimeDiagnostics {
   failures: RuntimeTraceFailure[];
 }
 
+export type BridgeRuntimeErrorCode =
+  | 'runtime_start_failed'
+  | 'runtime_stop_failed'
+  | 'runtime_probe_failed'
+  | 'runtime_gateway_error';
+
+export declare class BridgeRuntimeError extends Error {
+  readonly name: 'BridgeRuntimeError';
+  readonly code: BridgeRuntimeErrorCode;
+  constructor(code: BridgeRuntimeErrorCode, message: string);
+}
+
 export type BridgeRuntimeStatus =
   | 'idle'
   | 'starting'

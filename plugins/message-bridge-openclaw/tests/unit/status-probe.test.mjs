@@ -192,7 +192,7 @@ test("temporary probe cancellation is keyed by gateway url and ak", async () => 
 
   assert.equal(result.ok, false);
   assert.equal(result.state, "cancelled");
-  assert.equal(result.reason, "probe_cancelled_for_runtime_start");
+  assert.equal(result.reason, "probe_cancelled_for_runtime_lifecycle");
 });
 
 test("probe cancellation still wins when runtime creation has not settled yet", async () => {
@@ -234,7 +234,7 @@ test("probe cancellation still wins when runtime creation has not settled yet", 
 
   assert.equal(result.ok, false);
   assert.equal(result.state, "cancelled");
-  assert.equal(result.reason, "probe_cancelled_for_runtime_start");
+  assert.equal(result.reason, "probe_cancelled_for_runtime_lifecycle");
   assert.equal(stopCalls, 1);
 });
 

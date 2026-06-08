@@ -6,7 +6,6 @@ import {
 import type {
   BridgeGatewayHostConfig,
   BridgeGatewayLogger,
-  BridgeGatewayProbeResult,
 } from '../../public-contract.ts';
 import { resolvePackageVersion } from '../../packageVersion.ts';
 
@@ -59,32 +58,6 @@ export interface BridgeGatewayHostConnection {
   on<E extends keyof BridgeGatewayHostEvents>(event: E, listener: BridgeGatewayHostEvents[E]): this;
 }
 
-export interface BridgeGatewayProbeInput {
-  gatewayHost: InternalBridgeGatewayHostConfig;
-  timeoutMs: number;
-  abortSignal?: AbortSignal;
-}
-
-function elapsedMs(startedAt: number, now: () => number): number {
-  return Math.max(0, now() - startedAt);
-}
-
-function isRejectedProbeError(message: string): boolean {
-  return message !== 'gateway_websocket_error' && message !== 'gateway_not_connected';
-}
-
-function logInfo(logger: BridgeGatewayLogger | undefined, message: string, meta: Record<string, unknown>): void {
-  logger?.info?.(message, meta);
-}
-
-function logWarn(logger: BridgeGatewayLogger | undefined, message: string, meta: Record<string, unknown>): void {
-  logger?.warn?.(message, meta);
-}
-
-function logError(logger: BridgeGatewayLogger | undefined, message: string, meta: Record<string, unknown>): void {
-  logger?.error?.(message, meta);
-}
-
 export function createDefaultBridgeGatewayHostConnection(
   config: InternalBridgeGatewayHostConfig,
 ): BridgeGatewayHostConnection {
@@ -132,143 +105,4 @@ export function normalizeBridgeGatewayHostConfig(
     abortSignal: options.abortSignal,
     logger: options.logger,
   };
-}
-
-export async function probeBridgeGatewayHost(
-  input: BridgeGatewayProbeInput,
-  deps: {
-    connectionFactory?: (config: InternalBridgeGatewayHostConfig) => BridgeGatewayHostConnection;
-    now?: () => number;
-  } = {},
-): Promise<BridgeGatewayProbeResult> {
-  const now = deps.now ?? Date.now;
-  const startedAt = now();
-  const { gatewayHost, timeoutMs } = input;
-  const logger = gatewayHost.logger;
-
-  logInfo(logger, 'probe.requested', {
-    connectionKey: gatewayHost.connectionKey,
-    gatewayUrl: gatewayHost.url,
-    timeoutMs,
-  });
-
-  const connection = deps.connectionFactory?.(gatewayHost) ?? createDefaultBridgeGatewayHostConnection(gatewayHost);
-
-  return await new Promise((resolve) => {
-    let settled = false;
-
-    const finish = (result: BridgeGatewayProbeResult) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      input.abortSignal?.removeEventListener('abort', onAbort);
-      try {
-        connection.disconnect();
-      } catch {
-        // ignore disconnect failures in probe teardown
-      }
-      resolve(result);
-    };
-
-    const onAbort = () => {
-      const result = {
-        state: 'cancelled',
-        latencyMs: elapsedMs(startedAt, now),
-        reason: 'probe_cancelled_for_runtime_start',
-      } satisfies BridgeGatewayProbeResult;
-      logInfo(logger, 'probe.connect.cancelled_for_runtime', {
-        connectionKey: gatewayHost.connectionKey,
-        gatewayUrl: gatewayHost.url,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    };
-
-    input.abortSignal?.addEventListener('abort', onAbort, { once: true });
-
-    const timer = setTimeout(() => {
-      const result = {
-        state: 'timeout',
-        latencyMs: elapsedMs(startedAt, now),
-        reason: 'probe timed out before READY',
-      } satisfies BridgeGatewayProbeResult;
-      logWarn(logger, 'probe.connect.timeout', {
-        connectionKey: gatewayHost.connectionKey,
-        gatewayUrl: gatewayHost.url,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    }, timeoutMs);
-
-    logInfo(logger, 'probe.connect.started', {
-      connectionKey: gatewayHost.connectionKey,
-      gatewayUrl: gatewayHost.url,
-      timeoutMs,
-    });
-
-    connection.on('stateChange', (state) => {
-      if (settled) {
-        return;
-      }
-      if (state === 'READY') {
-        const result = {
-          state: 'ready',
-          latencyMs: elapsedMs(startedAt, now),
-          reason: 'probe_connected',
-        } satisfies BridgeGatewayProbeResult;
-        logInfo(logger, 'probe.connect.ready', {
-          connectionKey: gatewayHost.connectionKey,
-          gatewayUrl: gatewayHost.url,
-          latencyMs: result.latencyMs,
-          reason: result.reason,
-        });
-        finish(result);
-        return;
-      }
-    });
-
-    connection.on('error', (error) => {
-      if (settled) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error.message ?? error);
-      const result = {
-        state: isRejectedProbeError(message) ? 'rejected' : 'connect_error',
-        latencyMs: elapsedMs(startedAt, now),
-        reason: message,
-      } satisfies BridgeGatewayProbeResult;
-      const log = result.state === 'rejected' ? logWarn : logError;
-      log(logger, result.state === 'rejected' ? 'probe.connect.rejected' : 'probe.connect.error', {
-        connectionKey: gatewayHost.connectionKey,
-        gatewayUrl: gatewayHost.url,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    });
-
-    connection.connect().catch((error) => {
-      if (settled) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      const result = {
-        state: isRejectedProbeError(message) ? 'rejected' : 'connect_error',
-        latencyMs: elapsedMs(startedAt, now),
-        reason: message,
-      } satisfies BridgeGatewayProbeResult;
-      const log = result.state === 'rejected' ? logWarn : logError;
-      log(logger, result.state === 'rejected' ? 'probe.connect.rejected' : 'probe.connect.error', {
-        connectionKey: gatewayHost.connectionKey,
-        gatewayUrl: gatewayHost.url,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      finish(result);
-    });
-  });
 }

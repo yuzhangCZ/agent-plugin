@@ -1,10 +1,10 @@
 import type { GatewayDownstreamBusinessRequest } from '@agent-plugin/gateway-schema';
 
 import { toRuntimeCommand } from '../../adapters/gateway/GatewayDownstreamCommandAdapter.ts';
-import type { GatewayRuntimeDriver } from '../../adapters/gateway/GatewayRuntimeDriver.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { RuntimeLifecycleService } from '../lifecycle/RuntimeLifecycleService.ts';
+import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { CommandFailureToolErrorProjector } from '../projectors/CommandFailureToolErrorProjector.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
 import type { RuntimeCoreService } from '../runtime/RuntimeCoreService.ts';

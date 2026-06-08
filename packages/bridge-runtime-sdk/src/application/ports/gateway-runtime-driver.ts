@@ -20,6 +20,13 @@ export interface GatewayRuntimeDriver {
   connect(): Promise<void>;
   disconnect(): void;
   send(message: GatewayUplinkBusinessMessage): void;
-  probe(input: { timeoutMs: number; abortSignal?: AbortSignal }): Promise<BridgeGatewayProbeResult>;
   isReady(): boolean;
+}
+
+/**
+ * 临时 gateway probe 驱动端口。
+ * @remarks probe 使用旁路连接，不参与 runtime 主连接 lifecycle。
+ */
+export interface GatewayProbeDriver {
+  probe(input: { timeoutMs: number; abortSignal?: AbortSignal }): Promise<BridgeGatewayProbeResult>;
 }

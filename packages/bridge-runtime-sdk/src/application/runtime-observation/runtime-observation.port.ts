@@ -10,6 +10,7 @@ import type {
   RuntimeObservationUsecaseContext,
 } from './runtime-observation.types.ts';
 import type { GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
+import type { BridgeGatewayProbeResult } from '../../infrastructure/gateway/gateway-host.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 
@@ -31,6 +32,13 @@ export interface RuntimeObservation {
   gatewayInboundActivity(occurredAt?: number): void;
   gatewayOutboundActivity(occurredAt?: number): void;
   gatewayHeartbeatActivity(occurredAt?: number): void;
+  gatewayProbeRequested(gatewayUrl: string, timeoutMs: number): void;
+  gatewayProbeCompleted(
+    gatewayUrl: string,
+    state: BridgeGatewayProbeResult['state'],
+    latencyMs: number,
+    reason?: string,
+  ): void;
   downstreamReceived(summary: RuntimeObservationMessageSummary): void;
   downstreamHandled(summary: RuntimeObservationMessageSummary, command: RuntimeObservationCommand): void;
   downstreamFailed(summary: RuntimeObservationMessageSummary, error: unknown, code?: string): void;
@@ -128,6 +136,10 @@ export interface RuntimeObservation {
   uplinkSending(message: GatewayUplinkBusinessMessage): void;
   uplinkValidated(message: GatewayUplinkBusinessMessage): void;
   uplinkValidationFailed(message: GatewayUplinkBusinessMessage, code: string, field?: string, reason?: string): void;
+  /**
+   * 记录需要进入 RuntimeDiagnostics.failures 的 runtime 失败事件。
+   * @remarks 不用于 probe/status/health check 等查询型结果。
+   */
   failureRecorded(
     kind: FailureRecordedObservationEvent['kind'],
     phase: FailureRecordedObservationEvent['phase'],

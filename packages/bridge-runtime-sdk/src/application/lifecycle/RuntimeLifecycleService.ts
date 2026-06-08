@@ -1,12 +1,12 @@
 import type {
   BridgeGatewayHostError,
   BridgeGatewayHostState,
-  BridgeGatewayProbeResult,
 } from '../../infrastructure/gateway/gateway-host.ts';
-import { DEFAULT_PROBE_TIMEOUT_MS, RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
+import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { RuntimeObservation } from '../runtime-observation/index.ts';
 import type { BridgeRuntimeStatusSnapshot } from '../runtime.ts';
+import { createBridgeRuntimeError, normalizeErrorMessage } from '../runtime-error.ts';
 import type { RuntimeCore } from '../runtime/runtime-core.types.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './runtime-lifecycle.types.ts';
 
@@ -24,8 +24,6 @@ export class RuntimeLifecycleService {
   };
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
-  private probePromise: Promise<BridgeGatewayProbeResult> | null = null;
-  private probeAbortController: AbortController | null = null;
 
   constructor(
     core: RuntimeCore,
@@ -61,11 +59,15 @@ export class RuntimeLifecycleService {
   }
 
   handleGatewayRuntimeError(error: BridgeGatewayHostError): void {
-    this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'runtime', error, error.code);
+    const runtimeError = createBridgeRuntimeError('runtime_gateway_error', error);
+    this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'runtime', runtimeError, error.code);
     this.onTelemetryUpdated?.();
   }
 
   async start(): Promise<void> {
+    if (this.stopPromise) {
+      await this.stopPromise;
+    }
     if (this.status.state === 'ready') {
       return;
     }
@@ -82,7 +84,6 @@ export class RuntimeLifecycleService {
 
     this.startPromise = (async () => {
       try {
-        await this.cancelProbeForStart();
         await this.core.start();
         await this.driver.connect();
         this.status = {
@@ -92,11 +93,15 @@ export class RuntimeLifecycleService {
         this.observation.runtimeStartCompleted();
         this.onTelemetryUpdated?.();
       } catch (error) {
-        this.driver.disconnect();
-        this.setFailed(RUNTIME_FAILURE_KIND.startup, 'start', error);
-        this.observation.runtimeStartFailed(error);
+        const runtimeError = createBridgeRuntimeError('runtime_start_failed', error);
+        const cleanupError = this.disconnectBestEffort();
+        if (cleanupError) {
+          this.recordFailure(RUNTIME_FAILURE_KIND.gatewayRuntime, 'start', cleanupError);
+        }
+        this.setFailed(RUNTIME_FAILURE_KIND.startup, 'start', runtimeError, runtimeError.code);
+        this.observation.runtimeStartFailed(runtimeError, runtimeError.code);
         this.onTelemetryUpdated?.();
-        throw error;
+        throw runtimeError;
       } finally {
         this.startPromise = null;
       }
@@ -106,9 +111,6 @@ export class RuntimeLifecycleService {
   }
 
   async stop(): Promise<void> {
-    if (this.probePromise) {
-      await this.cancelProbeForStart();
-    }
     if (this.status.state === 'idle') {
       return;
     }
@@ -125,13 +127,23 @@ export class RuntimeLifecycleService {
 
     this.stopPromise = (async () => {
       try {
-        await this.cancelProbeForStart();
+        let primaryError: unknown | null = null;
         if (this.startPromise) {
-          this.driver.disconnect();
+          primaryError = this.disconnectBestEffort();
           await this.startPromise.catch(() => undefined);
         }
-        this.driver.disconnect();
-        await this.core.stop();
+        primaryError = primaryError ?? this.disconnectBestEffort();
+        try {
+          await this.core.stop();
+        } catch (error) {
+          if (primaryError) {
+            this.recordFailure(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', primaryError);
+          }
+          primaryError = error;
+        }
+        if (primaryError) {
+          throw primaryError;
+        }
         this.status = {
           state: 'idle',
           failureReason: null,
@@ -139,10 +151,11 @@ export class RuntimeLifecycleService {
         this.observation.runtimeStopCompleted();
         this.onTelemetryUpdated?.();
       } catch (error) {
-        this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', error);
-        this.observation.runtimeStopFailed(error);
+        const runtimeError = createBridgeRuntimeError('runtime_stop_failed', error);
+        this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', runtimeError, runtimeError.code);
+        this.observation.runtimeStopFailed(runtimeError, runtimeError.code);
         this.onTelemetryUpdated?.();
-        throw error;
+        throw runtimeError;
       } finally {
         this.stopPromise = null;
       }
@@ -155,55 +168,8 @@ export class RuntimeLifecycleService {
     return { ...this.status };
   }
 
-  async probe(input = { timeoutMs: DEFAULT_PROBE_TIMEOUT_MS }): Promise<BridgeGatewayProbeResult> {
-    const startedAt = Date.now();
-    if (this.status.state === 'ready') {
-      return {
-        state: 'ready',
-        latencyMs: 0,
-        reason: 'runtime_ready',
-      };
-    }
-
-    if (this.status.state === 'starting' || this.status.state === 'reconnecting') {
-      const waitMs = Math.min(input.timeoutMs, 1_000);
-      if (this.startPromise) {
-        await Promise.race([this.startPromise.catch(() => undefined), this.sleep(waitMs)]);
-      } else {
-        await this.sleep(waitMs);
-      }
-      const postWaitState = this.status.state;
-      if (this.isRuntimeReady(postWaitState)) {
-        return {
-          state: 'ready',
-          latencyMs: Math.max(0, Date.now() - startedAt),
-          reason: 'runtime_connected_after_wait',
-        };
-      }
-      return {
-        state: 'connecting',
-        latencyMs: Math.max(0, Date.now() - startedAt),
-        reason: 'runtime_connecting_probe_skipped',
-      };
-    }
-
-    if (this.probePromise) {
-      return this.probePromise;
-    }
-
-    this.probeAbortController = new AbortController();
-    this.probePromise = this.driver.probe({
-      timeoutMs: input.timeoutMs,
-      abortSignal: this.probeAbortController.signal,
-    }).finally(() => {
-      this.probePromise = null;
-      this.probeAbortController = null;
-    });
-    return this.probePromise;
-  }
-
   recordFailure(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): string {
-    const message = this.normalizeErrorMessage(error);
+    const message = normalizeErrorMessage(error);
     this.observation.failureRecorded(kind, phase, message, code);
     return message;
   }
@@ -217,24 +183,13 @@ export class RuntimeLifecycleService {
     };
   }
 
-  private async cancelProbeForStart(): Promise<void> {
-    if (!this.probePromise || !this.probeAbortController) {
-      return;
+  private disconnectBestEffort(): unknown | null {
+    try {
+      this.driver.disconnect();
+      return null;
+    } catch (error) {
+      return error;
     }
-    this.probeAbortController.abort(new Error('probe_cancelled_for_runtime_start'));
-    await this.probePromise.catch(() => undefined);
-  }
-
-  private normalizeErrorMessage(error: unknown): string {
-    if (
-      typeof error === 'object'
-      && error !== null
-      && 'message' in error
-      && typeof (error as { message?: unknown }).message === 'string'
-    ) {
-      return (error as { message: string }).message;
-    }
-    return error instanceof Error ? error.message : String(error);
   }
 
   private isGatewayReady(state: BridgeGatewayHostState): boolean {
@@ -243,13 +198,5 @@ export class RuntimeLifecycleService {
 
   private isGatewayRecovering(state: BridgeGatewayHostState): boolean {
     return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
-  }
-
-  private isRuntimeReady(state: BridgeRuntimeStatusSnapshot['state']): state is 'ready' {
-    return state === 'ready';
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

@@ -8,6 +8,7 @@ export type {
   FailureRecordedObservationEvent,
   FactProcessedObservationEvent,
   GatewayActivityObservationEvent,
+  GatewayProbeObservationEvent,
   GatewayStateChangedObservationEvent,
   InteractionChangedObservationEvent,
   ProviderCallObservationEvent,
