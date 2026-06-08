@@ -29,10 +29,10 @@ interface MessageBridgeRuntimeApi {
 
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __MB_RUNTIME_API__: MessageBridgeRuntimeApi | undefined;
-}
+type MessageBridgeRuntimeCarrier = typeof globalThis & {
+  [MESSAGE_BRIDGE_RUNTIME_API_KEY]?: MessageBridgeRuntimeApi;
+  __MB_RUNTIME_API__?: MessageBridgeRuntimeApi;
+};
 
 export const MessageBridgePlugin: Plugin = async (input) => {
   cacheLoadedPluginInput(input);
@@ -89,10 +89,8 @@ function stopMessageBridgeRuntime(): void {
 }
 
 function getInstalledRuntimeApi(): MessageBridgeRuntimeApi | undefined {
-  const carrier = globalThis as typeof globalThis & {
-    [MESSAGE_BRIDGE_RUNTIME_API_KEY]?: MessageBridgeRuntimeApi;
-  };
-  return carrier[MESSAGE_BRIDGE_RUNTIME_API_KEY] ?? globalThis.__MB_RUNTIME_API__;
+  const carrier = globalThis as MessageBridgeRuntimeCarrier;
+  return carrier[MESSAGE_BRIDGE_RUNTIME_API_KEY] ?? carrier.__MB_RUNTIME_API__;
 }
 
 function installRuntimeApi(api: MessageBridgeRuntimeApi): void {
