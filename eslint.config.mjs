@@ -23,6 +23,7 @@ const cleanCodeRules = {
       skipComments: true,
     },
   ],
+  'max-len': ['warn', { code: 160, tabWidth: 2 }],
   'max-params': ['warn', 5],
   'max-statements': ['warn', 40],
 };

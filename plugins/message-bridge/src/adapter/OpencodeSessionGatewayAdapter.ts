@@ -372,7 +372,11 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       : undefined;
   }
 
-  async createSession(parameters: { title?: string; directory?: string; permission?: Array<Record<string, unknown>> }): Promise<ActionResult<CreateSessionResultData>> {
+  async createSession(parameters: {
+    title?: string;
+    directory?: string;
+    permission?: Array<Record<string, unknown>>;
+  }): Promise<ActionResult<CreateSessionResultData>> {
     const client = this.requireClient();
     const executionResult = await safeExecute(
       client.session.create({
