@@ -160,17 +160,19 @@ export class AssistantMessageEventTranslator implements EventTranslator {
           finish: finish ?? null,
           hasError: Boolean(error),
         });
-      } else if (!state.doneEmitted) {
-        state.doneEmitted = true;
-        facts.push({
-          type: 'message.done',
-          ...factRoutingFields,
-          messageId,
-          ...(finish ? { reason: finish } : {}),
-          ...(asRecord(info?.tokens) ? { tokens: asRecord(info?.tokens) } : {}),
-          ...(asNumber(info?.cost) !== undefined ? { cost: asNumber(info?.cost) } : {}),
-          raw: properties,
-        } satisfies MessageDoneFact);
+      } else {
+        if (!state.doneEmitted) {
+          state.doneEmitted = true;
+          facts.push({
+            type: 'message.done',
+            ...factRoutingFields,
+            messageId,
+            ...(finish ? { reason: finish } : {}),
+            ...(asRecord(info?.tokens) ? { tokens: asRecord(info?.tokens) } : {}),
+            ...(asNumber(info?.cost) !== undefined ? { cost: asNumber(info?.cost) } : {}),
+            raw: properties,
+          } satisfies MessageDoneFact);
+        }
       }
 
       if (isTerminalCandidate) {

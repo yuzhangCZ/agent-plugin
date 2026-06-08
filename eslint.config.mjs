@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
+import sonarjs from 'eslint-plugin-sonarjs';
 import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
@@ -28,6 +29,7 @@ const cleanCodeRules = {
 
 const strictBaselineRules = {
   'no-var': 'error',
+  'sonarjs/elseif-without-else': 'error',
 };
 
 // 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
@@ -101,6 +103,9 @@ export default defineConfig([
       globals: nodeRuntimeGlobals,
       sourceType: 'module',
     },
+    plugins: {
+      sonarjs,
+    },
     rules: {
       ...js.configs.recommended.rules,
       ...strictBaselineRules,
@@ -124,6 +129,9 @@ export default defineConfig([
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
       globals: nodeRuntimeGlobals,
+    },
+    plugins: {
+      sonarjs,
     },
     rules: {
       'no-empty': 'warn',
