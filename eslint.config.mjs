@@ -65,6 +65,54 @@ const firstPassTypeScriptBaselineRules = {
   '@typescript-eslint/prefer-as-const': 'warn',
 };
 
+// 需要类型信息的 TS 规则先限制在已有 tsconfig 覆盖的源码范围内。
+const typeAwareTypeScriptRules = {
+  '@typescript-eslint/prefer-optional-chain': 'warn',
+};
+
+const typeAwareSourceConfigs = [
+  {
+    files: ['plugins/message-bridge/src/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './plugins/message-bridge/tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeAwareTypeScriptRules,
+  },
+  {
+    files: ['packages/bridge-runtime-sdk/src/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './packages/bridge-runtime-sdk/tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeAwareTypeScriptRules,
+  },
+  {
+    files: ['packages/skill-qrcode-auth/src/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './packages/skill-qrcode-auth/tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeAwareTypeScriptRules,
+  },
+  {
+    files: ['packages/skill-plugin-cli/src/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './packages/skill-plugin-cli/tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeAwareTypeScriptRules,
+  },
+];
+
 // 脚本和测试允许较长流程编排，但仍保留 unused、prefer-const 等基础问题检查。
 const relaxedGeneratedAndFixtureRules = {
   complexity: 'off',
@@ -144,6 +192,7 @@ export default defineConfig([
       ...cleanCodeRules,
     },
   },
+  ...typeAwareSourceConfigs,
   {
     files: [
       'plugins/**/scripts/**/*.{js,mjs,cjs,ts}',
