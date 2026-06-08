@@ -1283,7 +1283,7 @@ test("provider adapter debug logs raw runtime agent and reply dispatcher events"
           },
           async dispatchReplyWithBufferedBlockDispatcher({ ctx, dispatcherOptions }) {
             await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
-            provider["handleRuntimeAgentEvent"]({
+            provider.handleRuntimeAgentEvent({
               stream: "assistant",
               sessionKey: ctx.SessionKey,
               data: {

@@ -29,6 +29,7 @@ const cleanCodeRules = {
 };
 
 const strictBaselineRules = {
+  'dot-notation': 'error',
   'no-var': 'error',
   'sonarjs/elseif-without-else': 'error',
 };
