@@ -62,6 +62,8 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     streamingSource = "explicit_off";
   } else if (streamingRaw !== undefined) {
     malformedConfigPaths.push("channels.message-bridge.streaming");
+  } else {
+    // ignore else
   }
 
   if (!streamingEnabled) {
