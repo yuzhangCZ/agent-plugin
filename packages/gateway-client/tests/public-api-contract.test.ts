@@ -11,6 +11,10 @@ import { mapGatewayClientAvailability } from '../src/index.ts';
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled availability value: ${String(value)}`);
+}
+
 test('public api positive type fixture compiles with stable entry exports', async () => {
   await assert.doesNotReject(async () => {
     await execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.positive.json'], {
@@ -150,7 +154,8 @@ test('availability mapper is sufficient for upper-layer neutral consumption', ()
         return 'network_unavailable';
       case null:
         return 'queue_user_action';
-      // no default
+      default:
+        return assertNever(availability);
     }
   }
 

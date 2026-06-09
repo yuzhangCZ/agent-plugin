@@ -45,6 +45,10 @@ function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled connect session value: ${String(value)}`);
+}
+
 function isBoolean(value: unknown): value is boolean {
   return typeof value === 'boolean';
 }
@@ -114,7 +118,8 @@ class ConnectAttempt {
   }
 
   private resolveStage(): GatewayConnectionStage {
-    switch (this.phase) {
+    const phase = this.phase;
+    switch (phase) {
       case 'transport-opening':
         return 'pre_open';
       case 'register-sent':
@@ -123,7 +128,8 @@ class ConnectAttempt {
         return 'ready';
       case 'terminal':
         return this.opened ? 'handshake' : 'pre_open';
-      // no default
+      default:
+        return assertNever(phase);
     }
   }
 
@@ -324,7 +330,8 @@ class ConnectAttempt {
 
     this.state.setState('DISCONNECTED');
 
-    switch (closeContext.reconnectDecision.action) {
+    const reconnectAction = closeContext.reconnectDecision.action;
+    switch (reconnectAction) {
       case 'continue-window':
         this.continueReconnectWindow();
         return;
@@ -334,7 +341,8 @@ class ConnectAttempt {
       case 'stop':
         this.handleStopClose(closeContext);
         return;
-      // no default
+      default:
+        assertNever(reconnectAction);
     }
   }
 

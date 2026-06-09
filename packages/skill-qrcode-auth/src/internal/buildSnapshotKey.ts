@@ -1,5 +1,9 @@
 import type { QrCodeAuthSnapshot } from "../types.ts";
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled qrcode auth snapshot: ${JSON.stringify(value)}`);
+}
+
 /**
  * 为轮询态事件生成稳定去重 key，避免把去重语义绑定到对象序列化实现。
  */
@@ -17,6 +21,7 @@ export function buildSnapshotKey(snapshot: QrCodeAuthSnapshot): string {
       return `confirmed:${snapshot.qrcode}`;
     case "failed":
       return `failed:${snapshot.qrcode ?? "session"}:${snapshot.reasonCode}`;
-    // no default
+    default:
+      return assertNever(snapshot);
   }
 }

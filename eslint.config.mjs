@@ -75,48 +75,23 @@ const typeAwareTypeScriptRules = {
   '@typescript-eslint/prefer-optional-chain': 'warn',
 };
 
-const typeAwareSourceConfigs = [
-  {
-    files: ['plugins/message-bridge/src/**/*.ts'],
-    languageOptions: {
-      parserOptions: {
-        project: './plugins/message-bridge/tsconfig.json',
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: typeAwareTypeScriptRules,
-  },
-  {
-    files: ['packages/bridge-runtime-sdk/src/**/*.ts'],
-    languageOptions: {
-      parserOptions: {
-        project: './packages/bridge-runtime-sdk/tsconfig.json',
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: typeAwareTypeScriptRules,
-  },
-  {
-    files: ['packages/skill-qrcode-auth/src/**/*.ts'],
-    languageOptions: {
-      parserOptions: {
-        project: './packages/skill-qrcode-auth/tsconfig.json',
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: typeAwareTypeScriptRules,
-  },
-  {
-    files: ['packages/skill-plugin-cli/src/**/*.ts'],
-    languageOptions: {
-      parserOptions: {
-        project: './packages/skill-plugin-cli/tsconfig.json',
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: typeAwareTypeScriptRules,
-  },
+const typeAwareSourceEntries = [
+  ['plugins/message-bridge/src/**/*.ts', './plugins/message-bridge/tsconfig.json'],
+  ['packages/bridge-runtime-sdk/src/**/*.ts', './packages/bridge-runtime-sdk/tsconfig.json'],
+  ['packages/skill-qrcode-auth/src/**/*.ts', './packages/skill-qrcode-auth/tsconfig.json'],
+  ['packages/skill-plugin-cli/src/**/*.ts', './packages/skill-plugin-cli/tsconfig.json'],
 ];
+
+const typeAwareSourceConfigs = typeAwareSourceEntries.map(([files, project]) => ({
+  files: [files],
+  languageOptions: {
+    parserOptions: {
+      project,
+      tsconfigRootDir: import.meta.dirname,
+    },
+  },
+  rules: typeAwareTypeScriptRules,
+}));
 
 // 脚本和测试允许较长流程编排，但仍保留 unused、prefer-const 等基础问题检查。
 const relaxedGeneratedAndFixtureRules = {

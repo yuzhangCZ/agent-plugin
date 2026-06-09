@@ -23,6 +23,10 @@ function normalizeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled runtime contract error code: ${String(value)}`);
+}
+
 /**
  * downstream command failure -> `tool_error` projector。
  * @remarks
@@ -71,7 +75,8 @@ export class CommandFailureToolErrorProjector {
         case 'session_closed':
         case 'session_not_found':
           return null;
-        // no default
+        default:
+          return assertNever(error.code);
       }
     }
 

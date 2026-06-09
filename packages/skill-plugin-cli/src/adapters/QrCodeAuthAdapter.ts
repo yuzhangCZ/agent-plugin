@@ -6,6 +6,10 @@ import { embeddedQrCodeAuthRuntime } from "./embedded-qrcode-runtime.ts";
 
 const DEFAULT_MAX_REFRESH_COUNT = 3;
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled qrcode auth snapshot: ${JSON.stringify(value)}`);
+}
+
 function toCliFailureSummary(snapshot: Extract<QrCodeAuthSnapshot, { type: "failed" }>): CliQrFailureSummary {
   if (snapshot.reasonCode === "network_error") {
     return {
@@ -97,7 +101,8 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
             break;
           case "scanned":
             break;
-          // no default
+          default:
+            assertNever(snapshot);
         }
       },
     });

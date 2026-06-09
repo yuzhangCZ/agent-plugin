@@ -3,6 +3,10 @@ import type {
   GatewayClientErrorShape,
 } from '../domain/error-contract.ts';
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled gateway client error code: ${String(value)}`);
+}
+
 /**
  * 将 gateway-client 错误事实映射为共享可用性语义。
  * @remarks
@@ -39,6 +43,7 @@ export function mapGatewayClientAvailability(error: GatewayClientErrorShape): Ga
     case 'GATEWAY_NOT_CONNECTED':
     case 'GATEWAY_NOT_READY':
       return null;
-    // no default
+    default:
+      return assertNever(error.code);
   }
 }

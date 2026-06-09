@@ -5,6 +5,10 @@ import type { Presenter } from "../domain/ports.ts";
 import { INSTALL_STAGE_LABELS } from "../domain/stages.ts";
 import type { CliQrFailureSummary, CliQrSnapshot, HostAvailabilityResult, InstalledPluginArtifact, PresenterFailure } from "../domain/types.ts";
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled presenter value: ${JSON.stringify(value)}`);
+}
+
 function writeStdout(message = "") {
   process.stdout.write(`${message}\n`);
 }
@@ -247,7 +251,8 @@ export class TerminalCliPresenter implements Presenter {
       case "cancelled":
       case "failed":
         return;
-      // no default
+      default:
+        return assertNever(snapshot);
     }
   }
 

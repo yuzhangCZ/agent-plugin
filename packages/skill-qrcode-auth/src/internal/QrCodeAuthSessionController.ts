@@ -9,6 +9,10 @@ import type {
 
 type WaitFn = (ms: number) => Promise<void>;
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled qrcode auth query result: ${JSON.stringify(value)}`);
+}
+
 /**
  * 负责二维码授权会话的状态推进、刷新和终态收口。
  */
@@ -128,7 +132,8 @@ export class QrCodeAuthSessionController {
       case "failed":
         this.emitFailure(result);
         return true;
-      // no default
+      default:
+        return assertNever(result);
     }
   }
 
