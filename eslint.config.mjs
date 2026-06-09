@@ -28,6 +28,7 @@ const cleanCodeRules = {
 };
 
 const strictBaselineRules = {
+  curly: ['error', 'all'],
   'dot-notation': 'error',
   'no-nested-ternary': 'error',
   'no-var': 'error',

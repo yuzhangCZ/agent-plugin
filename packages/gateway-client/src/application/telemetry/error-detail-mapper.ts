@@ -48,13 +48,13 @@ export function getErrorDetails(error: unknown): Record<string, unknown> {
  */
 export function extractWebSocketErrorDetails(event: unknown): Record<string, unknown> {
   const record = isRecord(event) ? event : undefined;
-  if (!record) return getErrorDetails(event);
+  if (!record) {return getErrorDetails(event);}
   const details = record.error !== undefined && record.error !== event ? getErrorDetails(record.error) : getErrorDetails(event);
-  if (typeof record.type === 'string') details.eventType = record.type;
+  if (typeof record.type === 'string') {details.eventType = record.type;}
   if (!details.errorDetail && typeof record.message === 'string' && record.message.trim()) {
     details.errorDetail = record.message;
   }
   const target = isRecord(record.target) ? record.target : undefined;
-  if (typeof target?.readyState === 'number') details.readyState = target.readyState;
+  if (typeof target?.readyState === 'number') {details.readyState = target.readyState;}
   return details;
 }
