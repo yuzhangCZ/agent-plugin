@@ -12,6 +12,7 @@ export class ToolErrorMessageCatalog {
         return '当前交互已失效，请刷新后重试';
       case 'request_run_failed':
         return '当前请求处理失败，请重试';
+      // no default
     }
   }
 }

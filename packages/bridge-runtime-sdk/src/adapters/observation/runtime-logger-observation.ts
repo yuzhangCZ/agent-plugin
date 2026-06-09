@@ -204,6 +204,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
         return;
       case 'gateway_activity':
         return;
+      // no default
     }
   }
 }

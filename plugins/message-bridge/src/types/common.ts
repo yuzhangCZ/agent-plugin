@@ -86,6 +86,7 @@ export function stateToErrorCode(state: GatewayClientState): ErrorCode {
     case GATEWAY_CLIENT_STATE.CONNECTED:
     case GATEWAY_CLIENT_STATE.READY:
       return 'AGENT_NOT_READY';
+    // no default
   }
 }
 

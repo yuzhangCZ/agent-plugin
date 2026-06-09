@@ -33,6 +33,7 @@ function mapGatewayAvailabilityToReason(
       return 'network_failure';
     case null:
       return null;
+    // no default
   }
 }
 

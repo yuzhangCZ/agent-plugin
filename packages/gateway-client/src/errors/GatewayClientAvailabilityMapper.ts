@@ -39,5 +39,6 @@ export function mapGatewayClientAvailability(error: GatewayClientErrorShape): Ga
     case 'GATEWAY_NOT_CONNECTED':
     case 'GATEWAY_NOT_READY':
       return null;
+    // no default
   }
 }

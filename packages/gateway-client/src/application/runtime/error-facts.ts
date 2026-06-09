@@ -13,5 +13,6 @@ export function resolveGatewayClientStage(state: GatewayRuntimeStatePort): Gatew
     case 'CONNECTING':
     case 'DISCONNECTED':
       return 'pre_open';
+    // no default
   }
 }

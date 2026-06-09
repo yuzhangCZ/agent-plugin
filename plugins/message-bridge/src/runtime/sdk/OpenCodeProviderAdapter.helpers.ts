@@ -32,6 +32,7 @@ export function toProviderTerminalResult(terminal: PromptSessionTerminal): Provi
           ...(terminal.errorDetails ? { details: terminal.errorDetails } : {}),
         },
       };
+    // no default
   }
 }
 

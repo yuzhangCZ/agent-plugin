@@ -247,6 +247,7 @@ export class TerminalCliPresenter implements Presenter {
       case "cancelled":
       case "failed":
         return;
+      // no default
     }
   }
 

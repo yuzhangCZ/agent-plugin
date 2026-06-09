@@ -123,6 +123,7 @@ class ConnectAttempt {
         return 'ready';
       case 'terminal':
         return this.opened ? 'handshake' : 'pre_open';
+      // no default
     }
   }
 
@@ -333,6 +334,7 @@ class ConnectAttempt {
       case 'stop':
         this.handleStopClose(closeContext);
         return;
+      // no default
     }
   }
 
