@@ -86,9 +86,7 @@ async function collectFiles(dir) {
     const filepath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await collectFiles(filepath)));
-      continue;
-    }
-    if (entry.isFile() && (entry.name.endsWith('.log') || entry.name.endsWith('.jsonl'))) {
+    } else if (entry.isFile() && (entry.name.endsWith('.log') || entry.name.endsWith('.jsonl'))) {
       files.push(filepath);
     }
   }

@@ -897,13 +897,9 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         deltaText = suffix;
       } else if (deltaText.length === 0 || state.accumulatedText.endsWith(deltaText)) {
         return;
-      } else {
-        // full text 没有新增 suffix 时，保留宿主提供的非重复 delta。
       }
     } else if (deltaText.length === 0) {
       return;
-    } else {
-      // full text 与累积文本不连续时，继续使用宿主提供的 delta。
     }
 
     if (deltaText.length === 0) {

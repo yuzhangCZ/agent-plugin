@@ -144,9 +144,7 @@ class TuiOutboundRunHandle {
       if ('messageId' in fact && typeof fact.messageId === 'string') {
         if (fact.type === 'message.start') {
           this.openMessageIds.add(fact.messageId);
-          continue;
-        }
-        if (fact.type === 'message.done') {
+        } else if (fact.type === 'message.done') {
           this.openMessageIds.delete(fact.messageId);
         }
       }

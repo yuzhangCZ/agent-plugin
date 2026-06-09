@@ -52,8 +52,8 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
   const messageBridge: Record<string, unknown> = asRecord(messageBridgeRaw) ?? {};
 
   const streamingRaw = messageBridge.streaming;
-  let streamingEnabled: boolean;
-  let streamingSource: StreamingSource;
+  let streamingEnabled = true;
+  let streamingSource: StreamingSource = "default_on";
   if (streamingRaw === true) {
     streamingEnabled = true;
     streamingSource = "explicit_on";
@@ -61,12 +61,7 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     streamingEnabled = false;
     streamingSource = "explicit_off";
   } else if (streamingRaw !== undefined) {
-    streamingEnabled = true;
-    streamingSource = "default_on";
     malformedConfigPaths.push("channels.message-bridge.streaming");
-  } else {
-    streamingEnabled = true;
-    streamingSource = "default_on";
   }
 
   if (!streamingEnabled) {

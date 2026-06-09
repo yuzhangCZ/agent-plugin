@@ -30,8 +30,6 @@ export class ConfigValidator {
         if (typeof c.auth.sk !== 'string' || !c.auth.sk.trim()) {
           errors.push({ path: 'auth.sk', code: 'MISSING_REQUIRED', message: 'auth.sk is required' });
         }
-      } else {
-        // auth 类型错误在后续统一校验，避免在缺失字段处重复报错。
       }
     }
 

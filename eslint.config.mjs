@@ -1,7 +1,6 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
-import sonarjs from 'eslint-plugin-sonarjs';
 import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
@@ -31,7 +30,6 @@ const cleanCodeRules = {
 const strictBaselineRules = {
   'dot-notation': 'error',
   'no-var': 'error',
-  'sonarjs/elseif-without-else': 'error',
 };
 
 const firstPassSwitchRules = {
@@ -132,9 +130,6 @@ export default defineConfig([
       globals: nodeRuntimeGlobals,
       sourceType: 'module',
     },
-    plugins: {
-      sonarjs,
-    },
     rules: {
       ...js.configs.recommended.rules,
       ...strictBaselineRules,
@@ -159,9 +154,6 @@ export default defineConfig([
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
       globals: nodeRuntimeGlobals,
-    },
-    plugins: {
-      sonarjs,
     },
     rules: {
       'no-empty': 'warn',

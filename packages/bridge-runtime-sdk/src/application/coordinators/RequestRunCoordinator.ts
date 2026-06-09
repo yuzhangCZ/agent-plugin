@@ -122,8 +122,6 @@ export class RequestRunCoordinator {
           this.pipeline.observation.derivedEventProjected(toolSessionId, fact.type, event, profile.kind);
         } else if (classification.projectsFactEvent) {
           this.pipeline.observation.uplinkProjected(toolSessionId, fact.type, uplink.type, profile.kind);
-        } else {
-          // 非投影事件只发送 uplink，不记录 derived/fact 投影观测。
         }
         this.pipeline.observation.uplinkEmitted(uplink);
         await this.pipeline.sink.send(uplink);
