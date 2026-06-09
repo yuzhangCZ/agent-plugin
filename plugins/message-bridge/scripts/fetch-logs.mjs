@@ -113,7 +113,12 @@ async function main() {
       } catch {
         parsed = { raw: line };
       }
-      const timestamp = parsed.timestamp ? Date.parse(parsed.timestamp) : parsed.time ? Date.parse(parsed.time) : 0;
+      let timestamp = 0;
+      if (parsed.timestamp) {
+        timestamp = Date.parse(parsed.timestamp);
+      } else if (parsed.time) {
+        timestamp = Date.parse(parsed.time);
+      }
       const level = parsed.level ? String(parsed.level).toUpperCase() : '';
       const service = parsed.service ?? parsed.name ?? '';
       const traceId = parsed.traceId ?? parsed.trace_id ?? '';

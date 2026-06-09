@@ -904,12 +904,12 @@ describe('DefaultGatewayConnection coverage', () => {
 
     for (const [index, eventType] of ['message.updated', 'session.updated', 'session.status'].entries()) {
       const toolSessionId = `tool-${index}`;
-      const message =
-        eventType === 'message.updated'
-          ? createMessageUpdatedToolEventMessage({ toolSessionId, messageId: `op-msg-${index}` })
-          : eventType === 'session.updated'
-            ? createSessionUpdatedToolEventMessage(toolSessionId)
-            : createSessionStatusToolEventMessage(toolSessionId);
+      let message = createSessionStatusToolEventMessage(toolSessionId);
+      if (eventType === 'message.updated') {
+        message = createMessageUpdatedToolEventMessage({ toolSessionId, messageId: `op-msg-${index}` });
+      } else if (eventType === 'session.updated') {
+        message = createSessionUpdatedToolEventMessage(toolSessionId);
+      }
       conn.send(
         message,
         {

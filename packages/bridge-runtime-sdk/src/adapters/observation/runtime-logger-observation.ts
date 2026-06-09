@@ -36,17 +36,24 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
 
   record(event: RuntimeObservationEvent): void {
     switch (event.type) {
-      case 'runtime_lifecycle':
+      case 'runtime_lifecycle': {
+        let lifecycleScope = 'core';
+        if (event.action.startsWith('start')) {
+          lifecycleScope = 'start';
+        } else if (event.action.startsWith('stop')) {
+          lifecycleScope = 'stop';
+        }
         write(
           this.logger,
           event.action.endsWith('failed') ? 'error' : 'info',
-          `runtime_sdk.${event.action.startsWith('start') ? 'start' : event.action.startsWith('stop') ? 'stop' : 'core'}.${event.action.replace(/^(start_|stop_|core_)/, '')}`,
+          `runtime_sdk.${lifecycleScope}.${event.action.replace(/^(start_|stop_|core_)/, '')}`,
           {
             failureReason: event.failureReason,
             code: event.code,
           },
         );
         return;
+      }
       case 'gateway_state_changed':
         write(this.logger, 'info', 'runtime_sdk.gateway.state_changed', {
           gatewayState: event.state,
@@ -60,10 +67,16 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           welinkSessionId: event.welinkSessionId,
         });
         return;
-      case 'downstream_processed':
+      case 'downstream_processed': {
+        let level: 'debug' | 'info' | 'warn' | 'error' = 'info';
+        if (event.action === 'failed') {
+          level = 'error';
+        } else if (event.action === 'invalid_invoke_rejected') {
+          level = 'warn';
+        }
         write(
           this.logger,
-          event.action === 'failed' ? 'error' : event.action === 'invalid_invoke_rejected' ? 'warn' : 'info',
+          level,
           `runtime_sdk.downstream.${event.action}`,
           {
             messageType: event.messageType,
@@ -75,6 +88,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
+      }
       case 'command_dispatched':
         write(
           this.logger,
@@ -90,10 +104,16 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
-      case 'usecase_progress':
+      case 'usecase_progress': {
+        let level: 'debug' | 'info' | 'warn' | 'error' = 'info';
+        if (event.phase === 'failed') {
+          level = 'error';
+        } else if (event.phase === 'conflict') {
+          level = 'warn';
+        }
         write(
           this.logger,
-          event.phase === 'failed' ? 'error' : event.phase === 'conflict' ? 'warn' : 'info',
+          level,
           `runtime_sdk.usecase.${event.usecase}.${event.phase}`,
           {
             traceId: event.traceId,
@@ -106,10 +126,17 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
-      case 'provider_call':
+      }
+      case 'provider_call': {
+        let level: 'debug' | 'info' | 'warn' | 'error' = 'info';
+        if (event.phase === 'failed') {
+          level = 'error';
+        } else if (event.phase === 'started') {
+          level = 'debug';
+        }
         write(
           this.logger,
-          event.phase === 'failed' ? 'error' : event.phase === 'started' ? 'debug' : 'info',
+          level,
           `runtime_sdk.provider.${event.command}.${event.phase}`,
           {
             traceId: event.traceId,
@@ -120,37 +147,49 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
-      case 'fact_processed':
+      }
+      case 'fact_processed': {
+        let meta: Record<string, unknown>;
+        if (event.phase === 'received') {
+          meta = {
+            toolSessionId: event.toolSessionId,
+            factType: event.fact.type,
+            profile: event.profile,
+          };
+        } else if (event.phase === 'derived_event_projected') {
+          meta = {
+            toolSessionId: event.toolSessionId,
+            factType: event.factType,
+            eventType: event.event.type,
+            profile: event.profile,
+          };
+        } else {
+          meta = {
+            toolSessionId: event.toolSessionId,
+            factType: event.factType,
+            uplinkType: event.uplinkType,
+            profile: event.profile,
+          };
+        }
         write(
           this.logger,
           'debug',
           `runtime_sdk.fact.${event.phase}`,
-          event.phase === 'received'
-            ? {
-                toolSessionId: event.toolSessionId,
-                factType: event.fact.type,
-                profile: event.profile,
-              }
-            : event.phase === 'derived_event_projected'
-              ? {
-                  toolSessionId: event.toolSessionId,
-                  factType: event.factType,
-                  eventType: event.event.type,
-                  profile: event.profile,
-                }
-              : {
-                  toolSessionId: event.toolSessionId,
-                  factType: event.factType,
-                  uplinkType: event.uplinkType,
-                  profile: event.profile,
-                },
+          meta,
         );
         return;
-      case 'interaction_changed':
+      }
+      case 'interaction_changed': {
+        let action = 'conflict';
+        if (event.action === 'consume') {
+          action = 'consumed';
+        } else if (event.action === 'register') {
+          action = 'registered';
+        }
         write(
           this.logger,
           event.action === 'conflict' ? 'warn' : 'info',
-          `runtime_sdk.interaction.${event.action === 'consume' ? 'consumed' : event.action === 'register' ? 'registered' : 'conflict'}`,
+          `runtime_sdk.interaction.${action}`,
           {
             kind: event.kind,
             toolSessionId: event.toolSessionId,
@@ -159,6 +198,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
+      }
       case 'uplink_emitted':
         return;
       case 'uplink_validation':

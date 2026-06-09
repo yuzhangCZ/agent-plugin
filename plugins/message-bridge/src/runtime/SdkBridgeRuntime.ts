@@ -198,11 +198,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
           title: input.title,
           isGroupChat: false,
           directory: input.directory ?? config.bridgeDirectory,
-          ...(input.directory
-            ? { directorySource: 'explicit' as const }
-            : config.bridgeDirectory
-              ? { directorySource: 'config' as const }
-              : {}),
+          ...this.resolveDirectorySource(input.directory, config.bridgeDirectory),
         });
         return result;
       },
@@ -494,11 +490,13 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   private async listHostModels(client: BridgeSdkClient) {
     const providersResult = await client.config.providers();
     const payload = this.unwrapSdkData(providersResult);
-    const providers = Array.isArray(payload)
-      ? payload
-      : Array.isArray(asRecord(payload)?.providers)
-        ? (asRecord(payload)?.providers as unknown[])
-        : [];
+    let providers: unknown[] = [];
+    const payloadRecord = asRecord(payload);
+    if (Array.isArray(payload)) {
+      providers = payload;
+    } else if (Array.isArray(payloadRecord?.providers)) {
+      providers = payloadRecord.providers as unknown[];
+    }
 
     return providers.flatMap((provider) => {
       const providerRecord = asRecord(provider);
@@ -527,6 +525,19 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         }];
       });
     });
+  }
+
+  private resolveDirectorySource(
+    inputDirectory?: string,
+    configDirectory?: string,
+  ): { directorySource: 'explicit' | 'config' } | Record<string, never> {
+    if (inputDirectory) {
+      return { directorySource: 'explicit' };
+    }
+    if (configDirectory) {
+      return { directorySource: 'config' };
+    }
+    return {};
   }
 
   private unwrapSdkData(result: unknown) {

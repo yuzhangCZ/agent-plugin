@@ -914,12 +914,12 @@ export function createReleasePlan(input = {}, overrides = {}) {
   const targetIds = parsed.target === "dual" ? ["message-bridge", "message-bridge-openclaw"] : [parsed.target];
   const targets = targetIds.map((targetId) => {
     const resolved = resolveReleaseTarget(targetId, repoRoot, fs);
-    const explicitVersion =
-      targetId === "message-bridge"
-        ? parsed.bridgeVersion ?? parsed.version
-        : targetId === "message-bridge-openclaw"
-          ? parsed.openclawVersion ?? parsed.version
-          : parsed.version;
+    let explicitVersion = parsed.version;
+    if (targetId === "message-bridge") {
+      explicitVersion = parsed.bridgeVersion ?? parsed.version;
+    } else if (targetId === "message-bridge-openclaw") {
+      explicitVersion = parsed.openclawVersion ?? parsed.version;
+    }
     const targetVersion = resolveTargetVersion(resolved.currentVersion, {
       bump: parsed.bump,
       preid: parsed.preid,

@@ -190,12 +190,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       });
     }
 
-    const decision =
-      input.reply === "once"
-        ? "allow-once"
-        : input.reply === "always"
-          ? "allow-always"
-          : "deny";
+    let decision: "allow-once" | "allow-always" | "deny" = "deny";
+    if (input.reply === "once") {
+      decision = "allow-once";
+    } else if (input.reply === "always") {
+      decision = "allow-always";
+    }
     await this.approvalPort.resolve({
       permissionId: input.permissionId,
       decision,
@@ -466,7 +466,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         deliver: async (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => {
           this.logChatRawEvent({
             source: "runtime_reply_dispatcher",
-            eventName: info.kind === "block" ? "onBlock" : info.kind === "final" ? "onFinal" : "onTool",
+            eventName: this.toReplyDispatcherEventName(info.kind),
             toolSessionId: state.toolSessionId,
             sessionKey: state.sessionKey,
             payload: rawPayload,
@@ -670,7 +670,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private async handleRuntimeGatewayEvent(evt: RuntimeGatewayEvent): Promise<void> {
-    const eventName = typeof evt.event === "string" ? evt.event : typeof evt.type === "string" ? evt.type : "";
+    let eventName = "";
+    if (typeof evt.event === "string") {
+      eventName = evt.event;
+    } else if (typeof evt.type === "string") {
+      eventName = evt.type;
+    }
     const payload = asRecord(evt.payload) ?? asRecord(evt.data);
     if (!eventName || !payload) {
       return;
@@ -929,11 +934,12 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     const phase = asTrimmedString(payload.phase) ?? "delta";
-    const deltaText = typeof payload.delta === "string"
-      ? payload.delta
-      : typeof payload.text === "string"
-        ? payload.text
-        : "";
+    let deltaText = "";
+    if (typeof payload.delta === "string") {
+      deltaText = payload.delta;
+    } else if (typeof payload.text === "string") {
+      deltaText = payload.text;
+    }
     const shouldEmitReasoningDelta =
       deltaText.length > 0 &&
       (phase !== "finish" && phase !== "result" || state.accumulatedThinking.length === 0);
@@ -979,6 +985,16 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     state.queue.close();
     state.result.resolve({ outcome: "aborted" });
     this.finalizeRun(state);
+  }
+
+  private toReplyDispatcherEventName(kind: "tool" | "block" | "final"): "onTool" | "onBlock" | "onFinal" {
+    if (kind === "block") {
+      return "onBlock";
+    }
+    if (kind === "final") {
+      return "onFinal";
+    }
+    return "onTool";
   }
 
   private logChatRawEvent(params: {

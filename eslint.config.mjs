@@ -29,6 +29,7 @@ const cleanCodeRules = {
 
 const strictBaselineRules = {
   'dot-notation': 'error',
+  'no-nested-ternary': 'error',
   'no-var': 'error',
 };
 

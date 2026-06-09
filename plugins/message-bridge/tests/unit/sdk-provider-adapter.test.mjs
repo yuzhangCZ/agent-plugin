@@ -282,7 +282,12 @@ function createAdapter(overrides = {}) {
         throw new Error('runtime.sdk_client_unavailable');
       }
       const result = await sdkClient.config.providers({});
-      const providers = Array.isArray(result?.data?.providers) ? result.data.providers : Array.isArray(result?.data) ? result.data : [];
+      let providers = [];
+      if (Array.isArray(result?.data?.providers)) {
+        providers = result.data.providers;
+      } else if (Array.isArray(result?.data)) {
+        providers = result.data;
+      }
       return providers.flatMap((provider) => {
         const providerId = provider?.id ?? provider?.providerID ?? provider?.name;
         if (!providerId || !provider?.models) {
