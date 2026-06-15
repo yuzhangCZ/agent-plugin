@@ -299,6 +299,75 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   });
 });
 
+test('runtime preserves stream fact content verbatim when projecting uplinks', async () => {
+  const connection = new FakeGatewayClient();
+  const originalContent = '  keep leading spaces\nand trailing tabs\t';
+  const toolContent = {
+    title: '  Run command\t',
+    input: '   ',
+    output: '',
+    error: '\nfailed\t',
+  };
+  const provider: ThirdPartyAgentProvider = {
+    ...createProvider(),
+    async runMessage() {
+      return createFakeRun(
+        [
+          { type: 'message.start', messageId: 'msg-1' },
+          { type: 'text.delta', messageId: 'msg-1', partId: 'part-1', content: originalContent },
+          {
+            type: 'tool.update',
+            messageId: 'msg-1',
+            partId: 'part-tool-1',
+            toolCallId: 'tool-call-1',
+            toolName: 'bash',
+            status: 'error',
+            ...toolContent,
+          },
+          { type: 'message.done', messageId: 'msg-1' },
+        ],
+        { outcome: 'completed' },
+      );
+    },
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent[1], {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'text.delta',
+      properties: { messageId: 'msg-1', partId: 'part-1', content: originalContent },
+    },
+  });
+  assert.deepEqual(connection.sent[2], {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'tool.update',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-tool-1',
+        toolCallId: 'tool-call-1',
+        toolName: 'bash',
+        status: 'error',
+        ...toolContent,
+      },
+    },
+  });
+});
+
 test('runtime responds to status_query with provider health status', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
