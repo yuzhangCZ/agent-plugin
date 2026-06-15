@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { readFile } from "node:fs/promises";
-import { GatewayClientError } from "../../../../packages/bridge-runtime-sdk/node_modules/@agent-plugin/gateway-client/src/errors/GatewayClientError.ts";
+import { GatewayClientError } from "@agent-plugin/gateway-client";
 import {
   assertInvalidInvokeToolErrorContract,
   createInvalidInvokeInboundFrame,
@@ -510,7 +510,7 @@ test("openclaw bridge preserves shared runtime failed state in published status"
   await bridge.start();
   connection.emit("error", new GatewayClientError({
     code: "GATEWAY_AUTH_REJECTED",
-    disposition: "rejected",
+    disposition: "startup_failure",
     retryable: false,
     message: "rejected",
   }));
