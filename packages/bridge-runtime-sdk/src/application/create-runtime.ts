@@ -11,9 +11,11 @@ import type { BridgeRuntime } from './runtime.ts';
 import type {
   BridgeGatewayHostConfig,
   BridgeGatewayLogger,
+  BridgeGatewayProbeResult,
 } from '../infrastructure/gateway/gateway-host.ts';
 import { DEFAULT_PROBE_TIMEOUT_MS } from './constants/runtime.ts';
 import { RuntimeLifecycleService } from './lifecycle/RuntimeLifecycleService.ts';
+import { RuntimeProbeService } from './lifecycle/RuntimeProbeService.ts';
 import { createApplicationRuntimeSide } from './runtime-assembly/createApplicationRuntimeSide.ts';
 import { createGatewayRuntimeSide } from './runtime-assembly/createGatewayRuntimeSide.ts';
 import { attachRuntimeDriverHandlers } from './runtime-assembly/downstream.ts';
@@ -46,15 +48,16 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
   const observation = new DefaultRuntimeObservation(observationPort);
   const gatewaySide = createGatewayRuntimeSide(options, internalOptions, observation);
   const applicationSide = createApplicationRuntimeSide(options, internalOptions, observation, gatewaySide.sink);
+  const probe = new RuntimeProbeService(gatewaySide.probeDriver);
   const lifecycle = new RuntimeLifecycleService(
     applicationSide.core,
-    gatewaySide.driver,
+    gatewaySide.runtimeDriver,
     observation,
     options.onTelemetryUpdated,
   );
 
   attachRuntimeDriverHandlers({
-    driver: gatewaySide.driver,
+    driver: gatewaySide.runtimeDriver,
     core: applicationSide.core,
     lifecycle,
     observation,
@@ -65,16 +68,18 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
 
   return {
     async start(): Promise<void> {
+      await probe.cancelActiveProbe();
       return lifecycle.start();
     },
     async stop(): Promise<void> {
+      await probe.cancelActiveProbe();
       return lifecycle.stop();
     },
     getStatus() {
       return lifecycle.getStatus();
     },
-    async probe(input = { timeoutMs: DEFAULT_PROBE_TIMEOUT_MS }) {
-      return lifecycle.probe(input);
+    async probe(input = { timeoutMs: DEFAULT_PROBE_TIMEOUT_MS }): Promise<BridgeGatewayProbeResult> {
+      return probe.probe(lifecycle.getStatus(), input);
     },
     getDiagnostics() {
       return traceAdapter.snapshot();

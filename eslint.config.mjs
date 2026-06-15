@@ -6,6 +6,7 @@ import tseslint from 'typescript-eslint';
 const cleanCodeRules = {
   complexity: ['warn', { max: 12 }],
   'max-depth': ['warn', 4],
+  'max-classes-per-file': ['warn', 1],
   'max-lines': [
     'warn',
     {
@@ -61,6 +62,7 @@ const firstPassTypeScriptBaselineRules = {
 // 脚本和测试允许较长流程编排，但仍保留 unused、prefer-const 等基础问题检查。
 const relaxedGeneratedAndFixtureRules = {
   complexity: 'off',
+  'max-classes-per-file': 'off',
   'max-depth': 'off',
   'max-lines': 'off',
   'max-lines-per-function': 'off',

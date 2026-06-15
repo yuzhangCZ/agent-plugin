@@ -1,5 +1,5 @@
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
-import type { GatewayClientErrorCode, GatewayConnectionDisposition, GatewayConnectionStage } from '../../domain/error-contract.ts';
+import type { GatewayClientErrorCode, GatewayConnectionDisposition } from '../../domain/error-contract.ts';
 import type { GatewayInboundFrame } from '../../ports/GatewayClientMessages.ts';
 import { buildMessagePreview } from '../telemetry/message-log-fields.ts';
 
@@ -9,15 +9,13 @@ import { buildMessagePreview } from '../telemetry/message-log-fields.ts';
 export function buildProtocolViolationError(
   inboundFrame: GatewayInboundFrame & { kind: 'invalid' },
   facts: {
-    code?: GatewayClientErrorCode;
-    disposition?: GatewayConnectionDisposition;
-    stage?: GatewayConnectionStage;
-  } = {},
+    code: GatewayClientErrorCode;
+    disposition: GatewayConnectionDisposition;
+  },
 ): GatewayClientError {
   return new GatewayClientError({
-    code: facts.code ?? 'GATEWAY_INBOUND_PROTOCOL_INVALID',
-    disposition: facts.disposition ?? 'diagnostic',
-    stage: facts.stage ?? 'ready',
+    code: facts.code,
+    disposition: facts.disposition,
     retryable: false,
     message: inboundFrame.violation.violation.message,
     details: {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { readFile } from "node:fs/promises";
+import { GatewayClientError } from "@agent-plugin/gateway-client";
 import {
   assertInvalidInvokeToolErrorContract,
   createInvalidInvokeInboundFrame,
@@ -223,11 +224,16 @@ class FakeGatewayClient {
   getStatus() {
     return {
       isReady: () => this.state === "READY",
+      isConnecting: () => this.state === "CONNECTED",
+      isReconnecting: () => false,
+      isFailureClosed: () => false,
+      getError: () => null,
     };
   }
 
   setState(state) {
     this.state = state;
+    this.emit("statusChange", this.getStatus());
   }
 
   send(message) {
@@ -235,11 +241,27 @@ class FakeGatewayClient {
   }
 
   emit(event, payload) {
+    if (event === "error" && payload && typeof payload.code === "string") {
+      this.connected = false;
+      this.state = "DISCONNECTED";
+      this.emit("statusChange", createFailedGatewayStatus(payload));
+      return;
+    }
     const listeners = this.listeners.get(event) ?? [];
     for (const listener of listeners) {
       listener(payload);
     }
   }
+}
+
+function createFailedGatewayStatus(error) {
+  return {
+    isReady: () => false,
+    isConnecting: () => false,
+    isReconnecting: () => false,
+    isFailureClosed: () => true,
+    getError: () => error,
+  };
 }
 
 let bridgeModulePromise = null;
@@ -486,12 +508,12 @@ test("openclaw bridge preserves shared runtime failed state in published status"
   const { bridge, connection, statuses } = await createOpenClawGatewayBridgeForTest();
 
   await bridge.start();
-  connection.emit("error", {
-    code: "GATEWAY_REGISTER_REJECTED",
-    category: "auth",
+  connection.emit("error", new GatewayClientError({
+    code: "GATEWAY_AUTH_REJECTED",
+    disposition: "startup_failure",
     retryable: false,
     message: "rejected",
-  });
+  }));
   await new Promise((resolve) => setImmediate(resolve));
 
   const latestStatus = statuses.at(-1);

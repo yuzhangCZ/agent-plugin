@@ -25,8 +25,8 @@
 
 ## External Dependencies
 
-- `@agent-plugin/gateway-client` 提供连接状态与错误事实
-- `@agent-plugin/gateway-client` 保证启动期 `connect()` reject 的失败已进入 `error` 事件流，且二者语义一致
+- `@wecode/bridge-runtime-sdk` 提供 runtime 生命周期状态与结构化错误事实
+- `@wecode/bridge-runtime-sdk` 保证 failed status 的 `error.code` 可用于插件侧稳定失败分类
 - 宿主 `app.log()` 提供可选状态 API 日志出口
 
 ## 概述

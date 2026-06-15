@@ -13,6 +13,7 @@ import type {
   RuntimeObservationTerminalContext,
   RuntimeObservationUsecaseContext,
 } from './runtime-observation.types.ts';
+import type { BridgeGatewayProbeResult } from '../../infrastructure/gateway/gateway-host.ts';
 
 /**
  * 默认 observation facade；负责把阶段语义映射为标准 event。
@@ -80,6 +81,19 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
 
   gatewayHeartbeatActivity(occurredAt?: number): void {
     this.port.record({ type: 'gateway_activity', activity: 'heartbeat', occurredAt });
+  }
+
+  gatewayProbeRequested(gatewayUrl: string, timeoutMs: number): void {
+    this.port.record({ type: 'gateway_probe', phase: 'requested', gatewayUrl, timeoutMs });
+  }
+
+  gatewayProbeCompleted(
+    gatewayUrl: string,
+    state: BridgeGatewayProbeResult['state'],
+    latencyMs: number,
+    reason?: string,
+  ): void {
+    this.port.record({ type: 'gateway_probe', phase: 'completed', gatewayUrl, state, latencyMs, reason });
   }
 
   downstreamReceived(summary: RuntimeObservationMessageSummary): void {

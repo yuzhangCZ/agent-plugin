@@ -35,10 +35,12 @@ export type {
 } from './domain/provider.ts';
 export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
 export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
-export type {
-  BridgeGatewayChannel,
-  BridgeGatewayHostConfig,
-  BridgeGatewayProbeResult,
+export {
+  BridgeRuntimeError,
+  type BridgeRuntimeErrorCode,
+  type BridgeGatewayChannel,
+  type BridgeGatewayHostConfig,
+  type BridgeGatewayProbeResult,
 } from './public-contract.ts';
 export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
 export type {

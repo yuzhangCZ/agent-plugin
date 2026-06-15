@@ -12,7 +12,7 @@ export type InboundFrameDecodeResult =
  * @remarks 这里仅允许文本 JSON 进入后续协议层；二进制帧统一视为不支持，避免 router 里继续做隐式兼容。
  */
 export class InboundFrameDecoder {
-  async decode(data: string | Blob | ArrayBuffer | Uint8Array): Promise<InboundFrameDecodeResult> {
+  decode(data: string | Blob | ArrayBuffer | Uint8Array): InboundFrameDecodeResult {
     if (typeof data !== 'string') {
       return { kind: 'decode_error', reason: 'unsupported_binary_frame' };
     }

@@ -214,19 +214,18 @@ test('sdk runtime telemetry refresh does not republish READY when public status 
   });
   let readyPublishCount = 0;
   runtime.sdkRuntime = {
-    getStatus: () => ({ state: 'ready' }),
+    getStatus: () => ({ state: 'ready', failureReason: null }),
   };
   runtime.statusAdapter = {
     publishConnecting() {},
     publishDisabled() {},
     publishConfigInvalid() {},
     publishPluginFailure() {},
-    publishGatewayState(state) {
-      if (state === 'READY') {
+    publishRuntimeStatus(status) {
+      if (status.state === 'ready') {
         readyPublishCount += 1;
       }
     },
-    publishGatewayError() {},
   };
 
   runtime.syncSdkStatus();
@@ -240,6 +239,73 @@ test('sdk runtime telemetry refresh does not republish READY when public status 
     lastError: null,
     updatedAt: 100,
     lastReadyAt: 100,
+  });
+});
+
+test('sdk runtime telemetry publishes failed status even when sdk error is missing', () => {
+  const runtime = new SdkBridgeRuntime({
+    client: createSdkRuntimeClient(),
+  });
+  let failedPublishCount = 0;
+  runtime.sdkRuntime = {
+    getStatus: () => ({ state: 'failed', failureReason: null }),
+  };
+  runtime.statusAdapter = {
+    publishConnecting() {},
+    publishDisabled() {},
+    publishConfigInvalid() {},
+    publishPluginFailure() {},
+    publishRuntimeStatus(status) {
+      if (status.state === 'failed') {
+        failedPublishCount += 1;
+      }
+    },
+  };
+
+  runtime.syncSdkStatus();
+
+  assert.equal(failedPublishCount, 1);
+});
+
+test('sdk runtime stop disconnects sdk runtime and resets public status', async () => {
+  __resetMessageBridgeStatusForTests();
+  publishMessageBridgeStatus({
+    connected: true,
+    phase: 'ready',
+    unavailableReason: null,
+    willReconnect: null,
+    lastError: null,
+    updatedAt: 100,
+    lastReadyAt: 100,
+  });
+
+  const runtime = new SdkBridgeRuntime({
+    client: createSdkRuntimeClient(),
+  });
+  let stopCalls = 0;
+  runtime.started = true;
+  runtime.providerAdapter = {};
+  runtime.sdkRuntime = {
+    stop: async () => {
+      stopCalls += 1;
+    },
+  };
+
+  runtime.stop();
+  await flushAppLogs();
+
+  assert.equal(stopCalls, 1);
+  assert.equal(runtime.started, false);
+  assert.equal(runtime.sdkRuntime, null);
+  assert.equal(runtime.providerAdapter, null);
+  assert.deepEqual(getMessageBridgeStatus(), {
+    connected: false,
+    phase: 'unavailable',
+    unavailableReason: 'not_ready',
+    willReconnect: false,
+    lastError: null,
+    updatedAt: getMessageBridgeStatus().updatedAt,
+    lastReadyAt: null,
   });
 });
 

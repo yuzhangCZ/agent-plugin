@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- status 模块集中承载 OpenClaw 账户快照、probe 和用户可见诊断。 */
 import {
   buildBaseAccountStatusSnapshot,
   buildProbeChannelStatusSummary,
@@ -10,7 +11,6 @@ import {
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   createBridgeRuntime,
-  type BridgeGatewayHostConfig,
   type BridgeRuntime,
   type ThirdPartyAgentProvider,
 } from "@wecode/bridge-runtime-sdk";
@@ -40,6 +40,13 @@ import { buildBridgeGatewayHostConfig, buildMessageBridgeResourceKey } from "./g
 const HEARTBEAT_GRACE_MS = 5_000;
 const GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
+const PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE = "probe_cancelled_for_runtime_lifecycle";
+// 兼容旧版本 runtime start 取消原因；新代码统一使用 runtime lifecycle 取消语义。
+const PROBE_CANCELLED_FOR_RUNTIME_START = "probe_cancelled_for_runtime_start";
+const IGNORABLE_PROBE_CANCEL_REASONS = new Set([
+  PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE,
+  PROBE_CANCELLED_FOR_RUNTIME_START,
+]);
 
 const silentLogger: BridgeLogger = {
   info() {},
@@ -194,6 +201,7 @@ export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSna
   });
 }
 
+// eslint-disable-next-line max-lines-per-function, max-statements, complexity -- status probe 需要串联运行时复用、临时 runtime 和取消协调。
 export async function probeMessageBridgeAccount(
   params: {
     account: MessageBridgeResolvedAccount;
@@ -325,7 +333,7 @@ export async function probeMessageBridgeAccount(
     ok: false,
     state: "cancelled",
     latencyMs: elapsedMs(startedAt, now),
-    reason: "probe_cancelled_for_runtime_start",
+    reason: PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE,
   });
   const abortProbe = () => {
     if (!probeRuntime) {
@@ -372,6 +380,7 @@ export async function probeMessageBridgeAccount(
   }
 }
 
+// eslint-disable-next-line complexity -- status snapshot 需要兼容 OpenClaw channel account 的多种运行时输入形态。
 export function buildMessageBridgeAccountSnapshot(params: {
   account: MessageBridgeResolvedAccount;
   cfg: OpenClawConfig;
@@ -476,6 +485,7 @@ function createAuthIssue(params: {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function, max-statements, complexity -- 状态问题汇总集中维护用户可见诊断和修复建议。
 export function collectMessageBridgeStatusIssues(
   accounts: ChannelAccountSnapshot[],
   now: () => number = Date.now,
@@ -574,7 +584,7 @@ export function collectMessageBridgeStatusIssues(
       continue;
     }
 
-    if (probe && probe.state === "cancelled" && probeReason === "probe_cancelled_for_runtime_start") {
+    if (probe && probe.state === "cancelled" && IGNORABLE_PROBE_CANCEL_REASONS.has(probeReason)) {
       continue;
     }
 

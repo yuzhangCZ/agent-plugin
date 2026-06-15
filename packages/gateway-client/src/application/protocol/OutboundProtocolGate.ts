@@ -75,7 +75,6 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
     return new GatewayClientError({
       code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
       disposition: 'diagnostic',
-      stage: 'ready',
       retryable: false,
       message: violation.violation.message,
       details: {
@@ -90,11 +89,9 @@ export class DefaultOutboundProtocolGate implements OutboundProtocolGate {
     return new GatewayClientError({
       code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
       disposition: 'diagnostic',
-      stage: 'ready',
       retryable: false,
       message: `gateway_invalid_message_type:${getMessageType(message)}`,
       details: {
-        stage: 'transport',
         code: 'unsupported_message',
         field: 'type',
         message: `Unsupported outbound message type: ${getMessageType(message)}`,

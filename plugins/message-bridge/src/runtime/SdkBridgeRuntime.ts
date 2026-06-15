@@ -378,7 +378,10 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       });
     } catch (error) {
       if (!isRuntimeStartAbortedError(error)) {
-        this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+        const publicStatus = readMessageBridgeStatusSnapshot();
+        if (publicStatus.phase !== 'unavailable' || publicStatus.unavailableReason === 'not_ready') {
+          this.statusAdapter.publishPluginFailure(getErrorMessage(error));
+        }
       }
       throw error;
     } finally {
@@ -559,17 +562,17 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       if (publicStatus.phase === 'ready' && publicStatus.connected) {
         return;
       }
-      this.statusAdapter.publishGatewayState('READY');
+      this.statusAdapter.publishRuntimeStatus(status);
       return;
     }
 
     if (status.state === 'starting' || status.state === 'reconnecting') {
-      this.statusAdapter.publishGatewayState('CONNECTING');
+      this.statusAdapter.publishRuntimeStatus(status);
       return;
     }
 
-    if (status.state === 'failed' && status.failureReason) {
-      this.statusAdapter.publishPluginFailure(status.failureReason);
+    if (status.state === 'failed') {
+      this.statusAdapter.publishRuntimeStatus(status);
     }
   }
 }

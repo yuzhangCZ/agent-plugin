@@ -1,8 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import * as runtimeSdk from '../src/index.ts';
+
+const execFileAsync = promisify(execFile);
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+async function assertTypeFixturePasses(tsconfigPath: string): Promise<void> {
+  try {
+    await execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', tsconfigPath], {
+      cwd: packageRoot,
+    });
+  } catch (error) {
+    const output = typeof error === 'object' && error
+      ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`.trim()
+      : '';
+    assert.fail(output || (error instanceof Error ? error.message : String(error)));
+  }
+}
 
 test('stable entry exports executable runtime factory and public contracts', () => {
   assert.equal(typeof runtimeSdk.createBridgeRuntime, 'function');
@@ -20,6 +40,77 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('createQrCodeAuthRuntime' in runtimeSdk, false);
   assert.equal('HttpQrCodeAuthService' in runtimeSdk, false);
   assert.equal('QrCodeAuthSessionController' in runtimeSdk, false);
+});
+
+test('public api positive type fixture locks BridgeRuntime status snapshot shape', async () => {
+  await assertTypeFixturePasses('tests/type-contracts/tsconfig.positive.json');
+});
+
+test('runtime error public contract uses reason-oriented class-first codes', async () => {
+  const source = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+  const runtimeErrorSource = await readFile(new URL('../src/application/runtime-error.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const runtimeSource = await readFile(new URL('../src/application/runtime.ts', import.meta.url), 'utf8');
+  const lifecycleSource = await readFile(
+    new URL('../src/application/lifecycle/RuntimeLifecycleService.ts', import.meta.url),
+    'utf8',
+  );
+  const probeSource = await readFile(
+    new URL('../src/application/lifecycle/RuntimeProbeService.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.equal(source.includes("'gateway_transport_error'"), true);
+  assert.equal(source.includes("'provider_unavailable'"), true);
+  assert.equal(source.includes("'runtime_start_failed'"), false);
+  assert.equal(source.includes("'runtime_stop_failed'"), false);
+  assert.equal(source.includes("'runtime_probe_failed'"), false);
+  assert.equal(source.includes('export class BridgeRuntimeError extends Error'), true);
+  assert.equal(runtimeErrorSource.includes('export type BridgeRuntimeErrorCode ='), false);
+  assert.equal(runtimeErrorSource.includes('export class BridgeRuntimeError'), false);
+  assert.equal(indexSource.includes("from './application/runtime-error.ts'"), false);
+  assert.equal(source.includes('toBridgeRuntimeError'), false);
+  assert.equal(source.includes('isCancelledGatewayRuntimeError'), false);
+  assert.equal(lifecycleSource.includes('toBridgeRuntimeError'), false);
+  assert.equal(lifecycleSource.includes('isCancelledGatewayRuntimeError'), false);
+  assert.equal(lifecycleSource.includes('private async startCoreOrFail'), true);
+  assert.equal(lifecycleSource.includes('private async connectGatewayOrFail'), true);
+  assert.equal(probeSource.includes('toBridgeRuntimeError'), false);
+  assert.match(runtimeSource, /error\?: BridgeRuntimeError;/);
+});
+
+test('public api negative type fixture rejects extra runtime status fields', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-status-fields.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('failure')
+        && output.includes('code')
+        && output.includes('phase');
+    },
+  );
+});
+
+test('public api negative type fixture rejects gateway-only runtime status state', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-status-state.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('closed');
+    },
+  );
 });
 
 test('stable entry source does not re-export gateway connection internals', async () => {

@@ -583,6 +583,61 @@ describe('plugin contract', () => {
     }
   });
 
+  test('status subscription reports start ready and stop transitions in order', async () => {
+    process.env.BRIDGE_ENABLED = 'true';
+    process.env.BRIDGE_AUTH_AK = 'ak-test';
+    process.env.BRIDGE_AUTH_SK = 'sk-test';
+    process.env.BRIDGE_GATEWAY_URL = 'ws://localhost:8081/ws/agent';
+    const client = createPluginClient();
+    const readySocket = installReadyWebSocket();
+    const seen = [];
+    const unsubscribe = subscribeMessageBridgeStatus((snapshot) => {
+      seen.push({
+        connected: snapshot.connected,
+        phase: snapshot.phase,
+        unavailableReason: snapshot.unavailableReason,
+        willReconnect: snapshot.willReconnect,
+      });
+    });
+
+    try {
+      await MessageBridgePlugin(mockInput({ client }));
+      assert.strictEqual(getMessageBridgeStatus().phase, 'ready');
+
+      stopMessageBridgeRuntime();
+
+      assert.deepStrictEqual(seen, [
+        {
+          connected: false,
+          phase: 'connecting',
+          unavailableReason: null,
+          willReconnect: true,
+        },
+        {
+          connected: true,
+          phase: 'ready',
+          unavailableReason: null,
+          willReconnect: null,
+        },
+        {
+          connected: false,
+          phase: 'unavailable',
+          unavailableReason: 'not_ready',
+          willReconnect: false,
+        },
+      ]);
+      assert.strictEqual(getRuntime(), null);
+    } finally {
+      unsubscribe();
+      readySocket.restore();
+      delete process.env.BRIDGE_AUTH_AK;
+      delete process.env.BRIDGE_AUTH_SK;
+      delete process.env.BRIDGE_GATEWAY_URL;
+      process.env.BRIDGE_ENABLED = 'false';
+      stopRuntime();
+    }
+  });
+
   test('singleton initializes sdk runtime and logs sdk runtimeMode', async () => {
     const logs = [];
     const client = createPluginClient({

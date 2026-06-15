@@ -1,5 +1,6 @@
 import type { RuntimeDiagnostics } from './runtime-trace.ts';
 import type { BridgeGatewayProbeResult } from '../infrastructure/gateway/gateway-host.ts';
+import type { BridgeRuntimeError } from './runtime-error.ts';
 
 /**
  * 对外稳定暴露的 host runtime 状态。
@@ -20,6 +21,7 @@ export type BridgeRuntimeStatus =
 export interface BridgeRuntimeStatusSnapshot {
   state: BridgeRuntimeStatus;
   failureReason: string | null;
+  error?: BridgeRuntimeError;
 }
 
 /**
