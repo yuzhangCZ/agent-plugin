@@ -18,7 +18,7 @@ export class GatewayClientStatus {
 
   static closed(error?: GatewayClientError): GatewayClientStatus {
     if (error?.disposition === 'diagnostic') {
-      throw new Error('gateway_diagnostic_error_cannot_close_status');
+      throw new Error(`GatewayClientStatus.closed cannot accept diagnostic error ${error.code}`);
     }
     return new GatewayClientStatus('closed', error);
   }

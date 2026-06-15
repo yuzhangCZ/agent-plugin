@@ -283,10 +283,18 @@ export type BridgeRuntimeErrorCode =
   | 'runtime_unknown_error'
   | 'probe_unknown_error';
 
-export declare class BridgeRuntimeError extends Error {
-  readonly name: 'BridgeRuntimeError';
+/**
+ * Bridge runtime public API 抛出的稳定错误结构。
+ */
+export class BridgeRuntimeError extends Error {
+  override readonly name = 'BridgeRuntimeError';
   readonly code: BridgeRuntimeErrorCode;
-  constructor(code: BridgeRuntimeErrorCode, message: string);
+
+  constructor(code: BridgeRuntimeErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    Object.freeze(this);
+  }
 }
 
 export type BridgeRuntimeStatus =

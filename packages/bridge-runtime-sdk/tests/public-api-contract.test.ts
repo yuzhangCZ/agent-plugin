@@ -38,7 +38,9 @@ test('public api positive type fixture locks BridgeRuntime status snapshot shape
 });
 
 test('runtime error public contract uses reason-oriented class-first codes', async () => {
-  const source = await readFile(new URL('../src/application/runtime-error.ts', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+  const runtimeErrorSource = await readFile(new URL('../src/application/runtime-error.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
   const runtimeSource = await readFile(new URL('../src/application/runtime.ts', import.meta.url), 'utf8');
   const lifecycleSource = await readFile(
     new URL('../src/application/lifecycle/RuntimeLifecycleService.ts', import.meta.url),
@@ -54,6 +56,10 @@ test('runtime error public contract uses reason-oriented class-first codes', asy
   assert.equal(source.includes("'runtime_start_failed'"), false);
   assert.equal(source.includes("'runtime_stop_failed'"), false);
   assert.equal(source.includes("'runtime_probe_failed'"), false);
+  assert.equal(source.includes('export class BridgeRuntimeError extends Error'), true);
+  assert.equal(runtimeErrorSource.includes('export type BridgeRuntimeErrorCode ='), false);
+  assert.equal(runtimeErrorSource.includes('export class BridgeRuntimeError'), false);
+  assert.equal(indexSource.includes("from './application/runtime-error.ts'"), false);
   assert.equal(source.includes('toBridgeRuntimeError'), false);
   assert.equal(source.includes('isCancelledGatewayRuntimeError'), false);
   assert.equal(lifecycleSource.includes('toBridgeRuntimeError'), false);

@@ -291,7 +291,7 @@ test('gateway status rejects diagnostic errors as closed terminal state', () => 
 
   assert.throws(
     () => GatewayClientStatus.closed(diagnostic),
-    /gateway_diagnostic_error_cannot_close_status/,
+    /GatewayClientStatus\.closed cannot accept diagnostic error GATEWAY_NOT_READY/,
   );
 });
 

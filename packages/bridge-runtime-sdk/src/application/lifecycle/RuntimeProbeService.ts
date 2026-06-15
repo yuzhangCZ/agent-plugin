@@ -10,8 +10,10 @@ import { fromProbeFailure } from '../runtime-error-classifier.ts';
  */
 export class RuntimeProbeService {
   private readonly driver: GatewayProbeDriver;
-  private probePromise: Promise<BridgeGatewayProbeResult> | null = null;
-  private probeAbortController: AbortController | null = null;
+  private readonly activeProbes = new Map<number, {
+    abortController: AbortController;
+    promise: Promise<BridgeGatewayProbeResult>;
+  }>();
 
   constructor(driver: GatewayProbeDriver) {
     this.driver = driver;
@@ -22,15 +24,15 @@ export class RuntimeProbeService {
    * @remarks 这是 start/stop 前的旁路清理，失败不向 lifecycle 传播。
    */
   async cancelActiveProbe(): Promise<void> {
-    if (!this.probePromise || !this.probeAbortController) {
+    if (this.activeProbes.size === 0) {
       return;
     }
-    try {
-      this.probeAbortController.abort(new Error('probe_cancelled_for_runtime_lifecycle'));
-      await this.probePromise.catch(() => undefined);
-    } catch {
-      // cancel 是 best-effort；probe service 内部闭环，不污染 start/stop 语义。
+
+    const activeProbes = Array.from(this.activeProbes.values());
+    for (const probe of activeProbes) {
+      probe.abortController.abort(new Error('probe_cancelled_for_runtime_lifecycle'));
     }
+    await Promise.all(activeProbes.map((probe) => probe.promise.catch(() => undefined)));
   }
 
   async probe(
@@ -54,34 +56,33 @@ export class RuntimeProbeService {
       };
     }
 
-    if (this.probePromise) {
-      return this.probePromise;
+    const activeProbe = this.activeProbes.get(input.timeoutMs);
+    if (activeProbe) {
+      return activeProbe.promise;
     }
 
     const abortController = new AbortController();
-    this.probeAbortController = abortController;
     try {
       const pendingProbe = this.driver.probe({
         timeoutMs: input.timeoutMs,
         abortSignal: abortController.signal,
       });
-      this.probePromise = pendingProbe.catch((error) => {
+      const probePromise = pendingProbe.catch((error) => {
         throw fromProbeFailure(error);
       }).finally(() => {
-        this.clearActiveProbe(abortController);
+        this.clearActiveProbe(input.timeoutMs, abortController);
       });
+      this.activeProbes.set(input.timeoutMs, { abortController, promise: probePromise });
     } catch (error) {
-      this.clearActiveProbe(abortController);
       throw fromProbeFailure(error);
     }
-    return this.probePromise;
+    return this.activeProbes.get(input.timeoutMs)!.promise;
   }
 
-  private clearActiveProbe(abortController: AbortController): void {
-    if (this.probeAbortController !== abortController) {
+  private clearActiveProbe(timeoutMs: number, abortController: AbortController): void {
+    if (this.activeProbes.get(timeoutMs)?.abortController !== abortController) {
       return;
     }
-    this.probePromise = null;
-    this.probeAbortController = null;
+    this.activeProbes.delete(timeoutMs);
   }
 }

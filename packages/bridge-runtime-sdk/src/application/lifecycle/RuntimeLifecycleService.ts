@@ -102,7 +102,9 @@ export class RuntimeLifecycleService {
           primaryError = await this.disconnectBestEffort();
           await inFlightStart.catch(() => undefined);
         }
-        primaryError = primaryError ?? (await this.disconnectBestEffort());
+        if (!primaryError && (!inFlightStart || this.driver.isReady())) {
+          primaryError = await this.disconnectBestEffort();
+        }
         try {
           await this.core.stop();
         } catch (error) {

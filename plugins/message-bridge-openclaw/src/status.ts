@@ -41,6 +41,7 @@ const HEARTBEAT_GRACE_MS = 5_000;
 const GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const PROBE_RUNTIME_WAIT_CAP_MS = 1_000;
 const PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE = "probe_cancelled_for_runtime_lifecycle";
+// 兼容旧版本 runtime start 取消原因；新代码统一使用 runtime lifecycle 取消语义。
 const PROBE_CANCELLED_FOR_RUNTIME_START = "probe_cancelled_for_runtime_start";
 const IGNORABLE_PROBE_CANCEL_REASONS = new Set([
   PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE,

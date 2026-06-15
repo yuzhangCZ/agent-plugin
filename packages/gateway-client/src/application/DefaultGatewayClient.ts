@@ -72,7 +72,7 @@ export class DefaultGatewayClient extends EventEmitter implements GatewayClient 
     event: E,
     ...args: Parameters<GatewayClientEvents[E]>
   ): void {
-    for (const listener of this.listeners(event)) {
+    for (const listener of this.rawListeners(event)) {
       try {
         (listener as (...listenerArgs: unknown[]) => void)(...args);
       } catch (error) {

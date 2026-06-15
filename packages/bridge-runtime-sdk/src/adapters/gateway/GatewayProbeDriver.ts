@@ -4,8 +4,10 @@ import type {
   BridgeGatewayLogger,
   BridgeGatewayProbeResult,
 } from '../../infrastructure/gateway/gateway-host.ts';
+import { GatewayClientError } from '@agent-plugin/gateway-client';
 import type { GatewayProbeDriver as GatewayProbeDriverPort } from '../../application/ports/gateway-runtime-driver.ts';
 import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
+import { normalizeErrorMessage } from '../../application/runtime-error.ts';
 import {
   createDefaultBridgeGatewayHostConnection,
   normalizeBridgeGatewayHostConfig,
@@ -61,12 +63,13 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
     try {
       connection = this.createProbeConnection();
     } catch (error) {
-      this.recordProbeCompleted({
+      const result = {
         state: 'connect_error',
         latencyMs: this.elapsedMs(startedAt, now),
-        reason: this.normalizeErrorMessage(error),
-      });
-      throw error;
+        reason: normalizeErrorMessage(error),
+      } satisfies BridgeGatewayProbeResult;
+      this.recordProbeCompleted(result);
+      return result;
     }
 
     return await new Promise((resolve) => {
@@ -166,9 +169,9 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
     now: () => number,
     error: unknown,
   ): BridgeGatewayProbeResult {
-    const message = this.normalizeErrorMessage(error);
+    const message = normalizeErrorMessage(error);
     const result = {
-      state: this.isRejectedProbeError(message) ? 'rejected' : 'connect_error',
+      state: this.isRejectedProbeError(error) ? 'rejected' : 'connect_error',
       latencyMs: this.elapsedMs(startedAt, now),
       reason: message,
     } satisfies BridgeGatewayProbeResult;
@@ -179,23 +182,13 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
     return Math.max(0, now() - startedAt);
   }
 
-  private isRejectedProbeError(message: string): boolean {
-    return message !== 'gateway_websocket_error' && message !== 'gateway_not_connected';
-  }
-
-  private normalizeErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
+  private isRejectedProbeError(error: unknown): boolean {
+    if (error instanceof GatewayClientError) {
+      return error.code === 'GATEWAY_AUTH_REJECTED'
+        || error.code === 'GATEWAY_HANDSHAKE_REJECTED'
+        || error.code === 'GATEWAY_HANDSHAKE_INVALID';
     }
-    if (
-      typeof error === 'object'
-      && error !== null
-      && 'message' in error
-      && typeof (error as { message?: unknown }).message === 'string'
-    ) {
-      return (error as { message: string }).message;
-    }
-    return String(error);
+    return false;
   }
 
   private toCancelledReason(abortSignal: AbortSignal | undefined): string {

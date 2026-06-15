@@ -2,8 +2,30 @@ import type { GatewayConnectionDisposition } from '../domain/error-contract.ts';
 import { GatewayClientError } from './GatewayClientError.ts';
 
 function getUnknownErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : getUnknownValueMessage(error);
   return message.trim() ? message : 'unknown error';
+}
+
+function getUnknownValueMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof record.code === 'string' && record.code.trim()) {
+      parts.push(`code=${record.code}`);
+    }
+    if (typeof record.message === 'string' && record.message.trim()) {
+      parts.push(`message=${record.message}`);
+    }
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
 }
 
 /**

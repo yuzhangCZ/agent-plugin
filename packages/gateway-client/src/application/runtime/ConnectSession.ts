@@ -367,7 +367,7 @@ class ConnectAttempt {
     if (!this.state.markReconnectingIfCurrent(this.sessionToken)) {
       return;
     }
-    this.enterTerminal({ markClosed: false });
+    this.enterTerminal();
     this.reconnectOrchestrator.scheduleReconnect();
   }
 
@@ -382,7 +382,7 @@ class ConnectAttempt {
       }));
       if (closeContext.phase === 'ready') {
         this.state.closeIfCurrent(this.sessionToken, cancelled);
-        this.enterTerminal({ markClosed: true });
+        this.enterTerminal();
         return;
       }
       this.failBeforeReady(cancelled, { closeTransport: false });
@@ -494,7 +494,7 @@ class ConnectAttempt {
     const terminalError = this.commitTerminalError(error);
     this.state.closeIfCurrent(this.sessionToken, terminalError);
     this.rejectHandshake(terminalError);
-    this.enterTerminal({ markClosed: true });
+    this.enterTerminal();
     if (options.closeTransport) {
       this.transport.close();
     }
@@ -506,7 +506,7 @@ class ConnectAttempt {
   ): void {
     const terminalError = this.commitTerminalError(error);
     this.state.closeIfCurrent(this.sessionToken, terminalError);
-    this.enterTerminal({ markClosed: true });
+    this.enterTerminal();
     if (options.closeTransport) {
       this.transport.close();
     }
@@ -532,7 +532,7 @@ class ConnectAttempt {
     this.rejectConnect(error);
   }
 
-  private enterTerminal(_options: { markClosed: boolean }): void {
+  private enterTerminal(): void {
     if (this.terminalCleanupCompleted) {
       return;
     }
@@ -558,7 +558,7 @@ class ConnectAttempt {
       message: 'gateway_connection_aborted',
     });
     this.rejectHandshake(error);
-    this.enterTerminal({ markClosed: true });
+    this.enterTerminal();
   }
 
   private capturePendingTransportError(error: GatewayClientError): void {

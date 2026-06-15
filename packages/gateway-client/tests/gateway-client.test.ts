@@ -812,7 +812,6 @@ test('getStatus derives readiness from the current state snapshot', async () => 
   await flushAsyncHandlers();
 
   assert.equal(client.getStatus().isReady(), true);
-  assert.equal(client.getStatus().isReady(), true);
 
   await client.disconnect();
   assert.equal(client.getStatus().isReady(), false);
@@ -864,7 +863,6 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
 
     assert.equal(timers.scheduled.length, 1);
     assert.equal(timers.scheduled[0]!.delay, 1_000);
-    assert.equal(client.getStatus().isReconnecting(), true);
     assert.equal(client.getStatus().isReconnecting(), true);
 
     clock.nowMs = 600_001;
@@ -2585,6 +2583,23 @@ test('public send wraps unknown synchronous failures as GatewayClientError', () 
   );
 });
 
+test('unknown gateway client error summarizes object code and message', () => {
+  const error = new GatewayClientUnknownError({
+    action: 'connect',
+    disposition: 'startup_failure',
+    cause: {
+      code: 'CUSTOM_GATEWAY_FAILURE',
+      message: 'custom failure',
+      ignored: true,
+    },
+  });
+
+  assert.equal(
+    error.message,
+    'gateway client connect failed: code=CUSTOM_GATEWAY_FAILURE message=custom failure',
+  );
+});
+
 test('statusChange listener failures do not affect lifecycle', async () => {
   FakeWebSocket.instances = [];
   const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
@@ -2620,6 +2635,29 @@ test('statusChange listener failures do not affect lifecycle', async () => {
   assert.equal('action' in (listenerLog?.meta ?? {}), false);
 
   await client.disconnect();
+});
+
+test('statusChange once listener runs only once through safe event emission', async () => {
+  FakeWebSocket.instances = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+  let onceCalls = 0;
+
+  (client as unknown as { once(event: string, listener: () => void): unknown }).once('statusChange', () => {
+    onceCalls += 1;
+  });
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
+  await connecting;
+  await client.disconnect();
+
+  assert.equal(onceCalls, 1);
 });
 
 test('READY websocket error keeps ready phase', async () => {
