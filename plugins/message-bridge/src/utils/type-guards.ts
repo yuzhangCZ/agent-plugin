@@ -8,6 +8,14 @@ export function asRecord(value: unknown): PlainObject | null {
   return isPlainObject(value) ? value : null;
 }
 
+export function asJsonObject(value: unknown): PlainObject | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null ? (value as PlainObject) : undefined;
+}
+
 export function hasOwn(record: PlainObject, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }

@@ -31,6 +31,7 @@
 - `RuntimeOutboundEmitter` 新增方法 `emitOutboundRun(input)`，用于发送带 run 标识的主动 facts 流。
 - 新增 `EmitOutboundRunInput` 入参类型，字段包含 `toolSessionId`、`runId`、`trigger`、`facts`。
 - `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
+- Breaking change: `ToolUpdateFact.input` 从 `string` 改为 `Record<string, unknown>`；集成方必须传入 JSON 对象，不能传字符串、数组、`null`、数字或布尔值。
 
 ### 2026-06-02
 
@@ -835,7 +836,7 @@ sequenceDiagram
 | `toolName` | `string` | 是 | 工具名称。 |
 | `status` | `'pending' \| 'running' \| 'completed' \| 'error'` | 是 | 当前工具状态。 |
 | `title` | `string` | 否 | 可选标题。 |
-| `input` | `string` | 否 | 可选输入内容。 |
+| `input` | `Record<string, unknown>` | 否 | 可选工具输入参数，必须是 JSON 对象；SDK 会拒绝字符串、数组、`null`、数字和布尔值。 |
 | `output` | `string` | 否 | 可选输出内容。 |
 | `error` | `string` | 否 | 工具错误说明。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |

@@ -604,7 +604,7 @@ test('runtime preserves stream fact content verbatim when projecting uplinks', a
   const originalContent = '  keep leading spaces\nand trailing tabs\t';
   const toolContent = {
     title: '  Run command\t',
-    input: '   ',
+    input: { command: 'ls -la' },
     output: '',
     error: '\nfailed\t',
   };

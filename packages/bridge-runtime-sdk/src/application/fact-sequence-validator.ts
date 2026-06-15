@@ -1,5 +1,6 @@
 import { RuntimeContractError } from '../domain/errors.ts';
 import type { ProviderFact } from '../domain/provider.ts';
+import { isJsonObject } from '../shared/type-guards.ts';
 import { classifyFact } from './fact-semantics.ts';
 
 export type LifecycleProfileKind = 'request_run' | 'outbound' | 'outbound_run';
@@ -135,8 +136,8 @@ export class FactSequenceValidator {
       return;
     }
     if (fact.type === 'tool.update') {
-      if (fact.input !== undefined && typeof fact.input !== 'string') {
-        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update input must be a string', {
+      if (fact.input !== undefined && !isJsonObject(fact.input)) {
+        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update input must be a JSON object', {
           toolCallId: fact.toolCallId,
         });
       }

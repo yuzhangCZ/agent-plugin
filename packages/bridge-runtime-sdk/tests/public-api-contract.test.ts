@@ -133,7 +133,7 @@ test('stable entry source exports updated interaction and fact contracts', async
   assert.equal(source.includes('QuestionOption'), true);
 });
 
-test('public contract source locks interaction ids and tool.update string boundaries', async () => {
+test('public contract source locks interaction ids and tool.update boundaries', async () => {
   const source = await readFile(new URL('../src/domain/provider-contract.ts', import.meta.url), 'utf8');
   const exportedProviderSource = await readFile(new URL('../src/domain/provider.ts', import.meta.url), 'utf8');
   const factBaseBlock = source.match(/export interface ProviderFactBase \{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -176,7 +176,7 @@ test('public contract source locks interaction ids and tool.update string bounda
   assert.equal(questionAskBlock.includes('options?: string[];'), false);
   assert.equal(questionReplyBlock.includes('questionId: string;'), true);
   assert.equal(questionReplyBlock.includes('answers: QuestionAnswer[];'), true);
-  assert.equal(toolUpdateBlock.includes('input?: string;'), true);
+  assert.equal(toolUpdateBlock.includes('input?: Record<string, unknown>;'), true);
   assert.equal(toolUpdateBlock.includes('output?: string;'), true);
   assert.equal(errorSource.includes("'pending_interaction_conflict'"), true);
   assert.equal(source.includes('welinkSessionId?: string;'), false);

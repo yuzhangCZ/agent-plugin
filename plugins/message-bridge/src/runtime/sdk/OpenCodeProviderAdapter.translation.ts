@@ -15,7 +15,7 @@ import type {
   ThinkingDoneFact,
   ToolUpdateFact,
 } from '@wecode/bridge-runtime-sdk';
-import { asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
+import { asJsonObject, asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
 import type {
   RawEventTranslation,
   TranslationContext,
@@ -376,7 +376,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
           toolName,
           status: normalizedStatus,
           ...(asTrimmedString(state?.title) ? { title: asTrimmedString(state?.title) } : {}),
-          ...(asString(state?.input) ? { input: asString(state?.input) } : {}),
+          ...(asJsonObject(state?.input) ? { input: asJsonObject(state?.input) } : {}),
           ...(asString(state?.output) ? { output: asString(state?.output) } : {}),
           ...(asString(state?.error) ? { error: asString(state?.error) } : {}),
           raw: properties,
