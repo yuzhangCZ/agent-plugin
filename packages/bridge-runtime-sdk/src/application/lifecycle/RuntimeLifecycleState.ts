@@ -1,4 +1,5 @@
 import type { BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from '../runtime.ts';
+import { cloneBridgeRuntimeError, type BridgeRuntimeError } from '../runtime-error.ts';
 
 type RuntimeLifecycleAttemptId = number;
 
@@ -16,7 +17,10 @@ export class RuntimeLifecycleState {
   private activeStopToken: number | null = null;
 
   snapshot(): BridgeRuntimeStatusSnapshot {
-    return { ...this.current };
+    return {
+      ...this.current,
+      ...(this.current.error ? { error: cloneBridgeRuntimeError(this.current.error) } : {}),
+    };
   }
 
   isIdle(): boolean {
@@ -72,10 +76,10 @@ export class RuntimeLifecycleState {
     this.setStatus('idle', null);
   }
 
-  markFailed(reason: string): void {
+  markFailed(error: BridgeRuntimeError): void {
     this.activeStartToken = null;
     this.activeStopToken = null;
-    this.setStatus('failed', reason);
+    this.setStatus('failed', error.message, error);
   }
 
   finishStartIfCurrent(attemptId: RuntimeLifecycleAttemptId): boolean {
@@ -87,11 +91,11 @@ export class RuntimeLifecycleState {
     return true;
   }
 
-  failStartIfCurrent(attemptId: RuntimeLifecycleAttemptId, reason: string): boolean {
+  failStartIfCurrent(attemptId: RuntimeLifecycleAttemptId, error: BridgeRuntimeError): boolean {
     if (this.activeStartToken !== attemptId) {
       return false;
     }
-    this.markFailed(reason);
+    this.markFailed(error);
     return true;
   }
 
@@ -108,10 +112,15 @@ export class RuntimeLifecycleState {
     return this.nextToken;
   }
 
-  private setStatus(state: BridgeRuntimeStatus, failureReason: string | null): void {
+  private setStatus(
+    state: BridgeRuntimeStatus,
+    failureReason: string | null,
+    error?: BridgeRuntimeError,
+  ): void {
     this.current = {
       state,
       failureReason,
+      ...(error ? { error } : {}),
     };
   }
 }

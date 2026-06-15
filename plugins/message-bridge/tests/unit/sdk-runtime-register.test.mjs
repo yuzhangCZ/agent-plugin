@@ -214,19 +214,18 @@ test('sdk runtime telemetry refresh does not republish READY when public status 
   });
   let readyPublishCount = 0;
   runtime.sdkRuntime = {
-    getStatus: () => ({ state: 'ready' }),
+    getStatus: () => ({ state: 'ready', failureReason: null }),
   };
   runtime.statusAdapter = {
     publishConnecting() {},
     publishDisabled() {},
     publishConfigInvalid() {},
     publishPluginFailure() {},
-    publishGatewayState(state) {
-      if (state === 'READY') {
+    publishRuntimeStatus(status) {
+      if (status.state === 'ready') {
         readyPublishCount += 1;
       }
     },
-    publishGatewayError() {},
   };
 
   runtime.syncSdkStatus();
@@ -241,6 +240,31 @@ test('sdk runtime telemetry refresh does not republish READY when public status 
     updatedAt: 100,
     lastReadyAt: 100,
   });
+});
+
+test('sdk runtime telemetry publishes failed status even when sdk error is missing', () => {
+  const runtime = new SdkBridgeRuntime({
+    client: createSdkRuntimeClient(),
+  });
+  let failedPublishCount = 0;
+  runtime.sdkRuntime = {
+    getStatus: () => ({ state: 'failed', failureReason: null }),
+  };
+  runtime.statusAdapter = {
+    publishConnecting() {},
+    publishDisabled() {},
+    publishConfigInvalid() {},
+    publishPluginFailure() {},
+    publishRuntimeStatus(status) {
+      if (status.state === 'failed') {
+        failedPublishCount += 1;
+      }
+    },
+  };
+
+  runtime.syncSdkStatus();
+
+  assert.equal(failedPublishCount, 1);
 });
 
 test('sdk runtime register falls back to pluginVersion when sdkVersion is unavailable', async () => {

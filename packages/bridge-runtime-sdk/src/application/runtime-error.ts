@@ -1,8 +1,16 @@
 export type BridgeRuntimeErrorCode =
-  | 'runtime_start_failed'
-  | 'runtime_stop_failed'
-  | 'runtime_probe_failed'
-  | 'runtime_gateway_error';
+  | 'gateway_connect_parameter_invalid'
+  | 'gateway_auth_rejected'
+  | 'gateway_handshake_timeout'
+  | 'gateway_handshake_rejected'
+  | 'gateway_handshake_invalid'
+  | 'gateway_transport_error'
+  | 'gateway_reconnect_exhausted'
+  | 'gateway_unknown_error'
+  | 'provider_unavailable'
+  | 'runtime_internal_error'
+  | 'runtime_unknown_error'
+  | 'probe_unknown_error';
 
 /**
  * Bridge runtime public API 抛出的稳定错误结构。
@@ -14,6 +22,7 @@ export class BridgeRuntimeError extends Error {
   constructor(code: BridgeRuntimeErrorCode, message: string) {
     super(message);
     this.code = code;
+    Object.freeze(this);
   }
 }
 
@@ -29,9 +38,6 @@ export function normalizeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function createBridgeRuntimeError(code: BridgeRuntimeErrorCode, error: unknown): BridgeRuntimeError {
-  if (error instanceof BridgeRuntimeError && error.code === code) {
-    return error;
-  }
-  return new BridgeRuntimeError(code, normalizeErrorMessage(error));
+export function cloneBridgeRuntimeError(error: BridgeRuntimeError): BridgeRuntimeError {
+  return new BridgeRuntimeError(error.code, error.message);
 }

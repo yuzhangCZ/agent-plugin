@@ -3,8 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
-import type {
+import {
   BridgeRuntimeError,
+  createBridgeRuntime,
+} from '../src/index.ts';
+import type {
   BridgeGatewayHostConfig,
   BridgeGatewayLogger,
   BridgeRuntimeOptions,
@@ -22,7 +25,13 @@ import { GatewayProbeDriver } from '../src/adapters/gateway/GatewayProbeDriver.t
 import { GatewayRuntimeDriver } from '../src/adapters/gateway/GatewayRuntimeDriver.ts';
 import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
 import type { RuntimeObservationEvent } from '../src/application/runtime-observation/index.ts';
-import { createBridgeRuntime } from '../src/index.ts';
+import {
+  fromGatewayClosedFailure,
+  fromGatewayConnectFailure,
+  fromProbeFailure,
+  fromProviderStartFailure,
+  fromRuntimeInternalFailure,
+} from '../src/application/runtime-error-classifier.ts';
 
 function assertBridgeRuntimeError(
   error: unknown,
@@ -33,6 +42,61 @@ function assertBridgeRuntimeError(
   assert.equal((error as BridgeRuntimeError).code, expected.code);
   assert.equal((error as Error).message, expected.message);
 }
+
+test('runtime error classifier owns lifecycle gateway and fallback mappings', () => {
+  assertBridgeRuntimeError(fromGatewayConnectFailure(new GatewayClientError({
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    disposition: 'startup_failure',
+    retryable: false,
+    message: 'rejected',
+  })), {
+    code: 'gateway_handshake_rejected',
+    message: 'rejected',
+  });
+  assertBridgeRuntimeError(fromGatewayConnectFailure(new GatewayClientError({
+    code: 'GATEWAY_NOT_READY',
+    disposition: 'runtime_failure',
+    retryable: false,
+    message: 'not ready',
+  })), {
+    code: 'gateway_unknown_error',
+    message: 'not ready',
+  });
+  assertBridgeRuntimeError(fromGatewayConnectFailure({
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    message: 'plain object is not gateway client error',
+  }), {
+    code: 'gateway_unknown_error',
+    message: 'plain object is not gateway client error',
+  });
+  assertBridgeRuntimeError(fromProviderStartFailure(new Error('provider failed')), {
+    code: 'provider_unavailable',
+    message: 'provider failed',
+  });
+  assertBridgeRuntimeError(fromRuntimeInternalFailure(new Error('cleanup failed')), {
+    code: 'runtime_internal_error',
+    message: 'cleanup failed',
+  });
+  assertBridgeRuntimeError(fromProbeFailure(new Error('probe failed')), {
+    code: 'probe_unknown_error',
+    message: 'probe failed',
+  });
+  assert.equal(fromGatewayClosedFailure(new GatewayClientError({
+    code: 'GATEWAY_CLOSED_MANUAL',
+    disposition: 'cancelled',
+    retryable: false,
+    message: 'manual',
+  })), null);
+  assert.equal(fromGatewayClosedFailure(new GatewayClientError({
+    code: 'GATEWAY_CONNECT_ABORTED',
+    disposition: 'cancelled',
+    retryable: false,
+    message: 'aborted',
+  })), null);
+
+  const existing = new BridgeRuntimeError('runtime_internal_error', 'already classified');
+  assert.equal(fromRuntimeInternalFailure(existing), existing);
+});
 
 function createAsyncFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
   return {
@@ -2055,6 +2119,7 @@ test('runtime start disconnects owned connection when startup fails after connec
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
   });
 });
 
@@ -2096,13 +2161,59 @@ test('runtime start rejects and enters failed when provider initialize fails', a
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'provider_init_failed',
+    error: new BridgeRuntimeError('provider_unavailable', 'provider_init_failed'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'startup_failure',
     phase: 'start',
     message: 'provider_init_failed',
-    code: 'runtime_start_failed',
+    code: 'provider_unavailable',
   });
+});
+
+test('failed runtime status returns immutable cloned BridgeRuntimeError snapshots', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async initialize() {
+          throw new Error('provider_init_failed');
+        },
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await assert.rejects(runtime.start(), /provider_init_failed/);
+  const first = runtime.getStatus();
+  const second = runtime.getStatus();
+
+  assert.ok(first.error instanceof BridgeRuntimeError);
+  assert.ok(Object.isFrozen(first.error));
+  assert.notEqual(first.error, second.error);
+  assert.equal(second.error?.code, 'provider_unavailable');
+  assert.equal(second.error?.message, 'provider_init_failed');
 });
 
 test('runtime start wraps provider initialize failure as BridgeRuntimeError', async () => {
@@ -2143,7 +2254,7 @@ test('runtime start wraps provider initialize failure as BridgeRuntimeError', as
     runtime.start(),
     (error) => {
       assertBridgeRuntimeError(error, {
-        code: 'runtime_start_failed',
+        code: 'provider_unavailable',
         message: 'provider_init_failed',
       });
       return true;
@@ -2167,7 +2278,7 @@ test('runtime start preserves original message when disconnect cleanup throws', 
     runtime.start(),
     (error) => {
       assertBridgeRuntimeError(error, {
-        code: 'runtime_start_failed',
+        code: 'gateway_unknown_error',
         message: 'connect_failed_after_open',
       });
       return true;
@@ -2177,6 +2288,7 @@ test('runtime start preserves original message when disconnect cleanup throws', 
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
   });
 });
 
@@ -2193,7 +2305,7 @@ test('runtime stop wraps dispose failure as BridgeRuntimeError', async () => {
     runtime.stop(),
     (error) => {
       assertBridgeRuntimeError(error, {
-        code: 'runtime_stop_failed',
+        code: 'runtime_internal_error',
         message: 'provider_dispose_failed',
       });
       return true;
@@ -2219,7 +2331,7 @@ test('runtime stop still disposes provider when disconnect throws', async () => 
     runtime.stop(),
     (error) => {
       assertBridgeRuntimeError(error, {
-        code: 'runtime_stop_failed',
+        code: 'runtime_internal_error',
         message: 'disconnect_failed',
       });
       return true;
@@ -3208,6 +3320,7 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'rejected',
+    error: new BridgeRuntimeError('gateway_handshake_rejected', 'rejected'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
@@ -3275,6 +3388,7 @@ test('failed start does not drift back to reconnecting or ready after later gate
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
   });
 });
 
@@ -3292,6 +3406,7 @@ test('gateway runtime error preserves original gateway failure code in diagnosti
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'gateway_runtime_failed',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
@@ -3313,12 +3428,28 @@ test('gateway non-retryable closed status marks running runtime failed', async (
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'GATEWAY_TRANSPORT_ERROR',
+    error: new BridgeRuntimeError('gateway_transport_error', 'GATEWAY_TRANSPORT_ERROR'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
     phase: 'runtime',
     message: 'GATEWAY_TRANSPORT_ERROR',
     code: 'GATEWAY_TRANSPORT_ERROR',
+  });
+});
+
+test('manual gateway close does not mark running runtime failed', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.closedCode = 'GATEWAY_CLOSED_MANUAL';
+  connection.state = 'DISCONNECTED';
+  connection.emitStatus();
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'ready',
+    failureReason: null,
   });
 });
 
@@ -3661,6 +3792,7 @@ test('gateway runtime error during start is not overwritten by later connect com
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'gateway_runtime_failed_during_start',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed_during_start'),
   });
 
   connectGate.resolve();
@@ -3669,6 +3801,7 @@ test('gateway runtime error during start is not overwritten by later connect com
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'gateway_runtime_failed_during_start',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed_during_start'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
@@ -4025,7 +4158,7 @@ test('probe unexpected rejection wraps as BridgeRuntimeError', async () => {
     runtime.probe({ timeoutMs: 50 }),
     (error) => {
       assertBridgeRuntimeError(error, {
-        code: 'runtime_probe_failed',
+        code: 'probe_unknown_error',
         message: 'probe_factory_failed',
       });
       return true;

@@ -50,18 +50,18 @@ class ProbeGatewayClient extends EventEmitter {
 
   async connect() {
     this.state = "CONNECTING";
-    this.emit("stateChange", this.state);
+    this.emitStatus();
     if (this.connectMode === "pending") {
       return;
     }
     await new Promise((resolve) => setImmediate(resolve));
     this.state = "READY";
-    this.emit("stateChange", this.state);
+    this.emitStatus();
   }
 
   disconnect() {
     this.state = "DISCONNECTED";
-    this.emit("stateChange", this.state);
+    this.emitStatus();
   }
 
   send(message) {
@@ -79,7 +79,15 @@ class ProbeGatewayClient extends EventEmitter {
   getStatus() {
     return {
       isReady: () => this.state === "READY",
+      isConnecting: () => this.state === "CONNECTING",
+      isReconnecting: () => false,
+      isFailureClosed: () => false,
+      getError: () => null,
     };
+  }
+
+  emitStatus() {
+    this.emit("statusChange", this.getStatus());
   }
 }
 

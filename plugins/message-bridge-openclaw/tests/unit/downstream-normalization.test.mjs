@@ -223,11 +223,16 @@ class FakeGatewayClient {
   getStatus() {
     return {
       isReady: () => this.state === "READY",
+      isConnecting: () => this.state === "CONNECTED",
+      isReconnecting: () => false,
+      isFailureClosed: () => false,
+      getError: () => null,
     };
   }
 
   setState(state) {
     this.state = state;
+    this.emit("statusChange", this.getStatus());
   }
 
   send(message) {
@@ -235,11 +240,27 @@ class FakeGatewayClient {
   }
 
   emit(event, payload) {
+    if (event === "error" && payload && typeof payload.code === "string") {
+      this.connected = false;
+      this.state = "DISCONNECTED";
+      this.emit("statusChange", createFailedGatewayStatus(payload));
+      return;
+    }
     const listeners = this.listeners.get(event) ?? [];
     for (const listener of listeners) {
       listener(payload);
     }
   }
+}
+
+function createFailedGatewayStatus(error) {
+  return {
+    isReady: () => false,
+    isConnecting: () => false,
+    isReconnecting: () => false,
+    isFailureClosed: () => true,
+    getError: () => error,
+  };
 }
 
 let bridgeModulePromise = null;

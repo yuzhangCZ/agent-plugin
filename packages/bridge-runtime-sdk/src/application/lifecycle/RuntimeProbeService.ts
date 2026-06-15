@@ -2,7 +2,7 @@ import type { BridgeGatewayProbeResult } from '../../infrastructure/gateway/gate
 import { DEFAULT_PROBE_TIMEOUT_MS } from '../constants/runtime.ts';
 import type { GatewayProbeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { BridgeRuntimeStatusSnapshot } from '../runtime.ts';
-import { createBridgeRuntimeError } from '../runtime-error.ts';
+import { fromProbeFailure } from '../runtime-error-classifier.ts';
 
 /**
  * runtime gateway 探测服务。
@@ -66,13 +66,13 @@ export class RuntimeProbeService {
         abortSignal: abortController.signal,
       });
       this.probePromise = pendingProbe.catch((error) => {
-        throw createBridgeRuntimeError('runtime_probe_failed', error);
+        throw fromProbeFailure(error);
       }).finally(() => {
         this.clearActiveProbe(abortController);
       });
     } catch (error) {
       this.clearActiveProbe(abortController);
-      throw createBridgeRuntimeError('runtime_probe_failed', error);
+      throw fromProbeFailure(error);
     }
     return this.probePromise;
   }

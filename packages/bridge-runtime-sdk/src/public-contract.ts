@@ -270,10 +270,18 @@ export interface RuntimeDiagnostics {
 }
 
 export type BridgeRuntimeErrorCode =
-  | 'runtime_start_failed'
-  | 'runtime_stop_failed'
-  | 'runtime_probe_failed'
-  | 'runtime_gateway_error';
+  | 'gateway_connect_parameter_invalid'
+  | 'gateway_auth_rejected'
+  | 'gateway_handshake_timeout'
+  | 'gateway_handshake_rejected'
+  | 'gateway_handshake_invalid'
+  | 'gateway_transport_error'
+  | 'gateway_reconnect_exhausted'
+  | 'gateway_unknown_error'
+  | 'provider_unavailable'
+  | 'runtime_internal_error'
+  | 'runtime_unknown_error'
+  | 'probe_unknown_error';
 
 export declare class BridgeRuntimeError extends Error {
   readonly name: 'BridgeRuntimeError';
@@ -292,6 +300,7 @@ export type BridgeRuntimeStatus =
 export interface BridgeRuntimeStatusSnapshot {
   state: BridgeRuntimeStatus;
   failureReason: string | null;
+  error?: BridgeRuntimeError;
 }
 
 export interface BridgeRuntime {

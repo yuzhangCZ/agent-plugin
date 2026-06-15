@@ -3,7 +3,16 @@ import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { RuntimeObservation } from '../runtime-observation/index.ts';
 import type { BridgeRuntimeStatusSnapshot } from '../runtime.ts';
-import { createBridgeRuntimeError, normalizeErrorMessage } from '../runtime-error.ts';
+import {
+  BridgeRuntimeError,
+  normalizeErrorMessage,
+} from '../runtime-error.ts';
+import {
+  fromGatewayClosedFailure,
+  fromGatewayConnectFailure,
+  fromProviderStartFailure,
+  fromRuntimeInternalFailure,
+} from '../runtime-error-classifier.ts';
 import type { RuntimeCore } from '../runtime/runtime-core.types.ts';
 import { RuntimeLifecycleState } from './RuntimeLifecycleState.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './runtime-lifecycle.types.ts';
@@ -65,31 +74,10 @@ export class RuntimeLifecycleService {
     const startAttemptId = this.state.beginStart();
     this.onTelemetryUpdated?.();
 
-    this.startPromise = (async () => {
-      try {
-        await this.core.start();
-        await this.driver.connect();
-        if (this.state.finishStartIfCurrent(startAttemptId)) {
-          this.observation.runtimeStartCompleted();
-          this.onTelemetryUpdated?.();
-        }
-      } catch (error) {
-        const runtimeError = createBridgeRuntimeError('runtime_start_failed', error);
-        const cleanupError = await this.disconnectBestEffort();
-        if (!this.state.failStartIfCurrent(startAttemptId, normalizeErrorMessage(runtimeError))) {
-          return;
-        }
-        if (cleanupError) {
-          this.recordFailure(RUNTIME_FAILURE_KIND.gatewayRuntime, 'start', cleanupError);
-        }
-        this.recordFailure(RUNTIME_FAILURE_KIND.startup, 'start', runtimeError, runtimeError.code);
-        this.observation.runtimeStartFailed(runtimeError, runtimeError.code);
-        this.onTelemetryUpdated?.();
-        throw runtimeError;
-      } finally {
+    this.startPromise = this.runStartAttempt(startAttemptId)
+      .finally(() => {
         this.startPromise = null;
-      }
-    })();
+      });
 
     return this.startPromise;
   }
@@ -131,8 +119,8 @@ export class RuntimeLifecycleService {
           this.onTelemetryUpdated?.();
         }
       } catch (error) {
-        const runtimeError = createBridgeRuntimeError('runtime_stop_failed', error);
-        this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', runtimeError, runtimeError.code);
+        const runtimeError = fromRuntimeInternalFailure(error);
+        this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', runtimeError);
         this.observation.runtimeStopFailed(runtimeError, runtimeError.code);
         this.onTelemetryUpdated?.();
         throw runtimeError;
@@ -148,15 +136,71 @@ export class RuntimeLifecycleService {
     return this.state.snapshot();
   }
 
+  private async runStartAttempt(startAttemptId: number): Promise<void> {
+    await this.startCoreOrFail(startAttemptId);
+    await this.connectGatewayOrFail(startAttemptId);
+
+    if (this.state.finishStartIfCurrent(startAttemptId)) {
+      this.observation.runtimeStartCompleted();
+      this.onTelemetryUpdated?.();
+    }
+  }
+
+  private async startCoreOrFail(startAttemptId: number): Promise<void> {
+    try {
+      await this.core.start();
+    } catch (error) {
+      const runtimeError = fromProviderStartFailure(error);
+      if (this.state.failStartIfCurrent(startAttemptId, runtimeError)) {
+        this.publishStartFailure(runtimeError);
+      }
+      throw runtimeError;
+    }
+  }
+
+  private async connectGatewayOrFail(startAttemptId: number): Promise<void> {
+    try {
+      await this.driver.connect();
+    } catch (error) {
+      const runtimeError = fromGatewayConnectFailure(error);
+      const cleanupError = await this.disconnectBestEffort();
+      if (!this.state.failStartIfCurrent(startAttemptId, runtimeError)) {
+        return;
+      }
+      if (cleanupError) {
+        const cleanupRuntimeError = fromRuntimeInternalFailure(cleanupError);
+        this.recordFailure(
+          RUNTIME_FAILURE_KIND.gatewayRuntime,
+          'start',
+          cleanupRuntimeError,
+          cleanupRuntimeError.code,
+        );
+      }
+      this.publishStartFailure(runtimeError);
+      throw runtimeError;
+    }
+  }
+
+  private publishStartFailure(runtimeError: BridgeRuntimeError): void {
+    this.recordFailure(RUNTIME_FAILURE_KIND.startup, 'start', runtimeError, runtimeError.code);
+    this.observation.runtimeStartFailed(runtimeError, runtimeError.code);
+    this.onTelemetryUpdated?.();
+  }
+
   recordFailure(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): string {
     const message = normalizeErrorMessage(error);
     this.observation.failureRecorded(kind, phase, message, code);
     return message;
   }
 
-  private setFailed(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): void {
-    const message = this.recordFailure(kind, phase, error, code);
-    this.state.markFailed(message);
+  private setFailed(
+    kind: RuntimeFailureKind,
+    phase: RuntimeFailurePhase,
+    runtimeError: BridgeRuntimeError,
+    diagnosticCode: string = runtimeError.code,
+  ): void {
+    this.recordFailure(kind, phase, runtimeError, diagnosticCode);
+    this.state.markFailed(runtimeError);
   }
 
   private markReadyFromGateway(): void {
@@ -177,14 +221,16 @@ export class RuntimeLifecycleService {
 
   private markFailedFromGatewayClosed(status: GatewayClientStatus): void {
     const error = status.getError();
-    if (!error) {
+    const runtimeError = fromGatewayClosedFailure(error);
+    if (!runtimeError) {
       return;
     }
+    const diagnosticCode = error?.code ?? runtimeError.code;
     this.setFailed(
       RUNTIME_FAILURE_KIND.gatewayRuntime,
       'runtime',
-      error,
-      error.code,
+      runtimeError,
+      diagnosticCode,
     );
     this.onTelemetryUpdated?.();
   }

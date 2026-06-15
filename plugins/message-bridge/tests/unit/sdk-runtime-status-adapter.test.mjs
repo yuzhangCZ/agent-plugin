@@ -44,7 +44,7 @@ describe('sdk runtime status adapter', () => {
       lastReadyAt: null,
     });
 
-    adapter.publishGatewayState('READY');
+    adapter.publishRuntimeStatus({ state: 'ready', failureReason: null });
     const ready = getMessageBridgeStatus();
     assert.strictEqual(ready.connected, true);
     assert.strictEqual(ready.phase, 'ready');
@@ -53,7 +53,7 @@ describe('sdk runtime status adapter', () => {
     assert.strictEqual(ready.lastError, null);
     assert.strictEqual(typeof ready.lastReadyAt, 'number');
 
-    adapter.publishGatewayState('DISCONNECTED');
+    adapter.publishRuntimeStatus({ state: 'idle', failureReason: null });
     assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 
@@ -71,12 +71,13 @@ describe('sdk runtime status adapter', () => {
     assert.strictEqual(configInvalid.willReconnect, false);
     assert.strictEqual(configInvalid.lastError, 'invalid config');
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_HANDSHAKE_REJECTED',
-      disposition: 'startup_failure',
-      stage: 'handshake',
-      retryable: false,
-      message: 'device_conflict',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'device_conflict',
+      error: {
+        code: 'gateway_handshake_rejected',
+        message: 'device_conflict',
+      },
     });
     const rejected = getMessageBridgeStatus();
     assert.strictEqual(rejected.unavailableReason, 'server_failure');
@@ -90,27 +91,29 @@ describe('sdk runtime status adapter', () => {
     assert.strictEqual(failed.lastError, 'startup boom');
   });
 
-  test('uses shared availability mapper semantics for handshake and transport failures', () => {
+  test('maps sdk gateway status error codes to message bridge unavailable reasons', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_HANDSHAKE_INVALID',
-      disposition: 'startup_failure',
-      stage: 'handshake',
-      retryable: false,
-      message: 'register violated',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'register violated',
+      error: {
+        code: 'gateway_handshake_invalid',
+        message: 'register violated',
+      },
     });
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'server_failure');
 
     __resetMessageBridgeStatusForTests();
     const anotherAdapter = createSdkRuntimeStatusAdapter();
 
-    anotherAdapter.publishGatewayError({
-      code: 'GATEWAY_TRANSPORT_ERROR',
-      disposition: 'startup_failure',
-      stage: 'pre_open',
-      retryable: true,
-      message: 'timeout',
+    anotherAdapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'timeout',
+      error: {
+        code: 'gateway_transport_error',
+        message: 'timeout',
+      },
     });
     assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'network_failure');
   });
@@ -118,20 +121,22 @@ describe('sdk runtime status adapter', () => {
   test('keeps server failure precedence over later network failure', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_HANDSHAKE_REJECTED',
-      disposition: 'startup_failure',
-      stage: 'handshake',
-      retryable: false,
-      message: 'auth rejected',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'auth rejected',
+      error: {
+        code: 'gateway_handshake_rejected',
+        message: 'auth rejected',
+      },
     });
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_TRANSPORT_ERROR',
-      disposition: 'runtime_failure',
-      stage: 'ready',
-      retryable: true,
-      message: 'socket down',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'socket down',
+      error: {
+        code: 'gateway_transport_error',
+        message: 'socket down',
+      },
     });
 
     const snapshot = getMessageBridgeStatus();
@@ -142,13 +147,14 @@ describe('sdk runtime status adapter', () => {
   test('publishes network failure for transport-side gateway errors', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayState('READY');
-    adapter.publishGatewayError({
-      code: 'GATEWAY_TRANSPORT_ERROR',
-      disposition: 'runtime_failure',
-      stage: 'ready',
-      retryable: true,
-      message: 'network jitter',
+    adapter.publishRuntimeStatus({ state: 'ready', failureReason: null });
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'network jitter',
+      error: {
+        code: 'gateway_transport_error',
+        message: 'network jitter',
+      },
     });
 
     const failed = getMessageBridgeStatus();
@@ -158,49 +164,57 @@ describe('sdk runtime status adapter', () => {
     assert.strictEqual(failed.lastError, 'network jitter');
   });
 
-  test('state gate errors do not overwrite current public snapshot', () => {
+  test('non failed runtime statuses do not overwrite current ready snapshot except active lifecycle states', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayState('READY');
+    adapter.publishRuntimeStatus({ state: 'ready', failureReason: null });
     const ready = getMessageBridgeStatus();
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_NOT_READY',
-      disposition: 'diagnostic',
-      stage: 'handshake',
-      retryable: false,
-      message: 'not ready',
-    });
+    adapter.publishRuntimeStatus({ state: 'idle', failureReason: null });
 
     assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 
-  test('protocol diagnostic errors do not overwrite current public snapshot', () => {
+  test('unknown sdk status error code publishes plugin_failure', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayState('READY');
-    const ready = getMessageBridgeStatus();
-
-    adapter.publishGatewayError({
-      code: 'GATEWAY_INBOUND_PROTOCOL_INVALID',
-      disposition: 'diagnostic',
-      stage: 'ready',
-      retryable: false,
-      message: 'unexpected frame',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'gateway boom',
+      error: {
+        code: 'gateway_unknown_error',
+        message: 'gateway boom',
+      },
     });
 
-    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+    assert.strictEqual(getMessageBridgeStatus().unavailableReason, 'plugin_failure');
+    assert.strictEqual(getMessageBridgeStatus().lastError, 'gateway boom');
+  });
+
+  test('failed runtime status without error publishes plugin_failure with stable message', () => {
+    const adapter = createSdkRuntimeStatusAdapter();
+
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: null,
+    });
+
+    const snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'plugin_failure');
+    assert.strictEqual(snapshot.lastError, 'unknown error');
   });
 
   test('startup parameter invalid is projected to config_invalid locally', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
-    adapter.publishGatewayError({
-      code: 'GATEWAY_CONNECT_PARAMETER_INVALID',
-      disposition: 'startup_failure',
-      stage: 'pre_open',
-      retryable: false,
-      message: 'invalid auth config',
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'invalid auth config',
+      error: {
+        code: 'gateway_connect_parameter_invalid',
+        message: 'invalid auth config',
+      },
     });
 
     const snapshot = getMessageBridgeStatus();
@@ -215,7 +229,7 @@ describe('sdk runtime status adapter', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 
     adapter.publishConnecting();
-    adapter.publishGatewayState('READY');
+    adapter.publishRuntimeStatus({ state: 'ready', failureReason: null });
     await flushLogs();
 
     assert.strictEqual(logs.filter((entry) => entry?.message === 'status_api.query').length, 0);

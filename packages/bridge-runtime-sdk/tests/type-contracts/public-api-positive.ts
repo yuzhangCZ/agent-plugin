@@ -1,5 +1,7 @@
 import type {
   BridgeRuntime,
+  BridgeRuntimeError,
+  BridgeRuntimeErrorCode,
   BridgeRuntimeStatus,
   BridgeRuntimeStatusSnapshot,
   OutboundFact,
@@ -13,6 +15,8 @@ const status = runtime.getStatus();
 const snapshot: BridgeRuntimeStatusSnapshot = status;
 const state: BridgeRuntimeStatus = status.state;
 const failureReason: string | null = status.failureReason;
+const statusError: BridgeRuntimeError | undefined = status.error;
+const gatewayTransportErrorCode: BridgeRuntimeErrorCode = 'gateway_transport_error';
 
 const explicitSnapshot: BridgeRuntimeStatusSnapshot = {
   state: 'failed',
@@ -42,5 +46,7 @@ void outboundEmitter.emitOutboundRun({
 void snapshot;
 void state;
 void failureReason;
+void statusError;
+void gatewayTransportErrorCode;
 void explicitSnapshot;
 void idleSnapshot;
