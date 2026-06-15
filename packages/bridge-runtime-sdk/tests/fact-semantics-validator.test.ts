@@ -63,11 +63,11 @@ test('classifyFact returns stable application semantics for representative fact 
 test('FactSequenceValidator enforces order and tool.update fail-closed rules without session lifecycle', () => {
   const validator = new FactSequenceValidator();
 
-  const blankToolUpdateState = validator.createState();
+  const validToolUpdateState = validator.createState();
   validator.consume(
     'tool-1',
     { type: 'message.start', messageId: 'msg-1' },
-    blankToolUpdateState,
+    validToolUpdateState,
     { kind: 'request_run' },
   );
 
@@ -81,13 +81,41 @@ test('FactSequenceValidator enforces order and tool.update fail-closed rules wit
         toolCallId: 'call-1',
         toolName: 'shell',
         status: 'running',
-        input: '',
-        output: '   ',
+        input: { command: 'ls -la' },
+        output: 'total 24',
       },
-      blankToolUpdateState,
+      validToolUpdateState,
       { kind: 'request_run' },
     ),
   );
+
+  for (const input of ['ls -la', [], null, 1, true]) {
+    const invalidInputState = validator.createState();
+    validator.consume(
+      'tool-1',
+      { type: 'message.start', messageId: 'msg-invalid-input' },
+      invalidInputState,
+      { kind: 'request_run' },
+    );
+
+    assert.throws(
+      () => validator.consume(
+        'tool-1',
+        {
+          type: 'tool.update',
+          messageId: 'msg-invalid-input',
+          partId: 'part-1',
+          toolCallId: 'call-1',
+          toolName: 'shell',
+          status: 'running',
+          input: input as Record<string, unknown>,
+        },
+        invalidInputState,
+        { kind: 'request_run' },
+      ),
+      /tool\.update input must be a JSON object/,
+    );
+  }
 
   const invalidToolUpdateState = validator.createState();
   validator.consume(

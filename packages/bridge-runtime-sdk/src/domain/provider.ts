@@ -63,7 +63,7 @@ export interface ToolUpdateFact extends ProviderFactBase {
   toolName: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
-  input?: string;
+  input?: Record<string, unknown>;
   output?: string;
   error?: string;
   raw?: unknown;

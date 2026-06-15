@@ -50,7 +50,7 @@ const skillToolUpdateEventBaseSchema = z.object({
     status: z.enum(MESSAGE_PART_STATE_STATUSES),
     toolCallId: requiredProtocolString,
     title: z.string().optional(),
-    input: z.string().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
     output: z.string().optional(),
     error: z.string().optional(),
   }),

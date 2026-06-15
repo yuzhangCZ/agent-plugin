@@ -55,6 +55,13 @@
 - 推荐使用精简 TSDoc 标签：`@remarks`、`@param`、`@returns`、`@throws`、`@deprecated`
 - 禁止空洞或翻译式注释，例如“设置变量”“发送消息”“判断状态”
 
+## 类型收窄规则
+
+- JSON 对象、plain object、数组、字符串等协议边界判断必须优先使用所在包内共享 type guard 或 schema helper。
+- 禁止在业务文件中重复散落 `value !== null && typeof value === 'object' && !Array.isArray(value)` 这类对象判断。
+- 如果所在包缺少对应 helper，应先补充包内共享工具，再在业务逻辑中引用。
+- 跨包不要为了复用 type guard 引入反向依赖；各包可保留自己的边界工具，但同一包内必须收敛到一处。
+
 ## 语言规则
 
 - 用户可见输出、仓库文档、注释默认使用简体中文

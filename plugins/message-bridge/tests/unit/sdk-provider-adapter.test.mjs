@@ -2142,6 +2142,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
         state: {
           status: 'running',
           title: '读取文件',
+          input: { command: 'ls -la' },
         },
       },
     },
@@ -2158,6 +2159,24 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
         state: {
           status: 'completed',
           title: '标题不能当工具名',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update-invalid-input',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        tool: 'bash',
+        callID: 'call-invalid-input',
+        state: {
+          status: 'running',
+          input: 'ls -la',
+          output: 'total 24',
         },
       },
     },
@@ -2191,6 +2210,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
       toolName: 'read_file',
       status: 'running',
       title: '读取文件',
+      input: { command: 'ls -la' },
       raw: {
         part: {
           id: 'part-tool-update',
@@ -2202,6 +2222,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
           state: {
             status: 'running',
             title: '读取文件',
+            input: { command: 'ls -la' },
           },
         },
       },
@@ -2224,6 +2245,30 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
           state: {
             status: 'completed',
             title: '标题不能当工具名',
+          },
+        },
+      },
+    },
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-invalid-input',
+      toolCallId: 'call-invalid-input',
+      toolName: 'bash',
+      status: 'running',
+      output: 'total 24',
+      raw: {
+        part: {
+          id: 'part-tool-update-invalid-input',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          tool: 'bash',
+          callID: 'call-invalid-input',
+          state: {
+            status: 'running',
+            input: 'ls -la',
+            output: 'total 24',
           },
         },
       },
