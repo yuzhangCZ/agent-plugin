@@ -292,6 +292,8 @@ describe('plugin contract', () => {
     assert.strictEqual(shapeLogs[0].extra.hasAppHealth, false);
     assert.strictEqual(shapeLogs[0].extra.hasAppLog, true);
     assert.strictEqual(shapeLogs[0].extra.hasSessionCreate, true);
+    assert.strictEqual(shapeLogs[0].extra.hasPermissionReply, true);
+    assert.strictEqual(shapeLogs[0].extra.hasLegacyPermissionRespond, true);
     assert.strictEqual(shapeLogs[0].extra.hasRawClientGet, true);
     assert.strictEqual(shapeLogs[0].extra.hasRawClientPost, true);
   });

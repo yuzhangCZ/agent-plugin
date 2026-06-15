@@ -8,7 +8,6 @@ export const REQUIRED_SDK_CAPABILITIES = [
   'session.abort',
   'session.delete',
   'config.providers',
-  'postSessionIdPermissionsPermissionId',
   '_client.post',
 ] as const;
 
@@ -169,8 +168,6 @@ export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[
         return typeof session?.delete !== 'function';
       case 'config.providers':
         return typeof config?.providers !== 'function';
-      case 'postSessionIdPermissionsPermissionId':
-        return typeof root?.postSessionIdPermissionsPermissionId !== 'function';
       case '_client.post':
         return typeof rawClient?.post !== 'function';
       default:
@@ -193,17 +190,6 @@ export function toHostClientLike(client: unknown): HostClientLike {
   };
 }
 
-/**
- * 当前 OpenCode deprecated permission route 在服务端仅消费 permissionID/requestID。
- * adapter 在内部补一个稳定占位 sessionID，避免把兼容细节暴露给业务层。
- *
- * @remarks
- * 这里依赖的是当前 OpenCode 服务端的兼容行为，而不是桥接层对外契约：
- * 业务代码只需要提供 permissionId/response，不应感知 sessionID 占位值。
- * 等官方稳定的 requestID 级 permission reply façade 可用后，应优先删除这条兼容路径。
- */
-const LEGACY_PERMISSION_REPLY_SESSION_ID = 'ses_bridge_permission_compat';
-
 export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
   if (getMissingSdkCapabilities(client).length > 0) {
     return null;
@@ -224,16 +210,13 @@ export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
       providers: (parameters) => root.config.providers(buildLegacyScopedQuery(parameters)),
     },
     permission: {
-      // 兼容 deprecated route 的细节只允许停留在 adapter 内部，业务层不暴露 sessionID。
-      reply: (parameters) => root.postSessionIdPermissionsPermissionId({
-        url: '/session/{id}/permissions/{permissionID}',
-        path: {
-          id: LEGACY_PERMISSION_REPLY_SESSION_ID,
-          permissionID: parameters.permissionId,
-        },
+      // OpenCode server plugin 注入的 v1 client 没有高层 permission reply；这里直接走 requestID raw endpoint。
+      reply: (parameters) => root._client.post({
+        url: '/permission/{requestID}/reply',
+        path: { requestID: parameters.permissionId },
         ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
         body: {
-          response: parameters.response,
+          reply: parameters.response,
         },
         headers: {
           'Content-Type': 'application/json',

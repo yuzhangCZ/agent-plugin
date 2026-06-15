@@ -26,7 +26,8 @@ export function buildClientShapeSummary(client: unknown): Record<string, unknown
     hasSessionPrompt: typeof session?.prompt === 'function',
     hasSessionAbort: typeof session?.abort === 'function',
     hasSessionDelete: typeof session?.delete === 'function',
-    hasPermissionReply: typeof root?.postSessionIdPermissionsPermissionId === 'function',
+    hasPermissionReply: typeof rawClient?.post === 'function',
+    hasLegacyPermissionRespond: typeof root?.postSessionIdPermissionsPermissionId === 'function',
     hasRawClientGet: typeof rawClient?.get === 'function',
     hasRawClientPost: typeof rawClient?.post === 'function',
   };
