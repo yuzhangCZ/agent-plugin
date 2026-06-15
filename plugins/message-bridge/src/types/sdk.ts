@@ -86,7 +86,6 @@ export interface HostSdkClient {
   config: {
     providers: (options?: Record<string, unknown>) => Promise<unknown>;
   };
-  postSessionIdPermissionsPermissionId: (options: Record<string, unknown>) => Promise<unknown>;
   _client: {
     get: (options: Record<string, unknown>) => Promise<unknown>;
     post: (options: Record<string, unknown>) => Promise<unknown>;

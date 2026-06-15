@@ -8,7 +8,6 @@ export const REQUIRED_SDK_CAPABILITIES = [
   'session.abort',
   'session.delete',
   'config.providers',
-  'postSessionIdPermissionsPermissionId',
   '_client.post',
 ] as const;
 
@@ -16,6 +15,10 @@ export type SdkClientCapability = typeof REQUIRED_SDK_CAPABILITIES[number];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
+}
+
+function asRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
 }
 
 function asFunction<T extends (...args: never[]) => unknown>(value: unknown, bindTarget?: unknown): T | undefined {
@@ -148,35 +151,22 @@ function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGl
 }
 
 export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[] {
-  const root = isRecord(client) ? client : undefined;
-  const session = isRecord(root?.session) ? root.session : undefined;
-  const config = isRecord(root?.config) ? root.config : undefined;
-  const rawClient = isRecord(root?._client) ? root._client : undefined;
+  const root = asRecordOrUndefined(client);
+  const session = asRecordOrUndefined(root?.session);
+  const config = asRecordOrUndefined(root?.config);
+  const rawClient = asRecordOrUndefined(root?._client);
+  const available: Record<SdkClientCapability, boolean> = {
+    'session.create': asFunction(session?.create) !== undefined,
+    'session.get': asFunction(session?.get) !== undefined,
+    'session.list': asFunction(session?.list) !== undefined,
+    'session.prompt': asFunction(session?.prompt) !== undefined,
+    'session.abort': asFunction(session?.abort) !== undefined,
+    'session.delete': asFunction(session?.delete) !== undefined,
+    'config.providers': asFunction(config?.providers) !== undefined,
+    '_client.post': asFunction(rawClient?.post) !== undefined,
+  };
 
-  return REQUIRED_SDK_CAPABILITIES.filter((capability) => {
-    switch (capability) {
-      case 'session.create':
-        return typeof session?.create !== 'function';
-      case 'session.get':
-        return typeof session?.get !== 'function';
-      case 'session.list':
-        return typeof session?.list !== 'function';
-      case 'session.prompt':
-        return typeof session?.prompt !== 'function';
-      case 'session.abort':
-        return typeof session?.abort !== 'function';
-      case 'session.delete':
-        return typeof session?.delete !== 'function';
-      case 'config.providers':
-        return typeof config?.providers !== 'function';
-      case 'postSessionIdPermissionsPermissionId':
-        return typeof root?.postSessionIdPermissionsPermissionId !== 'function';
-      case '_client.post':
-        return typeof rawClient?.post !== 'function';
-      default:
-        return true;
-    }
-  });
+  return REQUIRED_SDK_CAPABILITIES.filter((capability) => !available[capability]);
 }
 
 export function toHostClientLike(client: unknown): HostClientLike {
@@ -192,17 +182,6 @@ export function toHostClientLike(client: unknown): HostClientLike {
     },
   };
 }
-
-/**
- * 当前 OpenCode deprecated permission route 在服务端仅消费 permissionID/requestID。
- * adapter 在内部补一个稳定占位 sessionID，避免把兼容细节暴露给业务层。
- *
- * @remarks
- * 这里依赖的是当前 OpenCode 服务端的兼容行为，而不是桥接层对外契约：
- * 业务代码只需要提供 permissionId/response，不应感知 sessionID 占位值。
- * 等官方稳定的 requestID 级 permission reply façade 可用后，应优先删除这条兼容路径。
- */
-const LEGACY_PERMISSION_REPLY_SESSION_ID = 'ses_bridge_permission_compat';
 
 export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
   if (getMissingSdkCapabilities(client).length > 0) {
@@ -224,16 +203,13 @@ export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
       providers: (parameters) => root.config.providers(buildLegacyScopedQuery(parameters)),
     },
     permission: {
-      // 兼容 deprecated route 的细节只允许停留在 adapter 内部，业务层不暴露 sessionID。
-      reply: (parameters) => root.postSessionIdPermissionsPermissionId({
-        url: '/session/{id}/permissions/{permissionID}',
-        path: {
-          id: LEGACY_PERMISSION_REPLY_SESSION_ID,
-          permissionID: parameters.permissionId,
-        },
+      // OpenCode server plugin 注入的 v1 client 没有高层 permission reply；这里直接走 requestID raw endpoint。
+      reply: (parameters) => root._client.post({
+        url: '/permission/{requestID}/reply',
+        path: { requestID: parameters.permissionId },
         ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
         body: {
-          response: parameters.response,
+          reply: parameters.response,
         },
         headers: {
           'Content-Type': 'application/json',
