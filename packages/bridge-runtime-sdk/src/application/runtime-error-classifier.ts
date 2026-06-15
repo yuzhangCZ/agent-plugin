@@ -28,11 +28,15 @@ function fromGatewayClientError(error: GatewayClientError): BridgeRuntimeError {
   );
 }
 
-function toRuntimeError(error: unknown, fallbackCode: BridgeRuntimeErrorCode): BridgeRuntimeError {
+function toRuntimeError(
+  error: unknown,
+  fallbackCode: BridgeRuntimeErrorCode,
+  options: { mapGatewayClientError?: boolean } = {},
+): BridgeRuntimeError {
   if (error instanceof BridgeRuntimeError) {
     return error;
   }
-  if (error instanceof GatewayClientError) {
+  if (options.mapGatewayClientError !== false && error instanceof GatewayClientError) {
     return fromGatewayClientError(error);
   }
   return new BridgeRuntimeError(fallbackCode, normalizeErrorMessage(error));
@@ -54,7 +58,7 @@ export function fromGatewayClosedFailure(error: unknown): BridgeRuntimeError | n
 }
 
 export function fromRuntimeInternalFailure(error: unknown): BridgeRuntimeError {
-  return toRuntimeError(error, 'runtime_internal_error');
+  return toRuntimeError(error, 'runtime_internal_error', { mapGatewayClientError: false });
 }
 
 export function fromProbeFailure(error: unknown): BridgeRuntimeError {

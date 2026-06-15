@@ -175,6 +175,62 @@ describe('sdk runtime status adapter', () => {
     assert.deepStrictEqual(getMessageBridgeStatus(), ready);
   });
 
+  test('projects sdk connect and disconnect lifecycle without inventing unavailable failures', () => {
+    const adapter = createSdkRuntimeStatusAdapter();
+
+    adapter.publishRuntimeStatus({ state: 'starting', failureReason: null });
+    const connecting = getMessageBridgeStatus();
+    assert.strictEqual(connecting.connected, false);
+    assert.strictEqual(connecting.phase, 'connecting');
+    assert.strictEqual(connecting.unavailableReason, null);
+    assert.strictEqual(connecting.willReconnect, true);
+
+    adapter.publishRuntimeStatus({ state: 'ready', failureReason: null });
+    const ready = getMessageBridgeStatus();
+    assert.strictEqual(ready.connected, true);
+    assert.strictEqual(ready.phase, 'ready');
+    assert.strictEqual(ready.unavailableReason, null);
+    assert.strictEqual(ready.lastError, null);
+
+    adapter.publishRuntimeStatus({ state: 'stopping', failureReason: null });
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+
+    adapter.publishRuntimeStatus({ state: 'idle', failureReason: null });
+    assert.deepStrictEqual(getMessageBridgeStatus(), ready);
+  });
+
+  test('projects sdk connect failures to stable message bridge unavailable reasons', () => {
+    const adapter = createSdkRuntimeStatusAdapter();
+
+    adapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'handshake timeout',
+      error: {
+        code: 'gateway_handshake_timeout',
+        message: 'handshake timeout',
+      },
+    });
+    let snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'server_failure');
+    assert.strictEqual(snapshot.lastError, 'handshake timeout');
+
+    __resetMessageBridgeStatusForTests();
+    const secondAdapter = createSdkRuntimeStatusAdapter();
+    secondAdapter.publishRuntimeStatus({
+      state: 'failed',
+      failureReason: 'transport down',
+      error: {
+        code: 'gateway_transport_error',
+        message: 'transport down',
+      },
+    });
+    snapshot = getMessageBridgeStatus();
+    assert.strictEqual(snapshot.phase, 'unavailable');
+    assert.strictEqual(snapshot.unavailableReason, 'network_failure');
+    assert.strictEqual(snapshot.lastError, 'transport down');
+  });
+
   test('unknown sdk status error code publishes plugin_failure', () => {
     const adapter = createSdkRuntimeStatusAdapter();
 

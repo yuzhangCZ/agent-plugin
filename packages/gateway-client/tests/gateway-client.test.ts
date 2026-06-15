@@ -406,6 +406,45 @@ test('connect sends register and enters READY only after register_ok', async () 
   await client.disconnect();
 });
 
+test('connect and disconnect emit stable status transitions and cancelled close error', async () => {
+  FakeWebSocket.instances = [];
+  const statuses: GatewayClientStatus[] = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('statusChange', (status) => statuses.push(status));
+
+  assert.equal(client.getStatus().isClosed(), true);
+  assert.equal(client.getStatus().hasError(), false);
+
+  const connecting = client.connect();
+  assert.equal(client.getStatus().isConnecting(), true);
+
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  await assertPromisePending(connecting);
+  assert.equal(client.getStatus().isConnecting(), true);
+
+  ws.emitMessage({ type: 'register_ok' });
+  await connecting;
+  await flushAsyncHandlers();
+  assert.equal(client.getStatus().isReady(), true);
+
+  await client.disconnect();
+  const closed = client.getStatus();
+  assert.equal(closed.isClosed(), true);
+  assert.equal(closed.isCancelled(), true);
+  assert.equal(closed.isFailureClosed(), false);
+  assert.equal(closed.getError()?.code, 'GATEWAY_CLOSED_MANUAL');
+  assert.equal(closed.getError()?.disposition, 'cancelled');
+  assert.equal(closed.getError()?.retryable, false);
+  assert.deepEqual(statuses.map(statusKind), ['connecting', 'ready', 'closed']);
+});
+
 test('connect reuses the same in-flight attempt until handshake completes', async () => {
   FakeWebSocket.instances = [];
   const client = createGatewayClient({
@@ -1029,6 +1068,46 @@ test('websocket error before READY waits for close and does not schedule reconne
   transport.emitError({ message: 'late socket failed' });
   assert.equal(reconnectScheduler.scheduled.length, 0);
   assert.equal(errors.length, 0);
+});
+
+test('connect failure closes with startup failure status and never emits ready', async () => {
+  const transport = new FakeTransport();
+  const statuses: GatewayClientStatus[] = [];
+  const runtime = new GatewayClientRuntime(
+    {
+      url: 'ws://localhost:8081/ws/agent',
+      registerMessage: registerMessage(),
+    },
+    buildFakeDependencies({ transport }),
+    {
+      ...createFakeSink(),
+      emitStatusChange(status) {
+        statuses.push(status);
+      },
+    },
+  );
+
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  await assertPromisePending(connecting);
+  transport.emitError({ message: 'socket error before ready' });
+  transport.emitClose({ code: 1006, reason: 'abnormal', wasClean: false });
+
+  let rejection: GatewayClientError | undefined;
+  await assert.rejects(connecting, (error) => {
+    rejection = error as GatewayClientError;
+    return error instanceof GatewayClientError
+      && error.code === 'GATEWAY_TRANSPORT_ERROR'
+      && error.disposition === 'startup_failure';
+  });
+
+  const status = runtime.getStatus();
+  assert.equal(status.isClosed(), true);
+  assert.equal(status.isFailureClosed(), true);
+  assert.equal(status.isRetryable(), true);
+  assert.equal(status.getError(), rejection);
+  assert.equal(status.getError()?.message, 'gateway_startup_transport_error');
+  assert.deepEqual(statuses.map(statusKind), ['connecting', 'closed']);
 });
 
 test('pre-open rejection close still wins when websocket error arrives before close', async () => {

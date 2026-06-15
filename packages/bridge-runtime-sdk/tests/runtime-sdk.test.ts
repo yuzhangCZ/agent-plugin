@@ -77,6 +77,15 @@ test('runtime error classifier owns lifecycle gateway and fallback mappings', ()
     code: 'runtime_internal_error',
     message: 'cleanup failed',
   });
+  assertBridgeRuntimeError(fromRuntimeInternalFailure(new GatewayClientError({
+    code: 'GATEWAY_TRANSPORT_ERROR',
+    disposition: 'runtime_failure',
+    retryable: false,
+    message: 'cleanup gateway failure',
+  })), {
+    code: 'runtime_internal_error',
+    message: 'cleanup gateway failure',
+  });
   assertBridgeRuntimeError(fromProbeFailure(new Error('probe failed')), {
     code: 'probe_unknown_error',
     message: 'probe failed',
@@ -420,6 +429,95 @@ function createInvalidInvokeInboundFrame() {
     },
   };
 }
+
+test('runtime lifecycle public api exposes stable start stop getStatus contract', async () => {
+  const connection = new FakeGatewayClient();
+  const initializeGate = createDeferred<void>();
+  const disposeGate = createDeferred<void>();
+  let factoryCalls = 0;
+  let connectCalls = 0;
+  let disconnectCalls = 0;
+  let disposeCalls = 0;
+  const provider = createProvider();
+  provider.initialize = async () => {
+    await initializeGate.promise;
+  };
+  provider.dispose = async () => {
+    disposeCalls += 1;
+    await disposeGate.promise;
+  };
+  connection.connect = async function connect(): Promise<void> {
+    connectCalls += 1;
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await flushEvents();
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  connection.disconnect = async function disconnect(): Promise<void> {
+    disconnectCalls += 1;
+    this.reconnecting = false;
+    this.closedCode = 'GATEWAY_CLOSED_MANUAL';
+    this.state = 'DISCONNECTED';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(provider, connection, {
+      connectionFactory: () => {
+        factoryCalls += 1;
+        return connection;
+      },
+    }),
+  );
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+  assert.equal(factoryCalls, 0);
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const startingStatus = runtime.getStatus();
+  assert.equal(startingStatus.state, 'starting');
+  assert.equal(startingStatus.failureReason, null);
+  assert.equal(startingStatus.error, undefined);
+  assert.equal(factoryCalls, 0);
+  assert.equal(connectCalls, 0);
+
+  initializeGate.resolve();
+  await startPromise;
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'ready',
+    failureReason: null,
+  });
+  assert.equal(factoryCalls, 1);
+  assert.equal(connectCalls, 1);
+
+  await runtime.start();
+  assert.equal(factoryCalls, 1);
+  assert.equal(connectCalls, 1);
+
+  const stopPromise = runtime.stop();
+  await flushEvents();
+  const stoppingStatus = runtime.getStatus();
+  assert.equal(stoppingStatus.state, 'stopping');
+  assert.equal(stoppingStatus.failureReason, null);
+  assert.equal(stoppingStatus.error, undefined);
+  assert.equal(disconnectCalls, 1);
+  assert.equal(disposeCalls, 1);
+
+  disposeGate.resolve();
+  await stopPromise;
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+
+  await runtime.stop();
+  assert.equal(disconnectCalls, 1);
+  assert.equal(disposeCalls, 1);
+});
 
 test('runtime starts, consumes downstream messages from gateway-client, and projects uplinks', async () => {
   const connection = new FakeGatewayClient();
@@ -2262,6 +2360,43 @@ test('runtime start wraps provider initialize failure as BridgeRuntimeError', as
   );
 });
 
+test('runtime start maps typed gateway-client connect failure into status error', async () => {
+  const connection = new FakeGatewayClient();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    throw new GatewayClientError({
+      code: 'GATEWAY_HANDSHAKE_TIMEOUT',
+      disposition: 'startup_failure',
+      retryable: true,
+      message: 'handshake timed out',
+    });
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'gateway_handshake_timeout',
+        message: 'handshake timed out',
+      });
+      return true;
+    },
+  );
+
+  const firstStatus = runtime.getStatus();
+  const secondStatus = runtime.getStatus();
+  assert.equal(firstStatus.state, 'failed');
+  assert.equal(firstStatus.failureReason, 'handshake timed out');
+  assert.equal(firstStatus.error?.code, 'gateway_handshake_timeout');
+  assert.equal(firstStatus.error?.message, 'handshake timed out');
+  assert.ok(firstStatus.error instanceof BridgeRuntimeError);
+  assert.ok(Object.isFrozen(firstStatus.error));
+  assert.notEqual(firstStatus.error, secondStatus.error);
+  assert.equal(secondStatus.error?.code, 'gateway_handshake_timeout');
+});
+
 test('runtime start preserves original message when disconnect cleanup throws', async () => {
   const connection = new FakeGatewayClient();
   connection.connect = async function connect(): Promise<void> {
@@ -2338,6 +2473,68 @@ test('runtime stop still disposes provider when disconnect throws', async () => 
     },
   );
   assert.equal(disposeCalls, 1);
+});
+
+test('runtime stop maps typed gateway-client disconnect failure as runtime internal error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.disconnect = async function disconnect(): Promise<void> {
+    throw new GatewayClientError({
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'runtime_failure',
+      retryable: false,
+      message: 'disconnect transport failed',
+    });
+  };
+
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'disconnect transport failed',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'disconnect transport failed',
+    error: new BridgeRuntimeError('runtime_internal_error', 'disconnect transport failed'),
+  });
+});
+
+test('runtime stop maps typed gateway-client provider cleanup failure as runtime internal error', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    throw new GatewayClientError({
+      code: 'GATEWAY_AUTH_REJECTED',
+      disposition: 'runtime_failure',
+      retryable: false,
+      message: 'provider cleanup gateway failure',
+    });
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'provider cleanup gateway failure',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'provider cleanup gateway failure',
+    error: new BridgeRuntimeError('runtime_internal_error', 'provider cleanup gateway failure'),
+  });
 });
 
 test('gateway runtime driver detaches observers when async disconnect rejects', async () => {
