@@ -11,6 +11,19 @@ import * as runtimeSdk from '../src/index.ts';
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+async function assertTypeFixturePasses(tsconfigPath: string): Promise<void> {
+  try {
+    await execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', tsconfigPath], {
+      cwd: packageRoot,
+    });
+  } catch (error) {
+    const output = typeof error === 'object' && error
+      ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`.trim()
+      : '';
+    assert.fail(output || (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 test('stable entry exports executable runtime factory and public contracts', () => {
   assert.equal(typeof runtimeSdk.createBridgeRuntime, 'function');
   assert.equal(typeof runtimeSdk.resolvePackageVersion, 'function');
@@ -30,11 +43,7 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
 });
 
 test('public api positive type fixture locks BridgeRuntime status snapshot shape', async () => {
-  await assert.doesNotReject(async () => {
-    await execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.positive.json'], {
-      cwd: packageRoot,
-    });
-  });
+  await assertTypeFixturePasses('tests/type-contracts/tsconfig.positive.json');
 });
 
 test('runtime error public contract uses reason-oriented class-first codes', async () => {
