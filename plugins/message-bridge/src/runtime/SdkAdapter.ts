@@ -17,6 +17,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
 
+function asRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
 function asFunction<T extends (...args: never[]) => unknown>(value: unknown, bindTarget?: unknown): T | undefined {
   if (typeof value !== 'function') {
     return undefined;
@@ -147,33 +151,22 @@ function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGl
 }
 
 export function getMissingSdkCapabilities(client: unknown): SdkClientCapability[] {
-  const root = isRecord(client) ? client : undefined;
-  const session = isRecord(root?.session) ? root.session : undefined;
-  const config = isRecord(root?.config) ? root.config : undefined;
-  const rawClient = isRecord(root?._client) ? root._client : undefined;
+  const root = asRecordOrUndefined(client);
+  const session = asRecordOrUndefined(root?.session);
+  const config = asRecordOrUndefined(root?.config);
+  const rawClient = asRecordOrUndefined(root?._client);
+  const available: Record<SdkClientCapability, boolean> = {
+    'session.create': asFunction(session?.create) !== undefined,
+    'session.get': asFunction(session?.get) !== undefined,
+    'session.list': asFunction(session?.list) !== undefined,
+    'session.prompt': asFunction(session?.prompt) !== undefined,
+    'session.abort': asFunction(session?.abort) !== undefined,
+    'session.delete': asFunction(session?.delete) !== undefined,
+    'config.providers': asFunction(config?.providers) !== undefined,
+    '_client.post': asFunction(rawClient?.post) !== undefined,
+  };
 
-  return REQUIRED_SDK_CAPABILITIES.filter((capability) => {
-    switch (capability) {
-      case 'session.create':
-        return typeof session?.create !== 'function';
-      case 'session.get':
-        return typeof session?.get !== 'function';
-      case 'session.list':
-        return typeof session?.list !== 'function';
-      case 'session.prompt':
-        return typeof session?.prompt !== 'function';
-      case 'session.abort':
-        return typeof session?.abort !== 'function';
-      case 'session.delete':
-        return typeof session?.delete !== 'function';
-      case 'config.providers':
-        return typeof config?.providers !== 'function';
-      case '_client.post':
-        return typeof rawClient?.post !== 'function';
-      default:
-        return true;
-    }
-  });
+  return REQUIRED_SDK_CAPABILITIES.filter((capability) => !available[capability]);
 }
 
 export function toHostClientLike(client: unknown): HostClientLike {
