@@ -145,11 +145,6 @@ export class FactSequenceValidator {
           toolCallId: fact.toolCallId,
         });
       }
-      if ((fact.input !== undefined && fact.input.trim().length === 0) || (fact.output !== undefined && fact.output.trim().length === 0)) {
-        throw new RuntimeContractError('fact_sequence_invalid', 'tool.update input/output must not be blank strings', {
-          toolCallId: fact.toolCallId,
-        });
-      }
       state.knownToolCallIds.add(fact.toolCallId);
       return;
     }

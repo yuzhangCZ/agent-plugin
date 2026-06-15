@@ -63,15 +63,15 @@ test('classifyFact returns stable application semantics for representative fact 
 test('FactSequenceValidator enforces order and tool.update fail-closed rules without session lifecycle', () => {
   const validator = new FactSequenceValidator();
 
-  const invalidToolUpdateState = validator.createState();
+  const blankToolUpdateState = validator.createState();
   validator.consume(
     'tool-1',
     { type: 'message.start', messageId: 'msg-1' },
-    invalidToolUpdateState,
+    blankToolUpdateState,
     { kind: 'request_run' },
   );
 
-  assert.throws(
+  assert.doesNotThrow(
     () => validator.consume(
       'tool-1',
       {
@@ -81,12 +81,38 @@ test('FactSequenceValidator enforces order and tool.update fail-closed rules wit
         toolCallId: 'call-1',
         toolName: 'shell',
         status: 'running',
+        input: '',
         output: '   ',
+      },
+      blankToolUpdateState,
+      { kind: 'request_run' },
+    ),
+  );
+
+  const invalidToolUpdateState = validator.createState();
+  validator.consume(
+    'tool-1',
+    { type: 'message.start', messageId: 'msg-invalid-tool' },
+    invalidToolUpdateState,
+    { kind: 'request_run' },
+  );
+
+  assert.throws(
+    () => validator.consume(
+      'tool-1',
+      {
+        type: 'tool.update',
+        messageId: 'msg-invalid-tool',
+        partId: 'part-1',
+        toolCallId: 'call-1',
+        toolName: 'shell',
+        status: 'running',
+        output: { nested: true } as unknown as string,
       },
       invalidToolUpdateState,
       { kind: 'request_run' },
     ),
-    /tool\.update input\/output must not be blank strings/,
+    /tool\.update output must be a string/,
   );
 
   const outboundState = validator.createState();

@@ -97,6 +97,169 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
   }
 });
 
+test('validateToolEvent preserves skill provider stream content verbatim', () => {
+  const cases = [
+    { type: 'text.delta', content: '' },
+    { type: 'text.delta', content: '  leading and trailing  ' },
+    { type: 'text.done', content: '\n\nfinal answer\t' },
+    { type: 'thinking.delta', content: '   ' },
+    { type: 'thinking.done', content: '\t\n  ' },
+  ] as const;
+
+  for (const item of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: item.type,
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        content: item.content,
+      },
+    });
+
+    assert.equal(result.ok, true, item.type);
+    if (!result.ok) {
+      continue;
+    }
+
+    assert.equal(result.value.properties.content, item.content);
+  }
+});
+
+test('validateToolEvent preserves skill provider tool.update content fields verbatim', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'tool.update',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-1',
+      toolName: 'bash',
+      status: 'completed',
+      toolCallId: 'call-1',
+      title: '  Run command\t',
+      input: '',
+      output: '   ',
+      error: '\nfailed\t',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    messageId: 'msg-1',
+    partId: 'part-1',
+    toolName: 'bash',
+    status: 'completed',
+    toolCallId: 'call-1',
+    title: '  Run command\t',
+    input: '',
+    output: '   ',
+    error: '\nfailed\t',
+  });
+});
+
+test('validateToolEvent preserves skill provider stream protocol fields verbatim', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'tool.update',
+    properties: {
+      messageId: ' msg-1 ',
+      partId: '\tpart-1',
+      toolName: '   ',
+      status: 'running',
+      toolCallId: ' call-1 ',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    messageId: ' msg-1 ',
+    partId: '\tpart-1',
+    toolName: '   ',
+    status: 'running',
+    toolCallId: ' call-1 ',
+  });
+});
+
+test('validateToolEvent rejects non-string skill provider stream content', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'text.delta',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-1',
+      content: 42,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+
+  assertWireViolationShape(result.error, {
+    stage: 'event',
+    eventType: 'text.delta',
+  });
+});
+
+test('validateToolEvent rejects empty skill provider stream protocol fields', () => {
+  const cases = [
+    { field: 'messageId', properties: { messageId: '', partId: 'part-1' } },
+    { field: 'partId', properties: { messageId: 'msg-1', partId: '' } },
+    {
+      field: 'toolCallId',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        toolName: 'bash',
+        status: 'running',
+        toolCallId: '',
+      },
+      type: 'tool.update',
+    },
+    {
+      field: 'toolName',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        toolName: '',
+        status: 'running',
+        toolCallId: 'call-1',
+      },
+      type: 'tool.update',
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: testCase.type ?? 'text.delta',
+      properties: {
+        ...testCase.properties,
+        ...(testCase.type ? {} : { content: 'hello' }),
+      },
+    });
+
+    assert.equal(result.ok, false, testCase.field);
+    if (result.ok) {
+      continue;
+    }
+
+    assertWireViolationShape(result.error, {
+      stage: 'event',
+      eventType: testCase.type ?? 'text.delta',
+    });
+  }
+});
+
 test('validateToolEvent accepts cloud events with deprecated fields that are now stripped from the contract', () => {
   const cases = [
     {
