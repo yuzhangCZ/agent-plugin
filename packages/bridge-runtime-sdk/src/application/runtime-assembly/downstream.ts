@@ -20,8 +20,8 @@ export function attachRuntimeDriverHandlers(input: {
   sink: GatewayOutboundSinkAdapter;
 }): void {
   input.driver.attach({
-    onGatewayStateChanged: (state) => {
-      input.lifecycle.handleGatewayStateChanged(state);
+    onGatewayStatusChanged: (status) => {
+      input.lifecycle.handleGatewayStatusChanged(status);
     },
     onBusinessMessage: (message: GatewayDownstreamBusinessRequest) => {
       const summary = summarizeDownstreamMessage(message);
@@ -53,9 +53,6 @@ export function attachRuntimeDriverHandlers(input: {
           }
         }
       })();
-    },
-    onNonRetryableError: (error) => {
-      input.lifecycle.handleGatewayRuntimeError(error);
     },
   });
 }

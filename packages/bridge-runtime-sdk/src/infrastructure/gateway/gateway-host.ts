@@ -1,5 +1,6 @@
 import {
   createGatewayClientForHost,
+  type GatewayClientStatus,
   type GatewayClientHostConfig,
   resolveGatewayClientHostConfig,
 } from '@agent-plugin/gateway-client';
@@ -25,22 +26,12 @@ interface InternalBridgeGatewayHostConfig extends GatewayClientHostConfig {
   logger?: BridgeGatewayLogger;
 }
 
-export type BridgeGatewayHostState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'READY';
-
-export interface BridgeGatewayHostError {
-  code: string;
-  message: string;
-  retryable?: boolean;
-  detail?: Record<string, unknown>;
-}
-
 export interface BridgeGatewayHostEvents {
-  stateChange: (state: BridgeGatewayHostState) => void;
+  statusChange: (status: GatewayClientStatus) => void;
   inbound: (frame: unknown) => void;
   outbound: (message: unknown) => void;
   heartbeat: () => void;
   message: (message: unknown) => void;
-  error: (error: BridgeGatewayHostError) => void;
 }
 
 /**
@@ -50,11 +41,10 @@ export interface BridgeGatewayHostEvents {
  */
 export interface BridgeGatewayHostConnection {
   connect(): Promise<void>;
-  disconnect(): void;
+  disconnect(): Promise<void>;
   send(message: unknown): void;
   isConnected(): boolean;
-  getState(): BridgeGatewayHostState;
-  getStatus(): { isReady(): boolean };
+  getStatus(): GatewayClientStatus;
   on<E extends keyof BridgeGatewayHostEvents>(event: E, listener: BridgeGatewayHostEvents[E]): this;
 }
 

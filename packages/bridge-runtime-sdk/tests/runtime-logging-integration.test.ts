@@ -2,12 +2,11 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
 import type { BridgeGatewayHostConfig, BridgeRuntimeOptions, ThirdPartyAgentProvider } from '../src/index.ts';
 import { createBridgeRuntime } from '../src/index.ts';
 import type {
   BridgeGatewayHostConnection,
-  BridgeGatewayHostError,
-  BridgeGatewayHostState,
   BridgeGatewayLogger,
 } from '../src/infrastructure/gateway/gateway-host.ts';
 
@@ -39,16 +38,16 @@ class RecordingLogger implements BridgeGatewayLogger {
 
 class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
-  state: BridgeGatewayHostState = 'DISCONNECTED';
+  state: 'DISCONNECTED' | 'READY' = 'DISCONNECTED';
 
   async connect(): Promise<void> {
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   }
 
   send(message: unknown): void {
@@ -60,14 +59,10 @@ class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
     return this.state === 'READY';
   }
 
-  getState(): BridgeGatewayHostState {
-    return this.state;
-  }
-
   getStatus() {
-    return {
-      isReady: () => this.state === 'READY',
-    };
+    return this.state === 'READY'
+      ? GatewayClientStatus.ready()
+      : GatewayClientStatus.closed();
   }
 
   override on(event: string, listener: (...args: unknown[]) => void): this {
@@ -82,8 +77,22 @@ class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
     this.emit('inbound', frame);
   }
 
-  emitError(error: BridgeGatewayHostError): void {
-    this.emit('error', error);
+  emitStatus(): void {
+    this.emit('statusChange', this.getStatus());
+  }
+
+  emitClosed(code: string, message?: string): void {
+    this.state = 'DISCONNECTED';
+    this.emit('statusChange', GatewayClientStatus.closed(new GatewayClientError({
+      code: code as GatewayClientError['code'],
+      disposition: 'runtime_failure',
+      retryable: false,
+      message: message ?? code,
+    })));
+  }
+
+  emitError(error: { code: string; message?: string }): void {
+    this.emitClosed(error.code, error.message);
   }
 }
 

@@ -1,13 +1,11 @@
-import type {
-  BridgeGatewayHostError,
-  BridgeGatewayHostState,
-} from '../../infrastructure/gateway/gateway-host.ts';
+import type { GatewayClientStatus } from '@agent-plugin/gateway-client';
 import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { RuntimeObservation } from '../runtime-observation/index.ts';
 import type { BridgeRuntimeStatusSnapshot } from '../runtime.ts';
 import { createBridgeRuntimeError, normalizeErrorMessage } from '../runtime-error.ts';
 import type { RuntimeCore } from '../runtime/runtime-core.types.ts';
+import { RuntimeLifecycleState } from './RuntimeLifecycleState.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './runtime-lifecycle.types.ts';
 
 /**
@@ -18,10 +16,7 @@ export class RuntimeLifecycleService {
   private readonly driver: GatewayRuntimeDriver;
   private readonly observation: RuntimeObservation;
   private readonly onTelemetryUpdated?: () => void;
-  private status: BridgeRuntimeStatusSnapshot = {
-    state: 'idle',
-    failureReason: null,
-  };
+  private readonly state = new RuntimeLifecycleState();
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
 
@@ -37,38 +32,29 @@ export class RuntimeLifecycleService {
     this.onTelemetryUpdated = onTelemetryUpdated;
   }
 
-  handleGatewayStateChanged(gatewayState: BridgeGatewayHostState): void {
-    if (this.status.state === 'idle' || this.status.state === 'stopping' || this.status.state === 'failed') {
+  handleGatewayStatusChanged(status: GatewayClientStatus): void {
+    if (this.state.shouldIgnoreGatewayStatus()) {
       return;
     }
-    if (this.isGatewayReady(gatewayState)) {
-      this.status = {
-        state: 'ready',
-        failureReason: null,
-      };
-      this.onTelemetryUpdated?.();
-      return;
-    }
-    if (this.status.state !== 'starting' && this.isGatewayRecovering(gatewayState)) {
-      this.status = {
-        state: 'reconnecting',
-        failureReason: null,
-      };
-      this.onTelemetryUpdated?.();
-    }
-  }
 
-  handleGatewayRuntimeError(error: BridgeGatewayHostError): void {
-    const runtimeError = createBridgeRuntimeError('runtime_gateway_error', error);
-    this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'runtime', runtimeError, error.code);
-    this.onTelemetryUpdated?.();
+    if (status.isReady()) {
+      this.markReadyFromGateway();
+      return;
+    }
+    if (status.isReconnecting()) {
+      this.markReconnectingFromGateway();
+      return;
+    }
+    if (status.isFailureClosed()) {
+      this.markFailedFromGatewayClosed(status);
+    }
   }
 
   async start(): Promise<void> {
     if (this.stopPromise) {
       await this.stopPromise;
     }
-    if (this.status.state === 'ready') {
+    if (this.state.isReady()) {
       return;
     }
     if (this.startPromise) {
@@ -76,29 +62,27 @@ export class RuntimeLifecycleService {
     }
 
     this.observation.runtimeStartRequested();
-    this.status = {
-      state: 'starting',
-      failureReason: null,
-    };
+    const startAttemptId = this.state.beginStart();
     this.onTelemetryUpdated?.();
 
     this.startPromise = (async () => {
       try {
         await this.core.start();
         await this.driver.connect();
-        this.status = {
-          state: 'ready',
-          failureReason: null,
-        };
-        this.observation.runtimeStartCompleted();
-        this.onTelemetryUpdated?.();
+        if (this.state.finishStartIfCurrent(startAttemptId)) {
+          this.observation.runtimeStartCompleted();
+          this.onTelemetryUpdated?.();
+        }
       } catch (error) {
         const runtimeError = createBridgeRuntimeError('runtime_start_failed', error);
-        const cleanupError = this.disconnectBestEffort();
+        const cleanupError = await this.disconnectBestEffort();
+        if (!this.state.failStartIfCurrent(startAttemptId, normalizeErrorMessage(runtimeError))) {
+          return;
+        }
         if (cleanupError) {
           this.recordFailure(RUNTIME_FAILURE_KIND.gatewayRuntime, 'start', cleanupError);
         }
-        this.setFailed(RUNTIME_FAILURE_KIND.startup, 'start', runtimeError, runtimeError.code);
+        this.recordFailure(RUNTIME_FAILURE_KIND.startup, 'start', runtimeError, runtimeError.code);
         this.observation.runtimeStartFailed(runtimeError, runtimeError.code);
         this.onTelemetryUpdated?.();
         throw runtimeError;
@@ -111,7 +95,7 @@ export class RuntimeLifecycleService {
   }
 
   async stop(): Promise<void> {
-    if (this.status.state === 'idle') {
+    if (this.state.isIdle()) {
       return;
     }
     if (this.stopPromise) {
@@ -119,20 +103,18 @@ export class RuntimeLifecycleService {
     }
 
     this.observation.runtimeStopRequested();
-    this.status = {
-      state: 'stopping',
-      failureReason: null,
-    };
+    const stopAttemptId = this.state.beginStop();
     this.onTelemetryUpdated?.();
 
     this.stopPromise = (async () => {
       try {
         let primaryError: unknown | null = null;
-        if (this.startPromise) {
-          primaryError = this.disconnectBestEffort();
-          await this.startPromise.catch(() => undefined);
+        const inFlightStart = this.startPromise;
+        if (inFlightStart) {
+          primaryError = await this.disconnectBestEffort();
+          await inFlightStart.catch(() => undefined);
         }
-        primaryError = primaryError ?? this.disconnectBestEffort();
+        primaryError = primaryError ?? (await this.disconnectBestEffort());
         try {
           await this.core.stop();
         } catch (error) {
@@ -144,12 +126,10 @@ export class RuntimeLifecycleService {
         if (primaryError) {
           throw primaryError;
         }
-        this.status = {
-          state: 'idle',
-          failureReason: null,
-        };
-        this.observation.runtimeStopCompleted();
-        this.onTelemetryUpdated?.();
+        if (this.state.finishStopIfCurrent(stopAttemptId)) {
+          this.observation.runtimeStopCompleted();
+          this.onTelemetryUpdated?.();
+        }
       } catch (error) {
         const runtimeError = createBridgeRuntimeError('runtime_stop_failed', error);
         this.setFailed(RUNTIME_FAILURE_KIND.gatewayRuntime, 'stop', runtimeError, runtimeError.code);
@@ -165,7 +145,7 @@ export class RuntimeLifecycleService {
   }
 
   getStatus(): BridgeRuntimeStatusSnapshot {
-    return { ...this.status };
+    return this.state.snapshot();
   }
 
   recordFailure(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): string {
@@ -176,27 +156,46 @@ export class RuntimeLifecycleService {
 
   private setFailed(kind: RuntimeFailureKind, phase: RuntimeFailurePhase, error: unknown, code?: string): void {
     const message = this.recordFailure(kind, phase, error, code);
-    this.status = {
-      ...this.status,
-      state: 'failed',
-      failureReason: message,
-    };
+    this.state.markFailed(message);
   }
 
-  private disconnectBestEffort(): unknown | null {
+  private markReadyFromGateway(): void {
+    if (this.state.isStarting()) {
+      return;
+    }
+    this.state.markReady();
+    this.onTelemetryUpdated?.();
+  }
+
+  private markReconnectingFromGateway(): void {
+    if (this.state.isStarting()) {
+      return;
+    }
+    this.state.markReconnecting();
+    this.onTelemetryUpdated?.();
+  }
+
+  private markFailedFromGatewayClosed(status: GatewayClientStatus): void {
+    const error = status.getError();
+    if (!error) {
+      return;
+    }
+    this.setFailed(
+      RUNTIME_FAILURE_KIND.gatewayRuntime,
+      'runtime',
+      error,
+      error.code,
+    );
+    this.onTelemetryUpdated?.();
+  }
+
+  private async disconnectBestEffort(): Promise<unknown | null> {
     try {
-      this.driver.disconnect();
+      await this.driver.disconnect();
       return null;
     } catch (error) {
       return error;
     }
   }
 
-  private isGatewayReady(state: BridgeGatewayHostState): boolean {
-    return state === 'READY';
-  }
-
-  private isGatewayRecovering(state: BridgeGatewayHostState): boolean {
-    return state === 'CONNECTING' || state === 'CONNECTED' || state === 'DISCONNECTED';
-  }
 }

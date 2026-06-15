@@ -44,7 +44,6 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
     return this.probeGatewayHost(input);
   }
 
-  // eslint-disable-next-line max-lines-per-function -- probe 需要在同一闭包中统一管理 settled、timeout 和连接清理。
   private async probeGatewayHost(input: GatewayProbeInput): Promise<BridgeGatewayProbeResult> {
     const now = Date.now;
     const startedAt = now();
@@ -81,11 +80,7 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
         clearTimeout(timer);
         input.abortSignal?.removeEventListener('abort', onAbort);
         this.recordProbeCompleted(result);
-        try {
-          connection.disconnect();
-        } catch {
-          // ignore disconnect failures in probe teardown
-        }
+        void this.disconnectBestEffort(connection);
         resolve(result);
       };
 
@@ -105,11 +100,11 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
         finish(result);
       }, input.timeoutMs);
 
-      connection.on('stateChange', (state) => {
+      connection.on('statusChange', (status) => {
         if (settled) {
           return;
         }
-        if (state === 'READY') {
+        if (status.isReady()) {
           const result = {
             state: 'ready',
             latencyMs: this.elapsedMs(startedAt, now),
@@ -117,13 +112,6 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
           } satisfies BridgeGatewayProbeResult;
           finish(result);
         }
-      });
-
-      connection.on('error', (error) => {
-        if (settled) {
-          return;
-        }
-        finish(this.handleConnectFailure(startedAt, now, error));
       });
 
       try {
@@ -146,6 +134,14 @@ export class GatewayProbeDriver implements GatewayProbeDriverPort {
       result.latencyMs,
       result.reason,
     );
+  }
+
+  private async disconnectBestEffort(connection: BridgeGatewayHostConnection): Promise<void> {
+    try {
+      await connection.disconnect();
+    } catch {
+      // probe teardown failure 不影响探测结果。
+    }
   }
 
   private createProbeConnection(): BridgeGatewayHostConnection {

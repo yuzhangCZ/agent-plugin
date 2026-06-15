@@ -1,7 +1,7 @@
 # 三方 Agent 集成接口文档 v1
 
 **Version:** 1.0-draft  
-**Date:** 2026-04-16  
+**Date:** 2026-06-15  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
 **Related:** [bridge-refactor-architecture.md](../../architecture/bridge-refactor-architecture.md), [protocol-contract.md](../../../plugins/message-bridge/docs/design/interfaces/protocol-contract.md)
@@ -28,6 +28,8 @@
 同时，v1 明确支持 **同一 `runMessage()` 下产生多条 assistant message**。SDK 不再假设“一次 run 只有一条主 message”。
 
 这是对当前 `1.0-draft` 的重新定稿，不承诺与旧草案中的事件集合和 Provider 最小 SPI 向后兼容。
+
+> 2026-06-15 更新：本文中的 Runtime SDK API 片段已按当前 `@wecode/bridge-runtime-sdk` 实现修正，Runtime 创建时直接注入 `provider`，不再使用旧草案中的 `registerProvider()` / `connectionState` 模型。
 
 ## 范围
 
@@ -86,14 +88,20 @@ Provider 负责：
 ### 步骤 1：创建 Runtime
 
 ```ts
-import { createBridgeRuntime } from '@your-scope/agent-bridge-sdk';
+import { createBridgeRuntime } from '@wecode/bridge-runtime-sdk';
 
-const runtime = createBridgeRuntime({
-  gateway: {
+const runtime = await createBridgeRuntime({
+  provider: new MyAgentProvider(),
+  gatewayHost: {
     url: 'wss://gateway.example.com/ws/agent',
-    ak: process.env.BRIDGE_AUTH_AK!,
-    sk: process.env.BRIDGE_AUTH_SK!,
-    channel: 'my-agent-channel',
+    auth: {
+      ak: process.env.BRIDGE_AUTH_AK!,
+      sk: process.env.BRIDGE_AUTH_SK!,
+    },
+    register: {
+      channel: 'my-agent-channel',
+      toolVersion: '1.0.0',
+    },
   },
 });
 ```
@@ -104,7 +112,7 @@ const runtime = createBridgeRuntime({
 import type {
   ProviderRun,
   ThirdPartyAgentProvider,
-} from '@your-scope/agent-bridge-sdk';
+} from '@wecode/bridge-runtime-sdk';
 
 class MyAgentProvider implements ThirdPartyAgentProvider {
   async health() {
@@ -117,7 +125,7 @@ class MyAgentProvider implements ThirdPartyAgentProvider {
       assistantId: input.assistantId,
     });
 
-    return { providerSessionId };
+    return { toolSessionId: providerSessionId };
   }
 
   async runMessage(input): Promise<ProviderRun> {
@@ -156,10 +164,9 @@ class MyAgentProvider implements ThirdPartyAgentProvider {
 }
 ```
 
-### 步骤 3：注册 Provider 并启动
+### 步骤 3：启动 Runtime
 
 ```ts
-runtime.registerProvider(new MyAgentProvider());
 await runtime.start();
 ```
 
@@ -169,33 +176,42 @@ await runtime.start();
 
 ```ts
 export interface CreateBridgeRuntimeOptions {
-  gateway: {
-    url: string;
-    ak: string;
-    sk: string;
-    channel: string;
-    heartbeatIntervalMs?: number;
-    reconnect?: {
-      baseMs: number;
-      maxMs: number;
-      exponential: boolean;
+  provider: ThirdPartyAgentProvider;
+  gatewayHost: {
+    url?: string;
+    auth: {
+      ak: string;
+      sk: string;
     };
-    readyTimeoutMs?: number;
+    register: {
+      channel: string;
+      toolVersion: string;
+      pluginVersion?: string;
+    };
   };
   logger?: BridgeLogger;
+  debug?: boolean;
+  traceIdFactory?: () => string;
+  onTelemetryUpdated?: () => void;
 }
 
-export interface BridgeRuntimeStatus {
-  connectionState: 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'READY';
-  providerRegistered: boolean;
-  gatewayReady: boolean;
+export type BridgeRuntimeStatus =
+  | 'idle'
+  | 'starting'
+  | 'ready'
+  | 'reconnecting'
+  | 'stopping'
+  | 'failed';
+
+export interface BridgeRuntimeStatusSnapshot {
+  state: BridgeRuntimeStatus;
+  failureReason: string | null;
 }
 
 export interface BridgeRuntimeSdk {
-  registerProvider(provider: ThirdPartyAgentProvider): void;
   start(): Promise<void>;
   stop(): Promise<void>;
-  getStatus(): BridgeRuntimeStatus;
+  getStatus(): BridgeRuntimeStatusSnapshot;
 }
 
 export function createBridgeRuntime(
@@ -208,16 +224,16 @@ export function createBridgeRuntime(
 | 方法 | 说明 |
 |---|---|
 | `createBridgeRuntime(options)` | 创建一个 Runtime SDK 实例 |
-| `registerProvider(provider)` | 注册一个 Provider 实现 |
-| `start()` | 建立连接并开始接收请求 |
-| `stop()` | 停止运行并释放资源 |
+| `start()` | 初始化 provider、建立 gateway READY 连接并开始接收请求 |
+| `stop()` | 停止运行、断开 gateway 并释放 provider 资源 |
 | `getStatus()` | 获取当前运行状态 |
 
 ### 使用要求
 
-- `registerProvider()` 必须在 `start()` 之前调用
-- v1 只支持注册一个 Provider
+- `provider` 在 `createBridgeRuntime()` 时注入，不再通过 `registerProvider()` 注册
+- v1 只支持一个 Provider
 - `start()` 成功后，runtime 才会开始对外提供服务
+- `getStatus().failureReason` 是 failed 状态的展示摘要，不是稳定错误码；需要稳定错误分类时应读取 runtime diagnostics 的 failure 记录
 
 ## Provider SPI
 

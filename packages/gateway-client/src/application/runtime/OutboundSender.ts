@@ -9,10 +9,8 @@ import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRu
 import type { GatewayTransport } from '../../ports/GatewayTransport.ts';
 import type { GatewayOutboundMessage, GatewaySendPayload } from '../../ports/GatewayClientMessages.ts';
 import { GatewayClientError } from '../../errors/GatewayClientError.ts';
-import type { GatewayBusinessOutboundMessage, OutboundProtocolGate } from '../protocol/OutboundProtocolGate.ts';
+import type { OutboundProtocolGate } from '../protocol/OutboundProtocolGate.ts';
 import { getMessageType } from '../telemetry/message-log-fields.ts';
-import { resolveGatewayClientStage } from './error-facts.ts';
-
 /**
  * 统一发送出口。
  * @remarks 在这里执行连接态校验、协议校验、日志采样与事件回传。
@@ -52,33 +50,33 @@ export class OutboundSender {
   protected dispatch(message: GatewayOutboundMessage, isBusinessMessage: boolean, logContext?: GatewaySendContext): void {
     if (!this.state.isConnected()) {
       const messageType = getMessageType(message);
+      const connection = this.state.getStatus().toDiagnosticFields();
       this.context.logger?.warn?.('gateway.send.rejected_not_connected', {
-        state: this.state.getState(),
+        connection,
         messageType,
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_CONNECTED',
         disposition: 'diagnostic',
-        stage: resolveGatewayClientStage(this.state),
         retryable: true,
         message: 'gateway_not_connected',
-        details: { state: this.state.getState(), messageType },
+        details: { connection, messageType },
       });
     }
 
     const messageType = getMessageType(message);
-    if (this.state.getState() !== 'READY' && isBusinessMessage) {
+    if (!this.state.getStatus().isReady() && isBusinessMessage) {
+      const connection = this.state.getStatus().toDiagnosticFields();
       this.context.logger?.warn?.('gateway.send.rejected_not_ready', {
-        state: this.state.getState(),
+        connection,
         messageType,
       });
       throw new GatewayClientError({
         code: 'GATEWAY_NOT_READY',
         disposition: 'diagnostic',
-        stage: resolveGatewayClientStage(this.state),
         retryable: true,
         message: 'Gateway connection is not ready. Cannot send business message.',
-        details: { state: this.state.getState(), messageType },
+        details: { connection, messageType },
       });
     }
 
@@ -100,7 +98,6 @@ export class OutboundSender {
         throw new GatewayClientError({
           code: error.code,
           disposition: error.disposition,
-          stage: resolveGatewayClientStage(this.state),
           retryable: error.retryable,
           message: error.message,
           details: error.details,
@@ -110,4 +107,5 @@ export class OutboundSender {
       throw error;
     }
   }
+
 }

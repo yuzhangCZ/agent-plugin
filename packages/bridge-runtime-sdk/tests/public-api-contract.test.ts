@@ -1,8 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import * as runtimeSdk from '../src/index.ts';
+
+const execFileAsync = promisify(execFile);
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('stable entry exports executable runtime factory and public contracts', () => {
   assert.equal(typeof runtimeSdk.createBridgeRuntime, 'function');
@@ -20,6 +27,48 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('createQrCodeAuthRuntime' in runtimeSdk, false);
   assert.equal('HttpQrCodeAuthService' in runtimeSdk, false);
   assert.equal('QrCodeAuthSessionController' in runtimeSdk, false);
+});
+
+test('public api positive type fixture locks BridgeRuntime status snapshot shape', async () => {
+  await assert.doesNotReject(async () => {
+    await execFileAsync('pnpm', ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.positive.json'], {
+      cwd: packageRoot,
+    });
+  });
+});
+
+test('public api negative type fixture rejects extra runtime status fields', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-status-fields.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('failure')
+        && output.includes('code')
+        && output.includes('phase');
+    },
+  );
+});
+
+test('public api negative type fixture rejects gateway-only runtime status state', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-status-state.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('closed');
+    },
+  );
 });
 
 test('stable entry source does not re-export gateway connection internals', async () => {

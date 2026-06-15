@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
-**Version:** 1.1
-**Date:** 2026-06-02
+**Version:** 1.2
+**Date:** 2026-06-15
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -25,6 +25,12 @@
 - 仓库内部代码组织、测试缝或源码定位方式
 
 ## 1.1 Changelog
+
+### 2026-06-15
+
+- `RuntimeOutboundEmitter` 新增方法 `emitOutboundRun(input)`，用于发送带 run 标识的主动 facts 流。
+- 新增 `EmitOutboundRunInput` 入参类型，字段包含 `toolSessionId`、`runId`、`trigger`、`facts`。
+- `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
 
 ### 2026-06-02
 
@@ -118,6 +124,7 @@ const runtime = await createBridgeRuntime({
 
 - `start()` 成功前，集成方不应将 Runtime 视为已就绪。
 - `start()` resolve 表示 Runtime 已完成启动并进入可处理请求状态，而不是仅完成底层建链。
+- 并发 `start()` 调用会得到同一轮启动结果；若调用时存在进行中的 `stop()`，会等停止完成后再进入启动流程。
 - 启动阶段如发生异常，`start()` 会 reject；调用方应按启动失败处理。
 
 ```ts
@@ -136,6 +143,8 @@ await runtime.start();
 | 说明 | 停止 Runtime。 |
 
 - `stop()` 之后，集成方不得继续使用旧的 `ProviderRuntimeContext`、旧的 `ProviderRun` 或旧的 outbound 发送器。
+- `stop()` resolve 表示 Runtime 已完成停止；若停止过程中发生异常，`stop()` 会 reject，调用方应按停止失败处理。
+- 并发 `stop()` 调用会得到同一轮停止结果；若停止发生在启动过程中，最终状态以停止结果为准。
 
 ```ts
 await runtime.stop();
@@ -180,11 +189,33 @@ const probe = await runtime.probe({ timeoutMs: 3000 });
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `state` | `'idle' \| 'starting' \| 'ready' \| 'reconnecting' \| 'stopping' \| 'failed'` | 是 | Runtime 当前状态。 |
-| `failureReason` | `string \| null` | 是 | 当前失败原因；无失败时为 `null`。 |
+| `failureReason` | `string \| null` | 是 | 当前失败摘要文本；无失败时为 `null`。该字段来自触发 failed 的错误 `message`，不是稳定错误码。 |
 
 ```ts
 const status = runtime.getStatus();
 ```
+
+#### `BridgeRuntimeStatus` 语义
+
+| 状态 | 说明 |
+|---|---|
+| `idle` | Runtime 未启动或已停止。 |
+| `starting` | Runtime 正在启动。 |
+| `ready` | Runtime 已启动且 gateway 可用，可以处理下行请求和上行发送。 |
+| `reconnecting` | Runtime 已启动，但当前连接正在恢复中。 |
+| `stopping` | Runtime 正在停止。 |
+| `failed` | Runtime 生命周期失败，需要调用方按失败状态处理。 |
+
+`failureReason` 只用于展示和快速排障。例如底层连接失败的错误消息为 `gateway transport closed`，则 `runtime.getStatus()` 返回的失败摘要是：
+
+```ts
+{
+  state: 'failed',
+  failureReason: 'gateway transport closed',
+}
+```
+
+若调用方需要稳定分类、错误码或失败阶段，应读取 `runtime.getDiagnostics().failures.at(-1)`，不要基于 `failureReason` 做业务分支。
 
 ### 3.6 `runtime.getDiagnostics()`
 
@@ -201,7 +232,7 @@ const status = runtime.getStatus();
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `gatewayState` | `string` | 否 | 当前网关状态标识。 |
+| `gatewayState` | `string` | 否 | 当前网关诊断状态标识；当前由 SDK 记录为 `ready`、`reconnecting`、`connecting`、`closed`。 |
 | `lastReadyAt` | `number \| null` | 是 | 最近一次进入可用状态的时间戳。 |
 | `lastInboundAt` | `number \| null` | 是 | 最近一次接收入站事件的时间戳。 |
 | `lastOutboundAt` | `number \| null` | 是 | 最近一次发送出站事件的时间戳。 |
@@ -217,6 +248,15 @@ const status = runtime.getStatus();
 ```ts
 const diagnostics = runtime.getDiagnostics();
 ```
+
+#### `RuntimeTraceFailure`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `kind` | `string` | 是 | 失败归类，例如 startup、gateway runtime、command execution 等。 |
+| `phase` | `string` | 是 | 失败发生阶段，例如 `start`、`runtime`、`stop`。 |
+| `message` | `string` | 是 | 原始错误消息摘要。 |
+| `code` | `string` | 否 | 可用时保留原始稳定错误码，例如连接错误码或 BridgeRuntimeError code。 |
 
 ## 4. Provider API
 
@@ -506,9 +546,34 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 该接口为可选实现。
 
-### 4.10 `emitOutboundMessage(input)`
+### 4.10 `RuntimeOutboundEmitter`
+
+Runtime 注入到 Provider 的主动发送出口。
+
+```ts
+export interface RuntimeOutboundEmitter {
+  /**
+   * @deprecated 请改用 emitOutboundRun(input)。
+   */
+  emitOutboundMessage(input: EmitOutboundMessageInput): Promise<{ applied: true }>;
+  emitOutboundRun(input: EmitOutboundRunInput): Promise<{ applied: true }>;
+}
+```
+
+| 方法 | 是否必填 | 说明 |
+|---|---|---|
+| `emitOutboundMessage(input)` | 是 | 已废弃。发送一批 outbound facts。 |
+| `emitOutboundRun(input)` | 是 | 发送一轮带 run 标识的主动 facts 流。 |
+
+- `RuntimeOutboundEmitter` 通过 `ProviderRuntimeContext.outbound` 注入。
+- outbound 只用于 request run 之外的主动消息。
+- 集成方不得用 outbound 代替 `runMessage()` 的正常回复路径。
+
+### 4.11 `emitOutboundMessage(input)`
 
 用于发送 outbound 事实流。
+
+> Deprecated: 新接入应使用 `emitOutboundRun(input)`，用 `runId` 表达主动发送的执行边界。
 
 | 项目 | 说明 |
 |---|---|
@@ -530,6 +595,47 @@ async runMessage(input: ProviderRunMessageInput) {
 - outbound 只用于 request run 之外的主动消息。
 - 集成方不得用 outbound 代替 `runMessage()` 的正常回复路径。
 - 同一批 outbound facts 的 `messageId` 必须与 `EmitOutboundMessageInput.messageId` 一致。
+
+```ts
+await context.outbound.emitOutboundMessage({
+  toolSessionId: 'tool-session-1',
+  messageId: 'message-1',
+  trigger: 'webhook',
+  facts,
+});
+```
+
+### 4.12 `emitOutboundRun(input)`
+
+用于发送一轮带 run 标识的主动 facts 流。
+
+| 项目 | 说明 |
+|---|---|
+| 接口名 | `RuntimeOutboundEmitter.emitOutboundRun` |
+| 入参 | `EmitOutboundRunInput` |
+| 出参 | `Promise<{ applied: true }>` |
+| 说明 | 发送一轮 outbound run facts。 |
+
+#### 入参类型：`EmitOutboundRunInput`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `runId` | `string` | 是 | 本轮 outbound run 标识。 |
+| `trigger` | `'scheduled' \| 'webhook' \| 'system' \| string` | 是 | 主动消息触发来源。 |
+| `facts` | `AsyncIterable<OutboundFact>` | 是 | 本轮 outbound run 事实流。 |
+
+- `emitOutboundRun` 与 `emitOutboundMessage` 表达不同主动发送模型：前者带 `runId`，后者按单批消息发送。
+- Provider 可直接调用该方法：
+
+```ts
+await context.outbound.emitOutboundRun({
+  toolSessionId: 'tool-session-1',
+  runId: 'outbound-run-1',
+  trigger: 'scheduled',
+  facts,
+});
+```
 
 ## 5. 二维码授权 API
 
@@ -648,7 +754,7 @@ sequenceDiagram
 `ProviderFact` 是 request run 使用的事实集合，`OutboundFact` 与其共用同一套事实类型。两者差别只在生命周期来源：
 
 - request run 通过 `ProviderRun.facts` 产出，并由 `result()` 收口
-- outbound 通过 `emitOutboundMessage()` 主动发送，不包含 `runId`，也不通过 `result()` 收口
+- outbound 通过 `emitOutboundMessage()` 或 `emitOutboundRun()` 主动发送；`emitOutboundRun()` 带 `runId`，`emitOutboundMessage()` 按单批消息发送
 
 ### 7.2 事实类型分组
 

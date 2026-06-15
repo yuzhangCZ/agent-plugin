@@ -19,7 +19,6 @@ export function getErrorDetails(error: unknown): Record<string, unknown> {
     return {
       code: error.code,
       disposition: error.disposition,
-      stage: error.stage,
       retryable: error.retryable,
       ...(error.details ? { details: error.details } : {}),
     };

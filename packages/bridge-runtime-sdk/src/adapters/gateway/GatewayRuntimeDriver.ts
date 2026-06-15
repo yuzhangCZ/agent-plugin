@@ -1,4 +1,4 @@
-import type { GatewayInboundFrame } from '@agent-plugin/gateway-client';
+import { GatewayClientStatus, type GatewayInboundFrame } from '@agent-plugin/gateway-client';
 import type { GatewayUplinkBusinessMessage } from '@agent-plugin/gateway-schema';
 
 import type {
@@ -59,9 +59,16 @@ export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
     await client.connect();
   }
 
-  disconnect(): void {
-    this.currentClient?.disconnect();
-    this.detachClient();
+  async disconnect(): Promise<void> {
+    try {
+      await this.currentClient?.disconnect();
+    } finally {
+      this.detachClient();
+    }
+  }
+
+  getStatus(): GatewayClientStatus {
+    return this.currentClient?.getStatus?.() ?? GatewayClientStatus.closed();
   }
 
   send(message: GatewayUplinkBusinessMessage): void {
@@ -72,8 +79,7 @@ export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
   }
 
   isReady(): boolean {
-    const gatewayStatus = this.currentClient?.getStatus?.();
-    return typeof gatewayStatus?.isReady === 'function' ? gatewayStatus.isReady() : false;
+    return this.getStatus().isReady();
   }
 
   private attachClient(client: BridgeGatewayHostConnection): void {
@@ -84,9 +90,9 @@ export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
     this.currentClient = client;
     this.options.onGatewayConnectionCreated?.(client);
     this.detachGatewayObservers = attachGatewayRuntimeObservers(client, {
-      onStateChange: (state) => {
-        this.options.observation.gatewayStateChanged(state, Date.now());
-        this.handlers?.onGatewayStateChanged(state);
+      onStatusChange: (status) => {
+        this.options.observation.gatewayStateChanged(this.formatGatewayState(status), Date.now());
+        this.handlers?.onGatewayStatusChanged(status);
         this.options.onTelemetryUpdated?.();
       },
       onInbound: (frame: GatewayInboundFrame) => {
@@ -108,13 +114,20 @@ export class GatewayRuntimeDriver implements GatewayRuntimeDriverPort {
         this.handlers?.onBusinessMessage(message);
         this.options.onTelemetryUpdated?.();
       },
-      onError: (error) => {
-        if (!error.retryable) {
-          this.handlers?.onNonRetryableError(error);
-        }
-        this.options.onTelemetryUpdated?.();
-      },
     });
+  }
+
+  private formatGatewayState(status: GatewayClientStatus): string {
+    if (status.isReady()) {
+      return 'ready';
+    }
+    if (status.isReconnecting()) {
+      return 'reconnecting';
+    }
+    if (status.isConnecting()) {
+      return 'connecting';
+    }
+    return 'closed';
   }
 
   private detachClient(): void {

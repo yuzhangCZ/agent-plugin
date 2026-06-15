@@ -6,14 +6,34 @@ import {
   createAkSkAuthProvider,
   createGatewayClient,
   GatewayClientError,
+  GatewayClientUnknownError,
+  type GatewayClientStatus,
   mapGatewayClientAvailability,
 } from '../src/index.ts';
 import { DefaultOutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
-import type { OutboundProtocolGate } from '../src/application/protocol/OutboundProtocolGate.ts';
 import type { GatewayWireCodec } from '../src/ports/GatewayWireCodec.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
 import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
+
+function statusKind(status: GatewayClientStatus): string {
+  if (status.isReady()) {
+    return 'ready';
+  }
+  if (status.isReconnecting()) {
+    return 'reconnecting';
+  }
+  if (status.isConnecting()) {
+    return 'connecting';
+  }
+  return 'closed';
+}
+
+function assertClosedWithError(status: GatewayClientStatus, code: GatewayClientError['code']): void {
+  assert.equal(status.isClosed(), true);
+  assert.equal(status.hasError(), true);
+  assert.equal(status.getError()?.code, code);
+}
 
 class FakeWebSocket {
   static OPEN = 1;
@@ -175,12 +195,11 @@ class FakeHeartbeatScheduler {
 
 function createFakeSink() {
   return {
-    emitStateChange() {},
+    emitStatusChange() {},
     emitInbound() {},
     emitOutbound() {},
     emitHeartbeat() {},
     emitMessage() {},
-    emitError() {},
   };
 }
 
@@ -319,7 +338,7 @@ function installFakeTimeouts() {
 
 test('connect sends register and enters READY only after register_ok', async () => {
   FakeWebSocket.instances = [];
-  const states: string[] = [];
+  const statuses: GatewayClientStatus[] = [];
   const inbound: unknown[] = [];
   const outbound: unknown[] = [];
   const messages: unknown[] = [];
@@ -337,7 +356,7 @@ test('connect sends register and enters READY only after register_ok', async () 
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
   });
 
-  client.on('stateChange', (state) => states.push(state));
+  client.on('statusChange', (status) => statuses.push(status));
   client.on('inbound', (message) => inbound.push(message));
   client.on('outbound', (message) => outbound.push(message));
   client.on('message', (message) => messages.push(message));
@@ -347,7 +366,7 @@ test('connect sends register and enters READY only after register_ok', async () 
   ws.emitOpen();
   await assertPromisePending(connecting);
 
-  assert.equal(client.getState(), 'CONNECTED');
+  assert.equal(client.getStatus().isConnecting(), true);
   assert.deepEqual(ws.sent[0], registerMessage());
   assert.deepEqual(outbound[0], registerMessage());
   assert.deepEqual(
@@ -367,13 +386,13 @@ test('connect sends register and enters READY only after register_ok', async () 
   ws.emitMessage({ type: 'register_ok' });
   await connecting;
   await flushAsyncHandlers();
-  assert.equal(client.getState(), 'READY');
+  assert.equal(client.getStatus().isReady(), true);
   assert.deepEqual(inbound.at(-1), {
     kind: 'control',
     messageType: 'register_ok',
     message: { type: 'register_ok' },
   });
-  assert.deepEqual(states, ['CONNECTING', 'CONNECTED', 'READY']);
+  assert.deepEqual(statuses.map(statusKind), ['connecting', 'ready']);
 
   ws.emitMessage({ type: 'status_query' });
   await flushAsyncHandlers();
@@ -384,7 +403,7 @@ test('connect sends register and enters READY only after register_ok', async () 
     message: { type: 'status_query' },
   });
 
-  client.disconnect();
+  await client.disconnect();
 });
 
 test('connect reuses the same in-flight attempt until handshake completes', async () => {
@@ -399,7 +418,6 @@ test('connect reuses the same in-flight attempt until handshake completes', asyn
   const first = client.connect();
   const second = client.connect();
 
-  assert.equal(first, second);
   assert.equal(FakeWebSocket.instances.length, 1);
 
   const ws = FakeWebSocket.instances[0]!;
@@ -407,11 +425,12 @@ test('connect reuses the same in-flight attempt until handshake completes', asyn
   await assertPromisePending(first);
 
   const third = client.connect();
-  assert.equal(third, first);
 
   ws.emitMessage({ type: 'register_ok' });
   await first;
+  await second;
   await third;
+  assert.equal(client.getStatus().isReady(), true);
 
   client.disconnect();
 });
@@ -502,7 +521,6 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
   const messages: unknown[] = [];
-  const errors: GatewayClientError[] = [];
   const logs = {
     error: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
   };
@@ -521,7 +539,6 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
 
   client.on('inbound', (message) => inbound.push(message));
   client.on('message', (message) => messages.push(message));
-  client.on('error', (error) => errors.push(error as GatewayClientError));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
@@ -566,24 +583,6 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
     },
   });
   assert.equal(messages.length, 0);
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]!.code, 'GATEWAY_INBOUND_PROTOCOL_INVALID');
-  assert.equal(errors[0]!.disposition, 'diagnostic');
-  assert.equal(errors[0]!.stage, 'ready');
-  assert.equal(errors[0]!.retryable, false);
-  assert.equal(errors[0]!.details?.stage, 'payload');
-  assert.equal(errors[0]!.details?.code, 'missing_required_field');
-  assert.equal(errors[0]!.details?.field, 'payload.text');
-  assert.equal(errors[0]!.details?.messageType, 'invoke');
-  assert.equal(errors[0]!.details?.action, 'chat');
-  assert.equal(errors[0]!.details?.welinkSessionId, 'wl-invalid-1');
-  assert.equal(errors[0]!.details?.toolSessionId, 'tool-1');
-  assert.equal(errors[0]!.details?.gatewayMessageId, 'gw-invalid-1');
-  assert.equal(
-    errors[0]!.details?.messagePreview,
-    JSON.stringify({ type: 'invoke', keys: ['type', 'messageId', 'welinkSessionId', 'action', 'payload'] }),
-  );
-  assert.equal('rawPreview' in (errors[0]!.details ?? {}), false);
   assert.equal(logs.error[0]?.message, 'gateway.business.validation_failed');
   assert.equal(logs.error[0]?.meta?.failClosed, false);
   assert.equal(logs.error[0]?.meta?.gatewayMessageId, 'gw-invalid-1');
@@ -592,15 +591,14 @@ test('invalid downstream inbound frame is not emitted as business', async () => 
     JSON.stringify({ type: 'invoke', keys: ['type', 'messageId', 'welinkSessionId', 'action', 'payload'] }),
   );
   assert.equal('rawPreview' in (logs.error[0]?.meta ?? {}), false);
-  assert.equal(client.getState(), 'READY');
+  assert.equal(client.getStatus().isReady(), true);
 
-  client.disconnect();
+  await client.disconnect();
 });
 
 test('invalid control frame emits protocol error instead of being silently ignored', async () => {
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
-  const errors: GatewayClientError[] = [];
   const logs = {
     error: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
   };
@@ -652,7 +650,6 @@ test('invalid control frame emits protocol error instead of being silently ignor
   });
 
   client.on('inbound', (message) => inbound.push(message));
-  client.on('error', (error) => errors.push(error as GatewayClientError));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
@@ -665,12 +662,9 @@ test('invalid control frame emits protocol error instead of being silently ignor
   });
   await flushAsyncHandlers();
 
-  assert.equal(errors.length, 0);
   assert.equal(rejection?.code, 'GATEWAY_HANDSHAKE_INVALID');
   assert.equal(rejection?.disposition, 'startup_failure');
-  assert.equal(rejection?.stage, 'handshake');
   assert.equal(rejection?.retryable, false);
-  assert.equal(rejection?.details?.stage, 'transport');
   assert.equal(rejection?.details?.code, 'invalid_payload');
   assert.equal(rejection?.details?.field, 'reason');
   assert.equal(rejection?.details?.messageType, 'register_rejected');
@@ -686,7 +680,7 @@ test('invalid control frame emits protocol error instead of being silently ignor
     JSON.stringify({ type: 'register_rejected', keys: ['type', 'reason'] }),
   );
   assert.equal('rawPreview' in (logs.error[0]?.meta ?? {}), false);
-  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal(client.getStatus().isClosed(), true);
   assert.equal((inbound.at(-1) as { kind?: string })?.kind, 'invalid');
   assert.equal((inbound.at(-1) as { messageType?: string })?.messageType, 'register_rejected');
   assert.deepEqual((inbound.at(-1) as { rawPreview?: unknown })?.rawPreview, {
@@ -763,25 +757,29 @@ test('getStatus derives readiness from the current state snapshot', async () => 
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
   });
 
-  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal(client.getStatus().isClosed(), true);
+  assert.equal(client.getStatus().hasError(), false);
   assert.equal(client.getStatus().isReady(), false);
 
   const connecting = client.connect();
+  assert.equal(client.getStatus().isConnecting(), true);
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  assert.equal(client.getState(), 'CONNECTED');
   assert.equal(client.getStatus().isReady(), false);
+  assert.equal(client.getStatus().isConnecting(), true);
 
   ws.emitMessage({ type: 'register_ok' });
   await connecting;
   await flushAsyncHandlers();
 
-  assert.equal(client.getState(), 'READY');
+  assert.equal(client.getStatus().isReady(), true);
   assert.equal(client.getStatus().isReady(), true);
 
-  client.disconnect();
-  assert.equal(client.getState(), 'DISCONNECTED');
+  await client.disconnect();
   assert.equal(client.getStatus().isReady(), false);
+  assert.equal(client.getStatus().isClosed(), true);
+  assertClosedWithError(client.getStatus(), 'GATEWAY_CLOSED_MANUAL');
+  assert.equal(client.getStatus().isCancelled(), true);
 });
 
 test('default reconnect preset exhausts after maxElapsedMs and does not reconnect forever', async () => {
@@ -827,6 +825,8 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
 
     assert.equal(timers.scheduled.length, 1);
     assert.equal(timers.scheduled[0]!.delay, 1_000);
+    assert.equal(client.getStatus().isReconnecting(), true);
+    assert.equal(client.getStatus().isReconnecting(), true);
 
     clock.nowMs = 600_001;
     assert.equal(timers.runNext(), true);
@@ -837,6 +837,8 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
       logs.warn.some((entry) => entry.message === 'gateway.reconnect.exhausted'),
       true,
     );
+    assertClosedWithError(client.getStatus(), 'GATEWAY_RECONNECT_EXHAUSTED');
+    assert.equal(client.getStatus().isFailureClosed(), true);
   } finally {
     client.disconnect();
     timers.restore();
@@ -916,8 +918,9 @@ test('abort keeps GATEWAY_CONNECT_ABORTED even when transport close synchronousl
     },
   );
   assert.equal(errors.length, 0);
-  assert.equal(rejection?.stage, 'handshake');
   assert.equal(rejection?.retryable, false);
+  assertClosedWithError(runtime.getStatus(), 'GATEWAY_CONNECT_ABORTED');
+  assert.equal(runtime.getStatus().isCancelled(), true);
 });
 
 test('abort-triggered reconnectable close keeps reconnectPlanned false and does not schedule reconnect', async () => {
@@ -951,13 +954,14 @@ test('abort-triggered reconnectable close keeps reconnectPlanned false and does 
   assert.equal(reconnectScheduler.scheduled.length, 0);
   const closeLog = logs.find((entry) => entry.message === 'gateway.close');
   assert.equal(closeLog?.meta?.reconnectPlanned, false);
+  assertClosedWithError(runtime.getStatus(), 'GATEWAY_CONNECT_ABORTED');
+  assert.equal(runtime.getStatus().isCancelled(), true);
 });
 
 test('manual disconnect ignores late handshake and business frames', async () => {
   FakeWebSocket.instances = [];
   const inbound: unknown[] = [];
   const messages: unknown[] = [];
-  const errors: GatewayClientError[] = [];
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
     registerMessage: registerMessage(),
@@ -967,18 +971,16 @@ test('manual disconnect ignores late handshake and business frames', async () =>
 
   client.on('inbound', (message) => inbound.push(message));
   client.on('message', (message) => messages.push(message));
-  client.on('error', (error) => errors.push(error as GatewayClientError));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
   ws.emitOpen();
-  client.disconnect();
+  await client.disconnect();
   await assert.rejects(
     connecting,
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_CONNECT_ABORTED'
       && error.disposition === 'cancelled'
-      && error.stage === 'handshake',
   );
   await flushAsyncHandlers();
 
@@ -988,8 +990,7 @@ test('manual disconnect ignores late handshake and business frames', async () =>
 
   assert.equal(inbound.length, 0);
   assert.equal(messages.length, 0);
-  assert.equal(errors.length, 0);
-  assert.equal(client.getState(), 'DISCONNECTED');
+  assertClosedWithError(client.getStatus(), 'GATEWAY_CLOSED_MANUAL');
 });
 
 test('websocket error before READY waits for close and does not schedule reconnect on non-whitelist code', async () => {
@@ -1021,7 +1022,6 @@ test('websocket error before READY waits for close and does not schedule reconne
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_TRANSPORT_ERROR'
       && error.disposition === 'startup_failure'
-      && error.stage === 'handshake',
   );
   assert.equal(reconnectScheduler.scheduled.length, 0);
   assert.equal(errors.length, 0);
@@ -1059,9 +1059,9 @@ test('pre-open rejection close still wins when websocket error arrives before cl
       (error) => error instanceof GatewayClientError
         && error.code === 'GATEWAY_AUTH_REJECTED'
         && error.disposition === 'startup_failure'
-        && error.stage === 'pre_open',
     );
     assert.equal(errors.length, 0);
+    assertClosedWithError(runtime.getStatus(), 'GATEWAY_AUTH_REJECTED');
   }
 });
 
@@ -1088,7 +1088,6 @@ test('startup multiple websocket errors preserve the first pending transport fac
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_TRANSPORT_ERROR'
       && error.disposition === 'startup_failure'
-      && error.stage === 'handshake'
       && error.details?.errorDetail === 'first transport error',
   );
 });
@@ -1120,7 +1119,6 @@ test('pre-ready whitelist close codes never schedule reconnect and log reconnect
       (error) => error instanceof GatewayClientError
         && error.code === 'GATEWAY_TRANSPORT_ERROR'
         && error.disposition === 'startup_failure'
-        && error.stage === 'pre_open',
     );
     assert.equal(reconnectScheduler.scheduled.length, 0);
     const closeLog = logs.find((entry) => entry.message === 'gateway.close');
@@ -1145,8 +1143,7 @@ test('invalid url connect rejects as promise and does not retain active attempt'
       firstRejection = error as GatewayClientError;
       return error instanceof GatewayClientError
         && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
-        && error.disposition === 'startup_failure'
-        && error.stage === 'pre_open';
+        && error.disposition === 'startup_failure';
     },
   );
   let secondRejection: GatewayClientError | undefined;
@@ -1156,8 +1153,7 @@ test('invalid url connect rejects as promise and does not retain active attempt'
       secondRejection = error as GatewayClientError;
       return error instanceof GatewayClientError
         && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
-        && error.disposition === 'startup_failure'
-        && error.stage === 'pre_open';
+        && error.disposition === 'startup_failure';
     },
   );
   assert.equal(secondRejection?.code, firstRejection?.code);
@@ -1187,7 +1183,6 @@ test('auth payload and transport open sync failures reject as promises', async (
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
       && error.disposition === 'startup_failure'
-      && error.stage === 'pre_open'
       && error.message === 'auth_payload_failed',
   );
 
@@ -1205,7 +1200,6 @@ test('auth payload and transport open sync failures reject as promises', async (
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
       && error.disposition === 'startup_failure'
-      && error.stage === 'pre_open'
       && error.message === 'socket_factory_failed',
   );
 });
@@ -1410,11 +1404,16 @@ test('onClose raw frame logging stays debug-gated while structured gateway.close
 
 test('async inbound handler exceptions are emitted as protocol errors', async () => {
   const transport = new FakeTransport();
-  const errors: GatewayClientError[] = [];
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
   const runtime = new GatewayClientRuntime(
     {
       url: 'ws://localhost:8081/ws/agent',
       registerMessage: registerMessage(),
+      logger: {
+        error(message, meta) {
+          logs.push({ message, meta });
+        },
+      },
     },
     buildFakeDependencies({
       transport,
@@ -1433,12 +1432,7 @@ test('async inbound handler exceptions are emitted as protocol errors', async ()
         },
       },
     }),
-    {
-      ...createFakeSink(),
-      emitError(error) {
-        errors.push(error);
-      },
-    },
+    createFakeSink(),
   );
 
   const connecting = runtime.connect();
@@ -1449,11 +1443,8 @@ test('async inbound handler exceptions are emitted as protocol errors', async ()
   transport.emitMessage({ type: 'status_query' });
   await flushAsyncHandlers();
 
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]!.code, 'GATEWAY_INBOUND_PROTOCOL_INVALID');
-  assert.equal(errors[0]!.message, 'normalize_failed');
-  assert.equal(errors[0]!.disposition, 'diagnostic');
-  assert.equal(errors[0]!.stage, 'ready');
+  assert.equal(logs[0]?.message, 'gateway.message.failure');
+  assert.equal(logs[0]?.meta?.error, 'normalize_failed');
 });
 
 test('handshake timeout rejects the active connect attempt', async () => {
@@ -1489,8 +1480,7 @@ test('handshake timeout rejects the active connect attempt', async () => {
         rejection = error as GatewayClientError;
         return error instanceof GatewayClientError
           && error.code === 'GATEWAY_HANDSHAKE_TIMEOUT'
-          && error.disposition === 'startup_failure'
-          && error.stage === 'handshake';
+          && error.disposition === 'startup_failure';
       },
     );
     assert.equal(errors.length, 0);
@@ -1622,7 +1612,6 @@ test('explicit handshake terminal error is not overwritten by later transport ca
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_HANDSHAKE_INVALID'
       && error.disposition === 'startup_failure'
-      && error.stage === 'handshake'
       && error.details?.messageType === 'register_rejected',
   );
   transport.emitOpen();
@@ -1654,7 +1643,6 @@ test('register send failure never schedules reconnect', async () => {
           throw new GatewayClientError({
             code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
             disposition: 'diagnostic',
-            stage: 'ready',
             retryable: false,
             message: 'register_invalid',
           });
@@ -1709,10 +1697,8 @@ test('READY close retries on close code 1013', async () => {
 
   transport.emitClose({ code: 1013, reason: 'try again later', wasClean: false });
 
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]?.code, 'GATEWAY_TRANSPORT_ERROR');
-  assert.equal(errors[0]?.disposition, 'runtime_failure');
-  assert.equal(errors[0]?.stage, 'ready');
+  assert.equal(errors.length, 0);
+  assert.equal(runtime.getStatus().isReconnecting(), true);
   assert.equal(reconnectScheduler.scheduled.length, 1);
   assert.equal(
     warnLogs.filter((entry) => entry.message === 'gateway.reconnect.scheduled').length,
@@ -1747,12 +1733,12 @@ test('manual disconnect after reconnectable ready close keeps reconnectPlanned f
   transport.emitMessage({ type: 'register_ok' });
   await connecting;
 
-  runtime.disconnect();
+  await runtime.disconnect();
   transport.emitClose({ code: 1013, reason: 'manual close', wasClean: false });
 
   assert.equal(reconnectScheduler.scheduled.length, 0);
-  const closeLog = logs.find((entry) => entry.message === 'gateway.close');
-  assert.equal(closeLog?.meta?.reconnectPlanned, false);
+  assert.equal(logs.some((entry) => entry.message === 'gateway.close'), false);
+  assertClosedWithError(runtime.getStatus(), 'GATEWAY_CLOSED_MANUAL');
 });
 
 test('READY websocket error still retries when follow-up close code is reconnectable', async () => {
@@ -1782,10 +1768,8 @@ test('READY websocket error still retries when follow-up close code is reconnect
   assert.equal(errors.length, 0);
   transport.emitClose({ code: 1013, reason: 'try again later', wasClean: false });
 
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]?.code, 'GATEWAY_TRANSPORT_ERROR');
-  assert.equal(errors[0]?.disposition, 'runtime_failure');
-  assert.equal(errors[0]?.stage, 'ready');
+  assert.equal(errors.length, 0);
+  assert.equal(runtime.getStatus().isReconnecting(), true);
   assert.equal(reconnectScheduler.scheduled.length, 1);
 });
 
@@ -1822,11 +1806,9 @@ test('READY rejection close does not reconnect and maps to remote unavailable', 
     transport.emitClose({ code: closeCode, reason: 'auth rejected', wasClean: false });
 
     assert.equal(reconnectScheduler.scheduled.length, 0);
-    assert.equal(errors.length, 1);
-    assert.equal(errors[0]?.code, 'GATEWAY_TRANSPORT_ERROR');
-    assert.equal(errors[0]?.disposition, 'runtime_failure');
-    assert.equal(errors[0]?.stage, 'ready');
-    assert.equal(mapGatewayClientAvailability(errors[0]!), 'remote_unavailable');
+    assert.equal(errors.length, 0);
+    assert.equal(runtime.getStatus().isClosed(), true);
+    assert.equal(runtime.getStatus().getError()?.code, 'GATEWAY_AUTH_REJECTED');
     const rejectionLog = logs.find((entry) => entry.message === 'gateway.close.rejected');
     assert.equal(rejectionLog?.meta?.rejected, true);
     assert.equal(rejectionLog?.meta?.code, closeCode);
@@ -1859,11 +1841,8 @@ test('READY register-timeout close starts reconnect window and keeps transport a
   transport.emitClose({ code: 4408, reason: 'register timeout', wasClean: false });
 
   assert.equal(reconnectScheduler.scheduled.length, 1);
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]?.code, 'GATEWAY_TRANSPORT_ERROR');
-  assert.equal(errors[0]?.disposition, 'runtime_failure');
-  assert.equal(errors[0]?.stage, 'ready');
-  assert.equal(mapGatewayClientAvailability(errors[0]!), 'transport_unavailable');
+  assert.equal(errors.length, 0);
+  assert.equal(runtime.getStatus().isReconnecting(), true);
 });
 
 test('READY multiple websocket errors still emit only one runtime terminal failure after close', async () => {
@@ -1894,11 +1873,9 @@ test('READY multiple websocket errors still emit only one runtime terminal failu
   transport.emitClose({ code: 1011, reason: 'runtime reset', wasClean: false });
   transport.emitClose({ code: 1011, reason: 'duplicate late close', wasClean: false });
 
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]?.code, 'GATEWAY_TRANSPORT_ERROR');
-  assert.equal(errors[0]?.disposition, 'runtime_failure');
-  assert.equal(errors[0]?.stage, 'ready');
-  assert.equal(errors[0]?.details?.errorDetail, 'first runtime transport error');
+  assert.equal(errors.length, 0);
+  assert.equal(runtime.getStatus().isClosed(), true);
+  assert.equal(runtime.getStatus().getError()?.code, 'GATEWAY_TRANSPORT_ERROR');
 });
 
 test('READY close does not retry on undefined, 1005, 1011, or unknown 4xxx codes', async () => {
@@ -1951,10 +1928,10 @@ test('reconnect attempt stops backoff after register_rejected', async () => {
   await reconnectTask;
 
   assert.equal(reconnectScheduler.scheduled.length, 1);
-  assert.equal(runtime.getState(), 'DISCONNECTED');
+  assert.equal(runtime.getStatus().isClosed(), true);
 });
 
-test('reconnect window send guards use current connection stage', async () => {
+test('reconnect window send guards use current connection status', async () => {
   const transport = new FakeTransport();
   const reconnectScheduler = new FakeReconnectScheduler();
   const runtime = new GatewayClientRuntime(
@@ -1979,7 +1956,6 @@ test('reconnect window send guards use current connection stage', async () => {
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_CONNECTED'
       && error.disposition === 'diagnostic'
-      && error.stage === 'pre_open',
   );
 
   const reconnectTask = reconnectScheduler.scheduled[0]!.task();
@@ -1990,7 +1966,6 @@ test('reconnect window send guards use current connection stage', async () => {
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_READY'
       && error.disposition === 'diagnostic'
-      && error.stage === 'handshake',
   );
 
   transport.emitClose({ code: 1011, reason: 'retry open failed', wasClean: false });
@@ -2135,12 +2110,12 @@ test('reconnect attempt whitelist close clears reconnecting when next retry is e
   transport.emitClose({ code: 4408, reason: 'retry register timeout', wasClean: false });
   await reconnectTask;
 
-  assert.equal(runtime.isReconnecting(), false);
+  assert.equal(runtime.getStatus().isClosed(), true);
+  assert.equal(runtime.getStatus().getError()?.code, 'GATEWAY_RECONNECT_EXHAUSTED');
   assert.equal(
     logs.some((entry) => entry.message === 'gateway.reconnect.exhausted'),
     true,
   );
-  assert.equal(mapGatewayClientAvailability(errors.at(-1)!), 'transport_unavailable');
 });
 
 test('reconnect attempt stops backoff after handshake protocol violation', async () => {
@@ -2211,7 +2186,7 @@ test('reconnect attempt stops backoff after handshake protocol violation', async
 
   await reconnectTask;
   assert.equal(reconnectScheduler.scheduled.length, 1);
-  assert.equal(runtime.getState(), 'DISCONNECTED');
+  assert.equal(runtime.getStatus().isClosed(), true);
 });
 
 test('reconnect attempt handshake failures stay on connect reject path', async () => {
@@ -2354,11 +2329,9 @@ test('reconnect attempt unexpected close after open stays handshake startup fail
   const failedLog = logs.find((entry) => entry.message === 'gateway.reconnect.failed');
   assert.equal(failedLog?.meta?.code, 'GATEWAY_TRANSPORT_ERROR');
   assert.equal(failedLog?.meta?.disposition, 'startup_failure');
-  assert.equal(failedLog?.meta?.stage, 'handshake');
   assert.equal(mapGatewayClientAvailability({
     code: String(failedLog?.meta?.code) as 'GATEWAY_TRANSPORT_ERROR',
     disposition: 'startup_failure',
-    stage: 'handshake',
     retryable: true,
     message: 'gateway_unexpected_close_before_ready',
   }), 'transport_unavailable');
@@ -2386,7 +2359,6 @@ test('reconnect attempt stops backoff after register send failure', async () => 
             throw new GatewayClientError({
               code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
               disposition: 'diagnostic',
-              stage: 'ready',
               retryable: false,
               message: 'register_invalid',
             });
@@ -2411,7 +2383,7 @@ test('reconnect attempt stops backoff after register send failure', async () => 
 
   await reconnectTask;
   assert.equal(reconnectScheduler.scheduled.length, 1);
-  assert.equal(runtime.getState(), 'DISCONNECTED');
+  assert.equal(runtime.getStatus().isClosed(), true);
 });
 
 test('send guards surface structured not-connected and not-ready errors', async () => {
@@ -2428,7 +2400,6 @@ test('send guards surface structured not-connected and not-ready errors', async 
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_CONNECTED'
       && error.disposition === 'diagnostic'
-      && error.stage === 'pre_open',
   );
 
   const connecting = client.connect();
@@ -2440,7 +2411,6 @@ test('send guards surface structured not-connected and not-ready errors', async 
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_NOT_READY'
       && error.disposition === 'diagnostic'
-      && error.stage === 'handshake',
   );
 
   client.disconnect();
@@ -2448,6 +2418,129 @@ test('send guards surface structured not-connected and not-ready errors', async 
     connecting,
     (error) => error instanceof GatewayClientError && error.code === 'GATEWAY_CONNECT_ABORTED',
   );
+});
+
+test('public connect wraps unknown synchronous failures as GatewayClientError', async () => {
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    logger: {
+      info() {
+        throw new Error('logger exploded');
+      },
+    },
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  await assert.rejects(
+    client.connect(),
+    (error) => error instanceof GatewayClientError
+      && error instanceof GatewayClientUnknownError
+      && error.code === 'GATEWAY_UNKNOWN_ERROR'
+      && error.disposition === 'startup_failure'
+      && error.message === 'gateway client connect failed: logger exploded'
+      && error.details === undefined
+      && error.cause instanceof Error
+      && error.cause.message === 'logger exploded',
+  );
+});
+
+test('public connect preserves GatewayClientError failures', async () => {
+  const client = createGatewayClient({
+    url: 'not a websocket url',
+    registerMessage: registerMessage(),
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  await assert.rejects(
+    client.connect(),
+    (error) => error instanceof GatewayClientError
+      && error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID'
+      && error.disposition === 'startup_failure',
+  );
+});
+
+test('public disconnect wraps unknown synchronous failures as GatewayClientError', async () => {
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    logger: {
+      info() {
+        throw new Error('disconnect logger exploded');
+      },
+    },
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  await assert.rejects(
+    client.disconnect(),
+    (error) => error instanceof GatewayClientError
+      && error instanceof GatewayClientUnknownError
+      && error.code === 'GATEWAY_UNKNOWN_ERROR'
+      && error.disposition === 'diagnostic'
+      && error.message === 'gateway client disconnect failed: disconnect logger exploded'
+      && error.details === undefined,
+  );
+});
+
+test('public send wraps unknown synchronous failures as GatewayClientError', () => {
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    logger: {
+      warn() {
+        throw new Error('send logger exploded');
+      },
+    },
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  assert.throws(
+    () => client.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
+    (error) => error instanceof GatewayClientError
+      && error instanceof GatewayClientUnknownError
+      && error.code === 'GATEWAY_UNKNOWN_ERROR'
+      && error.disposition === 'diagnostic'
+      && error.message === 'gateway client send failed: send logger exploded'
+      && error.details === undefined,
+  );
+});
+
+test('statusChange listener failures do not affect lifecycle', async () => {
+  FakeWebSocket.instances = [];
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const statuses: GatewayClientStatus[] = [];
+  const client = createGatewayClient({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    logger: {
+      error(message, meta) {
+        logs.push({ message, meta });
+      },
+    },
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  client.on('statusChange', () => {
+    throw new Error('listener exploded');
+  });
+  client.on('statusChange', (status) => statuses.push(status));
+
+  const connecting = client.connect();
+  const ws = FakeWebSocket.instances[0]!;
+  ws.emitOpen();
+  ws.emitMessage({ type: 'register_ok' });
+  await connecting;
+
+  assert.equal(client.getStatus().isReady(), true);
+  assert.equal(statuses.some((status) => status.isReady()), true);
+  const listenerLog = logs.find((entry) => entry.message === 'gateway.event.listener_failed');
+  assert.equal(listenerLog?.meta?.code, 'GATEWAY_UNKNOWN_ERROR');
+  assert.equal(listenerLog?.meta?.disposition, 'diagnostic');
+  assert.equal(listenerLog?.meta?.error, 'gateway client event:statusChange failed: listener exploded');
+  assert.equal('action' in (listenerLog?.meta ?? {}), false);
+
+  await client.disconnect();
 });
 
 test('READY websocket error keeps ready phase', async () => {
@@ -2475,13 +2568,12 @@ test('READY websocket error keeps ready phase', async () => {
   transport.emitError({ message: 'socket failed after ready' });
   assert.equal(errors.length, 0);
   transport.emitClose({ code: 1011, reason: 'socket failed after ready', wasClean: false });
-  assert.equal(errors.at(-1)?.code, 'GATEWAY_TRANSPORT_ERROR');
-  assert.equal(errors.at(-1)?.disposition, 'runtime_failure');
-  assert.equal(errors.at(-1)?.stage, 'ready');
-  assert.equal(mapGatewayClientAvailability(errors.at(-1)!), 'transport_unavailable');
+  assert.equal(errors.length, 0);
+  assert.equal(runtime.getStatus().isClosed(), true);
+  assert.equal(runtime.getStatus().getError()?.code, 'GATEWAY_TRANSPORT_ERROR');
 });
 
-test('READY protocol error keeps ready phase', () => {
+test('READY protocol error keeps ready phase', async () => {
   const transport = new FakeTransport();
   const runtime = new GatewayClientRuntime(
     {
@@ -2495,7 +2587,6 @@ test('READY protocol error keeps ready phase', () => {
           throw new GatewayClientError({
             code: 'GATEWAY_OUTBOUND_PROTOCOL_INVALID',
             disposition: 'diagnostic',
-            stage: 'handshake',
             retryable: false,
             message: 'business_invalid',
           });
@@ -2508,14 +2599,17 @@ test('READY protocol error keeps ready phase', () => {
     createFakeSink(),
   );
 
-  runtime.setState('READY');
+  const connecting = runtime.connect();
+  transport.emitOpen();
+  transport.emitMessage({ type: 'register_ok' });
+  await connecting;
 
   assert.throws(
     () => runtime.send({ type: 'tool_done', toolSessionId: 'tool-1' }),
     (error) => error instanceof GatewayClientError
       && error.code === 'GATEWAY_OUTBOUND_PROTOCOL_INVALID'
-      && error.stage === 'ready',
   );
+  assert.equal(runtime.getStatus().isReady(), true);
 });
 
 test('public send rejects heartbeat while internal heartbeat still reaches transport through one gate', async () => {
@@ -2698,14 +2792,7 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
       businessMessageHandler: new BusinessMessageHandler(),
       authSubprotocolBuilder: () => 'auth.test',
     } satisfies GatewayClientRuntimeDependencies,
-    {
-      emitStateChange() {},
-      emitInbound() {},
-      emitOutbound() {},
-      emitHeartbeat() {},
-      emitMessage() {},
-      emitError() {},
-    },
+    createFakeSink(),
   );
 
   const connecting = runtime.connect();
@@ -2721,14 +2808,12 @@ test('close logging follows resolved reconnectEnabled instead of raw reconnect c
 
 test('register_rejected emits non-retryable structured error and disconnects', async () => {
   FakeWebSocket.instances = [];
-  const errors: GatewayClientError[] = [];
   const client = createGatewayClient({
     url: 'ws://localhost:8081/ws/agent',
     registerMessage: registerMessage(),
     heartbeatIntervalMs: 60_000,
     webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
   });
-  client.on('error', (error) => errors.push(error as GatewayClientError));
 
   const connecting = client.connect();
   const ws = FakeWebSocket.instances[0]!;
@@ -2740,6 +2825,6 @@ test('register_rejected emits non-retryable structured error and disconnects', a
   );
   await flushAsyncHandlers();
 
-  assert.equal(errors.length, 0);
-  assert.equal(client.getState(), 'DISCONNECTED');
+  assert.equal(client.getStatus().isClosed(), true);
+  assert.equal(client.getStatus().getError()?.code, 'GATEWAY_HANDSHAKE_REJECTED');
 });
