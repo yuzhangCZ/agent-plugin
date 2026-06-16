@@ -26,6 +26,23 @@
 
 ## 1.1 Changelog
 
+### 2026-06-16
+
+- 所有 Provider fact 类型移除 `toolSessionId` 字段；该字段由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
+- 所有 Provider fact 类型新增 `subagentSessionId?` 和 `subagentName?` 可选字段（继承自 `ProviderFactBase`）。
+- `BridgeRuntimeStatusSnapshot` 新增 `error?: BridgeRuntimeError` 字段。
+- 新增 `BridgeRuntimeError` 和 `BridgeRuntimeErrorCode` 类型说明。
+- `ProviderRunMessageInput.context` 移除 `imGroupId` 字段；SDK 不向 Provider 透传该字段。
+- 修正所有 `toolSessionId` 字段说明：明确其代表 welink 会话标识，不代表宿主 agent session ID。
+- 新增 7.10 小节：`toolSessionId` 与 agent session 映射约束说明。
+- 7.5 标识符约束：补充 `toolSessionId`、`messageId`、`partId` 格式建议（`ses_`、`msg_`、`prt_` 前缀 + UUID）。
+- 4.4 和第 6 节时序图：体现一轮 run 可返回多个 message，每个 message 拥有独立 `messageId`。
+- 修正 7.4、8.1、8.2、8.3 示例代码：移除 fact 中多余的 `toolSessionId` 字段，示例 ID 改用前缀 + UUID 格式。
+- 4.4 时序图补充契约约束：`result()` 必须在 facts 流结束后 resolve。
+- 4.8 新增中断时序图：体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
+- 重写 8.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
+- 8.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
+
 ### 2026-06-15
 
 - `RuntimeOutboundEmitter` 新增方法 `emitOutboundRun(input)`，用于发送带 run 标识的主动 facts 流。
@@ -191,6 +208,7 @@ const probe = await runtime.probe({ timeoutMs: 3000 });
 |---|---|---|---|
 | `state` | `'idle' \| 'starting' \| 'ready' \| 'reconnecting' \| 'stopping' \| 'failed'` | 是 | Runtime 当前状态。 |
 | `failureReason` | `string \| null` | 是 | 当前失败摘要文本；无失败时为 `null`。该字段来自触发 failed 的错误 `message`，不是稳定错误码。 |
+| `error` | `BridgeRuntimeError` | 否 | 触发 failed 状态时的原始错误对象；非 failed 状态时为 `undefined`。 |
 
 ```ts
 const status = runtime.getStatus();
@@ -334,12 +352,12 @@ async health() {
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `toolSessionId` | `string` | 是 | 宿主返回的会话标识。 |
+| `toolSessionId` | `string` | 是 | welink 会话标识；不代表宿主 agent session ID，集成方需自行维护与 agent session 的映射。 |
 | `title` | `string` | 否 | 宿主确认后的会话标题。 |
 
 ```ts
 async createSession() {
-  return { toolSessionId: 'tool-session-1' };
+  return { toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000' };
 }
 ```
 
@@ -360,13 +378,12 @@ async createSession() {
 |---|---|---|---|
 | `traceId` | `string` | 是 | 本次调用 traceId。 |
 | `runId` | `string` | 是 | 当前 request run 标识。 |
-| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
 | `text` | `string` | 是 | 本次用户输入文本。 |
 | `assistantId` | `string` | 否 | 可选 assistant 标识。 |
 | `extParameters` | `ExtParameters` | 否 | 平台/业务扩展参数；当前正式协议字段见下表。SDK 仅透传，不解释业务语义。 |
 | `context.assistantAccount` | `string` | 否 | 可选 assistant 账号信息。 |
 | `context.sendUserAccount` | `string` | 否 | 可选发送用户账号信息。 |
-| `context.imGroupId` | `string` | 否 | 可选群组标识。 |
 | `context.suppressReply` | `boolean` | 否 | 可选回复抑制标记。 |
 
 #### 扩展类型：`ExtParameters`
@@ -424,10 +441,15 @@ sequenceDiagram
   RT->>P: runMessage(input)
   P-->>RT: ProviderRun { runId, facts, result() }
 
-  P-->>RT: message.start
+  P-->>RT: message.start (msg_1)
   P-->>RT: text.delta / thinking.delta / tool.update
   P-->>RT: text.done / thinking.done
-  P-->>RT: message.done
+  P-->>RT: message.done (msg_1)
+
+  P-->>RT: message.start (msg_2)
+  P-->>RT: text.delta / tool.update
+  P-->>RT: text.done
+  P-->>RT: message.done (msg_2)
 
   P-->>RT: result() => ProviderTerminalResult
 ```
@@ -438,6 +460,8 @@ sequenceDiagram
 - `message.done` 不等于 run 终态；run 最终结局以 `ProviderRun.result()` 为准。
 - `ProviderRun.result()` 是该次 run 的终态真源。
 - `completed` 表示正常完成，`failed` 表示执行失败，`aborted` 表示中止。
+- 一轮 run 可以产出多个 message，每个 message 拥有独立的 `messageId`，必须分别通过 `message.start` 打开和 `message.done` 关闭。
+- Provider 必须确保 `result()` 在 facts 流结束后才 resolve，不得提前 resolve。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput) {
@@ -509,7 +533,7 @@ async runMessage(input: ProviderRunMessageInput) {
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `traceId` | `string` | 是 | 本次调用 traceId。 |
-| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
 
 - 返回 `{ applied: true }` 时，表示关闭操作已真实应用到底层宿主。
 
@@ -529,10 +553,36 @@ async runMessage(input: ProviderRunMessageInput) {
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `traceId` | `string` | 是 | 本次调用 traceId。 |
-| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
 | `runId` | `string` | 否 | 需要中止的具体 run 标识；未提供时由宿主自行决定中止范围。 |
 
 - 返回 `{ applied: true }` 时，表示中止操作已真实应用到底层宿主。
+
+#### 中断时序图
+
+```mermaid
+sequenceDiagram
+  participant RT as Runtime
+  participant P as Provider
+
+  RT->>P: runMessage(input)
+  P-->>RT: ProviderRun { runId, facts, result() }
+
+  P-->>RT: message.start (msg_1)
+  P-->>RT: text.delta ...
+  Note over P: run 进行中
+
+  RT->>P: abortSession(input)
+  P-->>RT: { applied: true }
+  Note over P: Provider 手动 resolve result() => { outcome: 'aborted' }
+
+  P-->>RT: result() => ProviderTerminalResult { outcome: 'aborted' }
+  Note over RT: facts 流自然结束或被 Provider 内部终止
+```
+
+- 中断时 SDK 不会自动取消 facts 流或强制 resolve `result()`。
+- Provider 收到 `abortSession()` 后，必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
+- `abortSession()` 返回 `{ applied: true }` 只表示中断请求已接收，不代表 `result()` 已 resolve；终态仍以 `result()` 为准。
 
 ### 4.9 `dispose()`
 
@@ -587,7 +637,7 @@ export interface RuntimeOutboundEmitter {
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
 | `messageId` | `string` | 是 | 本批 outbound 所属消息 ID。 |
 | `trigger` | `'scheduled' \| 'webhook' \| 'system' \| string` | 是 | 主动消息触发来源。 |
 | `facts` | `AsyncIterable<OutboundFact>` | 是 | 本批 outbound 事实流。 |
@@ -599,8 +649,8 @@ export interface RuntimeOutboundEmitter {
 
 ```ts
 await context.outbound.emitOutboundMessage({
-  toolSessionId: 'tool-session-1',
-  messageId: 'message-1',
+  toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000',
+  messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8',
   trigger: 'webhook',
   facts,
 });
@@ -621,7 +671,7 @@ await context.outbound.emitOutboundMessage({
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
-| `toolSessionId` | `string` | 是 | 目标会话标识。 |
+| `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
 | `runId` | `string` | 是 | 本轮 outbound run 标识。 |
 | `trigger` | `'scheduled' \| 'webhook' \| 'system' \| string` | 是 | 主动消息触发来源。 |
 | `facts` | `AsyncIterable<OutboundFact>` | 是 | 本轮 outbound run 事实流。 |
@@ -631,8 +681,8 @@ await context.outbound.emitOutboundMessage({
 
 ```ts
 await context.outbound.emitOutboundRun({
-  toolSessionId: 'tool-session-1',
-  runId: 'outbound-run-1',
+  toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000',
+  runId: 'run_7c9e6b3a-2f4d-4e8a-b615-3d2a1c0f8e7b',
   trigger: 'scheduled',
   facts,
 });
@@ -729,7 +779,7 @@ sequenceDiagram
   RT->>P: createSession(input)
   RT->>P: runMessage(input)
   P-->>RT: ProviderRun { runId, facts, result() }
-  P-->>RT: facts stream
+  P-->>RT: facts stream (message 1...N)
 
   opt interaction reply
     RT->>P: replyQuestion(input)
@@ -746,6 +796,7 @@ sequenceDiagram
 - `createBridgeRuntime()` 只创建实例，`start()` 成功后 Runtime 才进入可处理请求状态。
 - `createSession()`、`runMessage()`、`replyQuestion()`、`replyPermission()` 都属于 Runtime 对 Provider 的调用路径。
 - `runMessage()` 返回的是 `ProviderRun` 句柄，不是最终结果；run 的终态以 `result()` 为准。
+- 一轮 `runMessage()` 可产出多个 message，每个 message 拥有独立的 `messageId`。
 - `stop()` 后 Runtime 不再继续使用旧上下文；若实现了 `dispose()`，会进入清理阶段。
 
 ## 7. 公共类型与通用约束
@@ -771,12 +822,22 @@ sequenceDiagram
 
 `type` 是 `ProviderFact` 的语义标签，用于声明当前事实在运行时中的生命周期含义，而不是仅表示“事实类型”。Runtime 会按该字段判断消息作用域、内容流收口、交互回复目标和会话级事件边界。
 
+所有 Provider fact 类型共享 `ProviderFactBase` 基类字段，`toolSessionId` 由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
+
+#### `ProviderFactBase`
+
+所有 Provider fact 类型共享以下可选基类字段：
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `subagentSessionId` | `string` | 否 | 子代理 envelope 提示，不参与 runtime session ownership、校验或回复路由。 |
+| `subagentName` | `string` | 否 | 子代理名称提示，不参与 runtime session ownership、校验或回复路由。 |
+
 #### `MessageStartFact`
 
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'message.start'` | 是 | 打开一条 provider message；后续消息内容事实必须归属到这个 `messageId`，同一 `messageId` 不可重复打开或关闭后重开。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
@@ -785,7 +846,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'text.delta'` | 是 | 发送文本片段的流式增量；必须归属到已打开的 message，`content` 是本次新增文本，不代表最终全文。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
 | `content` | `string` | 是 | 当前文本增量。 |
@@ -796,7 +856,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'text.done'` | 是 | 收口文本片段；必须归属到已打开的 message，`content` 是该 `partId` 的最终文本内容。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
 | `content` | `string` | 是 | 当前片段最终内容。 |
@@ -807,7 +866,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'thinking.delta'` | 是 | 发送思考或 reasoning 片段的流式增量；必须归属到已打开的 message，`content` 是本次新增思考内容。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
 | `content` | `string` | 是 | 当前思考增量。 |
@@ -818,7 +876,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'thinking.done'` | 是 | 收口思考或 reasoning 片段；必须归属到已打开的 message，`content` 是该 `partId` 的最终思考内容。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 思考片段标识。 |
 | `content` | `string` | 是 | 当前片段最终内容。 |
@@ -829,7 +886,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'tool.update'` | 是 | 更新一次工具调用的展示状态；必须归属到已打开的 message，同一 `toolCallId` 可通过多次更新表达 pending、running、completed 或 error。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 工具片段标识。 |
 | `toolCallId` | `string` | 是 | 工具调用标识。 |
@@ -846,7 +902,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'question.ask'` | 是 | 发起需要外部回复的问题交互；必须归属到已打开的 message，并通过全局唯一的 `questionId` 等待后续 `question_reply`。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 问题所在消息片段标识。 |
 | `questionId` | `string` | 是 | 直接回复目标，必须唯一。 |
@@ -878,7 +933,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'permission.ask'` | 是 | 发起需要外部确认的权限交互；不强制要求 message 作用域，`permissionId` 是全局唯一的权限回复目标。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 否 | 可选消息归属上下文。 |
 | `partId` | `string` | 是 | 权限所在消息片段标识。 |
 | `permissionId` | `string` | 是 | 直接回复目标，必须唯一。 |
@@ -892,7 +946,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'permission.reply'` | 是 | 记录某个权限请求已经得到回复；通过 `permissionId` 关联此前的 `permission.ask`。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `permissionId` | `string` | 是 | 已回复的权限标识。 |
 | `response` | `'once' \| 'always' \| 'reject'` | 是 | 权限回复结果。 |
 | `permType` | `string` | 否 | 权限类型|
@@ -903,7 +956,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'message.done'` | 是 | 关闭一条 provider message；表示该 `messageId` 的消息事实流结束，但不代表整个 request run 终态。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `reason` | `string` | 否 | 可选结束原因。 |
 | `tokens` | `unknown` | 否 | 可选令牌统计。 |
@@ -915,7 +967,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'session.title'` | 是 | 更新会话标题；不要求归属到某条已打开的 message。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `title` | `string` | 是 | 新的会话标题。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
@@ -924,7 +975,6 @@ sequenceDiagram
 | 字段 | 类型 | 是否必填 | 说明 |
 |---|---|---|---|
 | `type` | `'session.error'` | 是 | 发送会话级或 provider 级错误事件；不要求归属到某条已打开的 message，也不等同于 request run 终态。 |
-| `toolSessionId` | `string` | 是 | 所属会话标识。 |
 | `error` | `ProviderError` | 是 | 会话级错误信息。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
@@ -939,18 +989,30 @@ sequenceDiagram
 最小合法文本序列如下：
 
 ```ts
-yield { type: 'message.start', toolSessionId, messageId };
-yield { type: 'text.done', toolSessionId, messageId, partId: 'part-1', content: 'hello' };
-yield { type: 'message.done', toolSessionId, messageId };
+yield { type: 'message.start', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8' };
+yield { type: 'text.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8', partId: 'prt_f47ac10b-58cc-4372-a567-0e02b2c3d479', content: 'hello' };
+yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8' };
 ```
 
 ### 7.5 标识符约束
 
-- `toolSessionId` 标识会话作用域。
+#### 标识符语义
+
+- `toolSessionId` 标识 welink 会话作用域；不代表宿主 agent session ID，映射由集成方处理（见 7.10）。
 - `messageId` 必须在所属 `toolSessionId` 内唯一。
 - `partId` 必须稳定标识同一文本、思考或工具片段。
 - `runId` 绑定一次 request run，不得由 Provider 改写。
 - `questionId` 与 `permissionId` 是直接回复目标，必须可唯一定位到底层宿主对象。
+
+#### 标识符格式约束
+
+- `toolSessionId`、`messageId`、`partId` 必须为非空字符串，前后不得包含空白字符；SDK 会对上述标识符执行 trim 校验。
+- 标识符不强制要求特定编码格式，但建议使用前缀 + UUID 以提高可读性和排障效率：
+  - `toolSessionId` 建议以 `ses_` 开头，例如 `ses_550e8400-e29b-41d4-a716-446655440000`
+  - `messageId` 建议以 `msg_` 开头，例如 `msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8`
+  - `partId` 建议以 `prt_` 开头，例如 `prt_f47ac10b-58cc-4372-a567-0e02b2c3d479`
+- `messageId` 在同一 `toolSessionId` 内跨多轮 run 不可重复打开或关闭后重开。
+- `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。
 
 ### 7.6 `ProviderError`
 
@@ -982,12 +1044,52 @@ yield { type: 'message.done', toolSessionId, messageId };
 - 集成方不得把命令应用失败伪装成 `ProviderTerminalResult.error`。
 - 集成方不得用 `SessionErrorFact` 代替 `ProviderRun.result()` 收口。
 
+### 7.9 `BridgeRuntimeError`
+
+SDK 在生命周期和连接阶段抛出的稳定错误类型。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | `'BridgeRuntimeError'` | 错误类名。 |
+| `code` | `BridgeRuntimeErrorCode` | 稳定错误码。 |
+| `message` | `string` | 错误说明。 |
+
+#### `BridgeRuntimeErrorCode`
+
+| 错误码 | 说明 |
+|---|---|
+| `gateway_connect_parameter_invalid` | 连接参数不合法。 |
+| `gateway_auth_rejected` | 鉴权被拒绝。 |
+| `gateway_handshake_timeout` | 握手超时。 |
+| `gateway_handshake_rejected` | 握手被拒绝。 |
+| `gateway_handshake_invalid` | 握手返回不合法。 |
+| `gateway_transport_error` | 传输层错误。 |
+| `gateway_reconnect_exhausted` | 重连次数耗尽。 |
+| `gateway_unknown_error` | 网关未知错误。 |
+| `provider_unavailable` | Provider 不可用。 |
+| `runtime_internal_error` | Runtime 内部错误。 |
+| `runtime_unknown_error` | Runtime 未知错误。 |
+| `probe_unknown_error` | 探测未知错误。 |
+
+- `BridgeRuntimeStatusSnapshot.error` 仅在 `state` 为 `failed` 时可能携带 `BridgeRuntimeError`。
+- 集成方可基于 `error.code` 做稳定分类，不应基于 `message` 做业务分支。
+
+### 7.10 `toolSessionId` 与 agent session 映射
+
+`toolSessionId` 是 bridge runtime 协议层的 welink 会话标识，由网关下行请求带入，不代表宿主 agent 自身的 session ID。
+
+- `toolSessionId` 由 runtime 从下行请求中获取并透传给 Provider，Provider 不生成该值。
+- `toolSessionId` 与 agent session ID 是两个独立概念，映射关系由集成方在 Provider 实现中自行维护。
+- Provider 在 `createSession()`、`runMessage()`、`closeSession()`、`abortSession()` 等方法中收到 `toolSessionId` 时，需自行映射到底层 agent session。
+- SDK 不感知、不缓存、不代理 agent session ID；映射失败或找不到对应 session 时，Provider 应抛出 `ProviderError`（`code: 'session_not_found'`）。
+
 ## 8. 最小接入示例
 
 ### 8.1 最小 Provider 示例
 
 ```ts
 import type {
+  ProviderAbortSessionInput,
   ProviderFact,
   ProviderRun,
   ProviderRunMessageInput,
@@ -996,34 +1098,9 @@ import type {
   ThirdPartyAgentProvider,
 } from '@wecode/bridge-runtime-sdk';
 
-function fromArray<T>(items: T[]): AsyncIterable<T> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const item of items) {
-        yield item;
-      }
-    },
-  };
-}
-
-function createRun(runId: string, toolSessionId: string, text: string): ProviderRun {
-  const facts: ProviderFact[] = [
-    { type: 'message.start', toolSessionId, messageId: 'msg-1' },
-    { type: 'text.done', toolSessionId, messageId: 'msg-1', partId: 'part-1', content: text },
-    { type: 'message.done', toolSessionId, messageId: 'msg-1' },
-  ];
-
-  return {
-    runId,
-    facts: fromArray(facts),
-    async result(): Promise<ProviderTerminalResult> {
-      return { outcome: 'completed' };
-    },
-  };
-}
-
 export class DemoProvider implements ThirdPartyAgentProvider {
   private outbound = null as ProviderRuntimeContext['outbound'] | null;
+  private activeRuns = new Map<string, (result: ProviderTerminalResult) => void>();
 
   async initialize(context: ProviderRuntimeContext): Promise<void> {
     this.outbound = context.outbound;
@@ -1034,11 +1111,43 @@ export class DemoProvider implements ThirdPartyAgentProvider {
   }
 
   async createSession() {
-    return { toolSessionId: 'tool-session-1' };
+    return { toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000' };
   }
 
-  async runMessage(input: ProviderRunMessageInput) {
-    return createRun(input.runId, input.toolSessionId, `echo: ${input.text}`);
+  async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
+    const messageId = 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+    const partId = 'prt_f47ac10b-58cc-4372-a567-0e02b2c3d479';
+
+    let resolveTerminal!: (result: ProviderTerminalResult) => void;
+    const terminalPromise = new Promise<ProviderTerminalResult>((resolve) => {
+      resolveTerminal = resolve;
+    });
+    this.activeRuns.set(input.runId, resolveTerminal);
+
+    const facts: AsyncIterable<ProviderFact> = (async function* () {
+      try {
+        yield { type: 'message.start', messageId };
+        yield { type: 'text.done', messageId, partId, content: `echo: ${input.text}` };
+        yield { type: 'message.done', messageId };
+        // facts 流正常结束后，resolve 终态
+        resolveTerminal({ outcome: 'completed' });
+      } catch (error) {
+        // facts 流异常时，resolve failed
+        resolveTerminal({
+          outcome: 'failed',
+          error: {
+            code: 'internal_error',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+    })();
+
+    return {
+      runId: input.runId,
+      facts,
+      result: () => terminalPromise,
+    };
   }
 
   async replyQuestion() {
@@ -1053,37 +1162,46 @@ export class DemoProvider implements ThirdPartyAgentProvider {
     return { applied: true };
   }
 
-  async abortSession() {
+  async abortSession(input: ProviderAbortSessionInput) {
+    const resolve = input.runId ? this.activeRuns.get(input.runId) : undefined;
+    if (resolve) {
+      // 中断时手动 resolve result() 为 aborted
+      resolve({ outcome: 'aborted' });
+      this.activeRuns.delete(input.runId!);
+    }
     return { applied: true };
   }
 }
 ```
 
+- `result()` 必须在 facts 流结束后才 resolve，不得提前 resolve。
+- facts 流异常时，Provider 必须手动 resolve `result()` 为 `{ outcome: 'failed', error: ... }`。
+- 中断时（`abortSession` 被调用），Provider 必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
+- SDK 不会自动取消 facts 流或强制 resolve `result()`；终态收口是 Provider 的职责。
+
 ### 8.2 最小文本输出示例
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
-  const messageId = `msg-${input.runId}`;
+  const messageId = `msg_${input.runId}`;
 
   return {
     runId: input.runId,
     facts: (async function* () {
-      yield { type: 'message.start', toolSessionId: input.toolSessionId, messageId };
+      yield { type: 'message.start', messageId };
       yield {
         type: 'text.delta',
-        toolSessionId: input.toolSessionId,
         messageId,
-        partId: 'part-1',
+        partId: 'prt_f47ac10b-58cc-4372-a567-0e02b2c3d479',
         content: 'hel',
       };
       yield {
         type: 'text.done',
-        toolSessionId: input.toolSessionId,
         messageId,
-        partId: 'part-1',
+        partId: 'prt_f47ac10b-58cc-4372-a567-0e02b2c3d479',
         content: 'hello',
       };
-      yield { type: 'message.done', toolSessionId: input.toolSessionId, messageId };
+      yield { type: 'message.done', messageId };
     })(),
     async result() {
       return { outcome: 'completed' };
@@ -1099,13 +1217,12 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
   return {
     runId: input.runId,
     facts: (async function* () {
-      yield { type: 'message.start', toolSessionId: input.toolSessionId, messageId: 'msg-q-1' };
+      yield { type: 'message.start', messageId: 'msg_a1b2c3d4-e5f6-7890-abcd-ef1234567890' };
       yield {
         type: 'question.ask',
-        toolSessionId: input.toolSessionId,
-        messageId: 'msg-q-1',
-        partId: 'part-q-1',
-        questionId: 'question-1',
+        messageId: 'msg_a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        partId: 'prt_b2c3d4e5-f6a7-8901-bcde-f12345678901',
+        questionId: 'q_550e8400-e29b-41d4-a716-446655440000',
         questions: [
           {
             question: '请选择部署环境',
@@ -1135,3 +1252,5 @@ async replyQuestion(input: ProviderQuestionReplyInput) {
 - 返回的 `ProviderRun.runId` 与输入 `runId` 不一致。
 - 在 Runtime 已停止后继续使用旧的 outbound 发送器。
 - 在同一消息中复用同一个 `partId` 表示不同文本片段。
+- `result()` 在 facts 流结束前提前 resolve。
+- 中断后未手动 resolve `result()`，导致 run 永久挂起。
