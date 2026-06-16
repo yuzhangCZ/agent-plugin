@@ -93,7 +93,7 @@ describe('SessionScopedSdkExecutionBridge', () => {
 
     assert.deepStrictEqual(await bridge.replyQuestion({
       questionId: 'q-1',
-      answer: 'yes',
+      answers: [['yes']],
     }), { applied: true });
     assert.deepStrictEqual(await bridge.replyPermission({
       permissionId: 'p-1',
@@ -102,7 +102,7 @@ describe('SessionScopedSdkExecutionBridge', () => {
     assert.deepStrictEqual(calls, [
       {
         method: 'replyQuestion',
-        input: { questionId: 'q-1', answer: 'yes' },
+        input: { questionId: 'q-1', answers: [['yes']] },
       },
       {
         method: 'replyPermission',
@@ -125,7 +125,7 @@ describe('SessionScopedSdkExecutionBridge', () => {
     });
 
     await assert.rejects(
-      () => bridge.replyQuestion({ questionId: 'q-missing', answer: 'yes' }),
+      () => bridge.replyQuestion({ questionId: 'q-missing', answers: [['yes']] }),
       /question not found/u,
     );
   });

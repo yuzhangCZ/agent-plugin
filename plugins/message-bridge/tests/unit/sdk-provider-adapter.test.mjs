@@ -617,9 +617,9 @@ test('provider adapter delegates question replies to session-isolation command p
   assert.deepEqual(await adapter.replyQuestion({
     traceId: 'trace-question-port',
     questionId: 'question-a',
-    answers: [['answer-a']],
+    answers: [['answer-a'], ['answer-b', 'answer-c']],
   }), { applied: true });
-  assert.deepEqual(calls, [{ questionId: 'question-a', answer: 'answer-a' }]);
+  assert.deepEqual(calls, [{ questionId: 'question-a', answers: [['answer-a'], ['answer-b', 'answer-c']] }]);
   assert.equal(legacyReplyCalls, 0);
 });
 

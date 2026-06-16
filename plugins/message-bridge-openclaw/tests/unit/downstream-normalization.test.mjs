@@ -103,7 +103,7 @@ test("question_reply invalid payload is rejected with action context", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "missing_required_field");
+  assert.equal(result.error.code, "invalid_payload");
   assert.equal(result.error.action, "question_reply");
 });
 
@@ -137,7 +137,7 @@ test("question_reply accepts legacy toolCallId alias", () => {
   assert.equal(result.ok, true);
   assert.deepEqual(result.value.payload, {
     questionId: "question_legacy_1",
-    answer: "ok",
+    answers: [["ok"]],
   });
 });
 
@@ -155,7 +155,7 @@ test("question_reply prefers questionId when questionId and toolCallId both exis
   assert.equal(result.ok, true);
   assert.deepEqual(result.value.payload, {
     questionId: "question_primary_1",
-    answer: "ok",
+    answers: [["ok"]],
   });
 });
 

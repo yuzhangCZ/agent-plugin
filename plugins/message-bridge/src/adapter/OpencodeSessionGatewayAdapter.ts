@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- 历史适配器集中承载 OpenCode 兼容解析，本次只调整 question reply 契约。 */
 import type { CreateSessionResultData } from '../contracts/downstream-messages.js';
 import type {
   AbortSessionResultData,
@@ -23,10 +24,6 @@ import type { BridgeLogger } from '../types/logger.js';
 import type { ToolErrorEvidence } from '../utils/error.js';
 import { getErrorMessage, getToolErrorEvidence } from '../utils/error.js';
 import { SessionLookupResolver, type SessionLookupResult } from './SessionLookupResolver.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
 
 function pickString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
@@ -141,6 +138,7 @@ function readBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+// eslint-disable-next-line complexity -- 兼容 OpenCode prompt tokens 多字段缺省判断，后续适配器拆分时统一收敛。
 function normalizePromptAssistantTokens(value: unknown): PromptSessionAssistantTokens | undefined {
   const record = readRecord(value);
   const cache = readRecord(record?.cache);
@@ -170,6 +168,7 @@ function normalizePromptAssistantTokens(value: unknown): PromptSessionAssistantT
   };
 }
 
+// eslint-disable-next-line complexity -- 兼容 OpenCode prompt message 多分支解析，当前 PR 不改动该历史结构。
 function normalizePromptMessage(result: unknown): PromptSessionResultData['message'] | undefined {
   const data = extractResultData<unknown>(result);
   const root = readRecord(data);
@@ -181,6 +180,7 @@ function normalizePromptMessage(result: unknown): PromptSessionResultData['messa
     ? root.parts
       .map((part) => readRecord(part))
       .filter((part): part is Record<string, unknown> => Boolean(part))
+      // eslint-disable-next-line complexity -- 单个 part 归一化需同时兼容 text/tool/reasoning 等旧结构。
       .map((part): PromptSessionMessagePart | undefined => {
         const id = readString(part.id);
         const sessionID = readString(part.sessionID);
@@ -568,7 +568,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
 
   async replyQuestion(parameters: {
     questionId: string;
-    answer: string;
+    answers: string[][];
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>> {
     const client = this.requireClient();
@@ -577,7 +577,7 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       sourceOperation: 'question.reply',
       promiseFactory: () => client.question.reply({
         questionId: parameters.questionId,
-        answer: parameters.answer,
+        answers: parameters.answers,
       }),
       onSuccess: () => ({
         success: true,

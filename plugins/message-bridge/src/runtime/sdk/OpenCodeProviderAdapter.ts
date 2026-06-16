@@ -340,18 +340,17 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
-    const answer = input.answers[0]?.[0] ?? '';
     if (this.questionReplyCommandPort) {
       await this.questionReplyCommandPort.execute({
         questionId: input.questionId,
-        answer,
+        answers: input.answers,
       });
       return { applied: true };
     }
 
     const result = await this.opencodeSessionGatewayAdapter.replyQuestion({
       questionId: input.questionId,
-      answer,
+      answers: input.answers,
       logger: this.logger,
     });
     if (!result.success) {
