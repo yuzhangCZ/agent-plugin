@@ -113,6 +113,7 @@ export interface PermissionAskFact extends ProviderFactBase {
   // permissionId 是全局唯一的 permission reply target，不依赖 toolSessionId 二次定位。
   permissionId: string;
   permType: string;
+  /** 展示标题；投影时 undefined 会被替换为空字符串。 */
   title?: string;
   // 这里保留 unknown：metadata 是 provider 私有补充信息，仅用于透传和诊断。
   metadata?: Record<string, unknown>;

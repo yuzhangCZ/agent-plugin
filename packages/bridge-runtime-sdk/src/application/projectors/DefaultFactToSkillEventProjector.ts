@@ -119,7 +119,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         permissionId: fact.permissionId,
         ...(fact.messageId ? { messageId: fact.messageId } : {}),
         permType: fact.permType,
-        ...(fact.title ? { title: fact.title } : {}),
+        title: fact.title ?? '',
         ...(fact.metadata ? { metadata: fact.metadata } : {}),
       },
     });

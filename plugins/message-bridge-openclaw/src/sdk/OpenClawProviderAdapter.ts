@@ -709,7 +709,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     const messageId = asTrimmedString(payload.messageId) ?? `msg_${randomUUID()}`;
     const metadata = pickRecord(payload, "metadata") ?? pickRecord(payload, "meta");
-    const title = asTrimmedString(payload.title);
+    const title = asTrimmedString(payload.title) ?? "";
     const expiresAt = typeof payload.expiresAt === "number" ? payload.expiresAt : undefined;
     const record = this.approvalRegistry.upsertPending({
       toolSessionId,
@@ -732,7 +732,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
           partId: `part_${randomUUID()}`,
           permissionId,
           permType,
-          ...(record.title ? { title: record.title } : {}),
+          title: record.title,
           metadata: {
             ...(record.metadata ?? {}),
             ...(record.expiresAt !== undefined ? { expiresAt: record.expiresAt } : {}),

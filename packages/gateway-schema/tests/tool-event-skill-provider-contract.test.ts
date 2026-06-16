@@ -161,6 +161,31 @@ test('validateToolEvent preserves skill provider tool.update content fields verb
   });
 });
 
+test('validateToolEvent preserves empty skill provider permission.ask title', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'permission.ask',
+    properties: {
+      partId: 'part-permission-1',
+      permissionId: 'permission-1',
+      permType: 'file_write',
+      title: '',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    partId: 'part-permission-1',
+    permissionId: 'permission-1',
+    permType: 'file_write',
+    title: '',
+  });
+});
+
 test('validateToolEvent preserves skill provider stream protocol fields verbatim', () => {
   const result = validateToolEvent({
     protocol: 'cloud',
@@ -456,6 +481,21 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           toolCallId: 'perm-1',
           permissionId: 'perm-1',
           permType: 'file_write',
+          title: '允许写文件',
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing title',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          permissionId: 'perm-1',
+          permType: 'file_write',
         },
       },
     },
@@ -469,6 +509,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           messageId: 'msg-1',
           partId: 'part-5',
           permissionId: 'perm-1',
+          title: '允许写文件',
         },
       },
     },
