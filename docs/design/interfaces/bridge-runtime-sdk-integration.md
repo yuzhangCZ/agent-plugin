@@ -331,7 +331,7 @@ async health() {
 
 ### 4.3 `createSession(input)`
 
-用于创建或映射一个可用会话。
+仅在创建 welink session 时触发，用于建立 `toolSessionId` 与 `welinkSessionId` 的一一映射。
 
 | 项目 | 说明 |
 |---|---|
@@ -361,6 +361,8 @@ async createSession() {
   return { toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000' };
 }
 ```
+
+- `toolSessionId` 不等同于 agent session ID，Provider 需自行维护映射（见 7.10）。
 
 ### 4.4 `runMessage(input)`
 
