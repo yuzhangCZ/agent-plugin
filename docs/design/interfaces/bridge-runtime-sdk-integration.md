@@ -8,7 +8,7 @@
 
 ## 1. 文档定位
 
-本文面向 `@wecode/bridge-runtime-sdk` 集成方，说明如何实现 `ThirdPartyAgentProvider` 并接入 Runtime。
+本文面向三方 agent 开发者，说明如何通过 `@wecode/bridge-runtime-sdk` 实现 `ThirdPartyAgentProvider`，将三方 agent 接入 welink 助理。
 
 本文只描述以下稳定契约：
 
@@ -43,6 +43,8 @@
 - 重写 8.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
 - 8.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
 - 7.5 标识符语义：补充 `messageId` 与 `partId` 的层级关系和区别说明。
+- 4.3 `createSession`：补充触发时机和映射说明。
+- 1. 文档定位：修改为面向三方 agent 接入 welink 助理。
 
 ### 2026-06-15
 
