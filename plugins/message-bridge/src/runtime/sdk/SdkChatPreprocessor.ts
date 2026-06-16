@@ -41,7 +41,7 @@ export class SdkChatPreprocessor {
 
     const entryContext = this.resolveEntryContext(input);
     const ensuredContext = await this.resolveEnsuredContext(input, entryContext, logger);
-    const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext?.policy);
+    const decision = this.dependencies.chatEntryPolicy.decide(input, entryContext);
     this.logSlashDecision(input, decision, entryContext, logger);
 
     if (decision.kind === 'deny') {
@@ -77,7 +77,6 @@ export class SdkChatPreprocessor {
       input.toolSessionId,
       {
         assistantId: input.assistantId,
-        imGroupId: input.context?.imGroupId,
       },
       logger,
     );
@@ -120,7 +119,6 @@ export class SdkChatPreprocessor {
       invalid: decision.invalid,
       createContext: {
         assistantId: input.assistantId,
-        imGroupId: input.context?.imGroupId,
       },
       ensuredContext,
       ...(this.dependencies.effectiveDirectory ? { directory: this.dependencies.effectiveDirectory } : {}),

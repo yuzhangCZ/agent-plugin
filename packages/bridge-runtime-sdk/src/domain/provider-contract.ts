@@ -125,7 +125,6 @@ export interface ProviderRunMessageInput {
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
-    imGroupId?: string;
     suppressReply?: boolean;
   };
 }

@@ -367,6 +367,46 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
   }
 });
 
+test('sdk runtime forwards dialog-only permissions through session creation port', async () => {
+  const { restore } = installRegisterCaptureWebSocket();
+  const sessionCreateCalls = [];
+
+  try {
+    const runtime = await startSdkRuntime({
+      session: {
+        create: async (params) => {
+          sessionCreateCalls.push(params);
+          return {
+            data: {
+              id: 'session-dialog-only',
+              title: params?.title,
+              directory: params?.directory,
+            },
+          };
+        },
+      },
+    });
+
+    const result = await getProviderAdapter(runtime).createSession({
+      title: 'Dialog Only',
+      extParameters: createDirectEntryExtParameters(),
+    });
+
+    assert.equal(result.toolSessionId, 'session-dialog-only');
+    assert.equal(sessionCreateCalls.length, 1);
+    assert.equal(Array.isArray(sessionCreateCalls[0].body?.permission), true);
+    assert.deepEqual(sessionCreateCalls[0].body.permission[0], {
+      permission: 'bash',
+      pattern: '*',
+      action: 'deny',
+    });
+
+    runtime.stop();
+  } finally {
+    restore();
+  }
+});
+
 test('sdk runtime logs session-isolation store file path during startup', async () => {
   const { restore } = installRegisterCaptureWebSocket();
   const logs = [];

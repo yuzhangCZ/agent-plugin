@@ -10,8 +10,6 @@ import {
 } from '../../src/adapter/index.ts';
 import { SubagentSessionMapper } from '../../src/session/SubagentSessionMapper.ts';
 import {
-  CreateSessionRequestNormalizer,
-  CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
   SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
@@ -25,7 +23,6 @@ import {
 import {
   ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
-  DefaultCreatedSessionBindingPort,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
   SdkChatPreprocessor,
@@ -214,16 +211,10 @@ function createAdapter(overrides = {}) {
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
   const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => sdkClient);
-  const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
-  const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   const hostSessionCreationPort = {
     createSession: async (input) => {
-      const normalized = createSessionRequestNormalizer.fromChatContext({
-        assistantId: input?.assistantId,
-        imGroupId: input?.imGroupId,
-      });
-      const result = await createSessionUseCase.execute({
-        ...normalized,
+      void input;
+      const result = await opencodeSessionGatewayAdapter.createSession({
         directory: overrides.bridgeDirectory ?? '/workspace/test',
       });
       if (!result.success || !result.data.sessionId) {
@@ -325,12 +316,22 @@ function createAdapter(overrides = {}) {
     bindingStore.bind(anchor, sessionId);
     ownershipResolver.attach(sessionId, anchor);
   }
+  const createSessionCommandPort = overrides.createSessionCommandPort ?? {
+    execute: async (input) => ({
+      kind: 'entry_owned',
+      toolSessionId: 'ses-created-command',
+      session: {
+        id: 'ses-created-command',
+        title: input?.title,
+        directory: overrides.bridgeDirectory ?? '/workspace/test',
+      },
+    }),
+  };
 
   return new OpenCodeProviderAdapter({
     rawClient: createRawClient(),
     logger,
-    createSessionUseCase,
-    ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
+    createSessionCommandPort,
     ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
     ...(overrides.abortSessionCommandPort ? { abortSessionCommandPort: overrides.abortSessionCommandPort } : {}),
     ...(overrides.questionReplyCommandPort ? { questionReplyCommandPort: overrides.questionReplyCommandPort } : {}),
@@ -347,10 +348,6 @@ function createAdapter(overrides = {}) {
       ownershipResolver,
     }),
     eventAnchorResolver: new DefaultEventAnchorResolver({
-      ownershipResolver,
-    }),
-    createdSessionBindingPort: new DefaultCreatedSessionBindingPort({
-      bindingStore,
       ownershipResolver,
     }),
     subagentSessionMapper: new SubagentSessionMapper(() => sdkClient),
@@ -1976,16 +1973,18 @@ test('provider adapter keeps active run routing when session-isolation host even
   }]);
 });
 
-test('provider adapter createSession returns real OpenCode sessionId and establishes identity binding', async () => {
+test('provider adapter createSession delegates to session-isolation command port by default', async () => {
+  const calls = [];
   const adapter = createAdapter({
-    session: {
-      create: async () => ({
-        data: {
-          id: 'ses-created-identity',
-          title: 'Identity Session',
-          directory: '/workspace/identity',
-        },
-      }),
+    createSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return {
+          kind: 'entry_owned',
+          toolSessionId: 'ses-created-command',
+          session: { id: 'ses-created-command', title: 'Identity Session' },
+        };
+      },
     },
   });
 
@@ -1995,18 +1994,15 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
   });
 
   assert.deepEqual(result, {
-    toolSessionId: 'ses-created-identity',
+    toolSessionId: 'ses-created-command',
     title: 'Identity Session',
   });
-  assert.deepEqual(adapter.contextResolver.dependencies.bindingStore.get('ses-created-identity'), {
-    anchor: 'ses-created-identity',
-    activeOpencodeSessionId: 'ses-created-identity',
-    status: 'active',
-  });
-  assert.equal(
-    adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-identity'),
-    'ses-created-identity',
-  );
+  assert.deepEqual(calls, [{
+    title: 'Identity Session',
+    directory: '/workspace/test',
+  }]);
+  assert.equal(adapter.contextResolver.dependencies.bindingStore.get('ses-created-command'), undefined);
+  assert.equal(adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-command'), undefined);
 });
 
 test('provider adapter createSession delegates creation and ownership to session-isolation command port', async () => {
