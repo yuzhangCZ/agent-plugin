@@ -42,6 +42,7 @@
 - 4.8 新增中断时序图：体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
 - 重写 8.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
 - 8.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
+- 7.5 标识符语义：补充 `messageId` 与 `partId` 的层级关系和区别说明。
 
 ### 2026-06-15
 
@@ -999,8 +1000,9 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
 #### 标识符语义
 
 - `toolSessionId` 标识 welink 会话作用域；不代表宿主 agent session ID，映射由集成方处理（见 7.10）。
-- `messageId` 必须在所属 `toolSessionId` 内唯一。
-- `partId` 必须稳定标识同一文本、思考或工具片段。
+- `messageId` 标识一条 provider message，由 `message.start` 打开、`message.done` 关闭；必须在所属 `toolSessionId` 内唯一。一轮 run 可产出多个 message，每个 message 拥有独立的 `messageId`。
+- `partId` 标识 message 内的一个内容片段（文本、思考或工具），必须稳定标识同一片段。`partId` 隶属于 `messageId`，同一 `messageId` 下不同片段必须使用不同 `partId`；同一 `partId` 不可同时用于文本片段和思考片段。
+- `messageId` 与 `partId` 是父子层级关系：`messageId` 定义消息边界，`partId` 定义消息内的内容片段边界。内容事实（`text.delta`、`text.done`、`thinking.delta`、`thinking.done`、`tool.update`、`question.ask`）必须同时携带 `messageId` 和 `partId`，且 `messageId` 必须已通过 `message.start` 打开。
 - `runId` 绑定一次 request run，不得由 Provider 改写。
 - `questionId` 与 `permissionId` 是直接回复目标，必须可唯一定位到底层宿主对象。
 
