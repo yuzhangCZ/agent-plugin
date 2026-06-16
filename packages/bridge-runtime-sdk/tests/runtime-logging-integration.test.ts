@@ -3,8 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
+import type { GatewayUplinkBusinessMessage } from '@agent-plugin/gateway-schema';
 import type { BridgeGatewayHostConfig, BridgeRuntimeOptions, ThirdPartyAgentProvider } from '../src/index.ts';
 import { createBridgeRuntime } from '../src/index.ts';
+import { GatewayOutboundSinkAdapter } from '../src/adapters/gateway/GatewayOutboundSinkAdapter.ts';
+import { BridgeGatewayLoggerObservationAdapter } from '../src/adapters/observation/runtime-logger-observation.ts';
+import type { GatewayRuntimeDriver } from '../src/application/ports/gateway-runtime-driver.ts';
+import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
 import type {
   BridgeGatewayHostConnection,
   BridgeGatewayLogger,
@@ -158,6 +163,24 @@ type RuntimeTestOptions = BridgeRuntimeOptions & {
   connectionFactory: () => BridgeGatewayHostConnection;
 };
 
+function createRecordingGatewayDriver(): GatewayRuntimeDriver & { sent: GatewayUplinkBusinessMessage[] } {
+  return {
+    sent: [],
+    attach() {},
+    async connect() {},
+    async disconnect() {},
+    getStatus() {
+      return GatewayClientStatus.ready();
+    },
+    send(message) {
+      this.sent.push(message);
+    },
+    isReady() {
+      return true;
+    },
+  };
+}
+
 test('runtime projects observation events into lifecycle and command logs', async () => {
   const connection = new FakeGatewayClient();
   const logger = new RecordingLogger();
@@ -218,4 +241,29 @@ test('runtime logs invalid invoke rejection and gateway failures through observa
 
   assert.equal(hasLog(logger.logs, 'runtime_sdk.downstream.invalid_invoke_rejected', 'warn'), true);
   assert.equal(hasLog(logger.logs, 'runtime_sdk.failure.recorded', 'error'), true);
+});
+
+test('runtime logs invalid tool_event validation with event type and field before gateway send', () => {
+  const logger = new RecordingLogger();
+  const driver = createRecordingGatewayDriver();
+  const observation = new DefaultRuntimeObservation(new BridgeGatewayLoggerObservationAdapter(logger));
+  const sink = new GatewayOutboundSinkAdapter(driver, observation);
+
+  sink.send({
+    type: 'tool_event',
+    toolSessionId: 'tool-invalid-event',
+    event: {
+      type: 'session.status',
+      properties: {},
+    },
+  } as GatewayUplinkBusinessMessage);
+
+  const validationLog = logger.logs.find((log) => log.message === 'runtime_sdk.uplink.validation_failed');
+  assert.equal(validationLog?.level, 'warn');
+  assert.equal(validationLog?.meta?.messageType, 'tool_event');
+  assert.equal(validationLog?.meta?.eventType, 'session.status');
+  assert.equal(validationLog?.meta?.field, 'properties.sessionID');
+  assert.equal(validationLog?.meta?.code, 'missing_required_field');
+  assert.equal(validationLog?.meta?.toolSessionId, 'tool-invalid-event');
+  assert.equal(driver.sent.length, 0);
 });
