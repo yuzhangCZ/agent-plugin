@@ -24,6 +24,9 @@ import {
   RuntimeAnchorRegistry,
 } from '../../src/runtime/sdk/session-isolation/index.ts';
 
+const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 function createLogger() {
   const noop = () => undefined;
   return {
@@ -603,99 +606,115 @@ test('DefaultChatExecutionContextResolver delegates existing binding owner refre
 });
 
 test('EntryAwareChatSessionResolver reuses visible session for the same business entry only', async () => {
+  const originalNow = Date.now;
+  Date.now = () => FIXED_NOW;
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
   const switchCalls = [];
   const createCalls = [];
+  const resolveCalls = [];
   const logs = [];
-  const resolver = new EntryAwareChatSessionResolver({
-    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
-    resolveEntrySessionContextUseCase: {
-      execute: async (input) => {
-        if (input.entryKey.businessSessionId === 'group-a') {
+  try {
+    const resolver = new EntryAwareChatSessionResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      resolveEntrySessionContextUseCase: {
+        execute: async (input) => {
+          resolveCalls.push(input);
+          if (input.entryKey.businessSessionId === 'group-a') {
+            return {
+              toolSessionId: input.toolSessionId,
+              visibleSessions: [{ id: 'ses-group-a', directory: '/workspace/a' }],
+            };
+          }
           return {
             toolSessionId: input.toolSessionId,
-            visibleSessions: [{ id: 'ses-group-a', directory: '/workspace/a' }],
+            visibleSessions: [],
           };
-        }
-        return {
-          toolSessionId: input.toolSessionId,
-          visibleSessions: [],
-        };
-      },
-    },
-    switchAttachedSessionUseCase: {
-      execute: async (input) => {
-        switchCalls.push(input);
-        return { applied: true };
-      },
-    },
-    createOwnedSessionUseCase: {
-      execute: async (input) => {
-        createCalls.push(input);
-        return { session: { id: 'ses-created-b', directory: '/workspace/b' } };
-      },
-    },
-    runtimeAnchorRepository: new RuntimeAnchorRegistry(),
-    modelOverrideStore,
-  });
-
-  const reused = await resolver.resolve({
-    message: {
-      traceId: 'trace-a',
-      runId: 'run-a',
-      toolSessionId: 'tool-a',
-      text: 'hello',
-      extParameters: {
-        platformExtParam: {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: 'group-a',
         },
       },
-    },
-    logger: createCapturingLogger(logs),
-  });
-  const created = await resolver.resolve({
-    message: {
-      traceId: 'trace-b',
-      runId: 'run-b',
-      toolSessionId: 'tool-b',
-      text: 'hello',
-      extParameters: {
-        platformExtParam: {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: 'group-b',
+      switchAttachedSessionUseCase: {
+        execute: async (input) => {
+          switchCalls.push(input);
+          return { applied: true };
         },
       },
-    },
-    logger: createCapturingLogger(logs),
-  });
+      createOwnedSessionUseCase: {
+        execute: async (input) => {
+          createCalls.push(input);
+          return { session: { id: 'ses-created-b', directory: '/workspace/b' } };
+        },
+      },
+      runtimeAnchorRepository: new RuntimeAnchorRegistry(),
+      modelOverrideStore,
+    });
 
-  assert.deepEqual(reused, {
-    opencodeSessionId: 'ses-group-a',
-    session: { id: 'ses-group-a', directory: '/workspace/a' },
-    scope: { directory: '/workspace/a' },
-    modelOverride: undefined,
-    bootstrapSource: 'bootstrap_reused_recent_session',
-  });
-  assert.deepEqual(created, {
-    opencodeSessionId: 'ses-created-b',
-    session: { id: 'ses-created-b', directory: '/workspace/b' },
-    scope: { directory: '/workspace/b' },
-    modelOverride: undefined,
-    bootstrapSource: 'bootstrap_created',
-  });
-  assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
-  assert.equal(createCalls[0].toolSessionId, 'tool-b');
-  assert.equal(createCalls[0].entryKey.businessSessionId, 'group-b');
-  const reusedLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session');
-  const createdLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_created');
-  assert.equal(logs.some((entry) => entry.message === 'sdk_chat_context.entry_existing_binding'), false);
-  assert.equal(reusedLog.extra.entryKey, 'im:group:group-a');
-  assert.deepEqual(reusedLog.extra.visibleSessionIds, ['ses-group-a']);
-  assert.equal(createdLog.extra.entryKey, 'im:group:group-b');
-  assert.deepEqual(createdLog.extra.visibleSessionIds, []);
+    const reused = await resolver.resolve({
+      message: {
+        traceId: 'trace-a',
+        runId: 'run-a',
+        toolSessionId: 'tool-a',
+        text: 'hello',
+        extParameters: {
+          platformExtParam: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'group-a',
+          },
+        },
+      },
+      logger: createCapturingLogger(logs),
+    });
+    const created = await resolver.resolve({
+      message: {
+        traceId: 'trace-b',
+        runId: 'run-b',
+        toolSessionId: 'tool-b',
+        text: 'hello',
+        extParameters: {
+          platformExtParam: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'group-b',
+          },
+        },
+      },
+      logger: createCapturingLogger(logs),
+    });
+
+    assert.deepEqual(reused, {
+      opencodeSessionId: 'ses-group-a',
+      session: { id: 'ses-group-a', directory: '/workspace/a' },
+      scope: { directory: '/workspace/a' },
+      modelOverride: undefined,
+      bootstrapSource: 'bootstrap_reused_recent_session',
+    });
+    assert.deepEqual(created, {
+      opencodeSessionId: 'ses-created-b',
+      session: { id: 'ses-created-b', directory: '/workspace/b' },
+      scope: { directory: '/workspace/b' },
+      modelOverride: undefined,
+      bootstrapSource: 'bootstrap_created',
+    });
+    assert.deepEqual(resolveCalls.map((call) => ({
+      toolSessionId: call.toolSessionId,
+      roots: call.roots,
+      start: call.start,
+    })), [
+      { toolSessionId: 'tool-a', roots: true, start: FIXED_NOW - THIRTY_DAYS_MS },
+      { toolSessionId: 'tool-b', roots: true, start: FIXED_NOW - THIRTY_DAYS_MS },
+    ]);
+    assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
+    assert.equal(createCalls[0].toolSessionId, 'tool-b');
+    assert.equal(createCalls[0].entryKey.businessSessionId, 'group-b');
+    const reusedLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_reused_visible_session');
+    const createdLog = logs.find((entry) => entry.message === 'sdk_chat_context.entry_created');
+    assert.equal(logs.some((entry) => entry.message === 'sdk_chat_context.entry_existing_binding'), false);
+    assert.equal(reusedLog.extra.entryKey, 'im:group:group-a');
+    assert.deepEqual(reusedLog.extra.visibleSessionIds, ['ses-group-a']);
+    assert.equal(createdLog.extra.entryKey, 'im:group:group-b');
+    assert.deepEqual(createdLog.extra.visibleSessionIds, []);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('EntryAwareChatSessionResolver logs existing binding separately from visible session reuse', async () => {
