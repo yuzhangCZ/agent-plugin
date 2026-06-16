@@ -320,6 +320,7 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
       type: 'uplink_validation',
       phase: 'sending',
       messageType: message.type,
+      eventType: this.getEventType(message),
       toolSessionId: this.getToolSessionId(message),
       welinkSessionId: this.getWelinkSessionId(message),
     });
@@ -330,16 +331,24 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
       type: 'uplink_validation',
       phase: 'validated',
       messageType: message.type,
+      eventType: this.getEventType(message),
       toolSessionId: this.getToolSessionId(message),
       welinkSessionId: this.getWelinkSessionId(message),
     });
   }
 
-  uplinkValidationFailed(message: GatewayUplinkBusinessMessage, code: string, field?: string, reason?: string): void {
+  uplinkValidationFailed(
+    message: GatewayUplinkBusinessMessage,
+    code: string,
+    field?: string,
+    reason?: string,
+    eventType?: string,
+  ): void {
     this.port.record({
       type: 'uplink_validation',
       phase: 'validation_failed',
       messageType: message.type,
+      eventType: eventType ?? this.getEventType(message),
       toolSessionId: this.getToolSessionId(message),
       welinkSessionId: this.getWelinkSessionId(message),
       code,
@@ -359,6 +368,10 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
 
   private getToolSessionId(message: GatewayUplinkBusinessMessage): string | undefined {
     return 'toolSessionId' in message && typeof message.toolSessionId === 'string' ? message.toolSessionId : undefined;
+  }
+
+  private getEventType(message: GatewayUplinkBusinessMessage): string | undefined {
+    return message.type === 'tool_event' ? message.event?.type : undefined;
   }
 
   private getWelinkSessionId(message: GatewayUplinkBusinessMessage): string | undefined {

@@ -205,6 +205,7 @@ export type UplinkObservationEvent =
       type: 'uplink_validation';
       phase: 'sending' | 'validated' | 'validation_failed';
       messageType: GatewayUplinkBusinessMessage['type'];
+      eventType?: string;
       toolSessionId?: string;
       welinkSessionId?: string;
       code?: string;

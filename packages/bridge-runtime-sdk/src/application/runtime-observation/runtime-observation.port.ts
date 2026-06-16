@@ -135,7 +135,13 @@ export interface RuntimeObservation {
   uplinkEmitted(message: GatewayUplinkBusinessMessage): void;
   uplinkSending(message: GatewayUplinkBusinessMessage): void;
   uplinkValidated(message: GatewayUplinkBusinessMessage): void;
-  uplinkValidationFailed(message: GatewayUplinkBusinessMessage, code: string, field?: string, reason?: string): void;
+  uplinkValidationFailed(
+    message: GatewayUplinkBusinessMessage,
+    code: string,
+    field?: string,
+    reason?: string,
+    eventType?: string,
+  ): void;
   /**
    * 记录需要进入 RuntimeDiagnostics.failures 的 runtime 失败事件。
    * @remarks 不用于 probe/status/health check 等查询型结果。

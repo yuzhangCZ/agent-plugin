@@ -206,6 +206,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           `runtime_sdk.uplink.${event.phase}`,
           {
             messageType: event.messageType,
+            eventType: event.eventType,
             toolSessionId: event.toolSessionId,
             welinkSessionId: event.welinkSessionId,
             code: event.code,
