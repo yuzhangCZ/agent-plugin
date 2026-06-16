@@ -1140,6 +1140,8 @@ export class DemoProvider implements ThirdPartyAgentProvider {
             message: error instanceof Error ? error.message : String(error),
           },
         });
+      } finally {
+        this.activeRuns.delete(input.runId);
       }
     })();
 
@@ -1181,6 +1183,8 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 
 ### 8.2 最小文本输出示例
 
+> 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
+
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
   const messageId = `msg_${input.runId}`;
@@ -1211,6 +1215,8 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 ```
 
 ### 8.3 挂起交互与回复示例
+
+> 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
