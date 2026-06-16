@@ -6,7 +6,21 @@
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
 
-## 1. 文档定位
+## 1. 安装
+
+### 1.1 配置 npm 二方仓
+
+```bash
+npm config set @wecode:registry https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/
+```
+
+### 1.2 安装 SDK
+
+```bash
+npm install @wecode/bridge-runtime-sdk
+```
+
+## 2. 文档定位
 
 本文面向三方 agent 开发者，说明如何通过 `@wecode/bridge-runtime-sdk` 实现 `ThirdPartyAgentProvider`，将三方 agent 接入 welink 助理。
 
@@ -24,7 +38,7 @@
 - 消费侧展示逻辑或事件映射逻辑
 - 仓库内部代码组织、测试缝或源码定位方式
 
-## 1.1 Changelog
+## 2.1 Changelog
 
 ### 2026-06-16
 
@@ -64,7 +78,7 @@
 - `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
 - `PermissionReplyFact`: `messageId, partId` 移除
 
-## 2. 稳定导出概览
+## 3. 稳定导出概览
 
 `@wecode/bridge-runtime-sdk` 根入口稳定导出 3 类能力：
 
@@ -74,9 +88,9 @@
 
 接入方统一从 `@wecode/bridge-runtime-sdk` 导入运行时 API、Provider 契约和二维码授权能力即可。
 
-## 3. Runtime API
+## 4. Runtime API
 
-### 3.1 `createBridgeRuntime(options)`
+### 4.1 `createBridgeRuntime(options)`
 
 用于创建 Runtime 实例。
 
@@ -132,7 +146,7 @@ const runtime = await createBridgeRuntime({
 });
 ```
 
-### 3.2 `runtime.start()`
+### 4.2 `runtime.start()`
 
 用于启动 Runtime。
 
@@ -152,7 +166,7 @@ const runtime = await createBridgeRuntime({
 await runtime.start();
 ```
 
-### 3.3 `runtime.stop()`
+### 4.3 `runtime.stop()`
 
 用于停止 Runtime。
 
@@ -171,7 +185,7 @@ await runtime.start();
 await runtime.stop();
 ```
 
-### 3.4 `runtime.probe(input)`
+### 4.4 `runtime.probe(input)`
 
 用于主动探测当前配置。
 
@@ -194,7 +208,7 @@ await runtime.stop();
 const probe = await runtime.probe({ timeoutMs: 3000 });
 ```
 
-### 3.5 `runtime.getStatus()`
+### 4.5 `runtime.getStatus()`
 
 用于读取当前生命周期状态。
 
@@ -239,7 +253,7 @@ const status = runtime.getStatus();
 
 若调用方需要稳定分类、错误码或失败阶段，应读取 `runtime.getDiagnostics().failures.at(-1)`，不要基于 `failureReason` 做业务分支。
 
-### 3.6 `runtime.getDiagnostics()`
+### 4.6 `runtime.getDiagnostics()`
 
 用于读取当前诊断快照。
 
@@ -280,9 +294,9 @@ const diagnostics = runtime.getDiagnostics();
 | `message` | `string` | 是 | 原始错误消息摘要。 |
 | `code` | `string` | 否 | 可用时保留原始稳定错误码，例如连接错误码或 BridgeRuntimeError code。 |
 
-## 4. Provider API
+## 5. Provider API
 
-### 4.1 `initialize(context)`
+### 5.1 `initialize(context)`
 
 用于接收 Runtime 注入的运行时上下文。
 
@@ -302,7 +316,7 @@ const diagnostics = runtime.getDiagnostics();
 - 该接口为可选实现。
 - 若实现，应保证调用安全。
 
-### 4.2 `health(input)`
+### 5.2 `health(input)`
 
 用于查询 Provider 当前是否在线可用。
 
@@ -331,7 +345,7 @@ async health() {
 }
 ```
 
-### 4.3 `createSession(input)`
+### 5.3 `createSession(input)`
 
 仅在创建 welink session 时触发，用于建立 `toolSessionId` 与 `welinkSessionId` 的一一映射。
 
@@ -364,9 +378,9 @@ async createSession() {
 }
 ```
 
-- `toolSessionId` 不等同于 agent session ID，Provider 需自行维护映射（见 7.10）。
+- `toolSessionId` 不等同于 agent session ID，Provider 需自行维护映射（见 8.10）。
 
-### 4.4 `runMessage(input)`
+### 5.4 `runMessage(input)`
 
 用于启动一次 request run。
 
@@ -480,7 +494,7 @@ async runMessage(input: ProviderRunMessageInput) {
 }
 ```
 
-### 4.5 `replyQuestion(input)`
+### 5.5 `replyQuestion(input)`
 
 用于应用一次问题回复。
 
@@ -501,7 +515,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示回复已真实应用到底层宿主。
 
-### 4.6 `replyPermission(input)`
+### 5.6 `replyPermission(input)`
 
 用于应用一次权限回复。
 
@@ -522,7 +536,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示回复已真实应用到底层宿主。
 
-### 4.7 `closeSession(input)`
+### 5.7 `closeSession(input)`
 
 用于关闭指定会话。
 
@@ -542,7 +556,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示关闭操作已真实应用到底层宿主。
 
-### 4.8 `abortSession(input)`
+### 5.8 `abortSession(input)`
 
 用于中止指定执行或会话。
 
@@ -589,7 +603,7 @@ sequenceDiagram
 - Provider 收到 `abortSession()` 后，必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
 - `abortSession()` 返回 `{ applied: true }` 只表示中断请求已接收，不代表 `result()` 已 resolve；终态仍以 `result()` 为准。
 
-### 4.9 `dispose()`
+### 5.9 `dispose()`
 
 用于在 Runtime 停止时执行清理。
 
@@ -602,7 +616,7 @@ sequenceDiagram
 
 - 该接口为可选实现。
 
-### 4.10 `RuntimeOutboundEmitter`
+### 5.10 `RuntimeOutboundEmitter`
 
 Runtime 注入到 Provider 的主动发送出口。
 
@@ -625,7 +639,7 @@ export interface RuntimeOutboundEmitter {
 - outbound 只用于 request run 之外的主动消息。
 - 集成方不得用 outbound 代替 `runMessage()` 的正常回复路径。
 
-### 4.11 `emitOutboundMessage(input)`
+### 5.11 `emitOutboundMessage(input)`
 
 用于发送 outbound 事实流。
 
@@ -661,7 +675,7 @@ await context.outbound.emitOutboundMessage({
 });
 ```
 
-### 4.12 `emitOutboundRun(input)`
+### 5.12 `emitOutboundRun(input)`
 
 用于发送一轮带 run 标识的主动 facts 流。
 
@@ -693,9 +707,9 @@ await context.outbound.emitOutboundRun({
 });
 ```
 
-## 5. 二维码授权 API
+## 6. 二维码授权 API
 
-### 5.1 `qrcodeAuth.run(input)`
+### 6.1 `qrcodeAuth.run(input)`
 
 用于启动二维码授权流程。
 
@@ -767,7 +781,7 @@ await qrcodeAuth.run({
 });
 ```
 
-## 6. 整体主流程时序图
+## 7. 整体主流程时序图
 
 ```mermaid
 sequenceDiagram
@@ -804,16 +818,16 @@ sequenceDiagram
 - 一轮 `runMessage()` 可产出多个 message，每个 message 拥有独立的 `messageId`。
 - `stop()` 后 Runtime 不再继续使用旧上下文；若实现了 `dispose()`，会进入清理阶段。
 
-## 7. 公共类型与通用约束
+## 8. 公共类型与通用约束
 
-### 7.1 `ProviderFact` 与 `OutboundFact`
+### 8.1 `ProviderFact` 与 `OutboundFact`
 
 `ProviderFact` 是 request run 使用的事实集合，`OutboundFact` 与其共用同一套事实类型。两者差别只在生命周期来源：
 
 - request run 通过 `ProviderRun.facts` 产出，并由 `result()` 收口
 - outbound 通过 `emitOutboundMessage()` 或 `emitOutboundRun()` 主动发送；`emitOutboundRun()` 带 `runId`，`emitOutboundMessage()` 按单批消息发送
 
-### 7.2 事实类型分组
+### 8.2 事实类型分组
 
 - 消息生命周期：`message.start`、`message.done`
 - 文本输出：`text.delta`、`text.done`
@@ -823,7 +837,7 @@ sequenceDiagram
 - 会话信息：`session.title`
 - 会话错误：`session.error`
 
-### 7.3 主要 fact 字段
+### 8.3 主要 fact 字段
 
 `type` 是 `ProviderFact` 的语义标签，用于声明当前事实在运行时中的生命周期含义，而不是仅表示“事实类型”。Runtime 会按该字段判断消息作用域、内容流收口、交互回复目标和会话级事件边界。
 
@@ -983,7 +997,7 @@ sequenceDiagram
 | `error` | `ProviderError` | 是 | 会话级错误信息。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
-### 7.4 文本流规则
+### 8.4 文本流规则
 
 - `message.start` 表示一条消息开始。
 - `text.delta` 用于发送尚未收口的文本增量。
@@ -999,11 +1013,11 @@ yield { type: 'text.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8'
 yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8' };
 ```
 
-### 7.5 标识符约束
+### 8.5 标识符约束
 
 #### 标识符语义
 
-- `toolSessionId` 标识 welink 会话作用域；不代表宿主 agent session ID，映射由集成方处理（见 7.10）。
+- `toolSessionId` 标识 welink 会话作用域；不代表宿主 agent session ID，映射由集成方处理（见 8.10）。
 - `messageId` 标识一条 provider message，由 `message.start` 打开、`message.done` 关闭；必须在所属 `toolSessionId` 内唯一。一轮 run 可产出多个 message，每个 message 拥有独立的 `messageId`。
 - `partId` 标识 message 内的一个内容片段（文本、思考或工具），必须稳定标识同一片段。`partId` 隶属于 `messageId`，同一 `messageId` 下不同片段必须使用不同 `partId`；同一 `partId` 不可同时用于文本片段和思考片段。
 - `messageId` 与 `partId` 是父子层级关系：`messageId` 定义消息边界，`partId` 定义消息内的内容片段边界。内容事实（`text.delta`、`text.done`、`thinking.delta`、`thinking.done`、`tool.update`、`question.ask`）必须同时携带 `messageId` 和 `partId`，且 `messageId` 必须已通过 `message.start` 打开。
@@ -1020,7 +1034,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
 - `messageId` 在同一 `toolSessionId` 内跨多轮 run 不可重复打开或关闭后重开。
 - `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。
 
-### 7.6 `ProviderError`
+### 8.6 `ProviderError`
 
 用于表达执行期错误或 run 失败原因。
 
@@ -1031,7 +1045,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
 | `retryable` | `boolean` | 否 | 是否建议重试。 |
 | `details` | `Record<string, unknown>` | 否 | 可选补充上下文。 |
 
-### 7.7 `ProviderCommandError`
+### 8.7 `ProviderCommandError`
 
 用于表达命令应用阶段失败。
 
@@ -1042,7 +1056,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
 | `retryable` | `boolean` | 否 | 是否建议重试。 |
 | `details` | `Record<string, unknown>` | 否 | 可选补充上下文。 |
 
-### 7.8 失败表达边界
+### 8.8 失败表达边界
 
 - Provider 方法在命令应用阶段失败时，应抛出 `ProviderCommandError`。
 - 宿主需要在事实流中表达会话级错误时，应发送 `SessionErrorFact`。
@@ -1050,7 +1064,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
 - 集成方不得把命令应用失败伪装成 `ProviderTerminalResult.error`。
 - 集成方不得用 `SessionErrorFact` 代替 `ProviderRun.result()` 收口。
 
-### 7.9 `BridgeRuntimeError`
+### 8.9 `BridgeRuntimeError`
 
 SDK 在生命周期和连接阶段抛出的稳定错误类型。
 
@@ -1080,7 +1094,7 @@ SDK 在生命周期和连接阶段抛出的稳定错误类型。
 - `BridgeRuntimeStatusSnapshot.error` 仅在 `state` 为 `failed` 时可能携带 `BridgeRuntimeError`。
 - 集成方可基于 `error.code` 做稳定分类，不应基于 `message` 做业务分支。
 
-### 7.10 `toolSessionId` 与 agent session 映射
+### 8.10 `toolSessionId` 与 agent session 映射
 
 `toolSessionId` 是 bridge runtime 协议层的 welink 会话标识，由网关下行请求带入，不代表宿主 agent 自身的 session ID。
 
@@ -1089,9 +1103,9 @@ SDK 在生命周期和连接阶段抛出的稳定错误类型。
 - Provider 在 `createSession()`、`runMessage()`、`closeSession()`、`abortSession()` 等方法中收到 `toolSessionId` 时，需自行映射到底层 agent session。
 - SDK 不感知、不缓存、不代理 agent session ID；映射失败或找不到对应 session 时，Provider 应抛出 `ProviderError`（`code: 'session_not_found'`）。
 
-## 8. 最小接入示例
+## 9. 最小接入示例
 
-### 8.1 最小 Provider 示例
+### 9.1 最小 Provider 示例
 
 ```ts
 import type {
@@ -1187,7 +1201,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 - 中断时（`abortSession` 被调用），Provider 必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
 - SDK 不会自动取消 facts 流或强制 resolve `result()`；终态收口是 Provider 的职责。
 
-### 8.2 最小文本输出示例
+### 9.2 最小文本输出示例
 
 > 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
 
@@ -1220,7 +1234,7 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 }
 ```
 
-### 8.3 挂起交互与回复示例
+### 9.3 挂起交互与回复示例
 
 > 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
 
@@ -1258,7 +1272,7 @@ async replyQuestion(input: ProviderQuestionReplyInput) {
 }
 ```
 
-### 8.4 常见错误用法
+### 9.4 常见错误用法
 
 - 用 `message.done` 代替 `result()` 收口。
 - 返回的 `ProviderRun.runId` 与输入 `runId` 不一致。
