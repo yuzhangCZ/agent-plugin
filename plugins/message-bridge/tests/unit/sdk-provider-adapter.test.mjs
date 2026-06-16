@@ -3640,6 +3640,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       id: 'perm-1',
       permission: 'file_write',
       partID: 'part-permission-1',
+      patterns: ['src/app.ts'],
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -3660,17 +3661,93 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       },
     },
   });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-3',
+      permission: 'bash',
+      patterns: ['npm test'],
+      metadata: {
+        command: 'npm test',
+        description: 'Run tests',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-4',
+      permission: 'edit',
+      patterns: ['src/index.ts'],
+      metadata: {
+        filepath: '/repo/src/index.ts',
+        diff: '--- old\n+++ new',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-5',
+      permission: 'bash',
+      metadata: {},
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-6',
+      permission: 'task',
+      metadata: {},
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-7',
+      permission: 'bash',
+      metadata: new Proxy({}, {
+        get(_target, property) {
+          if (property === 'description') {
+            throw new Error('metadata read failed');
+          }
+          return undefined;
+        },
+      }),
+    },
+  });
+  const throwingMetadataProperties = {
+    sessionID: 'tool-permission',
+    id: 'perm-8',
+    permission: 'bash',
+  };
+  Object.defineProperty(throwingMetadataProperties, 'metadata', {
+    enumerable: true,
+    get() {
+      throw new Error('metadata getter failed');
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: throwingMetadataProperties,
+  });
 
   promptDeferred.resolve(createPromptResponse());
   const facts = await collect(run.facts);
 
-  assert.equal(facts.length, 2);
+  assert.equal(facts.length, 8);
   assert.deepEqual(facts[0], {
     type: 'permission.ask',
     messageId: 'msg-tool-1',
     partId: 'part-permission-1',
     permissionId: 'perm-1',
     permType: 'file_write',
+    title: 'src/app.ts',
     metadata: {
       scope: 'workspace',
     },
@@ -3679,6 +3756,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       id: 'perm-1',
       permission: 'file_write',
       partID: 'part-permission-1',
+      patterns: ['src/app.ts'],
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -3698,6 +3776,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       partId: '<generated>',
       permissionId: 'perm-2',
       permType: 'shell',
+      title: '',
       metadata: {
         scope: 'fallback',
       },
@@ -3711,6 +3790,31 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       },
     },
   );
+  assert.equal(facts[2].type, 'permission.ask');
+  assert.equal(facts[2].permissionId, 'perm-3');
+  assert.equal(facts[2].permType, 'bash');
+  assert.equal(facts[2].title, 'Run tests');
+  assert.equal(facts[3].type, 'permission.ask');
+  assert.equal(facts[3].permissionId, 'perm-4');
+  assert.equal(facts[3].permType, 'edit');
+  assert.equal(facts[3].title, 'Edit /repo/src/index.ts');
+  assert.equal(facts[4].type, 'permission.ask');
+  assert.equal(facts[4].permissionId, 'perm-5');
+  assert.equal(facts[4].permType, 'bash');
+  assert.equal(facts[4].title, '');
+  assert.equal(facts[5].type, 'permission.ask');
+  assert.equal(facts[5].permissionId, 'perm-6');
+  assert.equal(facts[5].permType, 'task');
+  assert.equal(facts[5].title, '');
+  assert.equal(facts[6].type, 'permission.ask');
+  assert.equal(facts[6].permissionId, 'perm-7');
+  assert.equal(facts[6].permType, 'bash');
+  assert.equal(facts[6].title, '');
+  assert.equal(facts[7].type, 'permission.ask');
+  assert.equal(facts[7].permissionId, 'perm-8');
+  assert.equal(facts[7].permType, 'bash');
+  assert.equal(facts[7].title, '');
+  assert.equal('metadata' in facts[7], false);
   assert.match(facts[1].partId, /^prt_[0-9a-f]{32}$/);
   assert.deepEqual(pendingInteractions, [
     {
@@ -3722,6 +3826,42 @@ test('provider adapter maps permission.asked permission field and legacy type fa
     {
       kind: 'permission',
       tokenId: 'perm-2',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-3',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-4',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-5',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-6',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-7',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-8',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
     },

@@ -362,6 +362,7 @@ export interface PermissionAskFact extends ProviderFactBase {
    */
   permissionId: string;
   permType: string;
+  /** 展示标题；投影时 undefined 会被替换为空字符串。 */
   title?: string;
   metadata?: Record<string, unknown>;
   raw?: unknown;

@@ -9,7 +9,7 @@ const skillPermissionAskEventPropertiesSchema = z
     partId: requiredTrimmedString,
     permissionId: requiredTrimmedString,
     permType: requiredTrimmedString,
-    title: requiredTrimmedString.optional(),
+    title: z.string().max(512),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough()
@@ -27,7 +27,7 @@ const skillPermissionAskEventPropertiesSchema = z
     partId,
     permissionId,
     permType,
-    ...(title === undefined ? {} : { title }),
+    title,
     ...(metadata === undefined ? {} : { metadata }),
   }));
 

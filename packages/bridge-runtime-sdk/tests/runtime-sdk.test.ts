@@ -2206,6 +2206,143 @@ test('question.ask rejects globally duplicated questionId across sessions withou
   });
 });
 
+test('permission.ask preserves empty title during projection', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.ask',
+                partId: 'permission-empty-title',
+                permissionId: 'permission-empty-title',
+                permType: 'file_write',
+                title: '',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const permissionEvent = connection.sent.find((message) => message.type === 'tool_event' && message.event?.type === 'permission.ask');
+  assert.ok(permissionEvent);
+  assert.deepStrictEqual(permissionEvent, {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'permission.ask',
+      properties: {
+        partId: 'permission-empty-title',
+        permissionId: 'permission-empty-title',
+        permType: 'file_write',
+        title: '',
+      },
+    },
+  });
+});
+
+test('permission.ask defaults missing title to empty string during projection', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.ask',
+                partId: 'permission-missing-title',
+                permissionId: 'permission-missing-title',
+                permType: 'file_write',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const permissionEvent = connection.sent.find((message) => message.type === 'tool_event' && message.event?.type === 'permission.ask');
+  assert.ok(permissionEvent);
+  assert.deepStrictEqual(permissionEvent, {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'permission.ask',
+      properties: {
+        partId: 'permission-missing-title',
+        permissionId: 'permission-missing-title',
+        permType: 'file_write',
+        title: '',
+      },
+    },
+  });
+});
+
 test('permission.ask rejects globally duplicated permissionId across sessions without clearing pending interactions', async () => {
   const connection = new FakeGatewayClient();
   const repliedPermissionIds: string[] = [];
