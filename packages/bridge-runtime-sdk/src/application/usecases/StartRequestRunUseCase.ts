@@ -55,7 +55,6 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       const providerContext = {
         ...(command.source.payload.assistantAccount ? { assistantAccount: command.source.payload.assistantAccount } : {}),
         ...(command.source.payload.sendUserAccount ? { sendUserAccount: command.source.payload.sendUserAccount } : {}),
-        ...(command.source.payload.imGroupId ? { imGroupId: command.source.payload.imGroupId } : {}),
         ...(command.source.suppressReply !== undefined ? { suppressReply: command.source.suppressReply } : {}),
       };
       const run = await this.handlers.startRequestRun({
@@ -63,7 +62,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
         runId,
         toolSessionId,
         text: command.source.payload.text,
-        assistantId: command.source.payload.assistantId,
+        ...(command.source.payload.assistantId ? { assistantId: command.source.payload.assistantId } : {}),
         ...(command.source.payload.extParameters !== undefined
           ? { extParameters: command.source.payload.extParameters }
           : {}),

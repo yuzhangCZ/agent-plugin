@@ -92,13 +92,19 @@ test('ChatEntryPolicy disables group-only forbidden slash commands', () => {
         runId: 'run-2',
         toolSessionId: 'anchor-2',
         text: '@bot /sessions',
-        context: { imGroupId: 'group-1' },
       },
       {
-        entryKey: 'im:group:group-1',
-        controlled: true,
-        allowOpencodeNativeSessions: false,
-        allowedSlashCommands: ['new'],
+        entryKey: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-1',
+        },
+        policy: {
+          entryKey: 'im:group:group-1',
+          controlled: true,
+          allowOpencodeNativeSessions: false,
+          allowedSlashCommands: ['new'],
+        },
       },
     ),
     {
@@ -122,13 +128,19 @@ test('ChatEntryPolicy allows group slash commands when policy includes command',
         runId: 'run-group-allow',
         toolSessionId: 'anchor-group-allow',
         text: '@bot /sessions',
-        context: { imGroupId: 'group-1' },
       },
       {
-        entryKey: 'im:group:group-1',
-        controlled: true,
-        allowOpencodeNativeSessions: false,
-        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        entryKey: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'group',
+          businessSessionId: 'group-1',
+        },
+        policy: {
+          entryKey: 'im:group:group-1',
+          controlled: true,
+          allowOpencodeNativeSessions: false,
+          allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        },
       },
     ),
     {
@@ -971,9 +983,6 @@ test('EntryAwareChatSessionResolver keeps anchor-only state when chat businessSe
         runId: 'run-anchor-only',
         toolSessionId: 'tool-anchor-only',
         text: 'hello',
-        context: {
-          imGroupId: 'group-a',
-        },
       },
     }),
     /business_entry_key_required/,
@@ -1139,7 +1148,6 @@ test('SdkChatPreprocessor fails closed when domain is missing even if im legacy 
       toolSessionId: 'tool-missing-domain-im',
       text: 'hello',
       context: {
-        imGroupId: 'group-a',
         assistantAccount: 'bot-1',
         sendUserAccount: 'user-1',
       },

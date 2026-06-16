@@ -1105,9 +1105,62 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     context: {
       assistantAccount: 'assistant-account',
       sendUserAccount: 'user-account',
-      imGroupId: 'group-1',
       suppressReply: true,
     },
+  });
+});
+
+test('start_request_run does not synthesize extParameters from legacy imGroupId', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedInput: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          capturedInput = input as unknown as Record<string, unknown>;
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-legacy-im',
+      text: 'hi',
+      imGroupId: 'group-legacy',
+    },
+  });
+  await flushEvents();
+
+  assert.equal(typeof capturedInput?.runId, 'string');
+  assert.deepEqual(capturedInput, {
+    traceId: 'trace-fixed',
+    runId: capturedInput?.runId,
+    toolSessionId: 'tool-legacy-im',
+    text: 'hi',
   });
 });
 

@@ -234,7 +234,6 @@ describe('slash command control plane', () => {
     const deps = createControlPlaneDependencies({ sessions: [] });
     const context = await createContextResolver(deps).resolve('tool-create', {
       assistantId: 'assistant-2',
-      imGroupId: 'group-1',
     });
 
     assert.strictEqual(context.bootstrapSource, 'bootstrap_created');
@@ -242,7 +241,6 @@ describe('slash command control plane', () => {
     assert.strictEqual(deps.createdSessions.length, 1);
     assert.deepStrictEqual(deps.createdSessions[0].input, {
       assistantId: 'assistant-2',
-      imGroupId: 'group-1',
     });
   });
 

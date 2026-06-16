@@ -8,8 +8,6 @@ import {
   SimpleSlashCommandParser,
 } from '../adapter/index.js';
 import {
-  CreateSessionRequestNormalizer,
-  CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
   SlashCommandExecutor,
 } from '../usecase/index.js';
@@ -20,6 +18,7 @@ import type {
   HostSessionListQuery,
   HostSessionQueryPort,
 } from '../port/SlashCommandControlPlanePort.js';
+import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import {
   createBridgeRuntime,
   type BridgeRuntime as SdkRuntimeFacade,
@@ -39,7 +38,6 @@ import { OpenCodeProviderAdapter } from './sdk/OpenCodeProviderAdapter.js';
 import {
   ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
-  DefaultCreatedSessionBindingPort,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
   SdkChatPreprocessor,
@@ -161,18 +159,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     const sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
     const slashCommandParser = new SimpleSlashCommandParser();
     const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => startupValidation.sdkClient);
-    const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
-    const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
-    const hostSessionCreationPort: HostSessionCreationPort = {
-      createSession: async (input?: { assistantId?: string; imGroupId?: string }) => {
-        const normalized = createSessionRequestNormalizer.fromChatContext({
-          assistantId: input?.assistantId,
-          imGroupId: input?.imGroupId,
-        });
-        const result = await createSessionUseCase.execute({
-          ...normalized,
+    // legacy chat/slash 控制面 bootstrap 出口：只负责给旧 resolver 创建可绑定的宿主会话。
+    const legacyChatBootstrapSessionPort: HostSessionCreationPort = {
+      createSession: async (input?: { assistantId?: string }) => {
+        void input;
+        const result = await opencodeSessionGatewayAdapter.createSession({
           directory: config.bridgeDirectory,
-          ...(config.bridgeDirectory ? { directorySource: 'config' } : {}),
         });
         if (!result.success) {
           const error = new Error(result.errorMessage ?? 'create_session_failed');
@@ -192,17 +184,13 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         };
       },
     };
-    const sessionCreationPort = {
-      createSession: async (input: { title?: string; directory?: string }) => {
-        const result = await createSessionUseCase.execute({
+    // session-isolation 的底层 OpenCode 建会话出口：必须原样透传权限控制参数。
+    const opencodeSessionCreationPort: SessionCreationPort = {
+      createSession: async (input) => {
+        const result = await opencodeSessionGatewayAdapter.createSession({
           title: input.title,
-          isGroupChat: false,
           directory: input.directory ?? config.bridgeDirectory,
-          ...(input.directory
-            ? { directorySource: 'explicit' as const }
-            : config.bridgeDirectory
-              ? { directorySource: 'config' as const }
-              : {}),
+          ...(input.permission ? { permission: input.permission } : {}),
         });
         return result;
       },
@@ -250,7 +238,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       diagnostics: sessionIsolationDiagnostics,
       logger: this.logger.child({ component: 'session_isolation' }),
       hostSessionQueryPort,
-      sessionCreationPort,
+      sessionCreationPort: opencodeSessionCreationPort,
       sessionScopedActionGatewayPort: opencodeSessionGatewayAdapter,
       pendingInteractionRegistry,
       runtimeAnchorRepository: runtimeAnchorRegistry,
@@ -263,14 +251,14 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       bindingStore,
       ownershipResolver,
       modelOverrideStore: sessionModelOverrideStore,
-      hostSessionCreationPort,
+      hostSessionCreationPort: legacyChatBootstrapSessionPort,
       hostSessionQueryPort,
     });
     const slashCommandExecutor = new SlashCommandExecutor({
       bindingStore,
       ownershipResolver,
       modelOverrideStore: sessionModelOverrideStore,
-      hostSessionCreationPort,
+      hostSessionCreationPort: legacyChatBootstrapSessionPort,
       hostSessionQueryPort,
       hostModelCatalogPort,
     });
@@ -300,7 +288,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.providerAdapter = new OpenCodeProviderAdapter({
       rawClient: this.rawClient,
       logger: this.logger.child({ component: 'provider_adapter' }),
-      createSessionUseCase,
       createSessionCommandPort: sessionIsolationControlPlane.createSessionCommandPort,
       closeSessionCommandPort: sessionIsolationControlPlane.closeSessionCommandPort,
       abortSessionCommandPort: sessionIsolationControlPlane.abortSessionCommandPort,
@@ -317,10 +304,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
         ownershipResolver,
       }),
       eventAnchorResolver: new DefaultEventAnchorResolver({
-        ownershipResolver,
-      }),
-      createdSessionBindingPort: new DefaultCreatedSessionBindingPort({
-        bindingStore,
         ownershipResolver,
       }),
       subagentSessionMapper: new SubagentSessionMapper(() => startupValidation.sdkClient),

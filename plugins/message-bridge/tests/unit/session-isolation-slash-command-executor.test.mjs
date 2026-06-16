@@ -193,7 +193,7 @@ test('SessionIsolationSlashCommandExecutor always creates and switches to a new 
       bootstrapSource: 'bootstrap_created',
     },
     entryContext,
-    createContext: { assistantId: 'assistant-a', imGroupId: 'group-ignored' },
+    createContext: { assistantId: 'assistant-a' },
     directory: '/repo',
   });
 

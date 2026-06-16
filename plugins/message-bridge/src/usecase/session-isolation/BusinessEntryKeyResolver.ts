@@ -7,7 +7,6 @@ export interface BusinessEntryKeyResolverInput {
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
-    imGroupId?: string;
   };
 }
 
