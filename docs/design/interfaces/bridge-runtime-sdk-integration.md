@@ -48,17 +48,16 @@ npm install @wecode/bridge-runtime-sdk
 - 新增 `BridgeRuntimeError` 和 `BridgeRuntimeErrorCode` 类型说明。
 - `ProviderRunMessageInput.context` 移除 `imGroupId` 字段；SDK 不向 Provider 透传该字段。
 - 修正所有 `toolSessionId` 字段说明：明确其代表 welink 会话标识，不代表宿主 agent session ID。
-- 新增 7.10 小节：`toolSessionId` 与 agent session 映射约束说明。
-- 7.5 标识符约束：补充 `toolSessionId`、`messageId`、`partId` 格式建议（`ses_`、`msg_`、`prt_` 前缀 + UUID）。
-- 4.4 和第 6 节时序图：体现一轮 run 可返回多个 message，每个 message 拥有独立 `messageId`。
-- 修正 7.4、8.1、8.2、8.3 示例代码：移除 fact 中多余的 `toolSessionId` 字段，示例 ID 改用前缀 + UUID 格式。
-- 4.4 时序图补充契约约束：`result()` 必须在 facts 流结束后 resolve。
-- 4.8 新增中断时序图：体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
-- 重写 8.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
-- 8.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
-- 7.5 标识符语义：补充 `messageId` 与 `partId` 的层级关系和区别说明。
-- 4.3 `createSession`：补充触发时机和映射说明。
-- 1. 文档定位：修改为面向三方 agent 接入 welink 助理。
+- 新增 8.10 小节：`toolSessionId` 与 agent session 映射约束说明。
+- 8.5 标识符约束：补充 `toolSessionId`、`messageId`、`partId` 格式建议（`ses_`、`msg_`、`prt_` 前缀 + UUID）。
+- 5.4 和第 7 节时序图：体现一轮 run 可返回多个 message，每个 message 拥有独立 `messageId`。
+- 修正 8.4、9.1、9.2、9.3 示例代码：移除 fact 中多余的 `toolSessionId` 字段，示例 ID 改用前缀 + UUID 格式。
+- 5.4 时序图补充契约约束：`result()` 必须在 facts 流结束后 resolve。
+- 5.8 新增中断时序图：体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
+- 重写 9.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
+- 9.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
+- 8.5 标识符语义：补充 `messageId` 与 `partId` 的层级关系和区别说明。
+- 5.3 `createSession`：补充触发时机和映射说明。
 
 ### 2026-06-15
 
@@ -1143,6 +1142,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
       resolveTerminal = resolve;
     });
     this.activeRuns.set(input.runId, resolveTerminal);
+    const self = this;
 
     const facts: AsyncIterable<ProviderFact> = (async function* () {
       try {
@@ -1161,7 +1161,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
           },
         });
       } finally {
-        this.activeRuns.delete(input.runId);
+        self.activeRuns.delete(input.runId);
       }
     })();
 
@@ -1203,7 +1203,7 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 
 ### 9.2 最小文本输出示例
 
-> 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
+> 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的 deferred Promise 模式。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
@@ -1236,7 +1236,7 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 
 ### 9.3 挂起交互与回复示例
 
-> 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 8.1 的 deferred Promise 模式。
+> 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的 deferred Promise 模式。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
