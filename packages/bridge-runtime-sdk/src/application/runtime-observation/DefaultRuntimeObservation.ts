@@ -371,7 +371,7 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
   }
 
   private getEventType(message: GatewayUplinkBusinessMessage): string | undefined {
-    return message.type === 'tool_event' ? message.event.type : undefined;
+    return message.type === 'tool_event' ? message.event?.type : undefined;
   }
 
   private getWelinkSessionId(message: GatewayUplinkBusinessMessage): string | undefined {
