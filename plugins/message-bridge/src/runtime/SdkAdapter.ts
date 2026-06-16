@@ -221,7 +221,7 @@ export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
       reply: (parameters) => root._client.post({
         url: '/question/{requestID}/reply',
         path: { requestID: parameters.questionId },
-        body: { answers: [[parameters.answer]] },
+        body: { answers: parameters.answers },
         headers: {
           'Content-Type': 'application/json',
         },

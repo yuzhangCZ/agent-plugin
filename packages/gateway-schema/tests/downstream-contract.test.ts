@@ -131,7 +131,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         action: 'question_reply',
         payload: {
           questionId: 'question-1',
-          answer: 'ok',
+          answers: [['ok']],
         },
       },
     ],
@@ -629,7 +629,50 @@ test('normalizeDownstream accepts question_reply without welinkSessionId through
     action: 'question_reply',
     payload: {
       questionId: 'question-1',
-      answer: 'ok',
+      answers: [['ok']],
+    },
+  });
+});
+
+test('normalizeDownstream accepts structured question_reply answers', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-structured-1',
+      answers: [['A'], ['B', 'C']],
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-structured-1',
+      answers: [['A'], ['B', 'C']],
+    },
+  });
+});
+
+test('normalizeDownstream prefers structured question_reply answers over legacy answer', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-structured-2',
+      answers: [['A'], ['B', 'C']],
+      answer: 'legacy ignored',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-structured-2',
+      answers: [['A'], ['B', 'C']],
     },
   });
 });
@@ -650,7 +693,7 @@ test('normalizeDownstream accepts question_reply using legacy toolCallId alias',
     action: 'question_reply',
     payload: {
       questionId: 'question-legacy-1',
-      answer: 'ok',
+      answers: [['ok']],
     },
   });
 });
@@ -672,8 +715,87 @@ test('normalizeDownstream prefers questionId over toolCallId for question_reply'
     action: 'question_reply',
     payload: {
       questionId: 'question-primary-1',
-      answer: 'ok',
+      answers: [['ok']],
     },
+  });
+});
+
+test('normalizeDownstream rejects question_reply without answer or answers', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-missing-answer-1',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.answers',
+    messageType: 'invoke',
+    action: 'question_reply',
+  });
+});
+
+test('normalizeDownstream rejects question_reply empty structured answers', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answers-1',
+      answers: [],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'missing_required_field',
+    field: 'payload.answers[][]',
+    messageType: 'invoke',
+    action: 'question_reply',
+  });
+});
+
+test('normalizeDownstream rejects question_reply empty answer group', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answer-group-1',
+      answers: [[]],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'missing_required_field',
+    field: 'payload.answers[]',
+    messageType: 'invoke',
+    action: 'question_reply',
+  });
+});
+
+test('normalizeDownstream rejects question_reply empty answer item', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answer-item-1',
+      answers: [['A'], ['  ']],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'missing_required_field',
+    field: 'payload.answers[][]',
+    messageType: 'invoke',
+    action: 'question_reply',
   });
 });
 

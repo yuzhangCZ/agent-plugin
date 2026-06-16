@@ -63,7 +63,7 @@ export interface BridgePermissionClient {
 export interface BridgeQuestionClient {
   reply(options: {
     questionId: string;
-    answer: string;
+    answers: string[][];
   }): Promise<unknown>;
 }
 

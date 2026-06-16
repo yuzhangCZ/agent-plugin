@@ -118,12 +118,13 @@ payload: {
 ```ts
 payload: {
   toolSessionId: string;
-  answer: string;
+  answers: string[][];
+  answer?: string; // legacy fallback input only
   toolCallId?: string;
 }
 ```
 
-该 action 会先通过 `GET /question` 查找 pending question，再通过 `POST /question/{requestID}/reply` 回复。
+该 action 会先通过 `GET /question` 查找 pending question，再通过 `POST /question/{requestID}/reply` 回复。`answers` 是稳定字段；旧 `answer` 输入仅用于兼容，会被归一化为 `answers: [[answer]]`。
 
 ## 目录上下文
 

@@ -102,7 +102,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
         welinkSessionId: 'wl-question',
         payload: {
           questionId: 'question-1',
-          answer: 'ok',
+          answers: [['ok']],
         },
       },
     ),

@@ -43,7 +43,7 @@ export class SessionScopedSdkExecutionBridge implements SdkExecutionBridge {
     // OpenCode reply token 全局唯一；sessionId 已在 lookup 阶段用于隔离校验，这里不再参与 SDK 调用。
     const result = await this.dependencies.gatewayPort.replyQuestion({
       questionId: input.questionId,
-      answer: input.answer,
+      answers: input.answers,
     });
     this.assertApplied(result);
     return { applied: true };

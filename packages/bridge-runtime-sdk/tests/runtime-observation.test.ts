@@ -555,7 +555,7 @@ test('usecases emit failed observation events for non request-run failures', asy
       source: {
         type: 'invoke',
         action: 'question_reply',
-        payload: { questionId: 'q-1', answer: 'yes' },
+        payload: { questionId: 'q-1', answers: [['yes']] },
       },
     } as never),
     /reply_question_failed/,

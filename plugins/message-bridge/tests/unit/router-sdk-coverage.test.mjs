@@ -81,7 +81,7 @@ describe('createSdkAdapter coverage', () => {
     });
     const r6 = await adapted.config.providers({ directory: '/tmp/bridge' });
     const r7 = await adapted.permission.reply({ permissionId: 'perm-1', response: 'always' });
-    const r8 = await adapted.question.reply({ questionId: 'question-1', answer: 'yes' });
+    const r8 = await adapted.question.reply({ questionId: 'question-1', answers: [['yes'], ['A', 'B']] });
 
     assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, sessionList: 1, abort: 1, delete: 1, prompt: 1, providers: 1, post: 2 });
     assert.deepStrictEqual(r1.data, {
@@ -120,7 +120,7 @@ describe('createSdkAdapter coverage', () => {
     assert.deepStrictEqual(r8.data, {
       url: '/question/{requestID}/reply',
       path: { requestID: 'question-1' },
-      body: { answers: [['yes']] },
+      body: { answers: [['yes'], ['A', 'B']] },
       headers: { 'Content-Type': 'application/json' },
     });
   });

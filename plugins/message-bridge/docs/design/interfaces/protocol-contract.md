@@ -80,7 +80,8 @@ type AbortSessionPayload = {
 
 type QuestionReplyPayload = {
   questionId?: string;
-  answer: string;
+  answers: string[][];
+  answer?: string; // legacy fallback input only
   toolCallId?: string;
 };
 ```

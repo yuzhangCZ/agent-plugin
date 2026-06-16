@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
+import { normalizeDownstream } from '@agent-plugin/gateway-schema';
 import {
   BridgeRuntimeError,
   createBridgeRuntime,
@@ -1159,7 +1160,7 @@ test('start_request_run omits absent extParameters in provider runMessage input'
   assert.equal('extParameters' in capturedInput, false);
 });
 
-test('runtime consumes question replies by questionId and forwards structured answers', async () => {
+test('runtime consumes legacy question answer by questionId and forwards normalized answers', async () => {
   const connection = new FakeGatewayClient();
   let capturedQuestionReply: Record<string, unknown> | undefined;
   const runtime = await createBridgeRuntime(
@@ -1221,17 +1222,91 @@ test('runtime consumes question replies by questionId and forwards structured an
     payload: { toolSessionId: 'tool-1', text: 'hi' },
   });
   await flushEvents();
-  connection.emitMessage({
+  const legacyQuestionReply = normalizeDownstream({
     type: 'invoke',
     action: 'question_reply',
     payload: { questionId: 'question-1', answer: 'A' },
   });
+  assert.equal(legacyQuestionReply.ok, true);
+  connection.emitMessage(legacyQuestionReply.value);
   await flushEvents();
 
   assert.deepEqual(capturedQuestionReply, {
     traceId: 'trace-fixed',
     questionId: 'question-1',
     answers: [['A']],
+  });
+});
+
+test('runtime forwards structured question replies without flattening answers', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedQuestionReply: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                status: 'running',
+                questions: [
+                  { question: 'Pick one', options: [{ label: 'A' }] },
+                  { question: 'Pick many', options: [{ label: 'B' }, { label: 'C' }] },
+                ],
+              },
+              { type: 'message.done', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion(input) {
+          capturedQuestionReply = input as unknown as Record<string, unknown>;
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-1', answers: [['A'], ['B', 'C']] },
+  });
+  await flushEvents();
+
+  assert.deepEqual(capturedQuestionReply, {
+    traceId: 'trace-fixed',
+    questionId: 'question-1',
+    answers: [['A'], ['B', 'C']],
   });
 });
 
@@ -1367,7 +1442,7 @@ test('close_session preserves pending question reply token routing', async () =>
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-close-1', answer: 'yes' },
+    payload: { questionId: 'question-close-1', answers: [['yes']] },
   });
   await flushEvents();
 
@@ -1769,7 +1844,7 @@ test('question.ask duplicate registration in the same session is idempotent', as
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-1', answer: 'A' },
+    payload: { questionId: 'question-1', answers: [['A']] },
   });
   await flushEvents();
 
@@ -2099,13 +2174,13 @@ test('question.ask rejects globally duplicated questionId across sessions withou
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-dup', answer: 'A' },
+    payload: { questionId: 'question-dup', answers: [['A']] },
   });
   await flushEvents();
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-current', answer: 'B' },
+    payload: { questionId: 'question-current', answers: [['B']] },
   });
   await flushEvents();
 
@@ -2793,7 +2868,7 @@ test('question_reply missing pending interaction projects tool_error', async () 
     type: 'invoke',
     action: 'question_reply',
     welinkSessionId: 'welink-question-missing-1',
-    payload: { questionId: 'question-missing-1', answer: 'A' },
+    payload: { questionId: 'question-missing-1', answers: [['A']] },
   });
   await flushEvents();
 

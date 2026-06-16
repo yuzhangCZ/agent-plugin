@@ -128,25 +128,51 @@ export const permissionReplyPayloadSchema = z.object({
 });
 export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchema>;
 
+const questionAnswerSchema = z.array(requiredTrimmedString).min(1);
+const questionAnswersSchema = z.array(questionAnswerSchema).superRefine((answers, context) => {
+  if (answers.length === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.too_small,
+      minimum: 1,
+      inclusive: true,
+      origin: 'array',
+      message: 'question_reply answers requires at least one answer item',
+      path: [0, 0],
+    });
+  }
+});
+
 export const questionReplyPayloadSchema = z
   .object({
     questionId: optionalStrictTrimmedString,
     toolCallId: optionalStrictTrimmedString,
-    answer: requiredTrimmedString,
+    answers: questionAnswersSchema.optional(),
+    // legacy answer 只在 answers 缺失时作为兼容输入校验，避免与 answers 同传时抢占错误优先级。
+    answer: z.unknown().optional(),
   })
   .superRefine((payload, context) => {
-    if (payload.questionId || payload.toolCallId) {
+    if (!payload.questionId && !payload.toolCallId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'question_reply requires questionId or toolCallId',
+        path: ['questionId'],
+      });
+    }
+    if (payload.answers !== undefined) {
       return;
     }
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'question_reply requires questionId or toolCallId',
-      path: ['questionId'],
-    });
+    const legacyAnswer = requiredTrimmedString.safeParse(payload.answer);
+    if (!legacyAnswer.success) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'question_reply requires answers or legacy answer',
+        path: ['answers'],
+      });
+    }
   })
   .transform((payload) => ({
     questionId: payload.questionId ?? payload.toolCallId!,
-    answer: payload.answer,
+    answers: payload.answers ?? [[requiredTrimmedString.parse(payload.answer)]],
   }));
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
