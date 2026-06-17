@@ -1,4 +1,4 @@
-const TUI_SESSION_LIST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+export const TUI_SESSION_LIST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type TuiSessionListQuery = {
   directory?: string;

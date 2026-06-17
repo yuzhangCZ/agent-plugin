@@ -22,10 +22,10 @@ import {
   DefaultBusinessEntryPolicyResolver,
   EntryAwareChatSessionResolver,
   RuntimeAnchorRegistry,
+  TUI_SESSION_LIST_WINDOW_MS,
 } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 function createLogger() {
   const noop = () => undefined;
@@ -699,8 +699,8 @@ test('EntryAwareChatSessionResolver reuses visible session for the same business
       roots: call.roots,
       start: call.start,
     })), [
-      { toolSessionId: 'tool-a', roots: true, start: FIXED_NOW - THIRTY_DAYS_MS },
-      { toolSessionId: 'tool-b', roots: true, start: FIXED_NOW - THIRTY_DAYS_MS },
+      { toolSessionId: 'tool-a', roots: true, start: FIXED_NOW - TUI_SESSION_LIST_WINDOW_MS },
+      { toolSessionId: 'tool-b', roots: true, start: FIXED_NOW - TUI_SESSION_LIST_WINDOW_MS },
     ]);
     assert.deepEqual(switchCalls, [{ toolSessionId: 'tool-a', sessionId: 'ses-group-a' }]);
     assert.equal(createCalls[0].toolSessionId, 'tool-b');
