@@ -128,29 +128,18 @@ export const permissionReplyPayloadSchema = z.object({
 });
 export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchema>;
 
-const questionAnswerSchema = z.array(requiredTrimmedString).min(1);
-const questionAnswersSchema = z.array(questionAnswerSchema).superRefine((answers, context) => {
-  if (answers.length === 0) {
-    context.addIssue({
-      code: z.ZodIssueCode.too_small,
-      minimum: 1,
-      inclusive: true,
-      origin: 'array',
-      message: 'question_reply answers requires at least one answer item',
-      path: [0, 0],
-    });
-  }
-});
+const questionAnswerSchema = z.array(z.string());
+const questionAnswersSchema = z.array(questionAnswerSchema);
 
 export const questionReplyPayloadSchema = z
   .object({
     questionId: optionalStrictTrimmedString,
     toolCallId: optionalStrictTrimmedString,
     answers: questionAnswersSchema.optional(),
-    // legacy answer 只在 answers 缺失时作为兼容输入校验，避免与 answers 同传时抢占错误优先级。
+    // legacy answer 只在 answers 缺失时作为兼容输入；JSON 数组字符串代表结构化 answers。
     answer: z.unknown().optional(),
   })
-  .superRefine((payload, context) => {
+  .transform((payload, context) => {
     if (!payload.questionId && !payload.toolCallId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -158,22 +147,55 @@ export const questionReplyPayloadSchema = z
         path: ['questionId'],
       });
     }
+
     if (payload.answers !== undefined) {
-      return;
+      return {
+        questionId: payload.questionId ?? payload.toolCallId!,
+        answers: payload.answers,
+      };
     }
-    const legacyAnswer = requiredTrimmedString.safeParse(payload.answer);
-    if (!legacyAnswer.success) {
+
+    if (typeof payload.answer !== 'string') {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'question_reply requires answers or legacy answer',
         path: ['answers'],
       });
+      return z.NEVER;
     }
-  })
-  .transform((payload) => ({
-    questionId: payload.questionId ?? payload.toolCallId!,
-    answers: payload.answers ?? [[requiredTrimmedString.parse(payload.answer)]],
-  }));
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload.answer);
+    } catch {
+      return {
+        questionId: payload.questionId ?? payload.toolCallId!,
+        answers: [[payload.answer]],
+      };
+    }
+
+    if (!Array.isArray(parsed)) {
+      return {
+        questionId: payload.questionId ?? payload.toolCallId!,
+        answers: [[payload.answer]],
+      };
+    }
+
+    const structuredAnswer = questionAnswersSchema.safeParse(parsed);
+    if (!structuredAnswer.success) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'question_reply serialized answer must be a string[][]',
+        path: ['answer'],
+      });
+      return z.NEVER;
+    }
+
+    return {
+      questionId: payload.questionId ?? payload.toolCallId!,
+      answers: structuredAnswer.data,
+    };
+  });
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
 export const chatInvokeSchema = z
