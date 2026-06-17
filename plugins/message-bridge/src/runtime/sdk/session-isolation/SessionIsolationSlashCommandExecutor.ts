@@ -10,8 +10,7 @@ import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation
 import type { BridgeLogger } from '../../AppLogger.js';
 import type { BusinessEntryContext } from './BusinessEntryContextResolver.js';
 import type { ChatExecutionContext } from '../SdkChatControlPlane.js';
-
-const TUI_SESSION_LIST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+import { buildTuiSessionListQuery } from './TuiSessionListQuery.js';
 
 type ResolveEntrySessionContextUseCase = {
   execute(input: {
@@ -149,9 +148,7 @@ export class SessionIsolationSlashCommandExecutor {
       toolSessionId: input.anchor,
       entryKey: input.entryContext.entryKey,
       policy: input.entryContext.policy,
-      ...(input.directory ? { directory: input.directory } : {}),
-      roots: true,
-      start: Date.now() - TUI_SESSION_LIST_WINDOW_MS,
+      ...buildTuiSessionListQuery(input.directory),
     });
   }
 

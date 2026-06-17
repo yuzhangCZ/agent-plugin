@@ -8,6 +8,7 @@ import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation
 import type { BridgeLogger } from '../../AppLogger.js';
 import type { ChatExecutionContext } from '../SdkChatControlPlane.js';
 import type { BusinessEntryContext } from './BusinessEntryContextResolver.js';
+import { buildTuiSessionListQuery } from './TuiSessionListQuery.js';
 
 type ResolveEntrySessionContextUseCase = {
     execute(input: {
@@ -15,6 +16,8 @@ type ResolveEntrySessionContextUseCase = {
       entryKey: NonNullable<ReturnType<BusinessEntryKeyResolver['resolve']>>;
       policy: BusinessEntryPolicy;
       directory?: string;
+      roots?: boolean;
+      start?: number;
     }): Promise<ResolvedEntrySessionContext>;
   };
 
@@ -115,7 +118,7 @@ export class EntryAwareChatSessionResolver {
       toolSessionId: input.message.toolSessionId,
       entryKey,
       policy,
-      ...(input.directory ? { directory: input.directory } : {}),
+      ...buildTuiSessionListQuery(input.directory),
     });
   }
 
