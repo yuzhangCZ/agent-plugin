@@ -439,7 +439,7 @@ type SdkRuntimeCommand =
 | `close_session` | `{ toolSessionId: string }` |
 | `abort_session` | `{ toolSessionId: string }` |
 | `permission_reply` | `{ permissionId: string, toolSessionId: string, response: 'once' | 'always' | 'reject' }` |
-| `question_reply` | `{ questionId?: string, answers: string[][], answer?: string, toolCallId?: string }`，`answer` 仅 legacy fallback |
+| `question_reply` | `{ questionId?: string, answers: string[][], answer?: string, toolCallId?: string }`，`answer` 仅兼容输入，可为历史普通字符串或 `string[][]` JSON 字符串，归一化后不保留 |
 
 #### 5.3.3 输出数据：bridge 回给网关的业务报文
 
@@ -598,7 +598,7 @@ type SdkFact = {
 | `close_session` | `{ toolSessionId }` |
 | `abort_session` | `{ toolSessionId }` |
 | `permission_reply` | `{ permissionId, toolSessionId, response }` |
-| `question_reply` | `{ questionId?, answers, answer?, toolCallId? }`，`answer` 仅 legacy fallback |
+| `question_reply` | `{ questionId?, answers, answer?, toolCallId? }`，`answer` 仅兼容输入，可为历史普通字符串或 `string[][]` JSON 字符串 |
 | `status_query` | `{}` |
 
 #### 6.3.2 内部数据：SDK 请求体

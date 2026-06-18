@@ -98,7 +98,7 @@
 | `invoke.chat` | 业务上下文 | `assistantAccount`、`sendUserAccount`、`imGroupId`、`suppressReply` | SDK 已有 typed `context` 并透传到 provider SPI | `SDK 已满足` | `context: { assistantAccount?, sendUserAccount?, imGroupId?, suppressReply? }` 已进入 `ProviderRunMessageInput`；其中 `suppressReply` 仍只透传给插件 |
 | `invoke.chat` | 回复抑制策略 | `suppressReply` | SDK 不内建 provider run 短路策略 | `插件闭环` | 闭环位置：adapter/action。SDK 透传字段，插件基于该字段自行决定是否调用真实 provider `runMessage`，不要求 SDK runtime 建模 pre-run policy |
 | `invoke.permission_reply` | direct reply target | 当前 bridge `permissionId + response` | SDK 已使用 `permissionId + reply` | `SDK 已满足` | runtime intake 继续消费 gateway `response`，进入 provider SPI 前归一为 `reply`；OpenCode provider 内部把 `permissionId` 映射到 `requestID` |
-| `invoke.question_reply` | direct reply target | 当前 bridge `questionId + answers` | SDK 当前使用 `questionId + answers: string[][]` | `SDK 已满足` | gateway 下行优先使用 `answers`；仅 legacy 单字符串 `answer` 在 runtime intake 归一为 `answers: [[answer]]` |
+| `invoke.question_reply` | direct reply target | 当前 bridge `questionId + answers` | SDK 当前使用 `questionId + answers: string[][]` | `SDK 已满足` | gateway 下行优先使用 `answers`；兼容输入 `answer` 可为历史普通字符串或 `string[][]` JSON 字符串，runtime intake 统一归一为 `answers` |
 | `invoke.close_session` | 关闭会话 | `toolSessionId` | `ProviderCloseSessionInput.toolSessionId` | `SDK 已满足` | 无额外 SDK contract 缺口 |
 | `invoke.abort_session` | 终止会话 | `toolSessionId`、runtime 派生 `runId` | `ProviderAbortSessionInput.toolSessionId/runId?` | `SDK 已满足` | `runId` 由 SDK runtime 管理 |
 
@@ -146,7 +146,7 @@ interface ProviderQuestionReplyInput {
 }
 ```
 
-OpenCode `Question.Answer = string[]`，`Question.Reply = { answers: QuestionAnswer[] }`。`answers` 按 `questions[]` 顺序排列；每个问题的答案数组可表达单选、多选和自定义输入。`message-bridge` 内部和 OpenCode 调用链路使用 `answers: string[][]`；legacy `answer: string` 只在 gateway-schema 输入兼容层折叠为 `answers: [[answer]]`。
+OpenCode `Question.Answer = string[]`，`Question.Reply = { answers: QuestionAnswer[] }`。`answers` 按 `questions[]` 顺序排列；每个问题的答案数组可表达单选、多选和自定义输入。`message-bridge` 内部和 OpenCode 调用链路使用 `answers: string[][]`；兼容输入 `answer` 只在 `gateway-schema` 输入兼容层归一化，可为历史普通字符串或 `string[][]` JSON 字符串。
 
 ## 4. 上行事件替换评估
 

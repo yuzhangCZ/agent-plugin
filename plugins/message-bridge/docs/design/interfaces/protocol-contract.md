@@ -81,7 +81,7 @@ type AbortSessionPayload = {
 type QuestionReplyPayload = {
   questionId?: string;
   answers: string[][];
-  answer?: string; // legacy fallback input only
+  answer?: string; // compat input only: legacy plain string or serialized string[][]
   toolCallId?: string;
 };
 ```

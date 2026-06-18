@@ -655,6 +655,27 @@ test('normalizeDownstream accepts structured question_reply answers', () => {
   });
 });
 
+test('normalizeDownstream accepts serialized structured question_reply answer', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-serialized-answer-1',
+      answer: '[["A"],["B","C"]]',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-serialized-answer-1',
+      answers: [['A'], ['B', 'C']],
+    },
+  });
+});
+
 test('normalizeDownstream prefers structured question_reply answers over legacy answer', () => {
   const result = normalizeDownstream({
     type: 'invoke',
@@ -675,6 +696,74 @@ test('normalizeDownstream prefers structured question_reply answers over legacy 
       answers: [['A'], ['B', 'C']],
     },
   });
+});
+
+test('normalizeDownstream treats non-json question_reply answer as legacy string', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-non-json-answer-1',
+      answer: '[not json',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-non-json-answer-1',
+      answers: [['[not json']],
+    },
+  });
+});
+
+test('normalizeDownstream accepts empty legacy question_reply answer string', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-legacy-answer-1',
+      answer: '',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-legacy-answer-1',
+      answers: [['']],
+    },
+  });
+});
+
+test('normalizeDownstream treats non-array json question_reply answer as legacy string', () => {
+  const cases = [
+    { questionId: 'question-json-string-answer-1', answer: '"ok"' },
+    { questionId: 'question-json-number-answer-1', answer: '123' },
+    { questionId: 'question-json-object-answer-1', answer: '{}' },
+  ];
+
+  for (const input of cases) {
+    const result = normalizeDownstream({
+      type: 'invoke',
+      action: 'question_reply',
+      payload: input,
+    });
+
+    assert.equal(result.ok, true, input.questionId);
+    assert.deepEqual(result.value, {
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: input.questionId,
+        answers: [[input.answer]],
+      },
+    });
+  }
 });
 
 test('normalizeDownstream accepts question_reply using legacy toolCallId alias', () => {
@@ -720,6 +809,55 @@ test('normalizeDownstream prefers questionId over toolCallId for question_reply'
   });
 });
 
+test('normalizeDownstream accepts empty serialized question_reply answer arrays', () => {
+  const cases = [
+    { questionId: 'question-empty-serialized-answer-1', answer: '[]', answers: [] },
+    { questionId: 'question-empty-serialized-group-1', answer: '[[]]', answers: [[]] },
+    { questionId: 'question-empty-serialized-item-1', answer: '[[""]]', answers: [['']] },
+  ];
+
+  for (const input of cases) {
+    const result = normalizeDownstream({
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: input.questionId,
+        answer: input.answer,
+      },
+    });
+
+    assert.equal(result.ok, true, input.questionId);
+    assert.deepEqual(result.value, {
+      type: 'invoke',
+      action: 'question_reply',
+      payload: {
+        questionId: input.questionId,
+        answers: input.answers,
+      },
+    });
+  }
+});
+
+test('normalizeDownstream rejects serialized question_reply answer arrays with non-array groups', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: {
+      questionId: 'question-flat-serialized-answer-1',
+      answer: '["A"]',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.answer',
+    messageType: 'invoke',
+    action: 'question_reply',
+  });
+});
+
 test('normalizeDownstream rejects question_reply without answer or answers', () => {
   const result = normalizeDownstream({
     type: 'invoke',
@@ -739,7 +877,7 @@ test('normalizeDownstream rejects question_reply without answer or answers', () 
   });
 });
 
-test('normalizeDownstream rejects question_reply empty structured answers', () => {
+test('normalizeDownstream accepts question_reply empty structured answers', () => {
   const result = normalizeDownstream({
     type: 'invoke',
     action: 'question_reply',
@@ -749,17 +887,18 @@ test('normalizeDownstream rejects question_reply empty structured answers', () =
     },
   });
 
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'missing_required_field',
-    field: 'payload.answers[][]',
-    messageType: 'invoke',
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
     action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answers-1',
+      answers: [],
+    },
   });
 });
 
-test('normalizeDownstream rejects question_reply empty answer group', () => {
+test('normalizeDownstream accepts question_reply empty answer group', () => {
   const result = normalizeDownstream({
     type: 'invoke',
     action: 'question_reply',
@@ -769,33 +908,35 @@ test('normalizeDownstream rejects question_reply empty answer group', () => {
     },
   });
 
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'missing_required_field',
-    field: 'payload.answers[]',
-    messageType: 'invoke',
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
     action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answer-group-1',
+      answers: [[]],
+    },
   });
 });
 
-test('normalizeDownstream rejects question_reply empty answer item', () => {
+test('normalizeDownstream accepts question_reply empty answer item', () => {
   const result = normalizeDownstream({
     type: 'invoke',
     action: 'question_reply',
     payload: {
       questionId: 'question-empty-answer-item-1',
-      answers: [['A'], ['  ']],
+      answers: [['A'], ['']],
     },
   });
 
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'missing_required_field',
-    field: 'payload.answers[][]',
-    messageType: 'invoke',
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value, {
+    type: 'invoke',
     action: 'question_reply',
+    payload: {
+      questionId: 'question-empty-answer-item-1',
+      answers: [['A'], ['']],
+    },
   });
 });
 
