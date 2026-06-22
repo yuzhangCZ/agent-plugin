@@ -2,27 +2,27 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { GatewayClientStatus } from '@agent-plugin/gateway-client';
 import { createBridgeRuntime } from '../src/index.ts';
 import type { BridgeGatewayHostConfig } from '../src/index.ts';
 import {
   normalizeBridgeGatewayHostConfig,
   type BridgeGatewayHostConnection,
-  type BridgeGatewayHostState,
 } from '../src/infrastructure/gateway/gateway-host.ts';
 import { resolvePackageVersion } from '../src/packageVersion.ts';
 
 class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
-  private state: BridgeGatewayHostState = 'DISCONNECTED';
+  private state: 'DISCONNECTED' | 'READY' = 'DISCONNECTED';
 
   async connect(): Promise<void> {
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emit('statusChange', this.getStatus());
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
+    this.emit('statusChange', this.getStatus());
   }
 
   send(message: unknown): void {
@@ -34,14 +34,10 @@ class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
     return this.state === 'READY';
   }
 
-  getState(): BridgeGatewayHostState {
-    return this.state;
-  }
-
   getStatus() {
-    return {
-      isReady: () => this.state === 'READY',
-    };
+    return this.state === 'READY'
+      ? GatewayClientStatus.ready()
+      : GatewayClientStatus.closed();
   }
 
   override on(event: string, listener: (...args: unknown[]) => void): this {
@@ -151,6 +147,6 @@ test('host runtime records gateway diagnostics and processes downstream messages
       sessionId: 'tool-1',
     },
   });
-  assert.equal(runtime.getDiagnostics().gatewayState, 'READY');
+  assert.equal(runtime.getDiagnostics().gatewayState, 'ready');
   assert.equal(typeof runtime.getDiagnostics().lastInboundAt, 'number');
 });

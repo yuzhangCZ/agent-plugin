@@ -26,7 +26,7 @@ export class ReplyQuestionUseCase implements ReplyQuestionUseCasePort {
       await this.handlers.replyQuestion({
         traceId: command.traceId,
         questionId: command.source.payload.questionId,
-        answers: [[command.source.payload.answer]],
+        answers: command.source.payload.answers,
       });
       this.observation.usecaseSucceeded('reply_question', command.traceId);
     } catch (error) {

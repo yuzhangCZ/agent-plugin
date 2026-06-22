@@ -66,7 +66,6 @@ export interface HostModelInfo {
 /** chat 触发的建会话原始上下文。 */
 export interface HostSessionCreateContext {
   assistantId?: string;
-  imGroupId?: string;
 }
 
 /** slash 命令语法树。 */

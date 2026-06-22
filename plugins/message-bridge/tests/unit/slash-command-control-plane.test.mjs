@@ -12,9 +12,9 @@ import {
   DefaultSlashCommandReplyPresenter,
   ResolveSlashCommandContextUseCase,
 } from '../../src/usecase/index.ts';
+import { TUI_SESSION_LIST_WINDOW_MS } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 function createLoggerRecorder() {
   const errors = [];
@@ -234,7 +234,6 @@ describe('slash command control plane', () => {
     const deps = createControlPlaneDependencies({ sessions: [] });
     const context = await createContextResolver(deps).resolve('tool-create', {
       assistantId: 'assistant-2',
-      imGroupId: 'group-1',
     });
 
     assert.strictEqual(context.bootstrapSource, 'bootstrap_created');
@@ -242,7 +241,6 @@ describe('slash command control plane', () => {
     assert.strictEqual(deps.createdSessions.length, 1);
     assert.deepStrictEqual(deps.createdSessions[0].input, {
       assistantId: 'assistant-2',
-      imGroupId: 'group-1',
     });
   });
 
@@ -316,7 +314,7 @@ describe('slash command control plane', () => {
       assert.deepStrictEqual(listCalls, [{
         directory: '/workspace',
         roots: true,
-        start: FIXED_NOW - THIRTY_DAYS_MS,
+        start: FIXED_NOW - TUI_SESSION_LIST_WINDOW_MS,
       }]);
       assert.strictEqual(completion.calls[0].kind, 'success');
     } finally {
@@ -359,7 +357,7 @@ describe('slash command control plane', () => {
       assert.deepStrictEqual(listCalls, [{
         directory: '/workspace',
         roots: true,
-        start: FIXED_NOW - THIRTY_DAYS_MS,
+        start: FIXED_NOW - TUI_SESSION_LIST_WINDOW_MS,
       }]);
       assert.strictEqual(deps.bindingStore.get('tool-switch-window').activeOpencodeSessionId, 'ses-target');
     } finally {

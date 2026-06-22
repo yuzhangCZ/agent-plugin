@@ -938,14 +938,14 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
 
     const result = await adapter.replyQuestion({
       questionId: 'question-request-openx-1',
-      answer: 'yes',
+      answers: [['yes']],
     });
 
     assert.strictEqual(result.success, true);
     assert.deepStrictEqual(postCalls, [
       {
         questionId: 'question-request-openx-1',
-        answer: 'yes',
+        answers: [['yes']],
       },
     ]);
   });
@@ -1145,7 +1145,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
 
     const result = await adapter.replyQuestion({
       questionId: 'question-request-1',
-      answer: 'yes',
+      answers: [['yes'], ['A', 'B']],
     });
 
     assert.strictEqual(result.success, true);
@@ -1153,7 +1153,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
     assert.deepStrictEqual(questionCalls, [
       {
         questionId: 'question-request-1',
-        answer: 'yes',
+        answers: [['yes'], ['A', 'B']],
       },
     ]);
   });
@@ -1179,7 +1179,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
 
     const result = await adapter.replyQuestion({
       questionId: 'question-request-1',
-      answer: 'yes',
+      answers: [['yes']],
     });
 
     assert.strictEqual(result.success, false);
@@ -1211,7 +1211,7 @@ describe('OpencodeSessionGatewayAdapter session-scoped actions', () => {
 
     const result = await adapter.replyQuestion({
       questionId: 'question-request-1',
-      answer: 'yes',
+      answers: [['yes']],
     });
 
     assert.strictEqual(result.success, false);

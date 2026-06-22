@@ -15,11 +15,12 @@ import type {
   ThinkingDoneFact,
   ToolUpdateFact,
 } from '@wecode/bridge-runtime-sdk';
-import { asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
+import { asJsonObject, asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
 import type {
   RawEventTranslation,
   TranslationContext,
 } from './OpenCodeProviderAdapter.types.js';
+import { isKnownPermType, resolvePermissionAskTitle, safePermissionMetadata } from './OpenCodeProviderAdapter.helpers.js';
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
@@ -376,7 +377,7 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
           toolName,
           status: normalizedStatus,
           ...(asTrimmedString(state?.title) ? { title: asTrimmedString(state?.title) } : {}),
-          ...(asString(state?.input) ? { input: asString(state?.input) } : {}),
+          ...(asJsonObject(state?.input) ? { input: asJsonObject(state?.input) } : {}),
           ...(asString(state?.output) ? { output: asString(state?.output) } : {}),
           ...(asString(state?.error) ? { error: asString(state?.error) } : {}),
           raw: properties,
@@ -516,6 +517,15 @@ export class PermissionAskedTranslator implements EventTranslator {
     const factRoutingFields = buildFactRoutingFields(context);
     const tool = asObject(properties?.tool);
     const messageId = asTrimmedString(tool?.messageID) ?? asTrimmedString(properties?.messageID) ?? undefined;
+    const metadata = safePermissionMetadata(properties);
+    const title = resolvePermissionAskTitle(properties, permType);
+    if (!isKnownPermType(permType)) {
+      context.diagnostics.warn('permission_ask_unknown_perm_type', {
+        toolSessionId: context.factSessionContext.trackingSessionId,
+        permissionId,
+        permType,
+      });
+    }
     // permissionId 只承担 reply target 语义；缺少上游 part 主键时生成独立 partId，避免混淆展示节点身份。
     const partId = resolveGeneratedPartId(properties) ?? buildSyntheticPartId();
     const fact: PermissionAskFact = {
@@ -525,7 +535,8 @@ export class PermissionAskedTranslator implements EventTranslator {
       partId,
       permissionId,
       permType,
-      ...(asObject(properties?.metadata) ? { metadata: asObject(properties?.metadata) } : {}),
+      title,
+      ...(metadata ? { metadata } : {}),
       raw: properties,
     };
 

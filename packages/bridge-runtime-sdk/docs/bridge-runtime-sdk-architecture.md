@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 模块架构
 
-**Version:** 1.0  
-**Date:** 2026-05-13  
+**Version:** 1.1  
+**Date:** 2026-06-15  
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `../../../docs/architecture/bridge-runtime-sdk-architecture.md`, `../../gateway-client/docs/gateway-client-architecture.md`, `../../gateway-schema/docs/gateway-schema-architecture.md`, `../../../plugins/message-bridge-openclaw/docs/architecture/message-bridge-openclaw-module-architecture.md`
@@ -37,7 +37,7 @@
 | 角色 | 职责 |
 |---|---|
 | `bridge-runtime-sdk` | 统一下行 intake、命令分发、fact 校验、上行投影、terminal 收口 |
-| `gateway-client` | 共享 transport 连接与 inbound/outbound 观测 |
+| `gateway-client` | 共享连接运行时、语义化连接状态与 inbound/outbound 观测 |
 | `gateway-schema` | 协议边界真源 |
 | `ThirdPartyAgentProvider` | 宿主能力抽象，提供 session/run/question/permission/health 等能力 |
 
@@ -70,7 +70,8 @@ flowchart LR
 |---|---|---|
 | domain 层 | `src/domain/*` | provider contract、runtime command、runtime status、错误类型 |
 | adapter 层 | `src/adapters/GatewayDownstreamCommandAdapter.ts` | 下行业务请求到 runtime command 的收敛 |
-| application 核心层 | `src/application/runtime.ts`, `create-runtime.ts` | 对外 facade、生命周期、host connection 装配 |
+| application lifecycle 层 | `src/application/lifecycle/*` | Runtime start/stop/probe 生命周期、状态快照与并发 attempt guard |
+| application 核心层 | `src/application/runtime.ts`, `create-runtime.ts` | 对外 facade、host connection 装配 |
 | application 编排层 | `RuntimeCommandDispatcher`, `usecases`, `coordinators`, `registries` | 命令分发、状态协作、pending interaction 与 session registry |
 | projector 层 | `projectors.ts` | fact 到事件、事件到 gateway message、命令结果和 terminal signal 投影 |
 | infrastructure 层 | `src/infrastructure/*` | 默认内存 registry 实现 |
@@ -130,6 +131,31 @@ createBridgeRuntime()
 4. `gatewayHost.register.channel` 在 SDK 层只要求为字符串，表示业务渠道标识，不对具体产品字面量做枚举限制；SDK 内部会映射为 Gateway register 报文的 `toolType` 协议字段。
 5. `gatewayHost.register.toolVersion` 表示宿主 agent 版本，`pluginVersion` 表示上层插件版本；`sdkVersion` 由 SDK 在可解析自身分发版本时自动注入，不作为外部输入暴露。
 
+### 5.4 Lifecycle 与 gateway status 投影
+
+```text
+BridgeRuntime.start()
+  -> RuntimeCore.start()
+  -> GatewayRuntimeDriver.connect()
+  -> gateway-client connect() resolve
+  -> RuntimeLifecycleState.ready
+
+gateway-client statusChange(status)
+  -> GatewayRuntimeDriver
+  -> RuntimeLifecycleService.handleGatewayStatusChanged(status)
+  -> ready / reconnecting / failed 投影
+```
+
+关键点：
+
+1. `BridgeRuntimeStatus` 是 Runtime 生命周期状态，不复用 gateway-client 的 public status class。
+2. gateway-client 对外只暴露语义化 `GatewayClientStatus`，SDK 通过 `isReady()`、`isReconnecting()`、`isFailureClosed()` 和 `getError()` 消费，不读取 transport-ish 枚举。
+3. `starting` 期间收到 gateway `ready` / `reconnecting` 事件不会完成 Runtime 启动；启动完成只由 `GatewayRuntimeDriver.connect()` resolve 驱动。
+4. `idle`、`stopping`、`failed` 期间忽略 gateway status 投影，避免 manual stop、迟到 close 或旧连接事件覆盖 Runtime lifecycle 意图。
+5. `ready` / `reconnecting` 期间收到 gateway failure closed 时，Runtime 进入 `failed`，并把 gateway error code/message 记录到 diagnostics。
+6. start/stop 内部使用 attempt id 防止旧异步完成路径覆盖新的 stop、failed 或新一轮 lifecycle 状态。
+7. `GatewayRuntimeDriver.disconnect()` 使用 `finally` detach observers；即使底层 disconnect reject，旧连接也不会继续向 Runtime 投递事件。
+
 ## 6. 关键约束
 
 1. 统一命令分发、事实投影、terminal 收口属于 SDK 职责，不应下沉回插件层重复实现。
@@ -137,12 +163,14 @@ createBridgeRuntime()
 3. `BridgeRuntime` 作为 facade，只暴露 `start/stop/probe/getStatus/getDiagnostics` 等稳定能力。
 4. SDK 不应拥有共享协议字段真源，也不应绕开 `gateway-schema`。
 5. SDK 组装的新 register 协议会在可解析自身分发版本时带上 `sdkVersion`，并在有插件封装层时透传 `pluginVersion`；若当前交付形态无法让 SDK 自证版本，则直接省略 `sdkVersion`，不由上层插件代填。
+6. `BridgeRuntime.getStatus().failureReason` 只作为 failed 状态的展示摘要；稳定错误分类和 gateway 原始 code 应从 `getDiagnostics().failures[]` 读取。
 
 ## 7. 失败处理与 fail-closed 边界
 
 1. inbound invalid invoke 必须在 runtime 边界被识别并收口，而不是继续进入 provider。
 2. fact sequence 非法时必须被判定为运行时失败，不应继续投影为上行业务事件。
-3. gateway 未 READY、host connection 不可用或 provider 返回非法结果时，应停止该执行链路并显式记录失败。
+3. gateway 未 ready、host connection 不可用或 provider 返回非法结果时，应停止该执行链路并显式记录失败。
+4. gateway-client failure closed 只在 Runtime 正在运行或启动阶段映射为 failed；停止意图内的 manual closed 不映射为 runtime failure。
 
 ## 8. 延伸阅读
 

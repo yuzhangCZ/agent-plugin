@@ -1,4 +1,5 @@
 export type GatewayClientErrorCode =
+  | 'GATEWAY_CLOSED_MANUAL'
   | 'GATEWAY_CONNECT_ABORTED'
   | 'GATEWAY_CONNECT_PARAMETER_INVALID'
   | 'GATEWAY_AUTH_REJECTED'
@@ -10,6 +11,8 @@ export type GatewayClientErrorCode =
   | 'GATEWAY_OUTBOUND_PROTOCOL_INVALID'
   | 'GATEWAY_NOT_CONNECTED'
   | 'GATEWAY_NOT_READY'
+  | 'GATEWAY_RECONNECT_EXHAUSTED'
+  | 'GATEWAY_UNKNOWN_ERROR'
 ;
 
 export type GatewayConnectionDisposition =
@@ -17,11 +20,6 @@ export type GatewayConnectionDisposition =
   | 'runtime_failure'
   | 'diagnostic'
   | 'cancelled';
-
-export type GatewayConnectionStage =
-  | 'pre_open'
-  | 'handshake'
-  | 'ready';
 
 /**
  * 宿主侧可复用的 gateway 可用性语义。
@@ -55,7 +53,6 @@ export interface GatewayClientErrorDetails {
 export interface GatewayClientErrorShape {
   readonly code: GatewayClientErrorCode;
   readonly disposition: GatewayConnectionDisposition;
-  readonly stage: GatewayConnectionStage;
   readonly retryable: boolean;
   readonly message: string;
   readonly details?: GatewayClientErrorDetails;

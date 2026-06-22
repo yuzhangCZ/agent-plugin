@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SessionIsolationSlashCommandExecutor } from '../../src/runtime/sdk/session-isolation/index.ts';
+import { SessionIsolationSlashCommandExecutor, TUI_SESSION_LIST_WINDOW_MS } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 const FIXED_NOW = Date.parse('2026-06-03T00:00:00.000Z');
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 const entryContext = {
   entryKey: {
@@ -115,7 +114,7 @@ test('SessionIsolationSlashCommandExecutor lists visible sessions from entry con
         policy: entryContext.policy,
         directory: '/repo',
         roots: true,
-        start: FIXED_NOW - THIRTY_DAYS_MS,
+        start: FIXED_NOW - TUI_SESSION_LIST_WINDOW_MS,
       },
     }]);
     assert.deepEqual(logs[0], {
@@ -193,7 +192,7 @@ test('SessionIsolationSlashCommandExecutor always creates and switches to a new 
       bootstrapSource: 'bootstrap_created',
     },
     entryContext,
-    createContext: { assistantId: 'assistant-a', imGroupId: 'group-ignored' },
+    createContext: { assistantId: 'assistant-a' },
     directory: '/repo',
   });
 

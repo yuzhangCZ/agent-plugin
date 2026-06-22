@@ -69,13 +69,13 @@ describe('session-isolation reply and abort use cases', () => {
       sdkExecutionBridge: sdk.bridge,
     });
 
-    assert.deepStrictEqual(await useCase.execute({ questionId: 'q-1', answer: 'yes' }), {
+    assert.deepStrictEqual(await useCase.execute({ questionId: 'q-1', answers: [['yes']] }), {
       applied: true,
     });
     assert.deepStrictEqual(lookup.calls, [{ method: 'findQuestion', questionId: 'q-1' }]);
     assert.deepStrictEqual(sdk.calls, [{
       method: 'replyQuestion',
-      input: { questionId: 'q-1', answer: 'yes' },
+      input: { questionId: 'q-1', answers: [['yes']] },
     }]);
   });
 
@@ -93,7 +93,7 @@ describe('session-isolation reply and abort use cases', () => {
     });
 
     await assert.rejects(
-      () => useCase.execute({ questionId: 'q-missing', answer: 'yes' }),
+      () => useCase.execute({ questionId: 'q-missing', answers: [['yes']] }),
       /question interaction not found/u,
     );
     assert.deepStrictEqual(sdk.calls, []);

@@ -14,10 +14,8 @@ import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type { BridgeEvent } from '../types.js';
 import type { HostClientLike } from '../../types/index.js';
-import { CreateSessionRequestNormalizer } from '../../usecase/CreateSessionRequestNormalizer.js';
 import { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
 import { getErrorMessage } from '../../utils/error.js';
-import type { CreateSessionUseCase } from '../../usecase/CreateSessionUseCase.js';
 import type {
   AbortSessionCommandPort,
   CloseSessionCommandPort,
@@ -28,7 +26,6 @@ import type {
 } from '../../port/session-isolation/inbound/index.js';
 import type {
   ChatExecutionContextResolver,
-  CreatedSessionBindingPort,
   EventAnchorResolver,
   ExecutionSessionInvalidationPort,
   SdkChatPreprocessor,
@@ -72,8 +69,7 @@ import { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.j
 type ProviderAdapterOptions = {
   rawClient: HostClientLike;
   logger: BridgeLogger;
-  createSessionUseCase: CreateSessionUseCase;
-  createSessionCommandPort?: CreateSessionCommandPort;
+  createSessionCommandPort: CreateSessionCommandPort;
   closeSessionCommandPort?: CloseSessionCommandPort;
   abortSessionCommandPort?: AbortSessionCommandPort;
   questionReplyCommandPort?: QuestionReplyCommandPort;
@@ -84,7 +80,6 @@ type ProviderAdapterOptions = {
   contextResolver: ChatExecutionContextResolver;
   executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   eventAnchorResolver: EventAnchorResolver;
-  createdSessionBindingPort: CreatedSessionBindingPort;
   subagentSessionMapper: SubagentSessionMapper;
   hostEventPort?: HostEventPort;
   pendingInteractionRecorder?: PendingInteractionRecorderPort;
@@ -101,18 +96,15 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly logger: BridgeLogger;
   private readonly rawClient: HostClientLike;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
-  private readonly createSessionUseCase: CreateSessionUseCase;
-  private readonly createSessionCommandPort?: CreateSessionCommandPort;
+  private readonly createSessionCommandPort: CreateSessionCommandPort;
   private readonly closeSessionCommandPort?: CloseSessionCommandPort;
   private readonly abortSessionCommandPort?: AbortSessionCommandPort;
   private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
   private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
   private readonly effectiveDirectory?: string;
-  private readonly createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   private readonly chatPreprocessor: SdkChatPreprocessor;
   private readonly contextResolver: ChatExecutionContextResolver;
   private readonly executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
-  private readonly createdSessionBindingPort: CreatedSessionBindingPort;
   private readonly pendingInteractionRecorder?: PendingInteractionRecorderPort;
   private readonly finalIdleTimeoutMs?: number;
 
@@ -146,7 +138,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     });
     this.rawClient = options.rawClient;
     this.opencodeSessionGatewayAdapter = options.opencodeSessionGatewayAdapter;
-    this.createSessionUseCase = options.createSessionUseCase;
     this.createSessionCommandPort = options.createSessionCommandPort;
     this.closeSessionCommandPort = options.closeSessionCommandPort;
     this.abortSessionCommandPort = options.abortSessionCommandPort;
@@ -156,7 +147,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     this.chatPreprocessor = options.chatPreprocessor;
     this.contextResolver = options.contextResolver;
     this.executionSessionInvalidationPort = options.executionSessionInvalidationPort;
-    this.createdSessionBindingPort = options.createdSessionBindingPort;
 
     const activeRunTranslatorRegistry = new EventTranslatorRegistry()
       .register('message.updated', new AssistantMessageEventTranslator())
@@ -214,33 +204,12 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async createSession(input: ProviderCreateSessionInput): Promise<{ toolSessionId: string; title?: string }> {
-    if (this.createSessionCommandPort) {
-      return this.createSessionThroughCommandPort(input);
-    }
-    return this.createSessionThroughLegacyUseCase(input);
-  }
-
-  private async createSessionThroughCommandPort(
-    input: ProviderCreateSessionInput,
-  ): Promise<{ toolSessionId: string; title?: string }> {
-    const normalized = this.createSessionRequestNormalizer.fromChatContext({
-      assistantId: input.assistantId,
-    });
-    const prepared = await this.createSessionUseCase.resolveCreateSession({
-      ...normalized,
-      title: input.title,
-      directory: this.effectiveDirectory,
-      ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
-    });
-    const result = await this.createSessionCommandPort?.execute({
+    const result = await this.createSessionCommandPort.execute({
       ...(input.title ? { title: input.title } : {}),
       ...(input.assistantId ? { assistantId: input.assistantId } : {}),
-      ...(prepared.resolvedDirectory ? { directory: prepared.resolvedDirectory } : {}),
+      ...(this.effectiveDirectory ? { directory: this.effectiveDirectory } : {}),
       ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
     });
-    if (!result) {
-      throw new Error('create_session_command_port_missing');
-    }
     this.logger.info('runtime_sdk.provider.createSession.session_isolation_resolved', {
       resultKind: result.kind,
       toolSessionId: result.toolSessionId,
@@ -249,33 +218,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     });
     return {
       toolSessionId: result.toolSessionId,
-      ...(input.title ? { title: input.title } : {}),
-    };
-  }
-
-  private async createSessionThroughLegacyUseCase(
-    input: ProviderCreateSessionInput,
-  ): Promise<{ toolSessionId: string; title?: string }> {
-    const normalized = this.createSessionRequestNormalizer.fromChatContext({
-      assistantId: input.assistantId,
-    });
-    const result = await this.createSessionUseCase.execute({
-      ...normalized,
-      title: input.title,
-      directory: this.effectiveDirectory,
-      ...(this.effectiveDirectory ? { directorySource: 'config' } : {}),
-    });
-    if (!result.success) {
-      throw new Error(result.errorMessage ?? 'create_session_failed');
-    }
-    if (!result.data.sessionId) {
-      throw new Error('create_session_missing_session_id');
-    }
-
-    this.createdSessionBindingPort.register(result.data.sessionId, result.data.sessionId);
-
-    return {
-      toolSessionId: result.data.sessionId,
       ...(input.title ? { title: input.title } : {}),
     };
   }
@@ -340,18 +282,17 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   async replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {
-    const answer = input.answers[0]?.[0] ?? '';
     if (this.questionReplyCommandPort) {
       await this.questionReplyCommandPort.execute({
         questionId: input.questionId,
-        answer,
+        answers: input.answers,
       });
       return { applied: true };
     }
 
     const result = await this.opencodeSessionGatewayAdapter.replyQuestion({
       questionId: input.questionId,
-      answer,
+      answers: input.answers,
       logger: this.logger,
     });
     if (!result.success) {

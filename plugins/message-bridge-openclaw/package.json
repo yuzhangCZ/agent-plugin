@@ -46,6 +46,7 @@
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
+    "@agent-plugin/gateway-client": "workspace:*",
     "@types/node": "22.19.17",
     "esbuild": "^0.27.4",
     "tsx": "^4.21.0",

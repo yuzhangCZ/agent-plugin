@@ -8,6 +8,7 @@ export class MockOpenCodeSDK {
       sessionAbort: [],
       sessionDelete: [],
       permissionReply: [],
+      rawPost: [],
       health: [],
     };
 
@@ -38,6 +39,13 @@ export class MockOpenCodeSDK {
     this.postSessionIdPermissionsPermissionId = async (options) => {
       await this._simulateDelay();
       return this._mockPermissionReply(options);
+    };
+
+    this._client = {
+      post: async (options) => {
+        await this._simulateDelay();
+        return this._mockRawPost(options);
+      },
     };
 
     this.global = {
@@ -98,10 +106,18 @@ export class MockOpenCodeSDK {
     this.calls.permissionReply.push({ options, timestamp: Date.now() });
     return {
       data: {
-        permissionId: options.permissionId,
-        decision: options.request.decision,
+        permissionId: options.permissionId ?? options.path?.requestID ?? options.path?.permissionID,
+        decision: options.request?.decision ?? options.body?.reply ?? options.body?.response,
       },
     };
+  }
+
+  _mockRawPost(options) {
+    this.calls.rawPost.push({ options, timestamp: Date.now() });
+    if (options?.url === '/permission/{requestID}/reply') {
+      return this._mockPermissionReply(options);
+    }
+    return { data: options };
   }
 
   _mockHealth() {

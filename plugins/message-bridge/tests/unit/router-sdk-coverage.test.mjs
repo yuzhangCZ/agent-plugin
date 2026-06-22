@@ -16,7 +16,6 @@ describe('createSdkAdapter coverage', () => {
       'session.abort',
       'session.delete',
       'config.providers',
-      'postSessionIdPermissionsPermissionId',
       '_client.post',
     ]);
   });
@@ -27,7 +26,7 @@ describe('createSdkAdapter coverage', () => {
   });
 
   test('creates adapted sdk methods and forwards calls', async () => {
-    const calls = { create: 0, sessionGet: 0, sessionList: 0, abort: 0, delete: 0, prompt: 0, providers: 0, permission: 0, post: 0 };
+    const calls = { create: 0, sessionGet: 0, sessionList: 0, abort: 0, delete: 0, prompt: 0, providers: 0, post: 0 };
     const raw = {
       session: {
         create: async (options) => {
@@ -61,10 +60,6 @@ describe('createSdkAdapter coverage', () => {
           return { data: options };
         },
       },
-      postSessionIdPermissionsPermissionId: async (options) => {
-        calls.permission += 1;
-        return { data: options };
-      },
       _client: {
         post: async (options) => {
           calls.post += 1;
@@ -86,9 +81,9 @@ describe('createSdkAdapter coverage', () => {
     });
     const r6 = await adapted.config.providers({ directory: '/tmp/bridge' });
     const r7 = await adapted.permission.reply({ permissionId: 'perm-1', response: 'always' });
-    const r8 = await adapted.question.reply({ questionId: 'question-1', answer: 'yes' });
+    const r8 = await adapted.question.reply({ questionId: 'question-1', answers: [['yes'], ['A', 'B']] });
 
-    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, sessionList: 1, abort: 1, delete: 1, prompt: 1, providers: 1, permission: 1, post: 1 });
+    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, sessionList: 1, abort: 1, delete: 1, prompt: 1, providers: 1, post: 2 });
     assert.deepStrictEqual(r1.data, {
       body: { title: 'session-1' },
       query: { directory: '/tmp/bridge' },
@@ -117,20 +112,20 @@ describe('createSdkAdapter coverage', () => {
       query: { directory: '/tmp/bridge' },
     });
     assert.deepStrictEqual(r7.data, {
-      url: '/session/{id}/permissions/{permissionID}',
-      path: { id: 'ses_bridge_permission_compat', permissionID: 'perm-1' },
-      body: { response: 'always' },
+      url: '/permission/{requestID}/reply',
+      path: { requestID: 'perm-1' },
+      body: { reply: 'always' },
       headers: { 'Content-Type': 'application/json' },
     });
     assert.deepStrictEqual(r8.data, {
       url: '/question/{requestID}/reply',
       path: { requestID: 'question-1' },
-      body: { answers: [['yes']] },
+      body: { answers: [['yes'], ['A', 'B']] },
       headers: { 'Content-Type': 'application/json' },
     });
   });
 
-  test('permission reply facade does not require business code to provide sessionId', async () => {
+  test('permission reply facade uses requestID raw endpoint without sessionId', async () => {
     const permissionCalls = [];
     const adapted = createSdkAdapter({
       session: {
@@ -144,12 +139,11 @@ describe('createSdkAdapter coverage', () => {
       config: {
         providers: async () => ({}),
       },
-      postSessionIdPermissionsPermissionId: async (options) => {
-        permissionCalls.push(options);
-        return { data: true };
-      },
       _client: {
-        post: async () => ({ data: true }),
+        post: async (options) => {
+          permissionCalls.push(options);
+          return { data: true };
+        },
       },
     });
 
@@ -157,9 +151,9 @@ describe('createSdkAdapter coverage', () => {
 
     assert.deepStrictEqual(permissionCalls, [
       {
-        url: '/session/{id}/permissions/{permissionID}',
-        path: { id: 'ses_bridge_permission_compat', permissionID: 'perm-contract-1' },
-        body: { response: 'reject' },
+        url: '/permission/{requestID}/reply',
+        path: { requestID: 'perm-contract-1' },
+        body: { reply: 'reject' },
         headers: { 'Content-Type': 'application/json' },
       },
     ]);

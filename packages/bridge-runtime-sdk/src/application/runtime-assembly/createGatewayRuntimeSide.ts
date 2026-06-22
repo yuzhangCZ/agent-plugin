@@ -1,5 +1,6 @@
 import { GatewayInboundPolicy } from '../../adapters/gateway/GatewayInboundPolicy.ts';
 import { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
+import { GatewayProbeDriver } from '../../adapters/gateway/GatewayProbeDriver.ts';
 import { GatewayRuntimeDriver } from '../../adapters/gateway/GatewayRuntimeDriver.ts';
 import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { InboundPolicy } from '../ports/inbound-policy.ts';
@@ -11,7 +12,8 @@ export function createGatewayRuntimeSide(
   internalOptions: BridgeRuntimeInternalOptions,
   observation: DefaultRuntimeObservation,
 ): {
-  driver: GatewayRuntimeDriver;
+  runtimeDriver: GatewayRuntimeDriver;
+  probeDriver: GatewayProbeDriver;
   sink: GatewayOutboundSinkAdapter;
 } {
   let inboundPolicyImpl: GatewayInboundPolicy | null = null;
@@ -21,7 +23,7 @@ export function createGatewayRuntimeSide(
     },
   };
 
-  const driver = new GatewayRuntimeDriver({
+  const runtimeDriver = new GatewayRuntimeDriver({
     gatewayHost: options.gatewayHost,
     logger: options.logger,
     debug: options.debug,
@@ -31,11 +33,19 @@ export function createGatewayRuntimeSide(
     connectionFactory: internalOptions.connectionFactory,
     onGatewayConnectionCreated: internalOptions.onGatewayConnectionCreated,
   });
-  const sink = new GatewayOutboundSinkAdapter(driver, observation);
+  const probeDriver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    logger: options.logger,
+    debug: options.debug,
+    observation,
+    connectionFactory: internalOptions.connectionFactory,
+  });
+  const sink = new GatewayOutboundSinkAdapter(runtimeDriver, observation);
   inboundPolicyImpl = new GatewayInboundPolicy(observation, sink);
 
   return {
-    driver,
+    runtimeDriver,
+    probeDriver,
     sink,
   };
 }

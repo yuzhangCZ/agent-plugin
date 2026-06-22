@@ -1,5 +1,11 @@
 import type { BridgeGatewayLogger } from '../../infrastructure/gateway/gateway-host.ts';
-import type { RuntimeObservationEvent, RuntimeObservationPort } from '../../application/runtime-observation/index.ts';
+import type {
+  GatewayProbeObservationEvent,
+  RuntimeObservationEvent,
+  RuntimeObservationPort,
+} from '../../application/runtime-observation/index.ts';
+
+type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 function redactMeta(meta: Record<string, unknown>): Record<string, unknown> {
   const sensitiveKeys = ['ak', 'sk', 'token', 'authorization', 'cookie', 'secret', 'password', 'content', 'text', 'answers'];
@@ -17,11 +23,24 @@ function redactMeta(meta: Record<string, unknown>): Record<string, unknown> {
 
 function write(
   logger: BridgeGatewayLogger | undefined,
-  level: 'debug' | 'info' | 'warn' | 'error',
+  level: RuntimeLogLevel,
   message: string,
   meta: Record<string, unknown>,
 ): void {
   logger?.[level]?.(message, redactMeta(meta));
+}
+
+function getGatewayProbeLogLevel(event: GatewayProbeObservationEvent): RuntimeLogLevel {
+  if (event.phase !== 'completed') {
+    return 'info';
+  }
+  if (event.state === 'connect_error') {
+    return 'error';
+  }
+  if (event.state === 'timeout' || event.state === 'rejected') {
+    return 'warn';
+  }
+  return 'info';
 }
 
 /**
@@ -34,6 +53,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
     this.logger = logger;
   }
 
+  // eslint-disable-next-line max-lines-per-function, complexity -- observation 日志投影按事件类型集中分派，保持日志命名在单一出口维护。
   record(event: RuntimeObservationEvent): void {
     switch (event.type) {
       case 'runtime_lifecycle':
@@ -51,6 +71,24 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
         write(this.logger, 'info', 'runtime_sdk.gateway.state_changed', {
           gatewayState: event.state,
         });
+        return;
+      case 'gateway_probe':
+        write(
+          this.logger,
+          getGatewayProbeLogLevel(event),
+          `runtime_sdk.gateway_probe.${event.phase}`,
+          event.phase === 'requested'
+            ? {
+                gatewayUrl: event.gatewayUrl,
+                timeoutMs: event.timeoutMs,
+              }
+            : {
+                gatewayUrl: event.gatewayUrl,
+                state: event.state,
+                latencyMs: event.latencyMs,
+                reason: event.reason,
+              },
+        );
         return;
       case 'downstream_received':
         write(this.logger, 'info', 'runtime_sdk.downstream.received', {
@@ -168,6 +206,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           `runtime_sdk.uplink.${event.phase}`,
           {
             messageType: event.messageType,
+            eventType: event.eventType,
             toolSessionId: event.toolSessionId,
             welinkSessionId: event.welinkSessionId,
             code: event.code,

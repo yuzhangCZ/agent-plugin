@@ -1,8 +1,7 @@
-import {
-  mapGatewayClientAvailability,
-  type GatewayClientErrorShape,
-  type GatewayClientState,
-} from '@agent-plugin/gateway-client';
+import type {
+  BridgeRuntimeErrorCode,
+  BridgeRuntimeStatusSnapshot,
+} from '@wecode/bridge-runtime-sdk';
 import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
@@ -12,6 +11,7 @@ import {
   createConnectingStatus,
   createReadyStatus,
   createUnavailableStatus,
+  type MessageBridgeUnavailableReason,
 } from './MessageBridgeStatus.js';
 
 export interface SdkRuntimeStatusAdapter {
@@ -19,22 +19,37 @@ export interface SdkRuntimeStatusAdapter {
   publishDisabled(errorMessage: string): void;
   publishConfigInvalid(errorMessage: string): void;
   publishPluginFailure(errorMessage: string): void;
-  publishGatewayState(state: GatewayClientState): void;
-  publishGatewayError(error: GatewayClientErrorShape): void;
+  publishRuntimeStatus(status: BridgeRuntimeStatusSnapshot): void;
 }
 
-function mapGatewayAvailabilityToReason(
-  availability: ReturnType<typeof mapGatewayClientAvailability>,
-): 'server_failure' | 'network_failure' | null {
-  switch (availability) {
-    case 'remote_unavailable':
+function mapBridgeRuntimeErrorCodeToUnavailableReason(
+  code: BridgeRuntimeErrorCode | undefined,
+): MessageBridgeUnavailableReason {
+  switch (code) {
+    case 'gateway_connect_parameter_invalid':
+      return 'config_invalid';
+    case 'gateway_auth_rejected':
+    case 'gateway_handshake_timeout':
+    case 'gateway_handshake_rejected':
+    case 'gateway_handshake_invalid':
       return 'server_failure';
-    case 'transport_unavailable':
+    case 'gateway_transport_error':
+    case 'gateway_reconnect_exhausted':
       return 'network_failure';
-    case null:
-      return null;
+    case 'provider_unavailable':
+    case 'runtime_internal_error':
+      return 'plugin_failure';
+    case 'gateway_unknown_error':
+    case 'runtime_unknown_error':
+    case 'probe_unknown_error':
+    case undefined:
+      return 'plugin_failure';
     // no default
   }
+}
+
+function getRuntimeStatusErrorMessage(status: BridgeRuntimeStatusSnapshot): string {
+  return status.error?.message ?? status.failureReason ?? 'unknown error';
 }
 
 export function createSdkRuntimeStatusAdapter(
@@ -87,44 +102,32 @@ export function createSdkRuntimeStatusAdapter(
       }));
     },
 
-    publishGatewayState(state: GatewayClientState) {
+    publishRuntimeStatus(status: BridgeRuntimeStatusSnapshot) {
       const current = read();
-      if (state === 'READY') {
+      if (status.state === 'ready') {
         publish(createReadyStatus({ updatedAt: now() }));
         return;
       }
 
-      if (state === 'CONNECTING' || state === 'CONNECTED') {
+      if (status.state === 'starting' || status.state === 'reconnecting') {
         publish(createConnectingStatus({
           updatedAt: now(),
           lastReadyAt: current.lastReadyAt,
         }));
+        return;
       }
-    },
-
-    publishGatewayError(error: GatewayClientErrorShape) {
-      const current = read();
-      if (error.code === 'GATEWAY_CONNECT_PARAMETER_INVALID' && error.disposition === 'startup_failure') {
-        publish(createUnavailableStatus({
-          reason: 'config_invalid',
-          lastError: error.message,
-          updatedAt: now(),
-          lastReadyAt: current.lastReadyAt,
-        }));
+      if (status.state !== 'failed') {
         return;
       }
 
-      const reason = mapGatewayAvailabilityToReason(mapGatewayClientAvailability(error));
-      if (!reason) {
-        return;
-      }
+      const reason = mapBridgeRuntimeErrorCodeToUnavailableReason(status.error?.code);
       if (reason === 'network_failure' && current.phase === 'unavailable' && current.unavailableReason === 'server_failure') {
         return;
       }
 
       publish(createUnavailableStatus({
         reason,
-        lastError: error.message,
+        lastError: getRuntimeStatusErrorMessage(status),
         updatedAt: now(),
         lastReadyAt: current.lastReadyAt,
       }));

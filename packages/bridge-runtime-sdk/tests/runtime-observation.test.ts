@@ -244,7 +244,7 @@ test('trace observation adapter keeps diagnostics in sync with observation event
 
   observation.record({
     type: 'gateway_state_changed',
-    state: 'READY',
+    state: 'ready',
     occurredAt: 123,
   });
   observation.record({
@@ -290,7 +290,7 @@ test('trace observation adapter keeps diagnostics in sync with observation event
   });
 
   const diagnostics = trace.snapshot();
-  assert.equal(diagnostics.gatewayState, 'READY');
+  assert.equal(diagnostics.gatewayState, 'ready');
   assert.equal(diagnostics.lastReadyAt, 123);
   assert.equal(diagnostics.lastInboundAt, 456);
   assert.deepEqual(diagnostics.providerCalls[0], {
@@ -555,7 +555,7 @@ test('usecases emit failed observation events for non request-run failures', asy
       source: {
         type: 'invoke',
         action: 'question_reply',
-        payload: { questionId: 'q-1', answer: 'yes' },
+        payload: { questionId: 'q-1', answers: [['yes']] },
       },
     } as never),
     /reply_question_failed/,

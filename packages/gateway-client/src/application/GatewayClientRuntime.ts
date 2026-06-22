@@ -5,14 +5,18 @@ import type { ReconnectPolicy } from '../ports/ReconnectPolicy.ts';
 import type { ReconnectScheduler } from '../ports/ReconnectScheduler.ts';
 import type { GatewayWireCodec } from '../ports/GatewayWireCodec.ts';
 import type { GatewaySendContext } from '../domain/send-context.ts';
-import type { GatewayClientState } from '../domain/state.ts';
-import { GATEWAY_CLIENT_STATE } from '../domain/state.ts';
+import type { GatewayClientStatus } from '../domain/state.ts';
 import type { GatewaySendPayload } from '../ports/GatewayClientMessages.ts';
 import { BusinessMessageHandler } from './handlers/BusinessMessageHandler.ts';
 import type { OutboundProtocolGate } from './protocol/OutboundProtocolGate.ts';
 import { GatewayClientTelemetry } from './telemetry/GatewayClientTelemetry.ts';
-import type { GatewayRuntimeContext, GatewayRuntimeSink, GatewayRuntimeStatePort } from './runtime/GatewayRuntimeContracts.ts';
+import type {
+  GatewayRuntimeContext,
+  GatewayRuntimeSink,
+  GatewayRuntimeStatePort,
+} from './runtime/GatewayRuntimeContracts.ts';
 import { ConnectSession } from './runtime/ConnectSession.ts';
+import { GatewayLifecycleState, type GatewayLifecycleSessionToken } from './runtime/GatewayLifecycleState.ts';
 import { HeartbeatLoop } from './runtime/HeartbeatLoop.ts';
 import { HandshakeFrameProcessor } from './runtime/HandshakeFrameProcessor.ts';
 import { InboundFrameClassifier } from './runtime/InboundFrameClassifier.ts';
@@ -20,6 +24,7 @@ import { InboundFrameRouter } from './runtime/InboundFrameRouter.ts';
 import { OutboundSender } from './runtime/OutboundSender.ts';
 import { ReconnectOrchestrator } from './runtime/ReconnectOrchestrator.ts';
 import type { AkSkAuthPayload } from '../ports/GatewayAuthProvider.ts';
+import type { GatewayClientError } from '../errors/GatewayClientError.ts';
 
 /**
  * GatewayClientRuntime 需要的依赖集合。
@@ -51,9 +56,7 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
   private readonly handshakeFrameProcessor: HandshakeFrameProcessor;
   private readonly inboundFrameRouter: InboundFrameRouter;
   private readonly connectSession: ConnectSession;
-  private manuallyDisconnected = false;
-  private reconnecting = false;
-  private state: GatewayClientState = GATEWAY_CLIENT_STATE.DISCONNECTED;
+  private readonly lifecycleState: GatewayLifecycleState;
 
   constructor(options: GatewayClientOptions, dependencies: GatewayClientRuntimeDependencies, sink: GatewayRuntimeSink) {
     this.options = options;
@@ -67,6 +70,9 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
       reconnectEnabled: dependencies.reconnectEnabled,
       authSubprotocolBuilder: dependencies.authSubprotocolBuilder,
     };
+    this.lifecycleState = new GatewayLifecycleState({
+      emitStatusChange: (status) => this.context.sink.emitStatusChange(status),
+    });
 
     this.outboundSender = new OutboundSender(
       dependencies.transport,
@@ -108,16 +114,8 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
     );
   }
 
-  getState(): GatewayClientState {
-    return this.state;
-  }
-
-  setState(next: GatewayClientState): void {
-    if (this.state === next) {
-      return;
-    }
-    this.state = next;
-    this.context.sink.emitStateChange(next);
+  getStatus(): GatewayClientStatus {
+    return this.lifecycleState.getStatus();
   }
 
   isConnected(): boolean {
@@ -125,34 +123,60 @@ export class GatewayClientRuntime implements GatewayRuntimeStatePort {
   }
 
   isManuallyDisconnected(): boolean {
-    return this.manuallyDisconnected;
+    return this.lifecycleState.isManuallyDisconnected();
   }
 
-  setManuallyDisconnected(value: boolean): void {
-    this.manuallyDisconnected = value;
+  beginConnect(input: { reconnectAttempt: boolean }): GatewayLifecycleSessionToken {
+    return this.lifecycleState.beginConnect(input);
   }
 
-  isReconnecting(): boolean {
-    return this.reconnecting;
+  finishConnectIfCurrent(token: GatewayLifecycleSessionToken): boolean {
+    return this.lifecycleState.finishConnectIfCurrent(token);
   }
 
-  setReconnecting(value: boolean): void {
-    this.reconnecting = value;
+  markReconnectingIfCurrent(token: GatewayLifecycleSessionToken): boolean {
+    return this.lifecycleState.markReconnectingIfCurrent(token);
+  }
+
+  beginReconnectWindow(): number {
+    return this.lifecycleState.beginReconnectWindow();
+  }
+
+  closeReconnectExhaustedIfCurrent(generation: number): boolean {
+    return this.lifecycleState.closeReconnectExhaustedIfCurrent(generation);
+  }
+
+  isCurrentGeneration(generation: number): boolean {
+    return this.lifecycleState.isCurrentGeneration(generation);
+  }
+
+  closeIfCurrent(token: GatewayLifecycleSessionToken, error: GatewayClientError): boolean {
+    return this.lifecycleState.closeIfCurrent(token, error);
+  }
+
+  isCurrentSession(token: GatewayLifecycleSessionToken): boolean {
+    return this.lifecycleState.isCurrentSession(token);
   }
 
   connect(): Promise<void> {
     return this.connectInternal(false);
   }
 
-  disconnect(): void {
-    this.context.logger?.info?.('gateway.disconnect.requested', { state: this.state });
-    this.setManuallyDisconnected(true);
-    this.setReconnecting(false);
-    this.reconnectOrchestrator.reset();
-    this.transport.close();
+  async disconnect(): Promise<void> {
+    this.context.logger?.info?.('gateway.disconnect.requested', {
+      connection: this.getStatus().toDiagnosticFields(),
+    });
+    this.lifecycleState.closeManual();
+    this.connectSession.cancelManualDisconnect();
     this.heartbeatLoop.stop();
     this.reconnectOrchestrator.stop();
-    this.setState(GATEWAY_CLIENT_STATE.DISCONNECTED);
+    try {
+      this.transport.close();
+    } catch (error) {
+      this.context.logger?.warn?.('gateway.disconnect.close_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   send(message: GatewaySendPayload, logContext?: GatewaySendContext): void {

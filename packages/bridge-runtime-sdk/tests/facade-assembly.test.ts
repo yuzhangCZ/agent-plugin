@@ -2,24 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 
+import { GatewayClientStatus } from '@agent-plugin/gateway-client';
 import { qrcodeAuth as sourceQrCodeAuth } from '@wecode/skill-qrcode-auth';
 import { createBridgeRuntime, qrcodeAuth } from '../src/index.ts';
-import type {
-  BridgeGatewayHostConnection,
-  BridgeGatewayHostState,
-} from '../src/infrastructure/gateway/gateway-host.ts';
+import type { BridgeGatewayHostConnection } from '../src/infrastructure/gateway/gateway-host.ts';
 
 class AssemblyGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
-  private state: BridgeGatewayHostState = 'DISCONNECTED';
+  private state: 'DISCONNECTED' | 'READY' = 'DISCONNECTED';
 
   async connect(): Promise<void> {
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emit('statusChange', this.getStatus());
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
+    this.emit('statusChange', this.getStatus());
   }
 
   send(): void {}
@@ -28,14 +26,10 @@ class AssemblyGatewayClient extends EventEmitter implements BridgeGatewayHostCon
     return this.state === 'READY';
   }
 
-  getState(): BridgeGatewayHostState {
-    return this.state;
-  }
-
   getStatus() {
-    return {
-      isReady: () => this.state === 'READY',
-    };
+    return this.state === 'READY'
+      ? GatewayClientStatus.ready()
+      : GatewayClientStatus.closed();
   }
 
   override on(event: string, listener: (...args: unknown[]) => void): this {

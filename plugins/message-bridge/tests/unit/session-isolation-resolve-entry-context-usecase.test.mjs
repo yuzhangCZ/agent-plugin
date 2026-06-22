@@ -166,6 +166,8 @@ describe('DefaultResolveEntrySessionContextUseCase', () => {
         visibleSessionIds: ['ses-1'],
         resolvedSessionId: 'ses-1',
         directory: '/repo',
+        roots: true,
+        start: 1_777_766_400_000,
         hasBinding: true,
       },
     });

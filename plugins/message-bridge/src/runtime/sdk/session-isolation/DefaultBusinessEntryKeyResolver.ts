@@ -62,7 +62,7 @@ function readPartialBusinessEntryKey(input: unknown): Partial<BusinessEntryKeyIn
 
 /**
  * 从 gateway 扩展参数解析控制面业务入口 key。
- * @remarks create_session 只接受显式三元组；chat 可按历史上下文字段补全，补全失败时 fail-closed。
+ * @remarks create_session 只接受显式三元组；chat 仅对 miniapp 历史上下文字段补全，补全失败时 fail-closed。
  */
 export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver {
   resolve(input: BusinessEntryKeyResolverInput): BusinessEntryKey | undefined {
@@ -85,59 +85,15 @@ export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver
   private completeChatEntryKey(input: {
     assistantAccount?: string;
     sendUserAccount?: string;
-    imGroupId?: string;
     platformExtParam?: Partial<BusinessEntryKeyInput>;
   } | undefined): BusinessEntryKey | undefined {
     const domain = asNormalizedKeyPart(input?.platformExtParam?.businessSessionDomain);
-    if (!domain || (domain !== 'im' && domain !== 'miniapp')) {
+    if (domain !== 'miniapp') {
       return undefined;
     }
     const sendUserAccount = asTrimmedString(input?.sendUserAccount);
     const assistantAccount = asTrimmedString(input?.assistantAccount);
-    const imGroupId = asTrimmedString(input?.imGroupId);
     const type = asNormalizedKeyPart(input?.platformExtParam?.businessSessionType);
-
-    if (domain === 'im') {
-      if (type === 'group') {
-        if (!imGroupId) {
-          return undefined;
-        }
-        return {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: imGroupId,
-        };
-      }
-      if (type === 'direct') {
-        if (!sendUserAccount || !assistantAccount) {
-          return undefined;
-        }
-        return {
-          businessSessionDomain: 'im',
-          businessSessionType: 'direct',
-          businessSessionId: `${sendUserAccount}#${assistantAccount}`,
-        };
-      }
-      if (type) {
-        return undefined;
-      }
-
-      if (imGroupId) {
-        return {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: imGroupId,
-        };
-      }
-      if (!sendUserAccount || !assistantAccount) {
-        return undefined;
-      }
-      return {
-        businessSessionDomain: 'im',
-        businessSessionType: 'direct',
-        businessSessionId: `${sendUserAccount}#${assistantAccount}`,
-      };
-    }
 
     if (type && type !== 'direct') {
       return undefined;

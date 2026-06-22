@@ -1,5 +1,6 @@
 import type { GatewayDownstreamBusinessRequest, GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
 
+import type { BridgeGatewayProbeResult } from '../../public-contract.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from '../constants/runtime.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
@@ -63,6 +64,25 @@ export type GatewayActivityObservationEvent = {
   activity: 'inbound' | 'outbound' | 'heartbeat';
   occurredAt?: number;
 };
+
+/**
+ * gateway 临时 probe 观测事件。
+ */
+export type GatewayProbeObservationEvent =
+  | {
+      type: 'gateway_probe';
+      phase: 'requested';
+      gatewayUrl: string;
+      timeoutMs: number;
+    }
+  | {
+      type: 'gateway_probe';
+      phase: 'completed';
+      gatewayUrl: string;
+      state: BridgeGatewayProbeResult['state'];
+      latencyMs: number;
+      reason?: string;
+    };
 
 /**
  * downstream 接收观测事件。
@@ -185,6 +205,7 @@ export type UplinkObservationEvent =
       type: 'uplink_validation';
       phase: 'sending' | 'validated' | 'validation_failed';
       messageType: GatewayUplinkBusinessMessage['type'];
+      eventType?: string;
       toolSessionId?: string;
       welinkSessionId?: string;
       code?: string;
@@ -222,6 +243,7 @@ export type RuntimeObservationEvent =
   | RuntimeLifecycleObservationEvent
   | GatewayStateChangedObservationEvent
   | GatewayActivityObservationEvent
+  | GatewayProbeObservationEvent
   | DownstreamReceivedObservationEvent
   | DownstreamProcessedObservationEvent
   | CommandDispatchedObservationEvent

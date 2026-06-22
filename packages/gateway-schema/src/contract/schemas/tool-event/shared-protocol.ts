@@ -8,21 +8,24 @@ export type ToolEventCloudProtocol = typeof TOOL_EVENT_CLOUD_PROTOCOL;
  * 同时保持 payload 本体字段定义集中在各自事件 schema 中。
  */
 export function withCloudProtocol<Schema extends z.ZodTypeAny>(schema: Schema) {
+  const stripCloudProtocol = z.preprocess((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+
+    const { protocol: _protocol, ...rest } = value as Record<string, unknown>;
+    return rest;
+  }, schema) as unknown as z.ZodType<
+    z.output<Schema>,
+    { protocol: ToolEventCloudProtocol } & Record<string, unknown>
+  >;
+
   return z
     .object({
       protocol: z.literal(TOOL_EVENT_CLOUD_PROTOCOL),
     })
     .passthrough()
-    .pipe(
-      z.preprocess((value) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) {
-          return value;
-        }
-
-        const { protocol: _protocol, ...rest } = value as Record<string, unknown>;
-        return rest;
-      }, schema),
-    )
+    .pipe(stripCloudProtocol)
     .transform((event) => ({
       protocol: TOOL_EVENT_CLOUD_PROTOCOL,
       ...(event as Record<string, unknown>),

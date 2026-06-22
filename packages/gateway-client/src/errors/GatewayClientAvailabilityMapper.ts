@@ -34,14 +34,20 @@ export function mapGatewayClientAvailability(error: GatewayClientErrorShape): Ga
         ? 'remote_unavailable'
         : null;
     case 'GATEWAY_CONNECT_ABORTED':
+    case 'GATEWAY_CLOSED_MANUAL':
       return error.disposition === 'cancelled'
         ? null
+        : null;
+    case 'GATEWAY_RECONNECT_EXHAUSTED':
+      return error.disposition === 'runtime_failure'
+        ? 'transport_unavailable'
         : null;
     case 'GATEWAY_CONNECT_PARAMETER_INVALID':
     case 'GATEWAY_INBOUND_PROTOCOL_INVALID':
     case 'GATEWAY_OUTBOUND_PROTOCOL_INVALID':
     case 'GATEWAY_NOT_CONNECTED':
     case 'GATEWAY_NOT_READY':
+    case 'GATEWAY_UNKNOWN_ERROR':
       return null;
     default:
       return assertNever(error.code);

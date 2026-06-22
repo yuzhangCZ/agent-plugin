@@ -1,57 +1,58 @@
 import { z } from 'zod';
 
-import { requiredTrimmedString } from '../../shared.ts';
 import { MESSAGE_PART_STATE_STATUSES } from '../../../literals/tool-event.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
+
+const requiredProtocolString = z.string().min(1);
 
 const skillTextDeltaEventBaseSchema = z.object({
   type: z.literal('text.delta'),
   properties: z.object({
-    messageId: requiredTrimmedString,
-    partId: requiredTrimmedString,
-    content: requiredTrimmedString,
+    messageId: requiredProtocolString,
+    partId: requiredProtocolString,
+    content: z.string(),
   }),
 });
 
 const skillTextDoneEventBaseSchema = z.object({
   type: z.literal('text.done'),
   properties: z.object({
-    messageId: requiredTrimmedString,
-    partId: requiredTrimmedString,
-    content: requiredTrimmedString,
+    messageId: requiredProtocolString,
+    partId: requiredProtocolString,
+    content: z.string(),
   }),
 });
 
 const skillThinkingDeltaEventBaseSchema = z.object({
   type: z.literal('thinking.delta'),
   properties: z.object({
-    messageId: requiredTrimmedString,
-    partId: requiredTrimmedString,
-    content: requiredTrimmedString,
+    messageId: requiredProtocolString,
+    partId: requiredProtocolString,
+    content: z.string(),
   }),
 });
 
 const skillThinkingDoneEventBaseSchema = z.object({
   type: z.literal('thinking.done'),
   properties: z.object({
-    messageId: requiredTrimmedString,
-    partId: requiredTrimmedString,
-    content: requiredTrimmedString,
+    messageId: requiredProtocolString,
+    partId: requiredProtocolString,
+    content: z.string(),
   }),
 });
 
 const skillToolUpdateEventBaseSchema = z.object({
   type: z.literal('tool.update'),
   properties: z.object({
-    messageId: requiredTrimmedString,
-    partId: requiredTrimmedString,
-    toolName: requiredTrimmedString,
+    messageId: requiredProtocolString,
+    partId: requiredProtocolString,
+    toolName: requiredProtocolString,
     status: z.enum(MESSAGE_PART_STATE_STATUSES),
-    toolCallId: requiredTrimmedString,
-    title: requiredTrimmedString.optional(),
-    input: requiredTrimmedString.optional(),
-    output: requiredTrimmedString.optional(),
-    error: requiredTrimmedString.optional(),
+    toolCallId: requiredProtocolString,
+    title: z.string().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    output: z.string().optional(),
+    error: z.string().optional(),
   }),
 });
 

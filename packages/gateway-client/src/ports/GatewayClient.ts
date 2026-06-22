@@ -1,5 +1,5 @@
 import type { GatewaySendContext } from '../domain/send-context.ts';
-import type { GatewayClientState, GatewayClientStatus } from '../domain/state.ts';
+import type { GatewayClientStatus } from '../domain/state.ts';
 import type { GatewaySendPayload } from './GatewayClientMessages.ts';
 import type { GatewayClientEvents } from './GatewayClientEvents.ts';
 
@@ -13,8 +13,11 @@ export interface GatewayClient {
    * @remarks Promise fulfilled 表示客户端已进入 READY，而不只是底层 transport 已经 open。
    */
   connect(): Promise<void>;
-  /** 主动断开连接并停止重连与心跳。 */
-  disconnect(): void;
+  /**
+   * 主动断开连接并停止重连与心跳。
+   * @remarks Promise fulfilled 表示客户端已经语义关闭，不等待底层 socket close event。
+   */
+  disconnect(): Promise<void>;
   /**
    * 统一发送出口，只接受业务负载。
    * @remarks 控制帧由运行时内部编排，外部调用方不应绕过 READY gating。
@@ -22,8 +25,6 @@ export interface GatewayClient {
   send(message: GatewaySendPayload, logContext?: GatewaySendContext): void;
   /** 返回 transport 连接态。 */
   isConnected(): boolean;
-  /** 返回状态机状态。 */
-  getState(): GatewayClientState;
   /** 返回当前状态快照的语义视图。 */
   getStatus(): GatewayClientStatus;
   /** 订阅 facade 事件。 */

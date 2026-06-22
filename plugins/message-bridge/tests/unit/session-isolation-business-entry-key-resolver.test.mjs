@@ -42,7 +42,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
         context: {
           assistantAccount: 'bot-1',
           sendUserAccount: 'user-1',
-          imGroupId: 'group-a',
         },
       }),
       {
@@ -97,7 +96,7 @@ describe('DefaultBusinessEntryKeyResolver', () => {
     );
   });
 
-  test('returns undefined when chat businessSessionDomain is missing even if imGroupId exists', () => {
+  test('returns undefined when chat businessSessionDomain is missing even if participant context exists', () => {
     const resolver = new DefaultBusinessEntryKeyResolver();
 
     assert.strictEqual(
@@ -105,7 +104,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
         source: 'chat',
         extParameters: {},
         context: {
-          imGroupId: ' group-a ',
           assistantAccount: 'bot-1',
           sendUserAccount: 'user-1',
         },
@@ -130,10 +128,10 @@ describe('DefaultBusinessEntryKeyResolver', () => {
     );
   });
 
-  test('completes im group chat business key when domain and type are explicit but businessSessionId is missing', () => {
+  test('does not complete im group chat business key when businessSessionId is missing', () => {
     const resolver = new DefaultBusinessEntryKeyResolver();
 
-    assert.deepStrictEqual(
+    assert.strictEqual(
       resolver.resolve({
         source: 'chat',
         extParameters: {
@@ -143,23 +141,18 @@ describe('DefaultBusinessEntryKeyResolver', () => {
           },
         },
         context: {
-          imGroupId: ' group-a ',
           assistantAccount: 'bot-1',
           sendUserAccount: 'user-1',
         },
       }),
-      {
-        businessSessionDomain: 'im',
-        businessSessionType: 'group',
-        businessSessionId: 'group-a',
-      },
+      undefined,
     );
   });
 
-  test('completes im direct chat business key when domain and type are explicit but businessSessionId is missing', () => {
+  test('does not complete im direct chat business key when businessSessionId is missing', () => {
     const resolver = new DefaultBusinessEntryKeyResolver();
 
-    assert.deepStrictEqual(
+    assert.strictEqual(
       resolver.resolve({
         source: 'chat',
         extParameters: {
@@ -173,11 +166,7 @@ describe('DefaultBusinessEntryKeyResolver', () => {
           sendUserAccount: ' user-1 ',
         },
       }),
-      {
-        businessSessionDomain: 'im',
-        businessSessionType: 'direct',
-        businessSessionId: 'user-1#bot-1',
-      },
+      undefined,
     );
   });
 
@@ -273,7 +262,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
         context: {
           assistantAccount: 'bot-1',
           sendUserAccount: 'user-1',
-          imGroupId: 'group-a',
         },
       }),
       undefined,
