@@ -40,7 +40,7 @@ const strictCodeRules = {
   'no-var': 'error',
 };
 
-const typeAwareTypeScriptProjects = [
+const typeCheckedTypeScriptProjects = [
   'plugins/message-bridge/tsconfig.json',
   'plugins/message-bridge-openclaw/tsconfig.typecheck.json',
   'packages/bridge-runtime-sdk/tsconfig.json',
@@ -48,13 +48,23 @@ const typeAwareTypeScriptProjects = [
   'packages/skill-plugin-cli/tsconfig.json',
 ];
 
-const typeAwareTypeScriptSourceFiles = [
+const typeCheckedTypeScriptFiles = [
   'plugins/message-bridge/src/**/*.ts',
   'plugins/message-bridge-openclaw/src/**/*.ts',
   'packages/bridge-runtime-sdk/src/**/*.ts',
   'packages/skill-qrcode-auth/src/**/*.ts',
   'packages/skill-plugin-cli/src/**/*.ts',
 ];
+
+const typeCheckedTypeScriptRules = {
+  '@typescript-eslint/dot-notation': [
+    'error',
+    {
+      allowIndexSignaturePropertyAccess: true,
+    },
+  ],
+  '@typescript-eslint/prefer-optional-chain': 'error',
+};
 
 // 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
 const firstPassBaselineRules = {
@@ -149,24 +159,6 @@ export default defineConfig([
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
   })),
   {
-    files: typeAwareTypeScriptSourceFiles,
-    languageOptions: {
-      parserOptions: {
-        project: typeAwareTypeScriptProjects,
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: {
-      '@typescript-eslint/dot-notation': [
-        'error',
-        {
-          allowIndexSignaturePropertyAccess: true,
-        },
-      ],
-      '@typescript-eslint/prefer-optional-chain': 'error',
-    },
-  },
-  {
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
       globals: nodeRuntimeGlobals,
@@ -180,6 +172,17 @@ export default defineConfig([
       ...strictCodeRules,
       ...cleanCodeRules,
     },
+  },
+  // 这些规则需要 TypeScript type checker；只覆盖已纳入 tsconfig 的主源码，避免脚本/夹具文件出现 parser project 误报。
+  {
+    files: typeCheckedTypeScriptFiles,
+    languageOptions: {
+      parserOptions: {
+        project: typeCheckedTypeScriptProjects,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeCheckedTypeScriptRules,
   },
   {
     files: [
