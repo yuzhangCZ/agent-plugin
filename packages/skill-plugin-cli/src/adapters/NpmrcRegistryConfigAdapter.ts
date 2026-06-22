@@ -69,7 +69,7 @@ export class NpmrcRegistryConfigAdapter implements RegistryConfigAdapter {
     });
     const nextContent = replaced
       ? `${nextLines.join("\n").replace(/\s*$/u, "")}\n`
-      : `${(existing ?? "").replace(/\s*$/u, "")}${existing && existing.trim() ? "\n" : ""}${SCOPE_REGISTRY_PREFIX}${normalized}\n`;
+      : `${(existing ?? "").replace(/\s*$/u, "")}${existing?.trim() ? "\n" : ""}${SCOPE_REGISTRY_PREFIX}${normalized}\n`;
 
     if (nextContent !== existing) {
       await writeFileAtomically(this.npmrcPath, nextContent);

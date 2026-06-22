@@ -3,7 +3,7 @@ import { asRecord } from "../utils/type-guards.js";
 export function extractAssistantText(messages: unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = asRecord(messages[index]);
-    if (!message || message.role !== "assistant") {
+    if (message?.role !== "assistant") {
       continue;
     }
 
