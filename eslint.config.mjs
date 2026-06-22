@@ -37,7 +37,6 @@ const cleanCodeRules = {
 };
 
 const strictCodeRules = {
-  'dot-notation': 'error',
   'no-var': 'error',
 };
 
@@ -131,6 +130,7 @@ export default defineConfig([
     },
     rules: {
       ...js.configs.recommended.rules,
+      'dot-notation': 'error',
       ...strictCodeRules,
       ...firstPassBaselineRules,
       ...cleanCodeRules,
@@ -157,6 +157,12 @@ export default defineConfig([
       },
     },
     rules: {
+      '@typescript-eslint/dot-notation': [
+        'error',
+        {
+          allowIndexSignaturePropertyAccess: true,
+        },
+      ],
       '@typescript-eslint/prefer-optional-chain': 'error',
     },
   },
