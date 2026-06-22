@@ -12,7 +12,10 @@ import type { QrCodeAuthRuntime } from "../../src/domain/qrcode-types.ts";
 
 function createFakeQrCodeRuntime(
   scenario: "confirmed" | "cancelled" | "network_error" | "refresh",
-  options: { onRun?: (input: Parameters<QrCodeAuthRuntime["run"]>[0]) => void } = {},
+  options: {
+    expiresAt?: string;
+    onRun?: (input: Parameters<QrCodeAuthRuntime["run"]>[0]) => void;
+  } = {},
 ): QrCodeAuthRuntime {
   return {
     async run(input) {
@@ -37,7 +40,7 @@ function createFakeQrCodeRuntime(
           weUrl: "https://we.example/qr-1",
           pcUrl: "https://pc.example/qr-1",
         },
-        expiresAt: "2026-04-28T08:00:00.000Z",
+        expiresAt: options.expiresAt ?? "2026-04-28T08:00:00.000Z",
       });
 
       if (scenario === "refresh") {
@@ -283,6 +286,49 @@ exit 0`,
 `,
     );
     assert.doesNotMatch(io.stdout.join(""), /附加配置路径|message-bridge\.jsonc?/);
+  } finally {
+    io.restore();
+    process.env = originalEnv;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("opencode success flow formats numeric string qrcode expiry returned by qrcodeAuth", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-opencode-numeric-expiry-"));
+  const originalEnv = { ...process.env };
+  const io = captureIo();
+  try {
+    const configDir = join(dir, ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ plugin: ["@wecode/skill-opencode-plugin"] }, null, 2), "utf8");
+    await createFakeCommand(
+      dir,
+      "opencode",
+      `if [ "$1" = "--version" ]; then
+  printf '1.0.0'
+  exit 0
+fi
+if [ "$1" = "plugin" ]; then
+  exit 0
+fi
+exit 0`,
+    );
+
+    process.env.PATH = `${dir}${delimiter}${originalEnv.PATH || ""}`;
+    process.env.XDG_CONFIG_HOME = join(dir, ".config");
+    process.env.NPM_CONFIG_USERCONFIG = join(dir, ".npmrc");
+
+    const parsed = parseInstallArgv(["install", "--host", "opencode"]);
+    assert.ok(!("help" in parsed));
+    const result = await createInstallCliUseCase({
+      qrcodeAuthRuntime: createFakeQrCodeRuntime("confirmed", {
+        expiresAt: "1782116650",
+      }),
+    }).execute(parsed);
+
+    assert.equal(result.status, "success");
+    assert.match(normalizeTerminalOutput(io.stdout.join("")), /\[skill-plugin-cli\] 二维码有效期至: 2026-06-22 08:24:10 UTC/);
+    assert.doesNotMatch(io.stdout.join(""), /NaN/u);
   } finally {
     io.restore();
     process.env = originalEnv;

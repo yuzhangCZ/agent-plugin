@@ -6,6 +6,20 @@ import { embeddedQrCodeAuthRuntime } from "./embedded-qrcode-runtime.ts";
 
 const DEFAULT_MAX_REFRESH_COUNT = 3;
 
+function normalizeExpiresAtForCli(value: string): string {
+  const raw = value.trim();
+  if (!/^\d+$/u.test(raw)) {
+    return value;
+  }
+
+  const seconds = Number(raw);
+  if (!Number.isSafeInteger(seconds)) {
+    return value;
+  }
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
 function toCliFailureSummary(snapshot: Extract<QrCodeAuthSnapshot, { type: "failed" }>): CliQrFailureSummary {
   if (snapshot.reasonCode === "network_error") {
     return {
@@ -78,7 +92,7 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
               type: "qrcode_generated",
               weUrl: snapshot.display.weUrl,
               pcUrl: snapshot.display.pcUrl,
-              expiresAt: snapshot.expiresAt,
+              expiresAt: normalizeExpiresAtForCli(snapshot.expiresAt),
               ...(refreshIndex > 0 ? { refresh: { index: refreshIndex, max: DEFAULT_MAX_REFRESH_COUNT } } : {}),
             });
             break;
