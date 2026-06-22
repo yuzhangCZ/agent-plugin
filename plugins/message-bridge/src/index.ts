@@ -29,11 +29,10 @@ interface MessageBridgeRuntimeApi {
 
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
-declare global {
-  interface GlobalThis {
-    __MB_RUNTIME_API__?: MessageBridgeRuntimeApi;
-  }
-}
+type MessageBridgeRuntimeApiGlobal = typeof globalThis & {
+  __MB_RUNTIME_API__?: MessageBridgeRuntimeApi;
+  [MESSAGE_BRIDGE_RUNTIME_API_KEY]?: MessageBridgeRuntimeApi;
+};
 
 export const MessageBridgePlugin: Plugin = async (input) => {
   cacheLoadedPluginInput(input);
@@ -89,15 +88,17 @@ function stopMessageBridgeRuntime(): void {
   stopRuntime();
 }
 
+function getRuntimeApiGlobal(): MessageBridgeRuntimeApiGlobal {
+  return globalThis as MessageBridgeRuntimeApiGlobal;
+}
+
 function getInstalledRuntimeApi(): MessageBridgeRuntimeApi | undefined {
-  const carrier = globalThis as typeof globalThis & {
-    [MESSAGE_BRIDGE_RUNTIME_API_KEY]?: MessageBridgeRuntimeApi;
-  };
-  return carrier[MESSAGE_BRIDGE_RUNTIME_API_KEY] ?? globalThis.__MB_RUNTIME_API__;
+  const runtimeGlobal = getRuntimeApiGlobal();
+  return runtimeGlobal[MESSAGE_BRIDGE_RUNTIME_API_KEY] ?? runtimeGlobal.__MB_RUNTIME_API__;
 }
 
 function installRuntimeApi(api: MessageBridgeRuntimeApi): void {
-  Object.defineProperty(globalThis, MESSAGE_BRIDGE_RUNTIME_API_KEY, {
+  Object.defineProperty(getRuntimeApiGlobal(), MESSAGE_BRIDGE_RUNTIME_API_KEY, {
     configurable: true,
     enumerable: false,
     value: api,
@@ -115,7 +116,7 @@ const runtimeApi: MessageBridgeRuntimeApi = getInstalledRuntimeApi() ?? Object.f
 
 installRuntimeApi(runtimeApi);
 
-Object.defineProperty(globalThis, '__MB_RUNTIME_API__', {
+Object.defineProperty(getRuntimeApiGlobal(), '__MB_RUNTIME_API__', {
   configurable: true,
   enumerable: false,
   value: runtimeApi,
