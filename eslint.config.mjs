@@ -37,6 +37,7 @@ const cleanCodeRules = {
 };
 
 const strictCodeRules = {
+  'dot-notation': 'error',
   'no-var': 'error',
 };
 
