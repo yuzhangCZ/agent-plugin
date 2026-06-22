@@ -27,6 +27,10 @@ const cleanCodeRules = {
   'max-statements': ['warn', 40],
 };
 
+const strictCodeRules = {
+  'no-var': 'error',
+};
+
 // 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
 const firstPassBaselineRules = {
   'no-empty': 'warn',
@@ -101,6 +105,7 @@ export default defineConfig([
     },
     rules: {
       ...js.configs.recommended.rules,
+      ...strictCodeRules,
       ...firstPassBaselineRules,
       ...cleanCodeRules,
     },
@@ -128,6 +133,7 @@ export default defineConfig([
       'no-useless-escape': 'warn',
       'prefer-const': 'warn',
       ...firstPassTypeScriptBaselineRules,
+      ...strictCodeRules,
       ...cleanCodeRules,
     },
   },

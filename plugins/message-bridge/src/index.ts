@@ -30,8 +30,9 @@ interface MessageBridgeRuntimeApi {
 const MESSAGE_BRIDGE_RUNTIME_API_KEY = Symbol.for('agent-plugin.message-bridge.runtime-api');
 
 declare global {
-  // eslint-disable-next-line no-var
-  var __MB_RUNTIME_API__: MessageBridgeRuntimeApi | undefined;
+  interface GlobalThis {
+    __MB_RUNTIME_API__?: MessageBridgeRuntimeApi;
+  }
 }
 
 export const MessageBridgePlugin: Plugin = async (input) => {
