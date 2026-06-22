@@ -40,7 +40,11 @@ npm install @wecode/bridge-runtime-sdk
 
 ## 2.1 Changelog
 
-### 2026-06-16
+### 2026-06-22
+
+- `QrCodeAuthSnapshot` 的 `confirmed` 事件新增 `assistantInfo` 字段，携带助理 `name`、`nameEn`、`desc`、`descEn` 基础信息；服务端字段缺失时 SDK 统一补为空字符串。
+
+### 2026-06-16 （1.0.3-beta）
 
 - 所有 Provider fact 类型移除 `toolSessionId` 字段；该字段由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
 - 所有 Provider fact 类型新增 `subagentSessionId?` 和 `subagentName?` 可选字段（继承自 `ProviderFactBase`）。
@@ -66,12 +70,12 @@ npm install @wecode/bridge-runtime-sdk
 - `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
 - Breaking change: `ToolUpdateFact.input` 从 `string` 改为 `Record<string, unknown>`；集成方必须传入 JSON 对象，不能传字符串、数组、`null`、数字或布尔值。
 
-### 2026-06-02
+### 2026-06-02 （1.0.2-beta）
 
 - Breaking change: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
 - 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
 
-### 2026-06-01
+### 2026-06-01 （1.0.1-beta）
 
 - `PermissionAskFact`: `permissionType?: string` -> `permType: string`
 - `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
@@ -1032,7 +1036,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
   - `messageId` 建议以 `msg_` 开头，例如 `msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8`
   - `partId` 建议以 `prt_` 开头，例如 `prt_f47ac10b-58cc-4372-a567-0e02b2c3d479`
 - `messageId` 在同一 `toolSessionId` 内跨多轮 run 不可重复打开或关闭后重开。
-- `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。
+- `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。(**partId在会话内唯一，服务端限制**)
 
 ### 8.6 `ProviderError`
 
