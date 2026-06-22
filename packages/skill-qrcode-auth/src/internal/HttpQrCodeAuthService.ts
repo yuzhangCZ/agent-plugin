@@ -1,6 +1,7 @@
 import { request as httpRequest, type RequestOptions as HttpRequestOptions } from "node:http";
 import { request as httpsRequest, type RequestOptions as HttpsRequestOptions } from "node:https";
 import type {
+  QrCodeAssistantInfo,
   QrCodeAuthServiceError,
   QrCodeDisplayData,
 } from "../types.ts";
@@ -142,74 +143,14 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
 
     const serviceError = buildServiceError(response.status, response.body);
     if (readCode(response.body) !== "200") {
-      return {
-        kind: "failed",
-        qrcode: input.ref.qrcode,
-        reasonCode: "auth_service_error",
-        ...(hasServiceError(serviceError) ? { serviceError } : {}),
-      };
+      return buildAuthServiceFailure(input.ref.qrcode, serviceError);
     }
 
-    const data = response.body.data;
-    const qrcode = readString(data?.qrcode);
-    if (!qrcode) {
-      return {
-        kind: "failed",
-        qrcode: input.ref.qrcode,
-        reasonCode: "auth_service_error",
-        ...(hasServiceError(serviceError) ? { serviceError } : {}),
-      };
-    }
-
-    if (readExpiredFlag(data?.expired)) {
-      return {
-        kind: "expired",
-        qrcode,
-      };
-    }
-
-    switch (readStatusCode(data?.status)) {
-      case 0:
-        return {
-          kind: "waiting",
-          qrcode,
-        };
-      case 1:
-        return {
-          kind: "scanned",
-          qrcode,
-        };
-      case 3:
-        return {
-          kind: "cancelled",
-          qrcode,
-        };
-      case 2: {
-        const ak = readString(data?.ak);
-        const sk = readString(data?.sk);
-        if (!ak || !sk) {
-          return {
-            kind: "failed",
-            qrcode,
-            reasonCode: "auth_service_error",
-            ...(hasServiceError(serviceError) ? { serviceError } : {}),
-          };
-        }
-        return {
-          kind: "confirmed",
-          qrcode,
-          credentials: { ak, sk },
-          assistantInfo: readAssistantInfo(data),
-        };
-      }
-      default:
-        return {
-          kind: "failed",
-          qrcode,
-          reasonCode: "auth_service_error",
-          ...(hasServiceError(serviceError) ? { serviceError } : {}),
-        };
-    }
+    return mapQuerySessionData({
+      data: response.body.data,
+      fallbackQrcode: input.ref.qrcode,
+      serviceError,
+    });
   }
 
   private async requestJson(input: {
@@ -448,12 +389,95 @@ function readDisplayData(data: Record<string, unknown> | null | undefined): QrCo
   };
 }
 
-function readAssistantInfo(data: Record<string, unknown> | null | undefined) {
+function readAssistantInfo(data: Record<string, unknown> | null | undefined): QrCodeAssistantInfo {
   return {
     name: readString(data?.name),
     nameEn: readString(data?.nameEn),
     desc: readString(data?.desc),
     descEn: readString(data?.descEn),
+  };
+}
+
+function mapQuerySessionData(input: {
+  data: Record<string, unknown> | null | undefined;
+  fallbackQrcode: string;
+  serviceError: QrCodeAuthServiceError;
+}): QueryQrCodeSessionResult {
+  const data = input.data;
+  const qrcode = readString(data?.qrcode);
+  if (!data || !qrcode) {
+    return buildAuthServiceFailure(input.fallbackQrcode, input.serviceError);
+  }
+
+  if (readExpiredFlag(data.expired)) {
+    return {
+      kind: "expired",
+      qrcode,
+    };
+  }
+
+  return mapQueryStatus({
+    data,
+    qrcode,
+    serviceError: input.serviceError,
+  });
+}
+
+function mapQueryStatus(input: {
+  data: Record<string, unknown>;
+  qrcode: string;
+  serviceError: QrCodeAuthServiceError;
+}): QueryQrCodeSessionResult {
+  switch (readStatusCode(input.data.status)) {
+    case 0:
+      return {
+        kind: "waiting",
+        qrcode: input.qrcode,
+      };
+    case 1:
+      return {
+        kind: "scanned",
+        qrcode: input.qrcode,
+      };
+    case 2:
+      return mapConfirmedQueryStatus(input);
+    case 3:
+      return {
+        kind: "cancelled",
+        qrcode: input.qrcode,
+      };
+    default:
+      return buildAuthServiceFailure(input.qrcode, input.serviceError);
+  }
+}
+
+function mapConfirmedQueryStatus(input: {
+  data: Record<string, unknown>;
+  qrcode: string;
+  serviceError: QrCodeAuthServiceError;
+}): QueryQrCodeSessionResult {
+  const ak = readString(input.data.ak);
+  const sk = readString(input.data.sk);
+  if (!ak || !sk) {
+    return buildAuthServiceFailure(input.qrcode, input.serviceError);
+  }
+  return {
+    kind: "confirmed",
+    qrcode: input.qrcode,
+    credentials: { ak, sk },
+    assistantInfo: readAssistantInfo(input.data),
+  };
+}
+
+function buildAuthServiceFailure(
+  qrcode: string,
+  serviceError: QrCodeAuthServiceError,
+): QrCodeAuthFailureResult {
+  return {
+    kind: "failed",
+    qrcode,
+    reasonCode: "auth_service_error",
+    ...(hasServiceError(serviceError) ? { serviceError } : {}),
   };
 }
 
