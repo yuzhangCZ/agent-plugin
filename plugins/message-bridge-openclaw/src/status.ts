@@ -172,7 +172,7 @@ function isRuntimeHealthy(
   runtime: MessageBridgeStatusSnapshot | undefined,
   nowAt: number,
 ): boolean {
-  if (!runtime || runtime.connected !== true || typeof runtime.lastReadyAt !== "number") {
+  if (runtime?.connected !== true || typeof runtime.lastReadyAt !== "number") {
     return false;
   }
   if (typeof runtime.lastHeartbeatAt !== "number") {
@@ -558,7 +558,7 @@ export function collectMessageBridgeStatusIssues(
       );
     }
 
-    if (probe && probe.state === "rejected" && !suppressDuplicateConnectionIssue) {
+    if (probe?.state === "rejected" && !suppressDuplicateConnectionIssue) {
       const rawReason = probeReason;
       const reason = rawReason ? `：${rawReason}` : "";
       if (rawReason && isAuthRejectedReason(rawReason)) {
@@ -580,15 +580,15 @@ export function collectMessageBridgeStatusIssues(
       }
     }
 
-    if (probe && probe.state === "connecting") {
+    if (probe?.state === "connecting") {
       continue;
     }
 
-    if (probe && probe.state === "cancelled" && IGNORABLE_PROBE_CANCEL_REASONS.has(probeReason)) {
+    if (probe?.state === "cancelled" && IGNORABLE_PROBE_CANCEL_REASONS.has(probeReason)) {
       continue;
     }
 
-    if (probe && probe.state === "connect_error") {
+    if (probe?.state === "connect_error") {
       const reason =
         typeof probe.reason === "string" && probe.reason.trim()
           ? `：${probe.reason.trim()}`
@@ -602,7 +602,7 @@ export function collectMessageBridgeStatusIssues(
       );
     }
 
-    if (probe && probe.state === "timeout") {
+    if (probe?.state === "timeout") {
       issues.push(
         createRuntimeIssue({
           accountId: snapshot.accountId,

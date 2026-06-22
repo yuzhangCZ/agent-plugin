@@ -47,7 +47,7 @@ function validateRunInput(input: QrCodeAuthRunInput): void {
     throw new TypeError("QrCodeAuth.run() requires onSnapshot callback.");
   }
 
-  if (!input.channel || !input.channel.trim()) {
+  if (!input.channel?.trim()) {
     throw new TypeError("QrCodeAuth.run() requires non-empty channel.");
   }
 
@@ -76,7 +76,7 @@ function mergePolicy(policy?: QrCodeAuthPolicy): Required<QrCodeAuthPolicy> {
 }
 
 function readRefreshOnExpired(policy?: QrCodeAuthPolicy): boolean {
-  if (!policy || policy.refreshOnExpired === undefined) {
+  if (policy?.refreshOnExpired === undefined) {
     return DEFAULT_POLICY.refreshOnExpired;
   }
   if (typeof policy.refreshOnExpired !== "boolean") {

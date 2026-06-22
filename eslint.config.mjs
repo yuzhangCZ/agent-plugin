@@ -40,6 +40,22 @@ const strictCodeRules = {
   'no-var': 'error',
 };
 
+const typeAwareTypeScriptProjects = [
+  'plugins/message-bridge/tsconfig.json',
+  'plugins/message-bridge-openclaw/tsconfig.typecheck.json',
+  'packages/bridge-runtime-sdk/tsconfig.json',
+  'packages/skill-qrcode-auth/tsconfig.json',
+  'packages/skill-plugin-cli/tsconfig.json',
+];
+
+const typeAwareTypeScriptSourceFiles = [
+  'plugins/message-bridge/src/**/*.ts',
+  'plugins/message-bridge-openclaw/src/**/*.ts',
+  'packages/bridge-runtime-sdk/src/**/*.ts',
+  'packages/skill-qrcode-auth/src/**/*.ts',
+  'packages/skill-plugin-cli/src/**/*.ts',
+];
+
 // 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
 const firstPassBaselineRules = {
   'no-empty': 'warn',
@@ -131,6 +147,18 @@ export default defineConfig([
     ...config,
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
   })),
+  {
+    files: typeAwareTypeScriptSourceFiles,
+    languageOptions: {
+      parserOptions: {
+        project: typeAwareTypeScriptProjects,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/prefer-optional-chain': 'error',
+    },
+  },
   {
     files: ['plugins/**/*.ts', 'packages/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
