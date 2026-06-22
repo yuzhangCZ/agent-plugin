@@ -199,6 +199,7 @@ export class HttpQrCodeAuthService implements QrCodeAuthServicePort {
           kind: "confirmed",
           qrcode,
           credentials: { ak, sk },
+          assistantInfo: readAssistantInfo(data),
         };
       }
       default:
@@ -444,6 +445,15 @@ function readDisplayData(data: Record<string, unknown> | null | undefined): QrCo
     qrcode,
     weUrl,
     pcUrl,
+  };
+}
+
+function readAssistantInfo(data: Record<string, unknown> | null | undefined) {
+  return {
+    name: readString(data?.name),
+    nameEn: readString(data?.nameEn),
+    desc: readString(data?.desc),
+    descEn: readString(data?.descEn),
   };
 }
 

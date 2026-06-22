@@ -190,7 +190,7 @@ test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
 test("TerminalCliPresenter renders reinstall notice in default mode", () => {
   const presenter = createPresenter();
   const { stdout, stderr } = captureIo(() => {
-    presenter.reinstallDetected({ host: "openclaw" });
+    presenter.reinstallDetected();
   });
 
   assert.equal(stderr, "");

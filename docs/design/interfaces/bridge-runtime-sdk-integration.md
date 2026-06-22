@@ -741,6 +741,7 @@ await context.outbound.emitOutboundRun({
 | `expiresAt` | `string` | 否 | 仅二维码生成事件携带的过期时间。 |
 | `credentials.ak` | `string` | 否 | 仅确认成功事件携带的 AK。 |
 | `credentials.sk` | `string` | 否 | 仅确认成功事件携带的 SK。 |
+| `assistantInfo` | `{ name: string; nameEn: string; desc: string; descEn: string }` | 否 | 仅确认成功事件携带的助理信息，字段缺失时为空字符串。 |
 | `reasonCode` | `'timeout' \| 'network_error' \| 'auth_service_error'` | 否 | 仅失败事件携带的失败原因。 |
 | `serviceError` | `QrCodeAuthServiceError` | 否 | 仅失败事件携带的服务错误信息。 |
 
@@ -752,7 +753,7 @@ await context.outbound.emitOutboundRun({
 | `scanned` | 当前二维码已被扫码，但用户尚未确认授权；流程继续轮询，不是终态。 |
 | `expired` | 当前二维码已过期；如果 `policy.refreshOnExpired` 允许且未超过 `policy.maxRefreshCount`，SDK 会创建新二维码并再次发出 `qrcode_generated`。 |
 | `cancelled` | 用户取消授权；这是终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
-| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk` 和 `assistantInfo`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
 | `failed` | 授权流程失败；携带 `reasonCode`，可能携带 `serviceError`，这是失败终态。 |
 
 - 内部等待轮询态不会作为 `QrCodeAuthSnapshot` 暴露给调用方。

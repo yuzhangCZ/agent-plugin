@@ -165,7 +165,7 @@ function createCommand(installStrategy: "host-native" | "fallback"): ParsedInsta
 }
 
 test("InstallPluginCliUseCase passes artifact from install stage into verify stage and aggregates warnings", async () => {
-  let verifiedArtifact: InstalledPluginArtifact | null = null;
+  const verifiedArtifact: { current?: InstalledPluginArtifact } = {};
   const presenter = new RecordingPresenter();
   const useCase = createUseCase(createHostAdapter({
     installResult: {
@@ -178,14 +178,14 @@ test("InstallPluginCliUseCase passes artifact from install stage into verify sta
     },
     cleanupWarnings: ["cleanup failed"],
     verifySpy: (artifact) => {
-      verifiedArtifact = artifact;
+      verifiedArtifact.current = artifact;
     },
     existingPluginDetected: true,
   }), presenter);
 
   const result = await useCase.execute(createCommand("fallback"));
   assert.equal(result.status, "success");
-  assert.equal(verifiedArtifact?.pluginSpec, "/tmp/plugin/package");
+  assert.equal(verifiedArtifact.current?.pluginSpec, "/tmp/plugin/package");
   assert.deepEqual(result.warningMessages, ["cleanup failed"]);
   assert.deepEqual(presenter.warnings, ["cleanup failed"]);
   assert.match(presenter.infos.join("\n"), /strategy=fallback/);

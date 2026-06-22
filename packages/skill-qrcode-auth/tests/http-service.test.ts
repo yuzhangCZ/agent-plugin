@@ -116,6 +116,10 @@ test("http adapter accepts numeric success business code on query", async () => 
       expired: "false",
       ak: "ak-1",
       sk: "sk-1",
+      name: "助理",
+      nameEn: "Assistant",
+      desc: "中文描述",
+      descEn: "English description",
     },
   }));
 
@@ -133,6 +137,51 @@ test("http adapter accepts numeric success business code on query", async () => 
     credentials: {
       ak: "ak-1",
       sk: "sk-1",
+    },
+    assistantInfo: {
+      name: "助理",
+      nameEn: "Assistant",
+      desc: "中文描述",
+      descEn: "English description",
+    },
+  });
+});
+
+test("http adapter defaults missing confirmed assistant info fields to empty strings", async () => {
+  const service = new HttpQrCodeAuthService(async () => jsonResponse({
+    code: "200",
+    data: {
+      qrcode: "qr-1",
+      status: 2,
+      expired: "false",
+      ak: "ak-1",
+      sk: "sk-1",
+      name: "助理",
+      nameEn: null,
+      desc: 123,
+    },
+  }));
+
+  const result = await service.querySession({
+    baseUrl: "https://auth.example.com",
+    ref: {
+      qrcode: "qr-1",
+      accessToken: "token-1",
+    },
+  });
+
+  assert.deepStrictEqual(result, {
+    kind: "confirmed",
+    qrcode: "qr-1",
+    credentials: {
+      ak: "ak-1",
+      sk: "sk-1",
+    },
+    assistantInfo: {
+      name: "助理",
+      nameEn: "",
+      desc: "",
+      descEn: "",
     },
   });
 });

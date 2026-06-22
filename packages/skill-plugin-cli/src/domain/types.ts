@@ -1,4 +1,4 @@
-import type { QrCodeAuthEnvironment, QrCodeAuthSnapshot } from "./qrcode-types.ts";
+import type { QrCodeAuthEnvironment, QrCodeAuthSnapshot } from "@wecode/skill-qrcode-auth";
 import type { InstallStageKey } from "./stages.ts";
 
 export type InstallHost = "opencode" | "openclaw";

@@ -198,6 +198,13 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 `QrCodeAuthSnapshot` 是调用方可见授权事件，不是完整会话状态对象。
 
 ```ts
+export interface QrCodeAssistantInfo {
+  name: string;
+  nameEn: string;
+  desc: string;
+  descEn: string;
+}
+
 export type QrCodeAuthSnapshot =
   | {
       type: "qrcode_generated";
@@ -221,6 +228,7 @@ export type QrCodeAuthSnapshot =
       type: "confirmed";
       qrcode: string;
       credentials: { ak: string; sk: string };
+      assistantInfo: QrCodeAssistantInfo;
     }
   | {
       type: "failed";
@@ -263,6 +271,10 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 | `confirmed` | `qrcode` | `string` | Y | 已确认二维码标识 |
 | `confirmed` | `credentials.ak` | `string` | Y | 授权成功返回的 AK |
 | `confirmed` | `credentials.sk` | `string` | Y | 授权成功返回的 SK |
+| `confirmed` | `assistantInfo.name` | `string` | Y | 助理中文名称，服务端缺失时为空字符串 |
+| `confirmed` | `assistantInfo.nameEn` | `string` | Y | 助理英文名称，服务端缺失时为空字符串 |
+| `confirmed` | `assistantInfo.desc` | `string` | Y | 助理中文描述，服务端缺失时为空字符串 |
+| `confirmed` | `assistantInfo.descEn` | `string` | Y | 助理英文描述，服务端缺失时为空字符串 |
 | `failed` | `qrcode` | `string` | N | 关联二维码；尚未生成二维码即失败时可缺省 |
 | `failed` | `reasonCode` | `"timeout" \| "network_error" \| "auth_service_error"` | Y | 失败大类 |
 | `failed` | `serviceError` | `QrCodeAuthServiceError` | N | 服务端错误安全子集 |
@@ -272,6 +284,7 @@ TypeScript 代码块仅用于展示接口形状，字段真源以下表为准。
 - 所有与具体二维码实例相关的事件必须携带 `qrcode`。
 - 会话级失败在尚未生成二维码时可以不携带 `qrcode`。
 - `confirmed` 缺失 `ak/sk` 时，不允许发送 `confirmed`，必须发送 `failed`。
+- `confirmed.assistantInfo` 缺失任一服务端字段时，以空字符串返回，不触发 `failed`。
 - `accessToken` 不进入对外模型。
 - 对外模型不携带 UI 文案字段；文案由调用方根据 `type` / `reasonCode` 生成。
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -31,4 +31,9 @@ test('prod build with minify disabled still prepares prod qrcode auth artifacts'
   await access(path.join(qrcodeDistRoot, 'index.js'));
   await access(path.join(qrcodeDistRoot, 'index.d.ts'));
   await assert.rejects(access(path.join(qrcodeDistRoot, 'index.js.map')));
+
+  const declarations = await readFile(path.join(packageRoot, 'dist/index.d.ts'), 'utf8');
+  assert.match(declarations, /qrcodeAuth/);
+  assert.match(declarations, /QrCodeAssistantInfo/);
+  assert.doesNotMatch(declarations, /@wecode\/skill-qrcode-auth/);
 });

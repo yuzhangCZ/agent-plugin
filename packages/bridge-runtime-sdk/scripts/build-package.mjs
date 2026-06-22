@@ -47,6 +47,8 @@ async function main() {
       'dts-bundle-generator',
       '--project',
       'tsconfig.build.json',
+      '--external-inlines',
+      '@wecode/skill-qrcode-auth',
       '--out-file',
       'dist/index.d.ts',
       'src/public-contract.ts',
