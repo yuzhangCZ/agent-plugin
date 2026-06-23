@@ -19,11 +19,14 @@ export class WebSocketGatewayTransport implements GatewayTransport {
   }
 
   open(options: GatewayTransportOpenOptions): void {
-    const socket = this.webSocketFactory
-      ? this.webSocketFactory(options.url, options.protocols)
-      : options.protocols
-        ? new WebSocket(options.url, options.protocols)
-        : new WebSocket(options.url);
+    let socket: WebSocket;
+    if (this.webSocketFactory) {
+      socket = this.webSocketFactory(options.url, options.protocols);
+    } else if (options.protocols) {
+      socket = new WebSocket(options.url, options.protocols);
+    } else {
+      socket = new WebSocket(options.url);
+    }
 
     socket.onopen = options.onOpen;
     socket.onclose = options.onClose;

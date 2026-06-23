@@ -480,11 +480,12 @@ export class SdkBridgeRuntime implements ManagedRuntime {
   private async listHostModels(client: BridgeSdkClient) {
     const providersResult = await client.config.providers();
     const payload = this.unwrapSdkData(providersResult);
-    const providers = Array.isArray(payload)
-      ? payload
-      : Array.isArray(asRecord(payload)?.providers)
-        ? (asRecord(payload)?.providers as unknown[])
-        : [];
+    let providers: unknown[] = [];
+    if (Array.isArray(payload)) {
+      providers = payload;
+    } else if (Array.isArray(asRecord(payload)?.providers)) {
+      providers = asRecord(payload)?.providers as unknown[];
+    }
 
     return providers.flatMap((provider) => {
       const providerRecord = asRecord(provider);
