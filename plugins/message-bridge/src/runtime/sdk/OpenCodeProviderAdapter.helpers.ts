@@ -160,6 +160,8 @@ export function toProviderTerminalResult(terminal: PromptSessionTerminal): Provi
           ...(terminal.errorDetails ? { details: terminal.errorDetails } : {}),
         },
       };
+    default:
+      throw new Error(`Unsupported prompt terminal: ${JSON.stringify(terminal)}`);
   }
 }
 

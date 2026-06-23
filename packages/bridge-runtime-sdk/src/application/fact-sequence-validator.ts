@@ -115,6 +115,8 @@ export class FactSequenceValidator {
       case 'session.title':
       case 'session.error':
         return;
+      default:
+        break;
     }
 
     if (fact.type === 'text.delta') {

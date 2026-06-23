@@ -89,6 +89,8 @@ export function stateToErrorCode(state: ConnectionState): ErrorCode {
     case 'CONNECTED':
     case 'READY':
       return 'AGENT_NOT_READY';
+    default:
+      throw new Error(`Unsupported connection state: ${state}`);
   }
 }
 

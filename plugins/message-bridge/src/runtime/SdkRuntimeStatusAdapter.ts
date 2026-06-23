@@ -44,6 +44,8 @@ function mapBridgeRuntimeErrorCodeToUnavailableReason(
     case 'probe_unknown_error':
     case undefined:
       return 'plugin_failure';
+    default:
+      return 'plugin_failure';
   }
 }
 

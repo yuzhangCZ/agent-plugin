@@ -97,6 +97,8 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
             break;
           case "scanned":
             break;
+          default:
+            break;
         }
       },
     });
