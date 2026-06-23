@@ -313,6 +313,8 @@ class ConnectAttempt {
       case 'stop':
         this.handleStopClose(closeContext);
         return;
+      default:
+        return;
     }
   }
 

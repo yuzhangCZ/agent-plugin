@@ -5,6 +5,12 @@ import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
   complexity: ['warn', { max: 12 }],
+  'default-case': [
+    'error',
+    {
+      commentPattern: '^no default$',
+    },
+  ],
   'max-depth': ['warn', 4],
   'max-classes-per-file': ['warn', 1],
   'max-lines': [
@@ -44,6 +50,8 @@ const typeCheckedTypeScriptProjects = [
   'plugins/message-bridge/tsconfig.json',
   'plugins/message-bridge-openclaw/tsconfig.typecheck.json',
   'packages/bridge-runtime-sdk/tsconfig.json',
+  'packages/gateway-client/tsconfig.json',
+  'packages/gateway-schema/tsconfig.json',
   'packages/skill-qrcode-auth/tsconfig.json',
   'packages/skill-plugin-cli/tsconfig.json',
 ];
@@ -52,6 +60,8 @@ const typeCheckedTypeScriptFiles = [
   'plugins/message-bridge/src/**/*.ts',
   'plugins/message-bridge-openclaw/src/**/*.ts',
   'packages/bridge-runtime-sdk/src/**/*.ts',
+  'packages/gateway-client/src/**/*.ts',
+  'packages/gateway-schema/src/**/*.ts',
   'packages/skill-qrcode-auth/src/**/*.ts',
   'packages/skill-plugin-cli/src/**/*.ts',
 ];

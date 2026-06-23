@@ -23,6 +23,8 @@ export function toRuntimeCommand(message: GatewayDownstreamBusinessRequest, trac
       return { kind: 'close_session', traceId, source: message };
     case 'abort_session':
       return { kind: 'abort_execution', traceId, source: message };
+    default:
+      break;
   }
 
   throw new Error(`Unsupported downstream action: ${(message as { action?: string }).action ?? 'unknown'}`);

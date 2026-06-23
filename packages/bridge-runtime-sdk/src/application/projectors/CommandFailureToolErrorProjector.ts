@@ -71,6 +71,8 @@ export class CommandFailureToolErrorProjector {
         case 'session_closed':
         case 'session_not_found':
           return null;
+        default:
+          break;
       }
     }
 

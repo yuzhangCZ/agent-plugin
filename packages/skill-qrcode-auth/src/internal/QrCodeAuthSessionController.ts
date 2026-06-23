@@ -128,6 +128,8 @@ export class QrCodeAuthSessionController {
       case "failed":
         this.emitFailure(result);
         return true;
+      default:
+        return false;
     }
   }
 

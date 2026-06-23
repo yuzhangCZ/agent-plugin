@@ -306,6 +306,8 @@ test('availability mapper is sufficient for upper-layer neutral consumption', ()
         return 'network_unavailable';
       case null:
         return 'queue_user_action';
+      default:
+        return 'queue_user_action';
     }
   }
 
