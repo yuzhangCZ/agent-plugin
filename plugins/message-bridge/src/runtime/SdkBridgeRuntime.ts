@@ -483,8 +483,11 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     let providers: unknown[] = [];
     if (Array.isArray(payload)) {
       providers = payload;
-    } else if (Array.isArray(asRecord(payload)?.providers)) {
-      providers = asRecord(payload)?.providers as unknown[];
+    } else {
+      const potentialProviders = asRecord(payload)?.providers;
+      if (Array.isArray(potentialProviders)) {
+        providers = potentialProviders;
+      }
     }
 
     return providers.flatMap((provider) => {

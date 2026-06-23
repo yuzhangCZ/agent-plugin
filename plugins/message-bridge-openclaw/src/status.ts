@@ -48,6 +48,26 @@ const IGNORABLE_PROBE_CANCEL_REASONS = new Set([
   PROBE_CANCELLED_FOR_RUNTIME_START,
 ]);
 
+const DEFAULT_STREAMING_PATH_ISSUE = {
+  message: "当前宿主缺少 route resolver，message-bridge 会退化为非流式回退路径。",
+  fix: "升级或校验当前 OpenClaw 宿主，确保 runtime.channel.routing.resolveAgentRoute 与 runtime.channel.reply 都可用。",
+};
+
+const STREAMING_PATH_ISSUES: Record<string, { message: string; fix: string }> = {
+  missing_reply_runtime: {
+    message: "当前宿主缺少 reply runtime，message-bridge 会退化为非流式回退路径。",
+    fix: DEFAULT_STREAMING_PATH_ISSUE.fix,
+  },
+  runtime_reply_final_only: {
+    message: "当前宿主虽然提供了 runtime reply，但没有产出可用的增量 block，message-bridge 只能在结束时一次性返回最终文本。",
+    fix: "校验当前 OpenClaw 宿主、模型路由和 block streaming 配置，确认 runtime.channel.reply 是否真的会持续产出非空 block。",
+  },
+  plugin_streaming_disabled_runtime_reply: {
+    message: "当前账号显式关闭了 streaming，message-bridge 会使用非流式输出模式。",
+    fix: "将 channels.message-bridge.streaming 设为 true，或删除该字段以使用默认开启。",
+  },
+};
+
 const silentLogger: BridgeLogger = {
   info() {},
   warn() {},
@@ -55,26 +75,11 @@ const silentLogger: BridgeLogger = {
 };
 
 function getStreamingPathIssueMessage(reason: string): string {
-  if (reason === "missing_reply_runtime") {
-    return "当前宿主缺少 reply runtime，message-bridge 会退化为非流式回退路径。";
-  }
-  if (reason === "runtime_reply_final_only") {
-    return "当前宿主虽然提供了 runtime reply，但没有产出可用的增量 block，message-bridge 只能在结束时一次性返回最终文本。";
-  }
-  if (reason === "plugin_streaming_disabled_runtime_reply") {
-    return "当前账号显式关闭了 streaming，message-bridge 会使用非流式输出模式。";
-  }
-  return "当前宿主缺少 route resolver，message-bridge 会退化为非流式回退路径。";
+  return STREAMING_PATH_ISSUES[reason]?.message ?? DEFAULT_STREAMING_PATH_ISSUE.message;
 }
 
 function getStreamingPathIssueFix(reason: string): string {
-  if (reason === "plugin_streaming_disabled_runtime_reply") {
-    return "将 channels.message-bridge.streaming 设为 true，或删除该字段以使用默认开启。";
-  }
-  if (reason === "runtime_reply_final_only") {
-    return "校验当前 OpenClaw 宿主、模型路由和 block streaming 配置，确认 runtime.channel.reply 是否真的会持续产出非空 block。";
-  }
-  return "升级或校验当前 OpenClaw 宿主，确保 runtime.channel.routing.resolveAgentRoute 与 runtime.channel.reply 都可用。";
+  return STREAMING_PATH_ISSUES[reason]?.fix ?? DEFAULT_STREAMING_PATH_ISSUE.fix;
 }
 
 const probeProvider: ThirdPartyAgentProvider = {
