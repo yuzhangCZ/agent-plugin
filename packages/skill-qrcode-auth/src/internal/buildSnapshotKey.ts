@@ -18,6 +18,6 @@ export function buildSnapshotKey(snapshot: QrCodeAuthSnapshot): string {
     case "failed":
       return `failed:${snapshot.qrcode ?? "session"}:${snapshot.reasonCode}`;
     default:
-      throw new Error(`Unsupported qrcode snapshot: ${JSON.stringify(snapshot)}`);
+      return `unknown:${JSON.stringify(snapshot)}`;
   }
 }

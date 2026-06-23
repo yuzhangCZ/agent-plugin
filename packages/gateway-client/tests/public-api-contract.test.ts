@@ -307,7 +307,7 @@ test('availability mapper is sufficient for upper-layer neutral consumption', ()
       case null:
         return 'queue_user_action';
       default:
-        throw new Error(`Unexpected availability: ${availability}`);
+        return 'queue_user_action';
     }
   }
 

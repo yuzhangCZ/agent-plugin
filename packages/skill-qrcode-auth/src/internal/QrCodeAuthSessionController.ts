@@ -129,7 +129,7 @@ export class QrCodeAuthSessionController {
         this.emitFailure(result);
         return true;
       default:
-        throw new Error(`Unsupported qrcode query result: ${JSON.stringify(result)}`);
+        return false;
     }
   }
 

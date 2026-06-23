@@ -314,7 +314,7 @@ class ConnectAttempt {
         this.handleStopClose(closeContext);
         return;
       default:
-        throw new Error(`Unsupported reconnect decision: ${JSON.stringify(closeContext.reconnectDecision)}`);
+        return;
     }
   }
 

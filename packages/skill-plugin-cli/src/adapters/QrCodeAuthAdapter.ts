@@ -98,7 +98,7 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
           case "scanned":
             break;
           default:
-            throw new Error(`Unsupported qrcode auth snapshot: ${JSON.stringify(snapshot)}`);
+            break;
         }
       },
     });

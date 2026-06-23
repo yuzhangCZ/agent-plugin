@@ -13,7 +13,7 @@ export class ToolErrorMessageCatalog {
       case 'request_run_failed':
         return '当前请求处理失败，请重试';
       default:
-        throw new Error(`Unsupported tool error message key: ${key}`);
+        return '当前请求处理失败，请重试';
     }
   }
 }

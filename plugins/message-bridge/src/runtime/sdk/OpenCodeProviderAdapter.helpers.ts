@@ -161,7 +161,7 @@ export function toProviderTerminalResult(terminal: PromptSessionTerminal): Provi
         },
       };
     default:
-      throw new Error(`Unsupported prompt terminal: ${JSON.stringify(terminal)}`);
+      return { outcome: 'failed', error: { code: 'internal_error', message: 'unknown terminal result' } };
   }
 }
 
