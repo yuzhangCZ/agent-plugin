@@ -121,7 +121,7 @@ export class OpenClawGatewayBridge {
     const diagnostics = this.bridgeRuntimeFacade.getDiagnostics();
     const streamingStatus = this.resolveStreamingStatus();
     let nextRuntimePhase = this.runtimePhaseOverride;
-    if (!nextRuntimePhase) {
+    if (nextRuntimePhase == null) {
       if (runtimeStatus.state === "ready") {
         nextRuntimePhase = "ready";
       } else if (runtimeStatus.state === "starting" || runtimeStatus.state === "reconnecting") {

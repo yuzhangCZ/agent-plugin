@@ -81,6 +81,10 @@ export const CONNECTION_STATES = ['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'RE
 
 export type ConnectionState = typeof CONNECTION_STATES[number];
 
+function assertNeverConnectionState(state: never): never {
+  throw new Error(`Unsupported connection state: ${state}`);
+}
+
 export function stateToErrorCode(state: ConnectionState): ErrorCode {
   switch (state) {
     case 'DISCONNECTED':
@@ -90,7 +94,7 @@ export function stateToErrorCode(state: ConnectionState): ErrorCode {
     case 'READY':
       return 'AGENT_NOT_READY';
     default:
-      return 'AGENT_NOT_READY';
+      return assertNeverConnectionState(state);
   }
 }
 
