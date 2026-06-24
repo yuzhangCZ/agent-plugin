@@ -2594,7 +2594,7 @@ test('provider adapter lists local slash commands and OpenCode command catalog w
             { name: 'init', description: 'Initialize repository command' },
             { name: '/slash-init', description: 'Slash-prefixed command' },
             { name: 'review', description: 'x'.repeat(60) },
-            { name: 'bad command', description: 'drop invalid whitespace command' },
+            { name: 'bad command', description: 'trusted whitespace command' },
           ],
         };
       },
@@ -2616,15 +2616,18 @@ test('provider adapter lists local slash commands and OpenCode command catalog w
     command: '/init',
     description: 'Initialize repository command',
   });
-  assert.deepEqual(result.slashCommands.find((command) => command.command === '/slash-init'), {
-    command: '/slash-init',
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '//slash-init'), {
+    command: '//slash-init',
     description: 'Slash-prefixed command',
   });
   assert.deepEqual(result.slashCommands.find((command) => command.command === '/review'), {
     command: '/review',
-    description: 'x'.repeat(50),
+    description: 'x'.repeat(60),
   });
-  assert.equal(result.slashCommands.some((command) => command.command === '/bad command'), false);
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '/bad command'), {
+    command: '/bad command',
+    description: 'trusted whitespace command',
+  });
 });
 
 test('provider adapter returns local slash commands when OpenCode command.list is unavailable', async () => {

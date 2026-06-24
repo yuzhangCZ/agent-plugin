@@ -449,7 +449,7 @@ test('ChatMessageClassifier resolves unknown slash to OpenCode native command af
   });
 });
 
-test('ChatMessageClassifier normalizes slash-prefixed OpenCode native catalog names', async () => {
+test('ChatMessageClassifier trusts OpenCode native catalog names without slash normalization', async () => {
   const classifier = createDefaultChatMessageClassifier({
     nativeCommandCatalog: {
       listCommands: async () => ({ success: true, commands: [{ name: '/init' }] }),
@@ -470,12 +470,9 @@ test('ChatMessageClassifier normalizes slash-prefixed OpenCode native catalog na
   });
 
   assert.deepEqual(decision, {
-    kind: 'slash',
-    slash: {
-      kind: 'opencode_native',
-      commandName: 'init',
-      arguments: 'project now',
-    },
+    kind: 'normal_chat',
+    fallbackReason: 'command_not_found',
+    commandName: 'init',
   });
 });
 

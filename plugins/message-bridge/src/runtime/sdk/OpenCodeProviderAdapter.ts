@@ -71,7 +71,6 @@ import {
   DefaultBusinessEntryKeyResolver,
   DefaultBusinessEntryPolicyResolver,
 } from './session-isolation/index.js';
-import { toOpenCodeNativeSlashCommand } from './OpenCodeNativeCommandName.js';
 import { bindProviderCommandTerminal } from './OpenCodeProviderAdapter.command.js';
 import { bindProviderPromptTerminal } from './OpenCodeProviderAdapter.prompt.js';
 import { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.js';
@@ -371,18 +370,10 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private normalizeOpenCodeSlashCommand(input: { name: string; description?: string }): { command: string; description: string } | undefined {
-    const command = toOpenCodeNativeSlashCommand(input.name);
-    if (!command) {
-      return undefined;
-    }
     return {
-      command,
-      description: this.truncateDescription(input.description?.trim() ?? ''),
+      command: `/${input.name}`,
+      description: input.description ?? '',
     };
-  }
-
-  private truncateDescription(description: string): string {
-    return description.length > 50 ? description.slice(0, 50) : description;
   }
 
   private resolveLocalSlashCommands(input: ProviderListSlashCommandsInput): typeof LOCAL_SLASH_COMMANDS[number][] {

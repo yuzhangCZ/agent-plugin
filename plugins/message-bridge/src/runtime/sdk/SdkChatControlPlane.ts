@@ -23,10 +23,13 @@ import type {
   SlashCommandResult,
   ToolSessionBindingStore,
 } from '../../port/SlashCommandControlPlanePort.js';
-import { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
+import type { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
-import { normalizeOpenCodeNativeCommandName } from './OpenCodeNativeCommandName.js';
+import {
+  SlashCommandExecutionRouter,
+  type SlashCommandExecutionRouterPort,
+} from './SdkSlashCommandExecutionRouter.js';
 export {
   SdkChatRunPlanner,
   type ChatQueuedExecution,
@@ -246,7 +249,7 @@ export class OpenCodeNativeSlashClassifier {
       };
     }
 
-    if (!listResult.commands.some((command) => normalizeOpenCodeNativeCommandName(command.name) === nativeCommand.commandName)) {
+    if (!listResult.commands.some((command) => command.name === nativeCommand.commandName)) {
       return {
         kind: 'normal_chat',
         fallbackReason: 'command_not_found',
@@ -343,12 +346,23 @@ function isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean
  * slash synthetic run 执行器。
  */
 export class SdkSlashExecutionUseCase {
+  private readonly slashCommandExecutionRouter: SlashCommandExecutionRouterPort;
+
   constructor(private readonly dependencies: {
     slashCommandExecutor: SlashCommandExecutor;
     sessionIsolationSlashCommandExecutor?: SessionIsolationSlashCommandExecutionPort;
     replyPresenter: SlashCommandReplyPresenter;
     contextResolver: ChatExecutionContextResolver;
-  }) {}
+    slashCommandExecutionRouter?: SlashCommandExecutionRouterPort;
+  }) {
+    this.slashCommandExecutionRouter = dependencies.slashCommandExecutionRouter ?? new SlashCommandExecutionRouter({
+      slashCommandExecutor: dependencies.slashCommandExecutor,
+      ...(dependencies.sessionIsolationSlashCommandExecutor
+        ? { sessionIsolationSlashCommandExecutor: dependencies.sessionIsolationSlashCommandExecutor }
+        : {}),
+      contextResolver: dependencies.contextResolver,
+    });
+  }
 
   async execute(input: {
     anchor: string;
@@ -382,28 +396,15 @@ export class SdkSlashExecutionUseCase {
     }
 
     try {
-      const formalResult = await this.executeSessionIsolationCommand(input);
-      if (formalResult) {
-        return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(formalResult));
-      }
-
-      const context = input.ensuredContext ?? await this.dependencies.contextResolver.resolveForChat(
-        input.anchor,
-        input.createContext,
-        input.logger,
-      );
-      const commandContext: SlashCommandContext = {
+      const result = await this.slashCommandExecutionRouter.execute({
         anchor: input.anchor,
-        activeOpencodeSessionId: context.opencodeSessionId,
-        scope: context.scope,
-        modelOverride: context.modelOverride,
-        bootstrapSource: context.bootstrapSource,
-      };
-      const result = await this.dependencies.slashCommandExecutor.execute(
-        input.command,
-        commandContext,
-        input.createContext,
-      );
+        command: input.command,
+        ...(input.entryContext ? { entryContext: input.entryContext } : {}),
+        ...(input.createContext ? { createContext: input.createContext } : {}),
+        ...(input.directory ? { directory: input.directory } : {}),
+        ...(input.ensuredContext ? { ensuredContext: input.ensuredContext } : {}),
+        ...(input.logger ? { logger: input.logger } : {}),
+      });
       return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(result));
     } catch (error) {
       return buildSyntheticRun(
@@ -414,37 +415,6 @@ export class SdkSlashExecutionUseCase {
         ),
       );
     }
-  }
-
-  private async executeSessionIsolationCommand(input: {
-    anchor: string;
-    command?: SlashCommand;
-    entryContext?: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-    ensuredContext?: ChatExecutionContext;
-  }): Promise<SlashCommandResult | undefined> {
-    if (!input.command || !input.entryContext || !this.dependencies.sessionIsolationSlashCommandExecutor) {
-      return undefined;
-    }
-    if (!this.isSessionIsolationCommand(input.command)) {
-      return undefined;
-    }
-    return this.dependencies.sessionIsolationSlashCommandExecutor.execute({
-      command: input.command,
-      anchor: input.anchor,
-      ensuredContext: input.ensuredContext ?? {
-        opencodeSessionId: '',
-        bootstrapSource: 'bootstrap_created',
-      },
-      entryContext: input.entryContext,
-      ...(input.createContext ? { createContext: input.createContext } : {}),
-      ...(input.directory ? { directory: input.directory } : {}),
-    });
-  }
-
-  private isSessionIsolationCommand(command: SlashCommand): command is Extract<SlashCommand, { kind: 'new' | 'sessions' | 'session' }> {
-    return command.kind === 'new' || command.kind === 'sessions' || command.kind === 'session';
   }
 }
 

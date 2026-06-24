@@ -699,6 +699,11 @@ test('runtime responds to query_slash_commands with provider slash command list'
       slashCommands: [
         { command: '/new', description: '新建会话' },
         { command: '/init', description: '初始化项目' },
+        { command: '//slash-init', description: 'slash-prefixed catalog name' },
+        { command: '/bad command', description: 'whitespace command' },
+        { command: '/foo/bar', description: 'nested command' },
+        { command: '', description: 'empty command' },
+        { command: '/review', description: `  ${'x'.repeat(60)}  ` },
       ],
     };
   };
@@ -740,6 +745,7 @@ test('runtime responds to query_slash_commands with provider slash command list'
       slashCommands: [
         { command: '/new', description: '新建会话' },
         { command: '/init', description: '初始化项目' },
+        { command: '/review', description: 'x'.repeat(50) },
       ],
     },
   });
