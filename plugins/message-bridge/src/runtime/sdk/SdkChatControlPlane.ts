@@ -26,7 +26,12 @@ import type {
 import { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
-export { SdkChatPreprocessor } from './SdkChatPreprocessor.js';
+import { normalizeOpenCodeNativeCommandName } from './OpenCodeNativeCommandName.js';
+export {
+  SdkChatRunPlanner,
+  type ChatQueuedExecution,
+  type ChatRunPlan,
+} from './SdkChatRunPlanner.js';
 
 const GROUP_CHAT_DENY_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
 
@@ -42,6 +47,11 @@ export interface ChatExecutionContext {
   scope?: SessionScope;
   modelOverride?: SessionModelOverride;
   bootstrapSource: SlashCommandContext['bootstrapSource'];
+}
+
+export interface ChatRunContext extends ChatExecutionContext {
+  entryContext?: BusinessEntryContext;
+  directory?: string;
 }
 
 export interface ChatExecutionContextResolver {
@@ -85,16 +95,51 @@ export interface NormalChatSessionResolver {
   }): Promise<ChatExecutionContext>;
 }
 
-type EntryPolicyDecision =
-  | { kind: 'deny'; text: string }
-  | { kind: 'normal_chat' }
+export interface ChatRunContextResolver {
+  resolve(input: {
+    message: ProviderRunMessageInput;
+    logger?: BridgeLogger;
+  }): Promise<ChatRunContext>;
+}
+
+export interface OpenCodeNativeCommandDescriptor {
+  name: string;
+}
+
+export type OpenCodeNativeCommandListResult =
+  | { success: true; commands: OpenCodeNativeCommandDescriptor[] }
+  | { success: false; reason: string };
+
+export interface OpenCodeNativeCommandCatalog {
+  listCommands(input: { directory?: string }): Promise<OpenCodeNativeCommandListResult>;
+}
+
+export type BridgeLocalSlashClassification =
   | {
-      kind: 'slash';
+      kind: 'bridge_local';
       descriptor: SlashCommandDescriptor;
       command?: SlashCommand;
       disabledInEntry?: boolean;
       invalid?: boolean;
-    };
+    }
+  | { kind: 'none'; normalizedText: string };
+
+export type OpenCodeNativeSlashClassification =
+  | {
+      kind: 'opencode_native';
+      commandName: string;
+      arguments: string;
+    }
+  | { kind: 'normal_chat'; fallbackReason?: string; commandName?: string };
+
+export type SlashCommandClassification =
+  | Exclude<BridgeLocalSlashClassification, { kind: 'none' }>
+  | Extract<OpenCodeNativeSlashClassification, { kind: 'opencode_native' }>;
+
+export type ChatMessageClassification =
+  | { kind: 'suppressed_reply'; text: string }
+  | { kind: 'slash'; slash: SlashCommandClassification }
+  | { kind: 'normal_chat'; fallbackReason?: string; commandName?: string };
 
 /**
  * SDK chat 入口的 slash 能力策略。
@@ -109,26 +154,27 @@ export class StaticSlashCapabilityProvider {
 }
 
 /**
- * SDK chat 入口判定器。
+ * bridge-local slash 分类器。
+ * @remarks 只识别插件本地控制命令，并应用本地 `BusinessEntryPolicy` allow-list。
  */
-export class ChatEntryPolicy {
+export class BridgeLocalSlashClassifier {
   constructor(private readonly dependencies: {
     slashCommandParser: SlashCommandParser;
     slashCapabilityProvider: StaticSlashCapabilityProvider;
   }) {}
 
-  decide(input: ProviderRunMessageInput, entryContext?: BusinessEntryContext): EntryPolicyDecision {
-    if (input.context?.suppressReply) {
-      return { kind: 'deny', text: GROUP_CHAT_DENY_REPLY_TEXT };
-    }
-
+  classify(input: {
+    text: string;
+    entryContext?: BusinessEntryContext;
+  }): BridgeLocalSlashClassification {
+    const normalizedText = normalizeSlashText(input.text, input.entryContext);
     const parseResult = this.dependencies.slashCommandParser.tryParse({
-      text: input.text,
-      isGroupChat: this.isImGroupEntry(entryContext),
+      text: normalizedText,
+      isGroupChat: isImGroupEntry(input.entryContext),
     });
 
     if (parseResult.kind === 'none') {
-      return { kind: 'normal_chat' };
+      return { kind: 'none', normalizedText };
     }
 
     const descriptor = parseResult.kind === 'matched'
@@ -136,12 +182,12 @@ export class ChatEntryPolicy {
       : parseResult.command;
 
     const allowed = this.dependencies.slashCapabilityProvider.isAllowed({
-      policy: entryContext?.policy,
+      policy: input.entryContext?.policy,
       command: descriptor,
     });
     if (!allowed) {
       return {
-        kind: 'slash',
+        kind: 'bridge_local',
         descriptor,
         disabledInEntry: true,
       };
@@ -149,25 +195,148 @@ export class ChatEntryPolicy {
 
     if (parseResult.kind === 'invalid') {
       return {
-        kind: 'slash',
+        kind: 'bridge_local',
         descriptor,
         invalid: true,
       };
     }
 
     return {
-      kind: 'slash',
+      kind: 'bridge_local',
       descriptor,
       command: parseResult.command,
     };
   }
+}
 
-  private isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean {
-    const entryKey = entryContext?.entryKey;
-    return entryKey?.businessSessionDomain.toLowerCase() === 'im'
-      && entryKey.businessSessionType.toLowerCase() === 'group';
+/**
+ * OpenCode native slash 分类器。
+ * @remarks 只处理 bridge-local 未命中的 unknown slash，并通过 `command.list` 做 preflight。
+ */
+export class OpenCodeNativeSlashClassifier {
+  constructor(private readonly dependencies: {
+    nativeCommandCatalog?: OpenCodeNativeCommandCatalog;
+  } = {}) {}
+
+  async classify(input: {
+    text: string;
+    directory?: string;
+  }): Promise<OpenCodeNativeSlashClassification> {
+    const nativeCommand = parseNativeSlash(input.text);
+    if (!nativeCommand) {
+      return { kind: 'normal_chat' };
+    }
+
+    if (!this.dependencies.nativeCommandCatalog) {
+      return {
+        kind: 'normal_chat',
+        fallbackReason: 'session.command_unavailable',
+        commandName: nativeCommand.commandName,
+      };
+    }
+
+    const listResult = await this.dependencies.nativeCommandCatalog.listCommands({
+      ...(input.directory ? { directory: input.directory } : {}),
+    });
+    if (!listResult.success) {
+      return {
+        kind: 'normal_chat',
+        fallbackReason: listResult.reason,
+        commandName: nativeCommand.commandName,
+      };
+    }
+
+    if (!listResult.commands.some((command) => normalizeOpenCodeNativeCommandName(command.name) === nativeCommand.commandName)) {
+      return {
+        kind: 'normal_chat',
+        fallbackReason: 'command_not_found',
+        commandName: nativeCommand.commandName,
+      };
+    }
+
+    return {
+      kind: 'opencode_native',
+      commandName: nativeCommand.commandName,
+      arguments: nativeCommand.arguments ?? '',
+    };
   }
+}
 
+/**
+ * chat message 分类器。
+ * @remarks 基于已构建的 entry/session 上下文分类消息，不执行 slash、prompt 或 command。
+ */
+export class ChatMessageClassifier {
+  constructor(private readonly dependencies: {
+    bridgeLocalSlashClassifier: BridgeLocalSlashClassifier;
+    openCodeNativeSlashClassifier: OpenCodeNativeSlashClassifier;
+  }) {}
+
+  async classify(input: {
+    message: ProviderRunMessageInput;
+    context: ChatRunContext;
+    logger?: BridgeLogger;
+  }): Promise<ChatMessageClassification> {
+    if (input.message.context?.suppressReply) {
+      return { kind: 'suppressed_reply', text: GROUP_CHAT_DENY_REPLY_TEXT };
+    }
+
+    const local = this.dependencies.bridgeLocalSlashClassifier.classify({
+      text: input.message.text,
+      entryContext: input.context.entryContext,
+    });
+    if (local.kind === 'bridge_local') {
+      return { kind: 'slash', slash: local };
+    }
+
+    const native = await this.dependencies.openCodeNativeSlashClassifier.classify({
+      text: local.normalizedText,
+      ...(input.context.directory ? { directory: input.context.directory } : {}),
+    });
+    if (native.kind === 'opencode_native') {
+      return { kind: 'slash', slash: native };
+    }
+
+    if (native.fallbackReason && native.commandName) {
+      input.logger?.info?.('sdk_chat_classifier.native_command_preflight_fallback', {
+        toolSessionId: input.message.toolSessionId,
+        runId: input.message.runId,
+        commandName: native.commandName,
+        reason: native.fallbackReason,
+      });
+    }
+    return native;
+  }
+}
+
+function normalizeSlashText(text: string, entryContext: BusinessEntryContext | undefined): string {
+  const normalized = text.trim();
+  if (!isImGroupEntry(entryContext)) {
+    return normalized;
+  }
+  return normalized.replace(/^@\S+\s+/, '').trim();
+}
+
+function parseNativeSlash(text: string): { commandName: string; arguments?: string } | undefined {
+  const match = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/u);
+  if (!match) {
+    return undefined;
+  }
+  const commandName = match[1]?.trim();
+  if (!commandName) {
+    return undefined;
+  }
+  const args = match[2]?.trim();
+  return {
+    commandName,
+    ...(args ? { arguments: args } : {}),
+  };
+}
+
+function isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean {
+  const entryKey = entryContext?.entryKey;
+  return entryKey?.businessSessionDomain.toLowerCase() === 'im'
+    && entryKey.businessSessionType.toLowerCase() === 'group';
 }
 
 /**

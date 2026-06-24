@@ -11,6 +11,7 @@ import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 export type RuntimeObservationCommand =
   | 'query_status'
   | 'create_session'
+  | 'list_slash_commands'
   | 'start_request_run'
   | 'reply_question'
   | 'reply_permission'
@@ -23,6 +24,7 @@ export type RuntimeObservationCommand =
 export type RuntimeObservationProviderCommand =
   | 'queryStatus'
   | 'createSession'
+  | 'listSlashCommands'
   | 'startRequestRun'
   | 'replyQuestion'
   | 'replyPermission'
@@ -275,6 +277,7 @@ export type RuntimeObservationUsecaseContext = RuntimeObservationCommandContext 
 export type RuntimeObservationProviderContext = {
   toolSessionId?: string;
   runId?: string;
+  welinkSessionId?: string;
 };
 
 export type RuntimeObservationTerminalContext = {

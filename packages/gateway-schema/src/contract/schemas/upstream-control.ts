@@ -3,12 +3,9 @@ import { z } from 'zod';
 import { TRANSPORT_UPSTREAM_MESSAGE_TYPES } from '../literals/upstream.ts';
 import { optionalLooseTrimmedString, requiredTrimmedString } from './shared.ts';
 
-const [REGISTER_MESSAGE_TYPE, REGISTER_OK_MESSAGE_TYPE, REGISTER_REJECTED_MESSAGE_TYPE, HEARTBEAT_MESSAGE_TYPE] =
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES;
-
 export const registerMessageSchema = z
   .object({
-    type: z.literal(REGISTER_MESSAGE_TYPE),
+    type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.REGISTER_MESSAGE_TYPE),
     deviceName: requiredTrimmedString,
     macAddress: z.string().optional(),
     os: requiredTrimmedString,
@@ -37,13 +34,13 @@ export const registerMessageSchema = z
 export type RegisterMessage = z.output<typeof registerMessageSchema>;
 
 export const registerOkMessageSchema = z.object({
-  type: z.literal(REGISTER_OK_MESSAGE_TYPE),
+  type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.REGISTER_OK_MESSAGE_TYPE),
 });
 export type RegisterOkMessage = z.output<typeof registerOkMessageSchema>;
 
 export const registerRejectedMessageSchema = z
   .object({
-    type: z.literal(REGISTER_REJECTED_MESSAGE_TYPE),
+    type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.REGISTER_REJECTED_MESSAGE_TYPE),
     reason: optionalLooseTrimmedString,
   })
   .transform((message) => ({
@@ -53,7 +50,7 @@ export const registerRejectedMessageSchema = z
 export type RegisterRejectedMessage = z.output<typeof registerRejectedMessageSchema>;
 
 export const heartbeatMessageSchema = z.object({
-  type: z.literal(HEARTBEAT_MESSAGE_TYPE),
+  type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.HEARTBEAT_MESSAGE_TYPE),
   timestamp: requiredTrimmedString,
 });
 export type HeartbeatMessage = z.output<typeof heartbeatMessageSchema>;

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createGatewayWireMessageUpdatedEvent } from '../../test-support/fixtures/index.mjs';
+import {
+  createGatewayWireMessageUpdatedEvent,
+  createSlashCommandsResultMessage,
+} from '../../test-support/fixtures/index.mjs';
 import { assertWireViolationShape } from '../../test-support/assertions/index.mjs';
 import {
   gatewayUpstreamTransportMessageSchema,
@@ -72,6 +75,7 @@ test('validateGatewayUpstreamTransportMessage accepts the upstream transport env
       type: 'status_response',
       opencodeOnline: true,
     },
+    createSlashCommandsResultMessage(),
   ];
 
   for (const message of cases) {
@@ -106,6 +110,7 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
       type: 'status_response',
       opencodeOnline: true,
     },
+    createSlashCommandsResultMessage(),
   ];
 
   for (const message of businessMessages) {

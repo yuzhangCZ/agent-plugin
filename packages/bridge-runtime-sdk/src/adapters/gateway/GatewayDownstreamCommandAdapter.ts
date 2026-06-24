@@ -9,10 +9,13 @@ export function toRuntimeCommand(message: GatewayDownstreamBusinessRequest, trac
   if (message.type === 'status_query') {
     return { kind: 'query_status', traceId, source: message };
   }
-
+  
+  // todo: kind/ case常量统一导出使用，例如:create_session->xxxx.xxx
   switch (message.action) {
     case 'create_session':
       return { kind: 'create_session', traceId, source: message };
+    case 'query_slash_commands':
+      return { kind: 'list_slash_commands', traceId, source: message };
     case 'chat':
       return { kind: 'start_request_run', traceId, source: message };
     case 'question_reply':

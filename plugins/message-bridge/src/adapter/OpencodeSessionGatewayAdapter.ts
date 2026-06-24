@@ -10,6 +10,7 @@ import type {
 import type { SessionModelOverride } from '../port/SlashCommandControlPlanePort.js';
 import type { SessionCreationPort } from '../port/SessionCreationPort.js';
 import type {
+  CommandSessionResultData,
   PromptSessionAssistantError,
   PromptSessionAssistantTokens,
   PromptSessionMessagePart,
@@ -241,6 +242,34 @@ function normalizePromptMessage(result: unknown): PromptSessionResultData['messa
   };
 }
 
+function normalizeCommandList(result: unknown): Array<{ name: string; description?: string }> {
+  const data = extractResultData<unknown>(result);
+  const root = readRecord(data);
+  const candidates = Array.isArray(data)
+    ? data
+    : Array.isArray(root?.commands)
+      ? root.commands
+      : Array.isArray(root?.items)
+        ? root.items
+        : [];
+  return candidates
+    .map((item) => {
+      if (typeof item === 'string') {
+        return { name: item };
+      }
+      const record = readRecord(item);
+      const name = readString(record?.name) ?? readString(record?.id);
+      const description = readString(record?.description);
+      return name
+        ? {
+            name,
+            ...(description ? { description } : {}),
+          }
+        : undefined;
+    })
+    .filter((item): item is { name: string; description?: string } => Boolean(item));
+}
+
 function readPromptRawAssistantError(result: unknown): Record<string, unknown> | undefined {
   const data = extractResultData<Record<string, unknown>>(result);
   const info = readRecord(data?.info);
@@ -325,6 +354,31 @@ function buildPromptPayloadFailure(
     ? (result as { error: unknown }).error
     : undefined;
   const errorMessage = errorField !== undefined ? getErrorMessage(errorField) : 'Invalid prompt response';
+  return {
+    success: false,
+    errorCode: 'SDK_UNREACHABLE',
+    errorMessage: `${failurePrefix}: ${errorMessage}`,
+    errorEvidence: getToolErrorEvidence(errorField ?? result, sourceOperation) ?? { sourceOperation },
+  };
+}
+
+function buildCommandPayloadFailure(
+  failurePrefix: string,
+  sourceOperation: NonNullable<ToolErrorEvidence['sourceOperation']>,
+  result: unknown,
+): ActionResult<CommandSessionResultData> {
+  const message = normalizePromptMessage(result);
+  if (message) {
+    return {
+      success: true,
+      data: { message },
+    };
+  }
+
+  const errorField = result && typeof result === 'object' && 'error' in (result as Record<string, unknown>)
+    ? (result as { error: unknown }).error
+    : undefined;
+  const errorMessage = errorField !== undefined ? getErrorMessage(errorField) : 'Invalid command response';
   return {
     success: false,
     errorCode: 'SDK_UNREACHABLE',
@@ -502,6 +556,142 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
           });
         }
         return promptResult;
+      },
+    });
+  }
+  async listNativeCommands(parameters: {
+    directory?: string;
+    logger?: BridgeLogger;
+  }): Promise<ActionResult<{ commands: Array<{ name: string }> }>> {
+    const client = this.getClient();
+    if (!client) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'OpenCode SDK client is unavailable',
+        errorEvidence: { sourceOperation: 'command.list' },
+      };
+    }
+    if (!client.session.command) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'OpenCode session.command is unavailable',
+        errorEvidence: { sourceOperation: 'session.command' },
+      };
+    }
+    if (!client.command?.list) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'OpenCode command.list is unavailable',
+        errorEvidence: { sourceOperation: 'command.list' },
+      };
+    }
+    parameters.logger?.debug('opencode_native_command.list.requested', {
+      directory: parameters.directory,
+    });
+    return this.executeSdkCall({
+      failurePrefix: 'Failed to list OpenCode commands',
+      sourceOperation: 'command.list',
+      promiseFactory: () => client.command?.list({
+        ...(parameters.directory ? { directory: parameters.directory } : {}),
+      }) ?? Promise.reject(new Error('OpenCode command.list is unavailable')),
+      onSuccess: (result) => ({
+        success: true,
+        data: {
+          commands: normalizeCommandList(result),
+        },
+      }),
+    });
+  }
+
+  async listCommandCatalog(parameters: {
+    directory?: string;
+    logger?: BridgeLogger;
+  }): Promise<ActionResult<{ commands: Array<{ name: string; description?: string }> }>> {
+    const client = this.getClient();
+    if (!client) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'OpenCode SDK client is unavailable',
+        errorEvidence: { sourceOperation: 'command.list' },
+      };
+    }
+    if (!client.command?.list) {
+      return {
+        success: true,
+        data: { commands: [] },
+      };
+    }
+    parameters.logger?.debug('opencode_command_catalog.list.requested', {
+      directory: parameters.directory,
+    });
+    return this.executeSdkCall({
+      failurePrefix: 'Failed to list OpenCode commands',
+      sourceOperation: 'command.list',
+      promiseFactory: () => client.command?.list({
+        ...(parameters.directory ? { directory: parameters.directory } : {}),
+      }) ?? Promise.reject(new Error('OpenCode command.list is unavailable')),
+      onSuccess: (result) => ({
+        success: true,
+        data: {
+          commands: normalizeCommandList(result),
+        },
+      }),
+    });
+  }
+
+  async commandSession(parameters: {
+    sessionId: string;
+    commandName: string;
+    arguments?: string;
+    directory?: string;
+    agent?: string;
+    modelOverride?: SessionModelOverride;
+    logger?: BridgeLogger;
+  }): Promise<ActionResult<CommandSessionResultData>> {
+    const client = this.requireClient();
+    if (!client.session.command) {
+      return {
+        success: false,
+        errorCode: 'SDK_UNREACHABLE',
+        errorMessage: 'OpenCode session.command is unavailable',
+        errorEvidence: { sourceOperation: 'session.command' },
+      };
+    }
+    parameters.logger?.debug('session_command.request.prepared', {
+      sessionId: parameters.sessionId,
+      commandName: parameters.commandName,
+      directory: parameters.directory,
+      providerID: parameters.modelOverride?.providerId,
+      modelID: parameters.modelOverride?.modelId,
+      hasAgent: Boolean(parameters.agent),
+      hasArguments: Boolean(parameters.arguments),
+    });
+    return this.executeSdkCall({
+      failurePrefix: 'Failed to execute command',
+      sourceOperation: 'session.command',
+      promiseFactory: () => client.session.command?.({
+        sessionID: parameters.sessionId,
+        command: parameters.commandName,
+        arguments: parameters.arguments ?? '',
+        ...(parameters.directory ? { directory: parameters.directory } : {}),
+        ...(parameters.modelOverride ? { model: `${parameters.modelOverride.providerId}/${parameters.modelOverride.modelId}` } : {}),
+        ...(parameters.agent ? { agent: parameters.agent } : {}),
+      }) ?? Promise.reject(new Error('OpenCode session.command is unavailable')),
+      onSuccess: (result) => {
+        const commandResult = buildCommandPayloadFailure('Failed to execute command', 'session.command', result);
+        if (commandResult.success && commandResult.data.message.info.error) {
+          logPromptAssistantErrorDiagnostic({
+            logger: parameters.logger,
+            sessionId: parameters.sessionId,
+            result,
+            normalizedError: commandResult.data.message.info.error,
+          });
+        }
+        return commandResult;
       },
     });
   }

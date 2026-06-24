@@ -70,6 +70,30 @@ export function createStatusQueryMessage(overrides = {}) {
   };
 }
 
+export function createQuerySlashCommandsInvokeMessage(overrides = {}) {
+  return createInvokeMessage({
+    welinkSessionId: 'wl-slash-commands',
+    traceId: 'trace-slash-commands',
+    action: 'query_slash_commands',
+    payload: {},
+    ...overrides,
+  });
+}
+
+export function createSlashCommandsResultMessage(overrides = {}) {
+  return {
+    type: 'slash_commands_result',
+    welinkSessionId: 'wl-slash-commands',
+    traceId: 'trace-slash-commands',
+    payload: {
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+      ],
+    },
+    ...overrides,
+  };
+}
+
 export function createCompatInvalidInvokeStatusQueryMessage(overrides = {}) {
   const welinkSessionId = withDefault(overrides.welinkSessionId, 'wl-invalid-status');
   return createInvokeMessage({

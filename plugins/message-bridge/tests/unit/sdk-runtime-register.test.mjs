@@ -194,7 +194,7 @@ function getContextResolver(runtime) {
 }
 
 function getSlashCommandExecutor(runtime) {
-  return getProviderAdapter(runtime).chatPreprocessor.dependencies.slashExecutionUseCase.dependencies.slashCommandExecutor;
+  return getProviderAdapter(runtime).chatRunPlanner.dependencies.slashExecutionUseCase.dependencies.slashCommandExecutor;
 }
 
 test('sdk runtime telemetry refresh does not republish READY when public status is already ready', () => {
@@ -350,7 +350,7 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
     const runtime = await startSdkRuntime();
     const providerAdapter = getProviderAdapter(runtime);
     const contextResolver = getContextResolver(runtime);
-    const chatPreprocessor = providerAdapter.chatPreprocessor;
+    const chatRunPlanner = providerAdapter.chatRunPlanner;
 
     assert.equal(typeof providerAdapter.createSessionCommandPort.execute, 'function');
     assert.equal(typeof providerAdapter.closeSessionCommandPort.execute, 'function');
@@ -358,8 +358,8 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
     assert.equal(typeof providerAdapter.questionReplyCommandPort.execute, 'function');
     assert.equal(typeof providerAdapter.permissionReplyCommandPort.execute, 'function');
     assert.equal(contextResolver.dependencies.sessionAttachmentPort, undefined);
-    assert.equal(typeof chatPreprocessor.dependencies.normalChatSessionResolver.resolve, 'function');
-    assert.equal(typeof chatPreprocessor.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.normalChatSessionResolver.resolve, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
 
     runtime.stop();
   } finally {

@@ -5,6 +5,8 @@ import type {
   ProviderCreateSessionResult,
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRun,
@@ -29,6 +31,10 @@ export class ProviderApiAdapter implements ProviderCommandHandlers {
 
   createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult> {
     return this.provider.createSession(input);
+  }
+
+  listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult> {
+    return this.provider.listSlashCommands(input);
   }
 
   startRequestRun(input: ProviderRunMessageInput): Promise<ProviderRun> {

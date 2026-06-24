@@ -202,6 +202,20 @@ export interface ProviderCreateSessionResult {
   title?: string;
 }
 
+export interface ProviderSlashCommand {
+  command: string;
+  description: string;
+}
+
+export interface ProviderListSlashCommandsInput {
+  traceId: string;
+  extParameters?: ExtParameters;
+}
+
+export interface ProviderListSlashCommandsResult {
+  slashCommands: ProviderSlashCommand[];
+}
+
 export interface ProviderRunMessageInput {
   traceId: string;
   runId: string;
@@ -280,6 +294,7 @@ export interface ThirdPartyAgentProvider {
   initialize?(context: ProviderRuntimeContext): Promise<void>;
   health(input: ProviderHealthInput): Promise<ProviderHealthResult>;
   createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult>;
+  listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult>;
   runMessage(input: ProviderRunMessageInput): Promise<ProviderRun>;
   replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }>;
   replyPermission(input: ProviderPermissionReplyInput): Promise<{ applied: true }>;

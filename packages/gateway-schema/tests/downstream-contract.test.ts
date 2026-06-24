@@ -9,6 +9,7 @@ import {
   createGatewayWireLegacyCreateSessionInvokeMessage,
   createPermissionReplyInvokeMessage,
   createQuestionReplyInvokeMessage,
+  createQuerySlashCommandsInvokeMessage,
   createStatusQueryMessage,
 } from '../../test-support/fixtures/index.mjs';
 import { assertWireViolationShape } from '../../test-support/assertions/index.mjs';
@@ -94,6 +95,37 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         action: 'abort_session',
         payload: {
           toolSessionId: 'tool-abort',
+        },
+      },
+    ],
+    [
+      'query_slash_commands',
+      createQuerySlashCommandsInvokeMessage({
+        welinkSessionId: 'wl-query-slash',
+        traceId: 'trace-query-slash',
+        payload: {
+          extParameters: {
+            platformExtParam: {
+              businessSessionDomain: 'im',
+              businessSessionType: 'direct',
+              businessSessionId: 'user-a#bot-a',
+            },
+          },
+        },
+      }),
+      {
+        type: 'invoke',
+        welinkSessionId: 'wl-query-slash',
+        traceId: 'trace-query-slash',
+        action: 'query_slash_commands',
+        payload: {
+          extParameters: {
+            platformExtParam: {
+              businessSessionDomain: 'im',
+              businessSessionType: 'direct',
+              businessSessionId: 'user-a#bot-a',
+            },
+          },
         },
       },
     ],

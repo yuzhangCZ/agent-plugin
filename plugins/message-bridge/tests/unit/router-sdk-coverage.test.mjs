@@ -26,7 +26,18 @@ describe('createSdkAdapter coverage', () => {
   });
 
   test('creates adapted sdk methods and forwards calls', async () => {
-    const calls = { create: 0, sessionGet: 0, sessionList: 0, abort: 0, delete: 0, prompt: 0, providers: 0, post: 0 };
+    const calls = {
+      create: 0,
+      sessionGet: 0,
+      sessionList: 0,
+      abort: 0,
+      delete: 0,
+      prompt: 0,
+      command: 0,
+      commandList: 0,
+      providers: 0,
+      post: 0,
+    };
     const raw = {
       session: {
         create: async (options) => {
@@ -51,6 +62,16 @@ describe('createSdkAdapter coverage', () => {
         },
         prompt: async (options) => {
           calls.prompt += 1;
+          return { data: options };
+        },
+        command: async (options) => {
+          calls.command += 1;
+          return { data: options };
+        },
+      },
+      command: {
+        list: async (options) => {
+          calls.commandList += 1;
           return { data: options };
         },
       },
@@ -79,11 +100,31 @@ describe('createSdkAdapter coverage', () => {
       directory: '/tmp/bridge',
       parts: [{ type: 'text', text: 'hi' }],
     });
+    const r5b = await adapted.session.command?.({
+      sessionID: 's1',
+      directory: '/tmp/bridge',
+      command: 'init',
+      arguments: 'now',
+      agent: 'build',
+      model: 'test/test-model',
+    });
+    const r5c = await adapted.command?.list({ directory: '/tmp/bridge' });
     const r6 = await adapted.config.providers({ directory: '/tmp/bridge' });
     const r7 = await adapted.permission.reply({ permissionId: 'perm-1', response: 'always' });
     const r8 = await adapted.question.reply({ questionId: 'question-1', answers: [['yes'], ['A', 'B']] });
 
-    assert.deepStrictEqual(calls, { create: 1, sessionGet: 1, sessionList: 1, abort: 1, delete: 1, prompt: 1, providers: 1, post: 2 });
+    assert.deepStrictEqual(calls, {
+      create: 1,
+      sessionGet: 1,
+      sessionList: 1,
+      abort: 1,
+      delete: 1,
+      prompt: 1,
+      command: 1,
+      commandList: 1,
+      providers: 1,
+      post: 2,
+    });
     assert.deepStrictEqual(r1.data, {
       body: { title: 'session-1' },
       query: { directory: '/tmp/bridge' },
@@ -107,6 +148,19 @@ describe('createSdkAdapter coverage', () => {
       path: { id: 's1' },
       query: { directory: '/tmp/bridge' },
       body: { parts: [{ type: 'text', text: 'hi' }] },
+    });
+    assert.deepStrictEqual(r5b.data, {
+      path: { id: 's1' },
+      query: { directory: '/tmp/bridge' },
+      body: {
+        command: 'init',
+        arguments: 'now',
+        agent: 'build',
+        model: 'test/test-model',
+      },
+    });
+    assert.deepStrictEqual(r5c.data, {
+      query: { directory: '/tmp/bridge' },
     });
     assert.deepStrictEqual(r6.data, {
       query: { directory: '/tmp/bridge' },
@@ -157,5 +211,28 @@ describe('createSdkAdapter coverage', () => {
         headers: { 'Content-Type': 'application/json' },
       },
     ]);
+  });
+
+  test('does not require optional OpenCode native command capabilities', () => {
+    const adapted = createSdkAdapter({
+      session: {
+        create: async () => ({}),
+        get: async () => ({}),
+        list: async () => ({}),
+        prompt: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+      },
+      config: {
+        providers: async () => ({}),
+      },
+      _client: {
+        post: async () => ({ data: true }),
+      },
+    });
+
+    assert.notStrictEqual(adapted, null);
+    assert.equal(adapted.session.command, undefined);
+    assert.equal(adapted.command, undefined);
   });
 });

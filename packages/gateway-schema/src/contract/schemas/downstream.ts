@@ -14,7 +14,15 @@ import type { ExtParameters, PlatformExtParam } from '../types/ext-parameters.ts
 import { jsonValueSchema } from './tool-event/opencode-provider-event/json.ts';
 
 const [INVOKE_MESSAGE_TYPE, STATUS_QUERY_MESSAGE_TYPE] = DOWNSTREAM_MESSAGE_TYPES;
-const [CHAT_ACTION, CREATE_SESSION_ACTION, CLOSE_SESSION_ACTION, PERMISSION_REPLY_ACTION, ABORT_SESSION_ACTION, QUESTION_REPLY_ACTION] =
+const [
+  CHAT_ACTION,
+  CREATE_SESSION_ACTION,
+  CLOSE_SESSION_ACTION,
+  PERMISSION_REPLY_ACTION,
+  ABORT_SESSION_ACTION,
+  QUESTION_REPLY_ACTION,
+  QUERY_SLASH_COMMANDS_ACTION,
+] =
   INVOKE_ACTIONS;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -80,6 +88,7 @@ export const extParametersSchema: z.ZodType<ExtParameters> = z
       })),
   );
 
+// todo: 大量的重复逻辑xxx ？（xx:  xx2): {} 这个有必要吗？
 export const chatPayloadSchema = z
   .object({
     toolSessionId: requiredTrimmedString,
@@ -198,6 +207,16 @@ export const questionReplyPayloadSchema = z
   });
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
+export const querySlashCommandsPayloadSchema = z
+  .object({
+    extParameters: extParametersSchema.optional(),
+  })
+  .transform((payload) => ({
+    ...(payload.extParameters ? { extParameters: payload.extParameters } : {}),
+  }))
+
+export type QuerySlashCommandsPayload = z.output<typeof querySlashCommandsPayloadSchema>;
+
 export const chatInvokeSchema = z
   .object({
     type: z.literal(INVOKE_MESSAGE_TYPE),
@@ -287,6 +306,22 @@ export const questionReplyInvokeSchema = z
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
   }));
 
+export const querySlashCommandsInvokeSchema = z
+  .object({
+    type: z.literal(INVOKE_MESSAGE_TYPE),
+    action: z.literal(QUERY_SLASH_COMMANDS_ACTION),
+    welinkSessionId: requiredTrimmedString,
+    traceId: requiredTrimmedString,
+    payload: querySlashCommandsPayloadSchema.optional(),
+  })
+  .transform((message) => ({
+    type: message.type,
+    action: message.action,
+    welinkSessionId: message.welinkSessionId,
+    traceId: message.traceId,
+    payload: message.payload,
+  }))
+
 export const invokeMessageSchema = z.union([
   chatInvokeSchema,
   createSessionInvokeSchema,
@@ -294,6 +329,7 @@ export const invokeMessageSchema = z.union([
   permissionReplyInvokeSchema,
   abortSessionInvokeSchema,
   questionReplyInvokeSchema,
+  querySlashCommandsInvokeSchema,
 ]);
 export type InvokeMessage = z.output<typeof invokeMessageSchema>;
 
@@ -377,6 +413,7 @@ export interface ActionResultDataByAction {
   permission_reply: PermissionReplyResultData;
   abort_session: AbortSessionResultData;
   question_reply: QuestionReplyResultData;
+  query_slash_commands: void;
 }
 
 export interface ActionResultDataByName extends ActionResultDataByAction {

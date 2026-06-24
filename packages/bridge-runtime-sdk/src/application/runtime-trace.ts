@@ -10,6 +10,7 @@ export interface RuntimeTraceProviderCall {
   command:
     | 'queryStatus'
     | 'createSession'
+    | 'listSlashCommands'
     | 'startRequestRun'
     | 'replyQuestion'
     | 'replyPermission'

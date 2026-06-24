@@ -16,6 +16,7 @@ import {
   registerOkMessageSchema,
   registerRejectedMessageSchema,
   sessionCreatedMessageSchema,
+  slashCommandsResultMessageSchema,
   statusResponseMessageSchema,
   toolDoneMessageSchema,
   toolErrorMessageSchema,
@@ -72,6 +73,7 @@ function normalizeToolEventMessage(raw: PlainObject): Result<ToolEventMessage, W
       };
 }
 
+// todo: 大量重复逻辑
 export class DefaultTransportMessageValidator implements TransportMessageValidatorPort {
   validate(raw: UnknownBoundaryInput): Result<GatewayUpstreamTransportMessage, WireContractViolation> {
     if (!isRecord(raw) || !readString(raw.type)) {
@@ -133,6 +135,12 @@ export class DefaultTransportMessageValidator implements TransportMessageValidat
         return parsed.success
           ? { ok: true, value: parsed.data }
           : { ok: false, error: zodErrorToWireViolation(parsed.error, { stage: 'transport', messageType: 'status_response' }) };
+      }
+      case 'slash_commands_result': {
+        const parsed = slashCommandsResultMessageSchema.safeParse(raw);
+        return parsed.success
+          ? { ok: true, value: parsed.data }
+          : { ok: false, error: zodErrorToWireViolation(parsed.error, { stage: 'transport', messageType: 'slash_commands_result' }) };
       }
       default:
         return unsupportedMessage(readString(raw.type) ?? String(raw.type), 'transport');

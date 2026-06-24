@@ -1,6 +1,8 @@
 import type {
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
   ProviderCreateSessionInput,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
@@ -26,9 +28,11 @@ import type {
 } from '../../port/session-isolation/inbound/index.js';
 import type {
   ChatExecutionContextResolver,
+  ChatRunContext,
+  ChatQueuedExecution,
   EventAnchorResolver,
   ExecutionSessionInvalidationPort,
-  SdkChatPreprocessor,
+  SdkChatRunPlanner,
 } from './SdkChatControlPlane.js';
 import type { FactSessionContext, PendingInteractionRecorderPort } from './OpenCodeProviderAdapter.types.js';
 import {
@@ -63,8 +67,22 @@ import {
   buildImmediateFailedRun,
   hasPlatformBusinessSessionId,
 } from './OpenCodeProviderAdapter.helpers.js';
+import {
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+} from './session-isolation/index.js';
+import { toOpenCodeNativeSlashCommand } from './OpenCodeNativeCommandName.js';
+import { bindProviderCommandTerminal } from './OpenCodeProviderAdapter.command.js';
 import { bindProviderPromptTerminal } from './OpenCodeProviderAdapter.prompt.js';
 import { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.js';
+
+const LOCAL_SLASH_COMMANDS = [
+  { kind: 'new', command: '/new', description: '新建会话' },
+  { kind: 'sessions', command: '/sessions', description: '查看可切换会话' },
+  { kind: 'session', command: '/session', description: '切换到指定会话' },
+  { kind: 'models', command: '/models', description: '查看可用模型' },
+  { kind: 'model', command: '/model', description: '切换后续请求使用的模型' },
+] as const;
 
 type ProviderAdapterOptions = {
   rawClient: HostClientLike;
@@ -76,7 +94,7 @@ type ProviderAdapterOptions = {
   permissionReplyCommandPort?: PermissionReplyCommandPort;
   effectiveDirectory?: string;
   opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
-  chatPreprocessor: SdkChatPreprocessor;
+  chatRunPlanner: SdkChatRunPlanner;
   contextResolver: ChatExecutionContextResolver;
   executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   eventAnchorResolver: EventAnchorResolver;
@@ -102,11 +120,13 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
   private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
   private readonly effectiveDirectory?: string;
-  private readonly chatPreprocessor: SdkChatPreprocessor;
+  private readonly chatRunPlanner: SdkChatRunPlanner;
   private readonly contextResolver: ChatExecutionContextResolver;
   private readonly executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   private readonly pendingInteractionRecorder?: PendingInteractionRecorderPort;
   private readonly finalIdleTimeoutMs?: number;
+  private readonly listBusinessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
+  private readonly listBusinessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
 
   private readonly activeRuns = new ActiveRunRegistry();
   private readonly runCoordinator: HostSessionRunCoordinator;
@@ -144,7 +164,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     this.questionReplyCommandPort = options.questionReplyCommandPort;
     this.permissionReplyCommandPort = options.permissionReplyCommandPort;
     this.effectiveDirectory = options.effectiveDirectory;
-    this.chatPreprocessor = options.chatPreprocessor;
+    this.chatRunPlanner = options.chatRunPlanner;
     this.contextResolver = options.contextResolver;
     this.executionSessionInvalidationPort = options.executionSessionInvalidationPort;
 
@@ -222,10 +242,44 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     };
   }
 
+  async listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult> {
+    const commands = new Map<string, { command: string; description: string }>();
+    for (const command of this.resolveLocalSlashCommands(input)) {
+      commands.set(command.command, {
+        command: command.command,
+        description: command.description,
+      });
+    }
+
+    const result = await this.opencodeSessionGatewayAdapter.listCommandCatalog({
+      ...(this.effectiveDirectory ? { directory: this.effectiveDirectory } : {}),
+      logger: this.logger,
+    });
+    if (!result.success) {
+      this.logger.warn('provider_adapter.slash_commands.command_list_failed', {
+        traceId: input.traceId,
+        error: result.errorMessage ?? 'command.list failed',
+        sourceOperation: result.errorEvidence?.sourceOperation,
+        sourceErrorCode: result.errorEvidence?.sourceErrorCode,
+      });
+      return { slashCommands: [...commands.values()] };
+    }
+
+    for (const command of result.data.commands) {
+      const normalized = this.normalizeOpenCodeSlashCommand(command);
+      if (!normalized || commands.has(normalized.command)) {
+        continue;
+      }
+      commands.set(normalized.command, normalized);
+    }
+
+    return { slashCommands: [...commands.values()] };
+  }
+
   async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
-    let preprocessed;
+    let plan;
     try {
-      preprocessed = await this.chatPreprocessor.preprocess(input, this.logger);
+      plan = await this.chatRunPlanner.plan(input, this.logger);
     } catch (error) {
       this.logger.warn('provider_adapter.run.immediate_failed', {
         toolSessionId: input.toolSessionId,
@@ -235,7 +289,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
           ? 'invalid_input'
           : 'provider_unavailable',
         error: getErrorMessage(error),
-        failureStage: 'preprocess',
+        failureStage: 'plan',
       });
       if (error instanceof Error && error.message === 'business_entry_key_required') {
         return buildImmediateFailedRun(input.toolSessionId, {
@@ -248,25 +302,60 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         message: getErrorMessage(error),
       });
     }
-    if (preprocessed.kind === 'synthetic_run') {
-      return preprocessed.run;
+    if (plan.kind === 'immediate_synthetic') {
+      return plan.run;
     }
 
+    return this.enqueueChatExecution(input, plan.context, plan.execution);
+  }
+
+  private enqueueChatExecution(
+    input: ProviderRunMessageInput,
+    context: ChatRunContext,
+    execution: ChatQueuedExecution,
+  ): ProviderRun {
     const activeRun = this.createActiveRunHandle(
       input.toolSessionId,
       input.runId,
-      preprocessed.context.opencodeSessionId,
+      context.opencodeSessionId,
     );
+    if (execution.kind === 'native_command') {
+      this.logger.info('provider_adapter.command.prepare_succeeded', {
+        toolSessionId: input.toolSessionId,
+        opencodeSessionId: context.opencodeSessionId,
+        runId: activeRun.runId,
+        commandName: execution.commandName,
+        hasAssistantId: Boolean(input.assistantId),
+      });
+      this.runCoordinator.enqueue(activeRun, () => bindProviderCommandTerminal({
+        activeRun,
+        message: input,
+        context,
+        commandName: execution.commandName,
+        arguments: execution.arguments,
+        ...(this.effectiveDirectory ? { effectiveDirectory: this.effectiveDirectory } : {}),
+        logger: this.logger,
+        gatewayAdapter: this.opencodeSessionGatewayAdapter,
+        executionSessionInvalidationPort: this.executionSessionInvalidationPort,
+        activeRuns: this.activeRuns,
+      }));
+
+      return {
+        runId: activeRun.runId,
+        facts: activeRun.queue,
+        result: () => activeRun.result(),
+      };
+    }
     this.logger.info('provider_adapter.prompt.prepare_succeeded', {
       toolSessionId: input.toolSessionId,
-      opencodeSessionId: preprocessed.context.opencodeSessionId,
+      opencodeSessionId: context.opencodeSessionId,
       runId: activeRun.runId,
       hasAssistantId: Boolean(input.assistantId),
     });
     this.runCoordinator.enqueue(activeRun, () => bindProviderPromptTerminal({
       activeRun,
       message: input,
-      context: preprocessed.context,
+      context,
       ...(this.effectiveDirectory ? { effectiveDirectory: this.effectiveDirectory } : {}),
       logger: this.logger,
       gatewayAdapter: this.opencodeSessionGatewayAdapter,
@@ -279,6 +368,41 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       facts: activeRun.queue,
       result: () => activeRun.result(),
     };
+  }
+
+  private normalizeOpenCodeSlashCommand(input: { name: string; description?: string }): { command: string; description: string } | undefined {
+    const command = toOpenCodeNativeSlashCommand(input.name);
+    if (!command) {
+      return undefined;
+    }
+    return {
+      command,
+      description: this.truncateDescription(input.description?.trim() ?? ''),
+    };
+  }
+
+  private truncateDescription(description: string): string {
+    return description.length > 50 ? description.slice(0, 50) : description;
+  }
+
+  private resolveLocalSlashCommands(input: ProviderListSlashCommandsInput): typeof LOCAL_SLASH_COMMANDS[number][] {
+    const entryKey = this.listBusinessEntryKeyResolver.resolve({
+      source: 'create_session',
+      ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+    });
+    if (!entryKey) {
+      this.logger.info('provider_adapter.slash_commands.entry_policy_unresolved', {
+        traceId: input.traceId,
+        hasExtParameters: input.extParameters !== undefined,
+      });
+      return [...LOCAL_SLASH_COMMANDS];
+    }
+    const policy = this.listBusinessEntryPolicyResolver.resolve({
+      entryKey,
+      ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+    });
+    const allowed = new Set(policy.allowedSlashCommands);
+    return LOCAL_SLASH_COMMANDS.filter((command) => allowed.has(command.kind));
   }
 
   async replyQuestion(input: ProviderQuestionReplyInput): Promise<{ applied: true }> {

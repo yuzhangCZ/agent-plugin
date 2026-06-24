@@ -69,6 +69,7 @@ export interface ThirdPartyAgentProvider {
   initialize?(context: ProviderRuntimeContext): Promise<void>;
   health(input: ProviderHealthInput): Promise<ProviderHealthResult>;
   createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult>;
+  listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult>;
   runMessage(input: ProviderRunMessageInput): Promise<ProviderRun>;
   replyQuestion(input: ProviderQuestionReplyInput): Promise<RuntimeAppliedResult>;
   replyPermission(input: ProviderPermissionReplyInput): Promise<RuntimeAppliedResult>;
@@ -107,6 +108,29 @@ export interface ProviderCreateSessionInput {
 export interface ProviderCreateSessionResult {
   toolSessionId: string;
   title?: string;
+}
+
+/**
+ * slash command 列表项。
+ */
+export interface ProviderSlashCommand {
+  command: string;
+  description: string;
+}
+
+/**
+ * 查询 slash command 列表输入。
+ */
+export interface ProviderListSlashCommandsInput {
+  traceId: string;
+  extParameters?: ExtParameters;
+}
+
+/**
+ * 查询 slash command 列表结果。
+ */
+export interface ProviderListSlashCommandsResult {
+  slashCommands: ProviderSlashCommand[];
 }
 
 /**

@@ -8,7 +8,6 @@ import {
   SimpleSlashCommandParser,
 } from '../adapter/index.js';
 import {
-  DefaultSlashCommandReplyPresenter,
   SlashCommandExecutor,
 } from '../usecase/index.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
@@ -36,19 +35,15 @@ import type { ManagedRuntime, ManagedRuntimeStartOptions } from './ManagedRuntim
 import type { BridgeEvent } from './types.js';
 import { OpenCodeProviderAdapter } from './sdk/OpenCodeProviderAdapter.js';
 import {
-  ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
-  SdkChatPreprocessor,
-  SdkSlashExecutionUseCase,
-  StaticSlashCapabilityProvider,
 } from './sdk/SdkChatControlPlane.js';
+import { createSdkChatRunPlanner } from './sdk/SdkChatRunPlannerFactory.js';
 import {
   DefaultBusinessEntryKeyResolver,
   DefaultBusinessEntryPolicyResolver,
   BusinessEntryContextResolver,
-  EntryAwareChatSessionResolver,
   RuntimeAnchorRegistry,
   RuntimePendingInteractionRegistry,
   SessionIsolationDiagnostics,
@@ -262,28 +257,23 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       hostSessionQueryPort,
       hostModelCatalogPort,
     });
-    const chatPreprocessor = new SdkChatPreprocessor({
-      chatEntryPolicy: new ChatEntryPolicy({
-        slashCommandParser,
-        slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-      }),
-      slashExecutionUseCase: new SdkSlashExecutionUseCase({
-        slashCommandExecutor,
-        sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
-        replyPresenter: new DefaultSlashCommandReplyPresenter(),
-        contextResolver,
-      }),
+    const chatRunPlanner = createSdkChatRunPlanner({
+      slashCommandParser,
+      slashCommandExecutor,
+      sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
       contextResolver,
       businessEntryContextResolver,
       effectiveDirectory: config.bridgeDirectory,
-      normalChatSessionResolver: new EntryAwareChatSessionResolver({
+      opencodeSessionGatewayAdapter,
+      logger: this.logger,
+      entryAwareChatSessionResolver: {
         businessEntryKeyResolver,
         resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
         switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
         createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
         runtimeAnchorRepository: runtimeAnchorRegistry,
         modelOverrideStore: sessionModelOverrideStore,
-      }),
+      },
     });
     this.providerAdapter = new OpenCodeProviderAdapter({
       rawClient: this.rawClient,
@@ -297,7 +287,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       pendingInteractionRecorder: pendingInteractionRegistry,
       effectiveDirectory: config.bridgeDirectory,
       opencodeSessionGatewayAdapter,
-      chatPreprocessor,
+      chatRunPlanner,
       contextResolver,
       executionSessionInvalidationPort: new DefaultExecutionSessionInvalidationPort({
         bindingStore,
