@@ -360,9 +360,15 @@ describe('plugin contract', () => {
     }
 
     for (const [, fn] of Object.entries(mod)) {
-      if (typeof fn !== 'function') continue;
-      if (!pluginFns.has(fn)) continue;
-      if (seen.has(fn)) continue;
+      if (typeof fn !== 'function') {
+        continue;
+      }
+      if (!pluginFns.has(fn)) {
+        continue;
+      }
+      if (seen.has(fn)) {
+        continue;
+      }
       seen.add(fn);
       hooks.push(await fn(mockInput()));
     }
@@ -732,14 +738,26 @@ describe('plugin contract', () => {
       assert.strictEqual(latestStartLog.extra.workspacePath, workspaceB);
     } finally {
       readySocket.restore();
-      if (originalBridgeEnabled === undefined) delete process.env.BRIDGE_ENABLED;
-      else process.env.BRIDGE_ENABLED = originalBridgeEnabled;
-      if (originalBridgeAuthAk === undefined) delete process.env.BRIDGE_AUTH_AK;
-      else process.env.BRIDGE_AUTH_AK = originalBridgeAuthAk;
-      if (originalBridgeAuthSk === undefined) delete process.env.BRIDGE_AUTH_SK;
-      else process.env.BRIDGE_AUTH_SK = originalBridgeAuthSk;
-      if (originalGatewayUrl === undefined) delete process.env.BRIDGE_GATEWAY_URL;
-      else process.env.BRIDGE_GATEWAY_URL = originalGatewayUrl;
+      if (originalBridgeEnabled === undefined) {
+        delete process.env.BRIDGE_ENABLED;
+      } else {
+        process.env.BRIDGE_ENABLED = originalBridgeEnabled;
+      }
+      if (originalBridgeAuthAk === undefined) {
+        delete process.env.BRIDGE_AUTH_AK;
+      } else {
+        process.env.BRIDGE_AUTH_AK = originalBridgeAuthAk;
+      }
+      if (originalBridgeAuthSk === undefined) {
+        delete process.env.BRIDGE_AUTH_SK;
+      } else {
+        process.env.BRIDGE_AUTH_SK = originalBridgeAuthSk;
+      }
+      if (originalGatewayUrl === undefined) {
+        delete process.env.BRIDGE_GATEWAY_URL;
+      } else {
+        process.env.BRIDGE_GATEWAY_URL = originalGatewayUrl;
+      }
       await rm(workspaceA, { recursive: true, force: true });
       await rm(workspaceB, { recursive: true, force: true });
     }

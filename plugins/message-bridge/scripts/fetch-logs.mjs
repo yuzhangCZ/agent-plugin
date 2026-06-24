@@ -63,17 +63,27 @@ for (let i = 0; i < args.length; i += 1) {
 }
 
 function toTimestamp(value, fallback) {
-  if (!value) return fallback;
+  if (!value) {
+    return fallback;
+  }
   const numeric = Number(value);
-  if (Number.isFinite(numeric) && `${numeric}` === value) return numeric;
+  if (Number.isFinite(numeric) && `${numeric}` === value) {
+    return numeric;
+  }
   const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) throw new Error(`Invalid datetime: ${value}`);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Invalid datetime: ${value}`);
+  }
   return parsed;
 }
 
 function formatEntries(entries) {
-  if (options.format === 'json') return JSON.stringify(entries, null, 2);
-  if (options.format === 'raw') return entries.map((entry) => entry.raw).join('\n');
+  if (options.format === 'json') {
+    return JSON.stringify(entries, null, 2);
+  }
+  if (options.format === 'raw') {
+    return entries.map((entry) => entry.raw).join('\n');
+  }
   return entries
     .map((entry) => `${entry.timestamp ?? '-'} ${entry.level ?? '-'} ${entry.service ?? '-'} ${entry.message ?? entry.raw}`)
     .join('\n');
@@ -106,7 +116,9 @@ async function main() {
   for (const { file } of sortedFiles) {
     const rl = readline.createInterface({ input: createReadStream(file), crlfDelay: Infinity });
     for await (const line of rl) {
-      if (!line.trim()) continue;
+      if (!line.trim()) {
+        continue;
+      }
       let parsed;
       try {
         parsed = JSON.parse(line);
@@ -120,12 +132,24 @@ async function main() {
       const sessionId = parsed.sessionId ?? parsed.session_id ?? '';
       const message = parsed.message ?? parsed.msg ?? parsed.event ?? '';
 
-      if (timestamp && (timestamp < since || timestamp > until)) continue;
-      if (options.service && service && service !== options.service) continue;
-      if (levelSet && level && !levelSet.has(level)) continue;
-      if (options.traceId && traceId !== options.traceId) continue;
-      if (options.sessionId && sessionId !== options.sessionId) continue;
-      if (messagePattern && !messagePattern.test(message) && !messagePattern.test(line)) continue;
+      if (timestamp && (timestamp < since || timestamp > until)) {
+        continue;
+      }
+      if (options.service && service && service !== options.service) {
+        continue;
+      }
+      if (levelSet && level && !levelSet.has(level)) {
+        continue;
+      }
+      if (options.traceId && traceId !== options.traceId) {
+        continue;
+      }
+      if (options.sessionId && sessionId !== options.sessionId) {
+        continue;
+      }
+      if (messagePattern && !messagePattern.test(message) && !messagePattern.test(line)) {
+        continue;
+      }
 
       results.push({
         timestamp: parsed.timestamp ?? parsed.time ?? '',
@@ -136,9 +160,13 @@ async function main() {
         message,
         raw: line,
       });
-      if (results.length >= options.limit) break;
+      if (results.length >= options.limit) {
+        break;
+      }
     }
-    if (results.length >= options.limit) break;
+    if (results.length >= options.limit) {
+      break;
+    }
   }
 
   const output = formatEntries(results);
