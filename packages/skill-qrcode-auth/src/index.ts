@@ -1,6 +1,7 @@
 import { createQrCodeAuthRuntime } from "./internal/createQrCodeAuthRuntime.ts";
 
 export type {
+  QrCodeAssistantInfo,
   QrCodeAuth,
   QrCodeAuthFailureReasonCode,
   QrCodeAuthEnvironment,

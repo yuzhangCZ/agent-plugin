@@ -8,11 +8,20 @@ import process from "node:process";
 import test from "node:test";
 import { parseInstallArgv } from "../../src/cli/parse-argv.ts";
 import { createInstallCliUseCase } from "../../src/cli/runtime.ts";
-import type { QrCodeAuthRuntime } from "../../src/domain/qrcode-types.ts";
+import type { QrCodeAuth } from "@wecode/skill-qrcode-auth";
+
+function assistantInfo() {
+  return {
+    name: "助理",
+    nameEn: "Assistant",
+    desc: "中文描述",
+    descEn: "English description",
+  };
+}
 
 function createFakeQrCodeRuntime(
   scenario: "confirmed" | "cancelled" | "network_error" | "refresh",
-): QrCodeAuthRuntime {
+): QrCodeAuth {
   return {
     async run(input) {
       if (scenario === "network_error") {
@@ -57,7 +66,12 @@ function createFakeQrCodeRuntime(
         return;
       }
 
-      input.onSnapshot({ type: "confirmed", qrcode: "qr-1", credentials: { ak: "ak-1", sk: "sk-1" } });
+      input.onSnapshot({
+        type: "confirmed",
+        qrcode: "qr-1",
+        credentials: { ak: "ak-1", sk: "sk-1" },
+        assistantInfo: assistantInfo(),
+      });
     },
   };
 }

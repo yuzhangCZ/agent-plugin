@@ -8,6 +8,16 @@ export interface QrCodeDisplayData {
 }
 
 /**
+ * 助理创建成功后返回的基础信息。
+ */
+export interface QrCodeAssistantInfo {
+  name: string;
+  nameEn: string;
+  desc: string;
+  descEn: string;
+}
+
+/**
  * 授权服务错误的安全子集，不透传敏感上下文。
  */
 export interface QrCodeAuthServiceError {
@@ -55,6 +65,7 @@ export type QrCodeAuthSnapshot =
         ak: string;
         sk: string;
       };
+      assistantInfo: QrCodeAssistantInfo;
     }
   | {
       type: "failed";
