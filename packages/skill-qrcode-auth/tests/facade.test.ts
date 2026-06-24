@@ -153,6 +153,12 @@ test("facade prefers injected service port over default http adapter", async () 
           ak: "ak-service",
           sk: "sk-service",
         },
+        assistantInfo: {
+          name: "助理",
+          nameEn: "Assistant",
+          desc: "中文描述",
+          descEn: "English description",
+        },
       };
     },
   };

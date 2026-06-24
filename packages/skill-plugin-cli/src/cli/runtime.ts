@@ -8,11 +8,11 @@ import { OpenClawHostAdapter } from "../adapters/OpenClawHostAdapter.ts";
 import { QrCodeAuthAdapter } from "../adapters/QrCodeAuthAdapter.ts";
 import { TerminalCliPresenter } from "../adapters/TerminalCliPresenter.ts";
 import { NodeProcessRunner } from "../infrastructure/ProcessRunner.ts";
-import type { QrCodeAuthRuntime } from "../domain/qrcode-types.ts";
 import type { ProcessCommandTrace, ProcessTraceSink } from "../domain/ports.ts";
+import type { QrCodeAuth } from "@wecode/skill-qrcode-auth";
 
 export interface CreateInstallCliUseCaseOptions {
-  qrcodeAuthRuntime?: QrCodeAuthRuntime;
+  qrcodeAuthRuntime?: QrCodeAuth;
 }
 
 class InMemoryProcessTraceSink implements ProcessTraceSink {

@@ -1,8 +1,7 @@
 import type { QrCodeAuthPort } from "../domain/ports.ts";
 import { InstallCliError } from "../domain/errors.ts";
 import type { CliQrFailureSummary, CliQrSnapshot, InstallContext } from "../domain/types.ts";
-import type { QrCodeAuthRuntime, QrCodeAuthSnapshot } from "../domain/qrcode-types.ts";
-import { embeddedQrCodeAuthRuntime } from "./embedded-qrcode-runtime.ts";
+import { type QrCodeAuthSnapshot, type QrCodeAuth, qrcodeAuth } from "@wecode/skill-qrcode-auth";
 
 const DEFAULT_MAX_REFRESH_COUNT = 3;
 
@@ -46,9 +45,9 @@ function toFailedInstallError(snapshot: Extract<QrCodeAuthSnapshot, { type: "fai
 }
 
 export class QrCodeAuthAdapter implements QrCodeAuthPort {
-  private readonly runtime: QrCodeAuthRuntime;
+  private readonly runtime: QrCodeAuth;
 
-  constructor(runtime: QrCodeAuthRuntime = embeddedQrCodeAuthRuntime) {
+  constructor(runtime: QrCodeAuth = qrcodeAuth) {
     this.runtime = runtime;
   }
 

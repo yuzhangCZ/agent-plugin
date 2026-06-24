@@ -1,6 +1,14 @@
 export type {
   EmitOutboundMessageInput,
   EmitOutboundRunInput,
+  BridgeGatewayChannel,
+  BridgeGatewayHostConfig,
+  BridgeGatewayProbeResult,
+  BridgeRuntime,
+  BridgeRuntimeErrorCode,
+  BridgeRuntimeOptions,
+  BridgeRuntimeStatus,
+  BridgeRuntimeStatusSnapshot,
   MessageDoneFact,
   MessageStartFact,
   OutboundFact,
@@ -8,8 +16,10 @@ export type {
   PermissionReplyFact,
   ProviderAbortSessionInput,
   ProviderCloseSessionInput,
+  ProviderCommandError,
   ProviderCreateSessionInput,
   ProviderCreateSessionResult,
+  ProviderError,
   ProviderFact,
   ProviderHealthInput,
   ProviderHealthResult,
@@ -23,38 +33,7 @@ export type {
   QuestionAskFact,
   QuestionItem,
   QuestionOption,
-  RuntimeOutboundEmitter,
-  SessionTitleFact,
-  SessionErrorFact,
-  TextDeltaFact,
-  TextDoneFact,
-  ThinkingDeltaFact,
-  ThinkingDoneFact,
-  ThirdPartyAgentProvider,
-  ToolUpdateFact,
-} from './domain/provider.ts';
-export type { ProviderCommandError, ProviderError } from './domain/errors.ts';
-export type { BridgeRuntimeOptions } from './application/create-runtime.ts';
-export {
-  BridgeRuntimeError,
-  type BridgeRuntimeErrorCode,
-  type BridgeGatewayChannel,
-  type BridgeGatewayHostConfig,
-  type BridgeGatewayProbeResult,
-} from './public-contract.ts';
-export type { BridgeRuntime, BridgeRuntimeStatus, BridgeRuntimeStatusSnapshot } from './application/runtime.ts';
-export type {
-  RuntimeDiagnostics,
-  RuntimeTraceFailure,
-  RuntimeTraceFact,
-  RuntimeTraceInteraction,
-  RuntimeTraceProviderCall,
-  RuntimeTraceTerminal,
-} from './application/runtime-trace.ts';
-export { createBridgeRuntime } from './application/create-runtime.ts';
-export { resolvePackageVersion } from './packageVersion.ts';
-export { qrcodeAuth } from '@wecode/skill-qrcode-auth';
-export type {
+  QrCodeAssistantInfo,
   QrCodeAuth,
   QrCodeAuthEnvironment,
   QrCodeAuthFailureReasonCode,
@@ -63,4 +42,23 @@ export type {
   QrCodeAuthServiceError,
   QrCodeAuthSnapshot,
   QrCodeDisplayData,
-} from '@wecode/skill-qrcode-auth';
+  RuntimeOutboundEmitter,
+  RuntimeDiagnostics,
+  RuntimeTraceFailure,
+  RuntimeTraceFact,
+  RuntimeTraceInteraction,
+  RuntimeTraceProviderCall,
+  RuntimeTraceTerminal,
+  SessionTitleFact,
+  SessionErrorFact,
+  TextDeltaFact,
+  TextDoneFact,
+  ThinkingDeltaFact,
+  ThinkingDoneFact,
+  ThirdPartyAgentProvider,
+  ToolUpdateFact,
+} from './public-contract.ts';
+export { BridgeRuntimeError } from './public-contract.ts';
+export { createBridgeRuntime } from './application/create-runtime.ts';
+export { resolvePackageVersion } from './packageVersion.ts';
+export { qrcodeAuth } from '@wecode/skill-qrcode-auth';

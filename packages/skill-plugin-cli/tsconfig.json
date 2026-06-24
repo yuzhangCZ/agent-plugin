@@ -7,10 +7,15 @@
     "declaration": true,
     "emitDeclarationOnly": false,
     "outDir": "./dist",
+    "rootDir": "./src",
     "allowImportingTsExtensions": true,
+    "noEmit": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/**/*.ts",

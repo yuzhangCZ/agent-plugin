@@ -30,6 +30,15 @@ function createService(input: {
   };
 }
 
+function assistantInfo() {
+  return {
+    name: "助理",
+    nameEn: "Assistant",
+    desc: "中文描述",
+    descEn: "English description",
+  };
+}
+
 function created(qrcode: string): CreateQrCodeSessionResult {
   return {
     kind: "created",
@@ -57,7 +66,17 @@ test("controller emits qrcode_generated -> scanned -> confirmed and resolves aft
       queryResults: [
         { kind: "waiting", qrcode: "qr-1" },
         { kind: "scanned", qrcode: "qr-1" },
-        { kind: "confirmed", qrcode: "qr-1", credentials: { ak: "ak-1", sk: "sk-1" } },
+        {
+          kind: "confirmed",
+          qrcode: "qr-1",
+          credentials: { ak: "ak-1", sk: "sk-1" },
+          assistantInfo: {
+            name: "助理",
+            nameEn: "Assistant",
+            desc: "中文描述",
+            descEn: "English description",
+          },
+        },
       ],
     }),
     baseUrl: "https://auth.example.com",
@@ -84,6 +103,20 @@ test("controller emits qrcode_generated -> scanned -> confirmed and resolves aft
     "confirmed",
     "resolved",
   ]);
+  assert.deepStrictEqual(snapshots.at(-1), {
+    type: "confirmed",
+    qrcode: "qr-1",
+    credentials: {
+      ak: "ak-1",
+      sk: "sk-1",
+    },
+    assistantInfo: {
+      name: "助理",
+      nameEn: "Assistant",
+      desc: "中文描述",
+      descEn: "English description",
+    },
+  });
 });
 
 test("controller refreshes expired qrcode and emits new qrcode_generated", async () => {
@@ -93,7 +126,7 @@ test("controller refreshes expired qrcode and emits new qrcode_generated", async
       createResults: [created("qr-1"), created("qr-2")],
       queryResults: [
         { kind: "expired", qrcode: "qr-1" },
-        { kind: "confirmed", qrcode: "qr-2", credentials: { ak: "ak-2", sk: "sk-2" } },
+        { kind: "confirmed", qrcode: "qr-2", credentials: { ak: "ak-2", sk: "sk-2" }, assistantInfo: assistantInfo() },
       ],
     }),
     baseUrl: "https://auth.example.com",
@@ -218,7 +251,7 @@ test("controller does not deduplicate same event type across different qrcodes",
         { kind: "scanned", qrcode: "qr-1" },
         { kind: "expired", qrcode: "qr-1" },
         { kind: "scanned", qrcode: "qr-2" },
-        { kind: "confirmed", qrcode: "qr-2", credentials: { ak: "ak-2", sk: "sk-2" } },
+        { kind: "confirmed", qrcode: "qr-2", credentials: { ak: "ak-2", sk: "sk-2" }, assistantInfo: assistantInfo() },
       ],
     }),
     baseUrl: "https://auth.example.com",
