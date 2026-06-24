@@ -4,6 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
+  'brace-style': ['error', '1tbs', { allowSingleLine: false }],
   complexity: ['warn', { max: 12 }],
   curly: ['error', 'all'],
   'default-case': [

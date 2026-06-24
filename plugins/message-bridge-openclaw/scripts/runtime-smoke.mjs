@@ -92,8 +92,11 @@ function findAvailablePort(port) {
       const address = server.address();
       const resolvedPort = typeof address === "object" && address ? address.port : port;
       server.close((err) => {
-        if (err) {reject(err);}
-        else {resolve(resolvedPort);}
+        if (err) {
+          reject(err);
+        } else {
+          resolve(resolvedPort);
+        }
       });
     });
   });
@@ -317,7 +320,7 @@ async function main() {
     30000,
   );
   const chatResult = chatTerminal.type;
-  if (chatTerminal.type === "tool_done") {
+  if (chatResult === "tool_done") {
     assertToolDoneShape(chatTerminal, {
       welinkSessionId: "wl-runtime-chat",
       toolSessionId: "tool-runtime-chat",

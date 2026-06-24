@@ -100,7 +100,9 @@ function createHostAdapter(options: {
       };
     },
     async installPlugin() {
-      if (options.installError) {throw options.installError;}
+      if (options.installError) {
+        throw options.installError;
+      }
       return options.installResult || {
         installStrategy: "host-native",
         pluginSpec: "@wecode/skill-opencode-plugin",

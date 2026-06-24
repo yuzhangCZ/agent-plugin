@@ -47,8 +47,11 @@ function findAvailablePort(port) {
       const address = server.address();
       const resolvedPort = typeof address === 'object' && address ? address.port : port;
       server.close((err) => {
-        if (err) {reject(err);}
-        else {resolve(resolvedPort);}
+        if (err) {
+          reject(err);
+        } else {
+          resolve(resolvedPort);
+        }
       });
     });
   });
@@ -56,7 +59,9 @@ function findAvailablePort(port) {
 
 async function cleanup() {
   for (const proc of [opencodeProc, gatewayProc]) {
-    if (!proc || proc.killed) {continue;}
+    if (!proc || proc.killed) {
+      continue;
+    }
     proc.kill();
   }
   await rm(tmpHome, { recursive: true, force: true }).catch(() => {});

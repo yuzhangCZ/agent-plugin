@@ -215,12 +215,12 @@ function parseSimpleEvent<T>(
   return parsed.success
     ? ok(parsed.data)
     : fail(
-        zodErrorToWireViolation(parsed.error, {
-          stage: 'event',
-          messageType: eventType,
-          eventType,
-        }).violation,
-      );
+      zodErrorToWireViolation(parsed.error, {
+        stage: 'event',
+        messageType: eventType,
+        eventType,
+      }).violation,
+    );
 }
 
 /**
@@ -238,35 +238,43 @@ function parseProjectedEvent<TInput, TOutput>(
   return parsed.success
     ? ok(parsed.data)
     : fail(
-        zodErrorToWireViolation(parsed.error, {
-          stage: 'event',
-          messageType: eventType,
-          eventType,
-        }).violation,
-      );
+      zodErrorToWireViolation(parsed.error, {
+        stage: 'event',
+        messageType: eventType,
+        eventType,
+      }).violation,
+    );
 }
 
 function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEvent, WireContractViolation> {
   const eventType = TOOL_EVENT_TYPES[0];
   const properties = requirePlainObject(raw.properties, 'properties', eventType);
-  if (!properties.ok) {return properties;}
+  if (!properties.ok) {
+    return properties;
+  }
 
   const info = requirePlainObject(properties.value.info, 'properties.info', eventType);
-  if (!info.ok) {return info;}
+  if (!info.ok) {
+    return info;
+  }
 
   const id = requireNonEmptyString(info.value.id ?? properties.value.messageID, {
     stage: 'event',
     field: 'properties.info.id',
     eventType,
   });
-  if (!id.ok) {return id;}
+  if (!id.ok) {
+    return id;
+  }
 
   const sessionID = requireNonEmptyString(info.value.sessionID ?? properties.value.sessionID, {
     stage: 'event',
     field: 'properties.info.sessionID',
     eventType,
   });
-  if (!sessionID.ok) {return sessionID;}
+  if (!sessionID.ok) {
+    return sessionID;
+  }
 
   const role = readEnumValue(info.value.role, MESSAGE_ROLES);
   if (!role) {
@@ -280,7 +288,9 @@ function projectMessageUpdatedEvent(raw: PlainObject): Result<MessageUpdatedEven
   }
 
   const time = requirePlainObject(info.value.time, 'properties.info.time', eventType);
-  if (!time.ok) {return time;}
+  if (!time.ok) {
+    return time;
+  }
 
   const created = readNumber(time.value.created);
   if (created === undefined) {
@@ -350,17 +360,27 @@ function readToolState(raw: UnknownBoundaryInput, eventType: OpencodeToolEventTy
 function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpdatedEvent, WireContractViolation> {
   const eventType = TOOL_EVENT_TYPES[1];
   const properties = requirePlainObject(raw.properties, 'properties', eventType);
-  if (!properties.ok) {return properties;}
+  if (!properties.ok) {
+    return properties;
+  }
 
   const part = requirePlainObject(properties.value.part, 'properties.part', eventType);
-  if (!part.ok) {return part;}
+  if (!part.ok) {
+    return part;
+  }
 
   const id = requireNonEmptyString(part.value.id, { stage: 'event', field: 'properties.part.id', eventType });
-  if (!id.ok) {return id;}
+  if (!id.ok) {
+    return id;
+  }
   const sessionID = requireNonEmptyString(part.value.sessionID, { stage: 'event', field: 'properties.part.sessionID', eventType });
-  if (!sessionID.ok) {return sessionID;}
+  if (!sessionID.ok) {
+    return sessionID;
+  }
   const messageID = requireNonEmptyString(part.value.messageID, { stage: 'event', field: 'properties.part.messageID', eventType });
-  if (!messageID.ok) {return messageID;}
+  if (!messageID.ok) {
+    return messageID;
+  }
 
   const type = readEnumValue(part.value.type, MESSAGE_PART_TYPES);
   if (!type) {
@@ -379,7 +399,9 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
       field: 'properties.part.text',
       eventType,
     });
-    if (!text.ok) {return text;}
+    if (!text.ok) {
+      return text;
+    }
     const rawDelta = properties.value.delta;
     const delta = rawDelta === undefined ? undefined : readLooseTrimmedStringPreservingEmpty(rawDelta);
     if (rawDelta !== undefined && delta === undefined) {
@@ -409,11 +431,17 @@ function projectMessagePartUpdatedEvent(raw: PlainObject): Result<MessagePartUpd
   switch (type) {
     case 'tool': {
       const tool = requireNonEmptyString(part.value.tool, { stage: 'event', field: 'properties.part.tool', eventType });
-      if (!tool.ok) {return tool;}
+      if (!tool.ok) {
+        return tool;
+      }
       const callID = requireNonEmptyString(part.value.callID, { stage: 'event', field: 'properties.part.callID', eventType });
-      if (!callID.ok) {return callID;}
+      if (!callID.ok) {
+        return callID;
+      }
       const state = readToolState(part.value.state, eventType);
-      if (!state.ok) {return state;}
+      if (!state.ok) {
+        return state;
+      }
 
       return ok({
         type: eventType,
@@ -516,12 +544,12 @@ function parseSkillProviderEvent(raw: PlainObject): Result<GatewayToolEventPaylo
   return parsed.success
     ? ok(parsed.data)
     : fail(
-        zodErrorToWireViolation(parsed.error, {
-          stage: 'event',
-          messageType: readString(raw.type) ?? 'tool_event',
-          eventType: readString(raw.type) ?? 'tool_event',
-        }).violation,
-      );
+      zodErrorToWireViolation(parsed.error, {
+        stage: 'event',
+        messageType: readString(raw.type) ?? 'tool_event',
+        eventType: readString(raw.type) ?? 'tool_event',
+      }).violation,
+    );
 }
 
 function readToolEventProviderKind(raw: PlainObject): Result<GatewayToolEventProviderKind, WireContractViolation> {

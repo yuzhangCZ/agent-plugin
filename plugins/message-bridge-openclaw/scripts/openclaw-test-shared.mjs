@@ -124,8 +124,12 @@ function parseVersion(text) {
 
 function compareVersion(a, b) {
   for (let index = 0; index < 3; index += 1) {
-    if (a[index] > b[index]) {return 1;}
-    if (a[index] < b[index]) {return -1;}
+    if (a[index] > b[index]) {
+      return 1;
+    }
+    if (a[index] < b[index]) {
+      return -1;
+    }
   }
   return 0;
 }
@@ -247,8 +251,11 @@ export function findAvailablePort(port) {
       const address = server.address();
       const resolvedPort = typeof address === "object" && address ? address.port : port;
       server.close((err) => {
-        if (err) {reject(err);}
-        else {resolve(resolvedPort);}
+        if (err) {
+          reject(err);
+        } else {
+          resolve(resolvedPort);
+        }
       });
     });
   });
@@ -279,6 +286,8 @@ export async function withTimeout(task, ms, label, category, timeoutCode) {
       }),
     ]);
   } finally {
-    if (timer) {clearTimeout(timer);}
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
