@@ -215,9 +215,9 @@ async function loginRegistry(registry) {
   }
 
   const username = "release-bot";
-  const password = "release-pass";
+  const registryLoginPwd = "release-local-registry-secret";
   const email = "release@example.com";
-  const basicAuth = Buffer.from(`${username}:${password}`).toString("base64");
+  const basicAuth = Buffer.from(`${username}:${registryLoginPwd}`).toString("base64");
   const response = await fetch(new URL(`-/user/org.couchdb.user:${encodeURIComponent(username)}`, registry), {
     method: "PUT",
     headers: {
@@ -229,7 +229,7 @@ async function loginRegistry(registry) {
       date: new Date().toISOString(),
       email,
       name: username,
-      password,
+      password: registryLoginPwd,
       roles: [],
       type: "user",
     }),
