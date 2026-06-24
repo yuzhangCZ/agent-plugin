@@ -39,6 +39,7 @@ const cleanCodeRules = {
     },
   ],
   'max-params': ['warn', 5],
+  'no-nested-ternary': 'error',
   'max-statements': ['warn', 40],
 };
 

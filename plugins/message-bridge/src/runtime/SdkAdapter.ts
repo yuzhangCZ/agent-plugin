@@ -32,12 +32,12 @@ function asFunction<T extends (...args: never[]) => unknown>(value: unknown, bin
 function normalizeHealthResponse(response: unknown): OpencodeHealthResult {
   if (isRecord(response) && 'error' in response && response.error !== undefined) {
     const error = response.error;
-    const message =
-      isRecord(error) && typeof error.message === 'string'
-        ? error.message
-        : typeof error === 'string'
-          ? error
-          : 'OpenCode health request failed';
+    let message = 'OpenCode health request failed';
+    if (isRecord(error) && typeof error.message === 'string') {
+      message = error.message;
+    } else if (typeof error === 'string') {
+      message = error;
+    }
     throw new Error(message);
   }
 

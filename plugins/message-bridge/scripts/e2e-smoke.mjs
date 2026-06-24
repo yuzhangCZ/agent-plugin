@@ -375,11 +375,10 @@ async function main() {
   }
 
   console.log('[4/5] Waiting for protocol evidence...');
-  const evidenceWaitMs =
-    scenario === 'permission-roundtrip' ? 15_000 :
-    scenario === 'directory-context' ? 15_000 :
-    scenario === 'chat-stream' ? 8_000 :
-    8_000;
+  let evidenceWaitMs = 8_000;
+  if (scenario === 'permission-roundtrip' || scenario === 'directory-context') {
+    evidenceWaitMs = 15_000;
+  }
   const { opencodeLogText, gatewayLogText } = await withTimeout(
     () => waitForScenarioEvidence(evidenceWaitMs),
     evidenceWaitMs + 2_000,
