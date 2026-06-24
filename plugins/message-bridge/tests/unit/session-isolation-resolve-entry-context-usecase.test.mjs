@@ -58,7 +58,7 @@ function createHostSessionGateway(sessions) {
       get: async (sessionId) => {
         calls.push({ method: 'get', sessionId });
         const session = sessions.find((candidate) => candidate.id === sessionId);
-        if (!session) throw new Error(`session not found: ${sessionId}`);
+        if (!session) {throw new Error(`session not found: ${sessionId}`);}
         return session;
       },
       list: async (input) => {

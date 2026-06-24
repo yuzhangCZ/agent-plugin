@@ -185,21 +185,21 @@ export class ConfigResolver {
     }
 
     const reconnect: Record<string, unknown> = {};
-    if (process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS) reconnect.baseMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS, 10);
-    if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS) reconnect.maxMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS, 10);
-    if (process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL !== undefined) reconnect.exponential = process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL.toLowerCase() === 'true';
-    if (process.env.BRIDGE_GATEWAY_RECONNECT_JITTER) reconnect.jitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;
-    if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS) reconnect.maxElapsedMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS, 10);
-    if (Object.keys(reconnect).length > 0) gateway.reconnect = reconnect;
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS) {reconnect.baseMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_BASE_MS, 10);}
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS) {reconnect.maxMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_MS, 10);}
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL !== undefined) {reconnect.exponential = process.env.BRIDGE_GATEWAY_RECONNECT_EXPONENTIAL.toLowerCase() === 'true';}
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_JITTER) {reconnect.jitter = process.env.BRIDGE_GATEWAY_RECONNECT_JITTER;}
+    if (process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS) {reconnect.maxElapsedMs = parseInt(process.env.BRIDGE_GATEWAY_RECONNECT_MAX_ELAPSED_MS, 10);}
+    if (Object.keys(reconnect).length > 0) {gateway.reconnect = reconnect;}
 
     const hb = process.env.BRIDGE_GATEWAY_HEARTBEAT_INTERVAL_MS ?? process.env.BRIDGE_EVENT_HEARTBEAT_INTERVAL_MS;
-    if (hb) gateway.heartbeatIntervalMs = parseInt(hb, 10);
+    if (hb) {gateway.heartbeatIntervalMs = parseInt(hb, 10);}
 
     const ping: Record<string, unknown> = {};
     if (process.env.BRIDGE_GATEWAY_PING_INTERVAL_MS) {
       ping.intervalMs = parseInt(process.env.BRIDGE_GATEWAY_PING_INTERVAL_MS, 10);
     }
-    if (Object.keys(ping).length > 0) gateway.ping = ping;
+    if (Object.keys(ping).length > 0) {gateway.ping = ping;}
 
     if (Object.keys(gateway).length > 0) {
       envConfig.gateway = gateway as unknown as BridgeConfig['gateway'];

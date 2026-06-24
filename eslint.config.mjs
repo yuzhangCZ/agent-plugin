@@ -5,6 +5,7 @@ import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
   complexity: ['warn', { max: 12 }],
+  curly: ['error', 'all'],
   'default-case': [
     'error',
     {

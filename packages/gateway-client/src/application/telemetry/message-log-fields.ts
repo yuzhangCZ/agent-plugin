@@ -48,9 +48,9 @@ export function extractWelinkSessionId(message: unknown): string | undefined {
  * 提取 toolSessionId 字段，兼容 payload 内嵌结构。
  */
 export function extractToolSessionId(message: unknown): string | undefined {
-  if (!isRecord(message)) return undefined;
+  if (!isRecord(message)) {return undefined;}
   const topLevel = readString(message.toolSessionId);
-  if (topLevel) return topLevel;
+  if (topLevel) {return topLevel;}
   return isRecord(message.payload) ? readString(message.payload.toolSessionId) : undefined;
 }
 
@@ -58,7 +58,7 @@ export function extractToolSessionId(message: unknown): string | undefined {
  * 提取 event.type 字段。
  */
 export function extractEventType(message: unknown): string | undefined {
-  if (!isRecord(message) || !isRecord(message.event)) return undefined;
+  if (!isRecord(message) || !isRecord(message.event)) {return undefined;}
   return readString(message.event.type);
 }
 

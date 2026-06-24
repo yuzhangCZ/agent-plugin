@@ -25,14 +25,14 @@ const requestedPorts = {
 
 function toVersion(text) {
   const match = String(text).match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
+  if (!match) {return null;}
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
 function compareVersion(a, b) {
   for (let i = 0; i < 3; i += 1) {
-    if (a[i] > b[i]) return 1;
-    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) {return 1;}
+    if (a[i] < b[i]) {return -1;}
   }
   return 0;
 }

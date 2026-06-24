@@ -66,9 +66,9 @@ function buildLegacyCreateOptions(parameters?: {
   }
 
   const body: Record<string, unknown> = {};
-  if (parameters.parentID !== undefined) body.parentID = parameters.parentID;
-  if (parameters.title !== undefined) body.title = parameters.title;
-  if (parameters.permission !== undefined) body.permission = parameters.permission;
+  if (parameters.parentID !== undefined) {body.parentID = parameters.parentID;}
+  if (parameters.title !== undefined) {body.title = parameters.title;}
+  if (parameters.permission !== undefined) {body.permission = parameters.permission;}
 
   return {
     ...(Object.keys(body).length > 0 ? { body } : {}),
@@ -113,15 +113,15 @@ function buildLegacyPromptOptions(parameters: {
   parts?: Array<{ type: 'text'; text: string }>;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  if (parameters.messageID !== undefined) body.messageID = parameters.messageID;
-  if (parameters.model !== undefined) body.model = parameters.model;
-  if (parameters.agent !== undefined) body.agent = parameters.agent;
-  if (parameters.noReply !== undefined) body.noReply = parameters.noReply;
-  if (parameters.tools !== undefined) body.tools = parameters.tools;
-  if (parameters.format !== undefined) body.format = parameters.format;
-  if (parameters.system !== undefined) body.system = parameters.system;
-  if (parameters.variant !== undefined) body.variant = parameters.variant;
-  if (parameters.parts !== undefined) body.parts = parameters.parts;
+  if (parameters.messageID !== undefined) {body.messageID = parameters.messageID;}
+  if (parameters.model !== undefined) {body.model = parameters.model;}
+  if (parameters.agent !== undefined) {body.agent = parameters.agent;}
+  if (parameters.noReply !== undefined) {body.noReply = parameters.noReply;}
+  if (parameters.tools !== undefined) {body.tools = parameters.tools;}
+  if (parameters.format !== undefined) {body.format = parameters.format;}
+  if (parameters.system !== undefined) {body.system = parameters.system;}
+  if (parameters.variant !== undefined) {body.variant = parameters.variant;}
+  if (parameters.parts !== undefined) {body.parts = parameters.parts;}
 
   return {
     path: { id: parameters.sessionID },
