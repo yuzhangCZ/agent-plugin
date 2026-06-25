@@ -103,7 +103,7 @@ test("OpenClawHostAdapter fallback install uses local tarball path", async () =>
     environment: "prod",
     registry: "https://npm.example.com",
     mac: "",
-    channel: "openx",
+    channel: "openclaw",
     verbose: false,
   });
 

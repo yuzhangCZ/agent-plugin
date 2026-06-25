@@ -5,6 +5,20 @@ import { type QrCodeAuthSnapshot, type QrCodeAuth, qrcodeAuth } from "@wecode/sk
 
 const DEFAULT_MAX_REFRESH_COUNT = 3;
 
+function normalizeExpiresAtForCli(value: string): string {
+  const raw = value.trim();
+  if (!/^\d+$/u.test(raw)) {
+    return value;
+  }
+
+  const seconds = Number(raw);
+  if (!Number.isSafeInteger(seconds)) {
+    return value;
+  }
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
 function toCliFailureSummary(snapshot: Extract<QrCodeAuthSnapshot, { type: "failed" }>): CliQrFailureSummary {
   if (snapshot.reasonCode === "network_error") {
     return {
@@ -51,7 +65,11 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
     this.runtime = runtime;
   }
 
-  async run(context: InstallContext, onSnapshot: (snapshot: CliQrSnapshot) => void) {
+  async run(
+    context: InstallContext,
+    onSnapshot: (snapshot: CliQrSnapshot) => void,
+    onDiagnostic?: (snapshot: unknown) => void,
+  ) {
     let credentials: { ak: string; sk: string } | null = null;
     let refreshIndex = 0;
     let latestFailure: InstallCliError | null = null;
@@ -64,13 +82,16 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
         maxRefreshCount: DEFAULT_MAX_REFRESH_COUNT,
       },
       onSnapshot(snapshot) {
+        if (context.verbose) {
+          onDiagnostic?.(snapshot);
+        }
         switch (snapshot.type) {
           case "qrcode_generated":
             onSnapshot({
               type: "qrcode_generated",
               weUrl: snapshot.display.weUrl,
               pcUrl: snapshot.display.pcUrl,
-              expiresAt: snapshot.expiresAt,
+              expiresAt: normalizeExpiresAtForCli(snapshot.expiresAt),
               ...(refreshIndex > 0 ? { refresh: { index: refreshIndex, max: DEFAULT_MAX_REFRESH_COUNT } } : {}),
             });
             break;
@@ -95,6 +116,7 @@ export class QrCodeAuthAdapter implements QrCodeAuthPort {
             });
             break;
           case "scanned":
+            onSnapshot({ type: "scanned" });
             break;
           default:
             break;

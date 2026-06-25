@@ -3,7 +3,7 @@ import test from "node:test";
 import { InstallPluginCliUseCase } from "../../src/application/InstallPluginCliUseCase.ts";
 import { ResolveInstallContextUseCase } from "../../src/application/ResolveInstallContextUseCase.ts";
 import type { HostAdapter, MacAddressResolver, Presenter, ProcessCommandTrace, ProcessTraceSink, QrCodeAuthPort, RegistryConfigAdapter } from "../../src/domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, HostPreflightResult, InstalledPluginArtifact, ParsedInstallCommand } from "../../src/domain/types.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostPreflightResult, InstallContext, InstalledPluginArtifact, ParsedInstallCommand } from "../../src/domain/types.ts";
 import { InstallCliError } from "../../src/domain/errors.ts";
 
 class FakeRegistryConfigAdapter implements RegistryConfigAdapter {
@@ -64,6 +64,7 @@ class RecordingPresenter implements Presenter {
     this.events.push("pluginInstalled");
   }
   qrSnapshot() {}
+  qrSnapshotDiagnostic() {}
   assistantCreated() {}
   availabilityChecked() {}
   completed() {
@@ -133,14 +134,19 @@ function createHostAdapter(options: {
   };
 }
 
-function createUseCase(hostAdapter: HostAdapter, presenter: RecordingPresenter) {
+function createUseCase(
+  hostAdapter: HostAdapter,
+  presenter: RecordingPresenter,
+  options: { onQrContext?: (context: InstallContext) => void } = {},
+) {
   const resolveContext = new ResolveInstallContextUseCase(
     new FakeRegistryConfigAdapter(),
     new FakeMacAddressResolver(),
     { opencode: hostAdapter, openclaw: hostAdapter as unknown as HostAdapter },
   );
   const qrCodeAuth: QrCodeAuthPort = {
-    async run() {
+    async run(context) {
+      options.onQrContext?.(context);
       return { ak: "ak", sk: "sk" };
     },
   };
@@ -205,4 +211,20 @@ test("InstallPluginCliUseCase fails host-native install without suggesting fallb
   assert.equal(result.status, "failed");
   assert.doesNotMatch(presenter.infos.join("\n"), /resolved=/);
   assert.doesNotMatch(presenter.infos.join("\n"), /applied=/);
+});
+
+test("InstallPluginCliUseCase passes host name as qrcode channel", async () => {
+  const received: string[] = [];
+  const presenter = new RecordingPresenter();
+  const hostAdapter = createHostAdapter({});
+  const useCase = createUseCase(hostAdapter, presenter, {
+    onQrContext(context) {
+      received.push(`${context.host}:${context.channel}`);
+    },
+  });
+
+  await useCase.execute({ ...createCommand("host-native"), host: "opencode" });
+  await useCase.execute({ ...createCommand("host-native"), host: "openclaw" });
+
+  assert.deepEqual(received, ["opencode:opencode", "openclaw:openclaw"]);
 });
