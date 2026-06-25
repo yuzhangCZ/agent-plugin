@@ -68,8 +68,7 @@ import {
   hasPlatformBusinessSessionId,
 } from './OpenCodeProviderAdapter.helpers.js';
 import {
-  DefaultBusinessEntryKeyResolver,
-  DefaultBusinessEntryPolicyResolver,
+  BusinessEntryContextResolver,
 } from './session-isolation/index.js';
 import { bindProviderCommandTerminal } from './OpenCodeProviderAdapter.command.js';
 import { bindProviderPromptTerminal } from './OpenCodeProviderAdapter.prompt.js';
@@ -124,8 +123,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   private readonly pendingInteractionRecorder?: PendingInteractionRecorderPort;
   private readonly finalIdleTimeoutMs?: number;
-  private readonly listBusinessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
-  private readonly listBusinessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
+  private readonly businessEntryContextResolver = new BusinessEntryContextResolver();
 
   private readonly activeRuns = new ActiveRunRegistry();
   private readonly runCoordinator: HostSessionRunCoordinator;
@@ -370,22 +368,17 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private resolveLocalSlashCommands(input: ProviderListSlashCommandsInput): typeof LOCAL_SLASH_COMMANDS[number][] {
-    const entryKey = this.listBusinessEntryKeyResolver.resolve({
-      source: 'create_session',
-      ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
+    const entryContext = this.businessEntryContextResolver.resolveOptional({
+      extParameters: input.extParameters,
     });
-    if (!entryKey) {
+    if (!entryContext) {
       this.logger.info('provider_adapter.slash_commands.entry_policy_unresolved', {
         traceId: input.traceId,
         hasExtParameters: input.extParameters !== undefined,
       });
       return [...LOCAL_SLASH_COMMANDS];
     }
-    const policy = this.listBusinessEntryPolicyResolver.resolve({
-      entryKey,
-      ...(input.extParameters !== undefined ? { extParameters: input.extParameters } : {}),
-    });
-    const allowed = new Set(policy.allowedSlashCommands);
+    const allowed = new Set(entryContext.policy.allowedSlashCommands);
     return LOCAL_SLASH_COMMANDS.filter((command) => allowed.has(command.kind));
   }
 

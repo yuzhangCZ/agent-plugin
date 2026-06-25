@@ -38,7 +38,6 @@ import {
 import { createSdkChatRunPlanner } from './sdk/SdkChatRunPlannerFactory.js';
 import {
   DefaultBusinessEntryKeyResolver,
-  DefaultBusinessEntryPolicyResolver,
   BusinessEntryContextResolver,
   RuntimeAnchorRegistry,
   RuntimePendingInteractionRegistry,
@@ -197,11 +196,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       listModels: async () => this.listHostModels(startupValidation.sdkClient),
     };
     const businessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
-    const businessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
-    const businessEntryContextResolver = new BusinessEntryContextResolver({
-      businessEntryKeyResolver,
-      businessEntryPolicyResolver,
-    });
+    const businessEntryContextResolver = new BusinessEntryContextResolver();
     const sessionIsolationDiagnostics = new SessionIsolationDiagnostics({
       logger: this.logger.child({ component: 'session_isolation' }),
     });

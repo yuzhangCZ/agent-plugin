@@ -375,7 +375,8 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
     assert.equal(typeof providerAdapter.permissionReplyCommandPort.execute, 'function');
     assert.equal(contextResolver.dependencies.sessionAttachmentPort, undefined);
     assert.equal(typeof chatRunPlanner.dependencies.normalChatSessionResolver.resolve, 'function');
-    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveRequired, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveOptional, 'function');
 
     runtime.stop();
   } finally {

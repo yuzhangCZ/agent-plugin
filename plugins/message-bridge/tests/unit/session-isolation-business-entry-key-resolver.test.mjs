@@ -9,7 +9,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.deepStrictEqual(
       resolver.resolve({
-        welinkSessionId: 'wl-fallback',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: ' IM ',
@@ -31,7 +30,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.deepStrictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: ' skill ',
@@ -57,7 +55,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.deepStrictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'miniapp',
@@ -78,13 +75,11 @@ describe('DefaultBusinessEntryKeyResolver', () => {
     );
   });
 
-  test('does not fall back to welinkSessionId for create_session without explicit business key', () => {
+  test('does not fall back without participant context fields', () => {
     const resolver = new DefaultBusinessEntryKeyResolver();
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'create_session',
-        welinkSessionId: ' wl-42 ',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'im',
@@ -101,7 +96,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {},
         context: {
           assistantAccount: 'bot-1',
@@ -117,7 +111,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {},
         context: {
           assistantAccount: ' bot-1 ',
@@ -133,7 +126,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: ' im ',
@@ -154,7 +146,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'im',
@@ -175,7 +166,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.deepStrictEqual(
       resolver.resolve({
-        source: 'chat',
         context: {
           assistantAccount: ' miniapp-app-1 ',
         },
@@ -198,7 +188,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.deepStrictEqual(
       resolver.resolve({
-        source: 'chat',
         context: {
           sendUserAccount: ' miniapp-user-1 ',
         },
@@ -221,7 +210,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'miniapp',
@@ -237,7 +225,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         context: {
           sendUserAccount: 'user-1',
         },
@@ -252,7 +239,6 @@ describe('DefaultBusinessEntryKeyResolver', () => {
 
     assert.strictEqual(
       resolver.resolve({
-        source: 'chat',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'skill',
@@ -268,12 +254,11 @@ describe('DefaultBusinessEntryKeyResolver', () => {
     );
   });
 
-  test('returns undefined when neither extParameters nor welinkSessionId can identify the business entry', () => {
+  test('returns undefined when extParameters cannot identify the business entry', () => {
     const resolver = new DefaultBusinessEntryKeyResolver();
 
     assert.strictEqual(
       resolver.resolve({
-        welinkSessionId: ' ',
         extParameters: {
           platformExtParam: {
             businessSessionDomain: 'im',

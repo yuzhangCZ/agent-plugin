@@ -62,7 +62,7 @@ function readPartialBusinessEntryKey(input: unknown): Partial<BusinessEntryKeyIn
 
 /**
  * 从 gateway 扩展参数解析控制面业务入口 key。
- * @remarks create_session 只接受显式三元组；chat 仅对 miniapp 历史上下文字段补全，补全失败时 fail-closed。
+ * @remarks 优先使用显式三元组；缺失时仅在输入携带 miniapp 补全所需字段时 fallback。
  */
 export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver {
   resolve(input: BusinessEntryKeyResolverInput): BusinessEntryKey | undefined {
@@ -70,10 +70,6 @@ export class DefaultBusinessEntryKeyResolver implements BusinessEntryKeyResolver
     const fromPlatformExtParam = readBusinessEntryKey(extParameters?.platformExtParam);
     if (fromPlatformExtParam) {
       return fromPlatformExtParam;
-    }
-
-    if (input.source === 'create_session') {
-      return undefined;
     }
 
     return this.completeChatEntryKey({

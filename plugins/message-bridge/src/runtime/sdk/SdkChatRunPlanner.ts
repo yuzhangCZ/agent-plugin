@@ -81,7 +81,10 @@ export class SdkChatRunPlanner {
     input: ProviderRunMessageInput,
     logger: BridgeLogger | undefined,
   ): Promise<ChatActionContext> {
-    const entryContext = this.dependencies.businessEntryContextResolver.resolveForChatMessage(input);
+    const entryContext = this.dependencies.businessEntryContextResolver.resolveRequired({
+      extParameters: input.extParameters,
+      context: input.context,
+    });
     const sessionContext = await this.dependencies.normalChatSessionResolver.resolve({
       message: input,
       entryContext,

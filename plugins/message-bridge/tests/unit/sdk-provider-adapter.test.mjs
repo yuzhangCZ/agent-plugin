@@ -113,21 +113,23 @@ function createCapturingLogger(logs) {
 }
 
 function createFixedBusinessEntryContextResolver() {
+  const context = {
+    entryKey: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: 'user-a',
+    },
+    policy: {
+      entryKey: 'im:direct:user-a',
+      controlled: false,
+      allowOpencodeNativeSessions: true,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      slashPolicySource: 'entry_template',
+    },
+  };
   return {
-    resolveForChatMessage: () => ({
-      entryKey: {
-        businessSessionDomain: 'im',
-        businessSessionType: 'direct',
-        businessSessionId: 'user-a',
-      },
-      policy: {
-        entryKey: 'im:direct:user-a',
-        controlled: false,
-        allowOpencodeNativeSessions: true,
-        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
-        slashPolicySource: 'entry_template',
-      },
-    }),
+    resolveOptional: () => context,
+    resolveRequired: () => context,
   };
 }
 
@@ -1484,7 +1486,7 @@ test('provider adapter clears superseded host tracking state after old prompt ta
               opencodeSessionId: planCount === 1 ? 'host-old' : 'host-new',
               bootstrapSource: 'existing_binding',
             },
-            entryContext: createFixedBusinessEntryContextResolver().resolveForChatMessage(),
+            entryContext: createFixedBusinessEntryContextResolver().resolveRequired({}),
             logger,
           },
           execution: { kind: 'prompt', text: 'hello' },

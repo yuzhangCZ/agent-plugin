@@ -111,7 +111,6 @@ describe('session-isolation create and close use cases', () => {
       {
         method: 'resolve',
         input: {
-          source: 'create_session',
           extParameters: { platformExtParam: { businessSessionId: 'group-a' } },
         },
       },
@@ -213,7 +212,6 @@ describe('session-isolation create and close use cases', () => {
       {
         method: 'resolve',
         input: {
-          source: 'create_session',
           extParameters: undefined,
         },
       },
