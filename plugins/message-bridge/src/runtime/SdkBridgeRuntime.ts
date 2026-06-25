@@ -5,11 +5,7 @@ import {
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
   OpencodeSessionGatewayAdapter,
-  SimpleSlashCommandParser,
 } from '../adapter/index.js';
-import {
-  SlashCommandExecutor,
-} from '../usecase/index.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import type {
   HostModelCatalogPort,
@@ -152,7 +148,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
-    const slashCommandParser = new SimpleSlashCommandParser();
     const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => startupValidation.sdkClient);
     // legacy chat/slash 控制面 bootstrap 出口：只负责给旧 resolver 创建可绑定的宿主会话。
     const legacyChatBootstrapSessionPort: HostSessionCreationPort = {
@@ -249,19 +244,15 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       hostSessionCreationPort: legacyChatBootstrapSessionPort,
       hostSessionQueryPort,
     });
-    const slashCommandExecutor = new SlashCommandExecutor({
-      bindingStore,
-      ownershipResolver,
-      modelOverrideStore: sessionModelOverrideStore,
-      hostSessionCreationPort: legacyChatBootstrapSessionPort,
-      hostSessionQueryPort,
-      hostModelCatalogPort,
-    });
     const chatRunPlanner = createSdkChatRunPlanner({
-      slashCommandParser,
-      slashCommandExecutor,
-      sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
-      contextResolver,
+      slashCommandExecutorDependencies: {
+        resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
+        switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
+        createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
+        runtimeAnchorRepository: runtimeAnchorRegistry,
+        modelOverrideStore: sessionModelOverrideStore,
+        hostModelCatalogPort,
+      },
       businessEntryContextResolver,
       effectiveDirectory: config.bridgeDirectory,
       opencodeSessionGatewayAdapter,

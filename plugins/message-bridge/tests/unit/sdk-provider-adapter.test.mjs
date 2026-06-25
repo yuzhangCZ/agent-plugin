@@ -6,12 +6,10 @@ import {
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
   OpencodeSessionGatewayAdapter,
-  SimpleSlashCommandParser,
 } from '../../src/adapter/index.ts';
 import { SubagentSessionMapper } from '../../src/session/SubagentSessionMapper.ts';
 import {
   DefaultSlashCommandReplyPresenter,
-  SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
 import { HostSessionRunCoordinator } from '../../src/runtime/sdk/HostSessionRunCoordinator.ts';
@@ -21,16 +19,18 @@ import {
   ActiveRunRegistry,
 } from '../../src/runtime/sdk/OpenCodeProviderAdapter.run.ts';
 import {
-  BridgeLocalSlashClassifier,
   ChatMessageClassifier,
   DefaultChatExecutionContextResolver,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
-  OpenCodeNativeSlashClassifier,
   SdkChatRunPlanner,
   SdkSlashExecutionUseCase,
-  StaticSlashCapabilityProvider,
 } from '../../src/runtime/sdk/SdkChatControlPlane.ts';
+import {
+  BusinessEntryContextResolver,
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+} from '../../src/runtime/sdk/session-isolation/index.ts';
 
 function createDeferred() {
   let resolve;
@@ -109,6 +109,25 @@ function createCapturingLogger(logs) {
     error: write('error'),
     child: () => createCapturingLogger(logs),
     getTraceId: () => 'trace-test',
+  };
+}
+
+function createFixedBusinessEntryContextResolver() {
+  return {
+    resolveForChatMessage: () => ({
+      entryKey: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-a',
+      },
+      policy: {
+        entryKey: 'im:direct:user-a',
+        controlled: false,
+        allowOpencodeNativeSessions: true,
+        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        slashPolicySource: 'entry_template',
+      },
+    }),
   };
 }
 
@@ -296,46 +315,74 @@ function createAdapter(overrides = {}) {
     hostSessionCreationPort,
     hostSessionQueryPort,
   });
-  const slashCommandParser = new SimpleSlashCommandParser();
-  const slashCapabilityProvider = new StaticSlashCapabilityProvider();
   const chatRunPlanner = overrides.chatRunPlanner ?? new SdkChatRunPlanner({
       chatMessageClassifier: new ChatMessageClassifier({
-        bridgeLocalSlashClassifier: new BridgeLocalSlashClassifier({
-          slashCommandParser,
-          slashCapabilityProvider,
-        }),
-        openCodeNativeSlashClassifier: new OpenCodeNativeSlashClassifier({
-          ...(overrides.enableNativeCommandDispatch
-            ? {
-                nativeCommandCatalog: {
-                  listCommands: async (input) => {
-                    const result = await opencodeSessionGatewayAdapter.listNativeCommands({
-                      ...(input.directory ? { directory: input.directory } : {}),
-                      logger,
-                    });
-                    if (!result.success) {
-                      return { success: false, reason: 'command.list_failed' };
-                    }
-                    return { success: true, commands: result.data.commands };
-                  },
+        ...(overrides.enableNativeCommandDispatch
+          ? {
+              nativeCommandCatalog: {
+                listCommands: async (input) => {
+                  const result = await opencodeSessionGatewayAdapter.listNativeCommands({
+                    ...(input.directory ? { directory: input.directory } : {}),
+                    logger,
+                  });
+                  if (!result.success) {
+                    return { success: false, reason: 'command.list_failed' };
+                  }
+                  return { success: true, commands: result.data.commands };
                 },
-              }
-            : {}),
-        }),
+              },
+            }
+          : {}),
       }),
     slashExecutionUseCase: new SdkSlashExecutionUseCase({
-      slashCommandExecutor: new SlashCommandExecutor({
-        bindingStore,
-        ownershipResolver,
-        modelOverrideStore,
-        hostSessionCreationPort,
-        hostSessionQueryPort,
-        hostModelCatalogPort,
-      }),
+      slashCommandExecutor: {
+        execute: async (input) => {
+          switch (input.command.kind) {
+            case 'sessions':
+              return {
+                kind: 'sessions',
+                activeSessionId: input.context.sessionContext.opencodeSessionId,
+                sessions: await hostSessionQueryPort.listSessions({}),
+              };
+            case 'models':
+              return { kind: 'models', models: await hostModelCatalogPort.listModels() };
+            case 'model': {
+              const models = await hostModelCatalogPort.listModels();
+              const exists = models.some((item) => item.providerId === input.command.providerId && item.modelId === input.command.modelId);
+              if (!exists) {
+                throw { code: 'model_not_found' };
+              }
+              const override = {
+                providerId: input.command.providerId,
+                modelId: input.command.modelId,
+              };
+              modelOverrideStore.set(input.context.sessionContext.opencodeSessionId, override);
+              return {
+                kind: 'model',
+                sessionId: input.context.sessionContext.opencodeSessionId,
+                modelOverride: override,
+              };
+            }
+            case 'new':
+              return { kind: 'new', session: await hostSessionCreationPort.createSession() };
+            case 'session':
+              return { kind: 'session', session: { id: input.command.sessionId }, previousSessionId: input.context.sessionContext.opencodeSessionId };
+            default:
+              throw { code: 'invalid_command' };
+          }
+        },
+      },
       replyPresenter: new DefaultSlashCommandReplyPresenter(),
-      contextResolver,
     }),
-    contextResolver,
+    businessEntryContextResolver: overrides.businessEntryContextResolver ?? createFixedBusinessEntryContextResolver(),
+    normalChatSessionResolver: overrides.normalChatSessionResolver ?? {
+      resolve: async (input) => contextResolver.resolveForChat(
+        input.message.toolSessionId,
+        input.message.assistantId ? { assistantId: input.message.assistantId } : undefined,
+        input.logger,
+      ),
+    },
+    effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
   });
   for (const [anchor, sessionId] of overrides.bindings ?? []) {
     bindingStore.bind(anchor, sessionId);
@@ -1426,13 +1473,19 @@ test('provider adapter clears superseded host tracking state after old prompt ta
   let promptCount = 0;
   const adapter = createAdapter({
     chatRunPlanner: {
-      plan: async () => {
+      plan: async (message, logger) => {
         planCount += 1;
         return {
           kind: 'queued_execution',
           context: {
-            opencodeSessionId: planCount === 1 ? 'host-old' : 'host-new',
-            bootstrapSource: 'existing_binding',
+            message,
+            anchor: message.toolSessionId,
+            sessionContext: {
+              opencodeSessionId: planCount === 1 ? 'host-old' : 'host-new',
+              bootstrapSource: 'existing_binding',
+            },
+            entryContext: createFixedBusinessEntryContextResolver().resolveForChatMessage(),
+            logger,
           },
           execution: { kind: 'prompt', text: 'hello' },
         };
@@ -2518,6 +2571,10 @@ test('provider adapter returns synthetic ProviderRun for suppressReply deny path
 test('provider adapter returns synthetic ProviderRun for slash command without calling prompt', async () => {
   let promptCalled = false;
   const adapter = createAdapter({
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
     session: {
       prompt: async () => {
         promptCalled = true;
@@ -2534,6 +2591,13 @@ test('provider adapter returns synthetic ProviderRun for slash command without c
     runId: 'run-slash',
     toolSessionId: 'anchor-slash',
     text: '/sessions',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-slash',
+      },
+    },
   });
 
   const facts = await collect(run.facts);

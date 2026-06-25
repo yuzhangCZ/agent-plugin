@@ -5,7 +5,6 @@ import type {
 import type {
   BusinessEntryContext,
 } from './session-isolation/index.js';
-import type { BusinessEntryPolicy } from '../../port/session-isolation/dto/commands/index.js';
 
 import type {
   HostSessionCreateContext,
@@ -18,25 +17,34 @@ import type {
   SlashCommand,
   SlashCommandContext,
   SlashCommandDescriptor,
-  SlashCommandParser,
+  SlashCommandFailure,
+  SlashCommandFailureCode,
   SlashCommandReplyPresenter,
-  SlashCommandResult,
   ToolSessionBindingStore,
 } from '../../port/SlashCommandControlPlanePort.js';
-import type { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
-import {
-  SlashCommandExecutionRouter,
-  type SlashCommandExecutionRouterPort,
-} from './SdkSlashCommandExecutionRouter.js';
+import type {
+  ChatMessageClassification,
+  ChatMessageClassifierPort,
+  SlashCommandClassification,
+} from './ChatMessageClassifier.js';
+import type { SdkChatSlashCommandExecutor } from './SdkChatSlashCommandExecutor.js';
+export {
+  ChatMessageClassifier,
+  type ChatMessageClassification,
+  type ChatMessageClassifierPort,
+  type OpenCodeNativeCommandCatalog,
+  type OpenCodeNativeCommandDescriptor,
+  type OpenCodeNativeCommandListResult,
+  type SlashCapabilityProvider,
+  type SlashCommandClassification,
+} from './ChatMessageClassifier.js';
 export {
   SdkChatRunPlanner,
   type ChatQueuedExecution,
   type ChatRunPlan,
 } from './SdkChatRunPlanner.js';
-
-const GROUP_CHAT_DENY_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
 
 export interface ChatExecutionContext {
   opencodeSessionId: string;
@@ -52,9 +60,18 @@ export interface ChatExecutionContext {
   bootstrapSource: SlashCommandContext['bootstrapSource'];
 }
 
-export interface ChatRunContext extends ChatExecutionContext {
-  entryContext?: BusinessEntryContext;
-  directory?: string;
+/**
+ * 一次 SDK chat action 的完整运行上下文。
+ * @remarks `sessionContext` 只描述已解析的 OpenCode 宿主会话；
+ * `effectiveDirectory` 是本次 action 的工作目录约束，不从宿主会话目录推导。
+ */
+export interface ChatActionContext {
+  message: ProviderRunMessageInput;
+  anchor: string;
+  entryContext: BusinessEntryContext;
+  sessionContext: ChatExecutionContext;
+  effectiveDirectory?: string;
+  logger?: BridgeLogger;
 }
 
 export interface ChatExecutionContextResolver {
@@ -78,343 +95,126 @@ export interface SessionAttachmentPort {
   switchAttachedSession(input: { toolSessionId: string; sessionId: string }): Promise<{ applied: boolean }>;
 }
 
-export interface SessionIsolationSlashCommandExecutionPort {
-  execute(input: {
-    command: SlashCommand;
-    anchor: string;
-    ensuredContext: ChatExecutionContext;
-    entryContext: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-  }): Promise<SlashCommandResult>;
-}
-
 export interface NormalChatSessionResolver {
   resolve(input: {
     message: ProviderRunMessageInput;
-    entryContext?: BusinessEntryContext;
+    entryContext: BusinessEntryContext;
     directory?: string;
     logger?: BridgeLogger;
   }): Promise<ChatExecutionContext>;
 }
 
-export interface ChatRunContextResolver {
-  resolve(input: {
-    message: ProviderRunMessageInput;
-    logger?: BridgeLogger;
-  }): Promise<ChatRunContext>;
-}
+type SdkSlashExecutionUseCaseInputBase = {
+  context: ChatActionContext;
+};
 
-export interface OpenCodeNativeCommandDescriptor {
-  name: string;
-}
-
-export type OpenCodeNativeCommandListResult =
-  | { success: true; commands: OpenCodeNativeCommandDescriptor[] }
-  | { success: false; reason: string };
-
-export interface OpenCodeNativeCommandCatalog {
-  listCommands(input: { directory?: string }): Promise<OpenCodeNativeCommandListResult>;
-}
-
-export type BridgeLocalSlashClassification =
-  | {
-      kind: 'bridge_local';
-      descriptor: SlashCommandDescriptor;
-      command?: SlashCommand;
-      disabledInEntry?: boolean;
-      invalid?: boolean;
-    }
-  | { kind: 'none'; normalizedText: string };
-
-export type OpenCodeNativeSlashClassification =
-  | {
-      kind: 'opencode_native';
-      commandName: string;
-      arguments: string;
-    }
-  | { kind: 'normal_chat'; fallbackReason?: string; commandName?: string };
-
-export type SlashCommandClassification =
-  | Exclude<BridgeLocalSlashClassification, { kind: 'none' }>
-  | Extract<OpenCodeNativeSlashClassification, { kind: 'opencode_native' }>;
-
-export type ChatMessageClassification =
-  | { kind: 'suppressed_reply'; text: string }
-  | { kind: 'slash'; slash: SlashCommandClassification }
-  | { kind: 'normal_chat'; fallbackReason?: string; commandName?: string };
+type SdkSlashExecutionUseCaseInput = SdkSlashExecutionUseCaseInputBase & {
+  slash: Extract<SlashCommandClassification, { kind: 'bridge_local' }>;
+};
 
 /**
- * SDK chat 入口的 slash 能力策略。
- */
-export class StaticSlashCapabilityProvider {
-  isAllowed(input: { policy?: BusinessEntryPolicy; command: SlashCommandDescriptor }): boolean {
-    if (!input.policy) {
-      return true;
-    }
-    return input.policy.allowedSlashCommands.includes(input.command.kind);
-  }
-}
-
-/**
- * bridge-local slash 分类器。
- * @remarks 只识别插件本地控制命令，并应用本地 `BusinessEntryPolicy` allow-list。
- */
-export class BridgeLocalSlashClassifier {
-  constructor(private readonly dependencies: {
-    slashCommandParser: SlashCommandParser;
-    slashCapabilityProvider: StaticSlashCapabilityProvider;
-  }) {}
-
-  classify(input: {
-    text: string;
-    entryContext?: BusinessEntryContext;
-  }): BridgeLocalSlashClassification {
-    const normalizedText = normalizeSlashText(input.text, input.entryContext);
-    const parseResult = this.dependencies.slashCommandParser.tryParse({
-      text: normalizedText,
-      isGroupChat: isImGroupEntry(input.entryContext),
-    });
-
-    if (parseResult.kind === 'none') {
-      return { kind: 'none', normalizedText };
-    }
-
-    const descriptor = parseResult.kind === 'matched'
-      ? { kind: parseResult.command.kind }
-      : parseResult.command;
-
-    const allowed = this.dependencies.slashCapabilityProvider.isAllowed({
-      policy: input.entryContext?.policy,
-      command: descriptor,
-    });
-    if (!allowed) {
-      return {
-        kind: 'bridge_local',
-        descriptor,
-        disabledInEntry: true,
-      };
-    }
-
-    if (parseResult.kind === 'invalid') {
-      return {
-        kind: 'bridge_local',
-        descriptor,
-        invalid: true,
-      };
-    }
-
-    return {
-      kind: 'bridge_local',
-      descriptor,
-      command: parseResult.command,
-    };
-  }
-}
-
-/**
- * OpenCode native slash 分类器。
- * @remarks 只处理 bridge-local 未命中的 unknown slash，并通过 `command.list` 做 preflight。
- */
-export class OpenCodeNativeSlashClassifier {
-  constructor(private readonly dependencies: {
-    nativeCommandCatalog?: OpenCodeNativeCommandCatalog;
-  } = {}) {}
-
-  async classify(input: {
-    text: string;
-    directory?: string;
-  }): Promise<OpenCodeNativeSlashClassification> {
-    const nativeCommand = parseNativeSlash(input.text);
-    if (!nativeCommand) {
-      return { kind: 'normal_chat' };
-    }
-
-    if (!this.dependencies.nativeCommandCatalog) {
-      return {
-        kind: 'normal_chat',
-        fallbackReason: 'session.command_unavailable',
-        commandName: nativeCommand.commandName,
-      };
-    }
-
-    const listResult = await this.dependencies.nativeCommandCatalog.listCommands({
-      ...(input.directory ? { directory: input.directory } : {}),
-    });
-    if (!listResult.success) {
-      return {
-        kind: 'normal_chat',
-        fallbackReason: listResult.reason,
-        commandName: nativeCommand.commandName,
-      };
-    }
-
-    if (!listResult.commands.some((command) => command.name === nativeCommand.commandName)) {
-      return {
-        kind: 'normal_chat',
-        fallbackReason: 'command_not_found',
-        commandName: nativeCommand.commandName,
-      };
-    }
-
-    return {
-      kind: 'opencode_native',
-      commandName: nativeCommand.commandName,
-      arguments: nativeCommand.arguments ?? '',
-    };
-  }
-}
-
-/**
- * chat message 分类器。
- * @remarks 基于已构建的 entry/session 上下文分类消息，不执行 slash、prompt 或 command。
- */
-export class ChatMessageClassifier {
-  constructor(private readonly dependencies: {
-    bridgeLocalSlashClassifier: BridgeLocalSlashClassifier;
-    openCodeNativeSlashClassifier: OpenCodeNativeSlashClassifier;
-  }) {}
-
-  async classify(input: {
-    message: ProviderRunMessageInput;
-    context: ChatRunContext;
-    logger?: BridgeLogger;
-  }): Promise<ChatMessageClassification> {
-    if (input.message.context?.suppressReply) {
-      return { kind: 'suppressed_reply', text: GROUP_CHAT_DENY_REPLY_TEXT };
-    }
-
-    const local = this.dependencies.bridgeLocalSlashClassifier.classify({
-      text: input.message.text,
-      entryContext: input.context.entryContext,
-    });
-    if (local.kind === 'bridge_local') {
-      return { kind: 'slash', slash: local };
-    }
-
-    const native = await this.dependencies.openCodeNativeSlashClassifier.classify({
-      text: local.normalizedText,
-      ...(input.context.directory ? { directory: input.context.directory } : {}),
-    });
-    if (native.kind === 'opencode_native') {
-      return { kind: 'slash', slash: native };
-    }
-
-    if (native.fallbackReason && native.commandName) {
-      input.logger?.info?.('sdk_chat_classifier.native_command_preflight_fallback', {
-        toolSessionId: input.message.toolSessionId,
-        runId: input.message.runId,
-        commandName: native.commandName,
-        reason: native.fallbackReason,
-      });
-    }
-    return native;
-  }
-}
-
-function normalizeSlashText(text: string, entryContext: BusinessEntryContext | undefined): string {
-  const normalized = text.trim();
-  if (!isImGroupEntry(entryContext)) {
-    return normalized;
-  }
-  return normalized.replace(/^@\S+\s+/, '').trim();
-}
-
-function parseNativeSlash(text: string): { commandName: string; arguments?: string } | undefined {
-  const match = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/u);
-  if (!match) {
-    return undefined;
-  }
-  const commandName = match[1]?.trim();
-  if (!commandName) {
-    return undefined;
-  }
-  const args = match[2]?.trim();
-  return {
-    commandName,
-    ...(args ? { arguments: args } : {}),
-  };
-}
-
-function isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean {
-  const entryKey = entryContext?.entryKey;
-  return entryKey?.businessSessionDomain.toLowerCase() === 'im'
-    && entryKey.businessSessionType.toLowerCase() === 'group';
-}
-
-/**
- * slash synthetic run 执行器。
+ * bridge-local slash synthetic run 执行器。
+ * @remarks 仅处理插件本地实现的 slash command，例如 /new、/sessions、/session、/models、/model。
+ * OpenCode native slash command 在 `SdkChatRunPlanner` 中转为 queued native_command，
+ * 后续由 provider adapter 调用 OpenCode `session.command` 执行。
  */
 export class SdkSlashExecutionUseCase {
-  private readonly slashCommandExecutionRouter: SlashCommandExecutionRouterPort;
-
   constructor(private readonly dependencies: {
-    slashCommandExecutor: SlashCommandExecutor;
-    sessionIsolationSlashCommandExecutor?: SessionIsolationSlashCommandExecutionPort;
+    slashCommandExecutor: SdkChatSlashCommandExecutor;
     replyPresenter: SlashCommandReplyPresenter;
-    contextResolver: ChatExecutionContextResolver;
-    slashCommandExecutionRouter?: SlashCommandExecutionRouterPort;
-  }) {
-    this.slashCommandExecutionRouter = dependencies.slashCommandExecutionRouter ?? new SlashCommandExecutionRouter({
-      slashCommandExecutor: dependencies.slashCommandExecutor,
-      ...(dependencies.sessionIsolationSlashCommandExecutor
-        ? { sessionIsolationSlashCommandExecutor: dependencies.sessionIsolationSlashCommandExecutor }
-        : {}),
-      contextResolver: dependencies.contextResolver,
-    });
-  }
+  }) {}
 
-  async execute(input: {
-    anchor: string;
-    descriptor: SlashCommandDescriptor;
-    command?: SlashCommand;
-    entryContext?: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-    ensuredContext?: ChatExecutionContext;
-    disabledInEntry?: boolean;
-    invalid?: boolean;
-    logger?: BridgeLogger;
-  }): Promise<ProviderRun> {
-    if (input.disabledInEntry) {
+  async execute(input: SdkSlashExecutionUseCaseInput): Promise<ProviderRun> {
+    if (input.slash.disabledInEntry) {
       return buildSyntheticRun(
-        input.anchor,
-        this.dependencies.replyPresenter.presentFailure(input.descriptor, {
+        input.context.anchor,
+        this.dependencies.replyPresenter.presentFailure(input.slash.descriptor, {
           code: 'command_disabled_in_group_chat',
           reasonKey: 'command_not_available_in_group_chat',
         }),
       );
     }
 
-    if (input.invalid || !input.command) {
+    if (input.slash.invalid || !input.slash.command) {
       return buildSyntheticRun(
-        input.anchor,
-        this.dependencies.replyPresenter.presentFailure(input.descriptor, {
+        input.context.anchor,
+        this.dependencies.replyPresenter.presentFailure(input.slash.descriptor, {
           code: 'invalid_command',
         }),
       );
     }
 
     try {
-      const result = await this.slashCommandExecutionRouter.execute({
-        anchor: input.anchor,
-        command: input.command,
-        ...(input.entryContext ? { entryContext: input.entryContext } : {}),
-        ...(input.createContext ? { createContext: input.createContext } : {}),
-        ...(input.directory ? { directory: input.directory } : {}),
-        ...(input.ensuredContext ? { ensuredContext: input.ensuredContext } : {}),
-        ...(input.logger ? { logger: input.logger } : {}),
+      const result = await this.dependencies.slashCommandExecutor.execute({
+        command: input.slash.command,
+        context: input.context,
       });
-      return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(result));
+      return buildSyntheticRun(input.context.anchor, this.dependencies.replyPresenter.presentSuccess(result));
     } catch (error) {
       return buildSyntheticRun(
-        input.anchor,
+        input.context.anchor,
         this.dependencies.replyPresenter.presentFailure(
-          input.descriptor,
-          this.dependencies.slashCommandExecutor.normalizeFailure(error),
+          input.slash.descriptor,
+          this.normalizeFailure(error),
         ),
       );
     }
+  }
+
+  private normalizeFailure(error: unknown): SlashCommandFailure {
+    const sourceErrorCode = this.extractSourceErrorCode(error);
+    if (sourceErrorCode === 'session_not_found') {
+      return { code: 'session_not_found' as const };
+    }
+
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && typeof (error as { code: unknown }).code === 'string'
+    ) {
+      const normalizedError = error as {
+        code: string;
+        reasonKey?: unknown;
+      };
+      const reasonKey = this.isSlashCommandFailureReasonKey(normalizedError.reasonKey)
+        ? normalizedError.reasonKey
+        : undefined;
+      return {
+        code: this.isSlashCommandFailureCode(normalizedError.code) ? normalizedError.code : 'sdk_unreachable',
+        ...(reasonKey ? { reasonKey } : {}),
+      };
+    }
+
+    return { code: 'sdk_unreachable' as const };
+  }
+
+  private extractSourceErrorCode(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null) {
+      return undefined;
+    }
+    const evidence = (error as {
+      errorEvidence?: { sourceErrorCode?: unknown };
+    }).errorEvidence;
+    return typeof evidence?.sourceErrorCode === 'string' ? evidence.sourceErrorCode : undefined;
+  }
+
+  private isSlashCommandFailureCode(code: string): code is SlashCommandFailureCode {
+    return code === 'session_not_found'
+      || code === 'session_out_of_scope'
+      || code === 'model_not_found'
+      || code === 'invalid_command'
+      || code === 'command_disabled_in_group_chat'
+      || code === 'sdk_unreachable';
+  }
+
+  private isSlashCommandFailureReasonKey(reasonKey: unknown): reasonKey is SlashCommandFailure['reasonKey'] {
+    return reasonKey === 'current_session_unavailable'
+      || reasonKey === 'target_session_out_of_scope'
+      || reasonKey === 'target_model_unavailable'
+      || reasonKey === 'unsupported_command'
+      || reasonKey === 'command_not_available_in_group_chat'
+      || reasonKey === 'host_unavailable';
   }
 }
 

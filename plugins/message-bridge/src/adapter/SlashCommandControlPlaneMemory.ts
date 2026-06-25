@@ -4,9 +4,9 @@ import type {
   SessionModelOverride,
   SessionModelOverrideStore,
   SlashCommand,
-  SlashCommandParseInput,
-  SlashCommandParseResult,
-  SlashCommandParser,
+  BridgeLocalSlashCommandParseInput,
+  BridgeLocalSlashCommandParseResult,
+  BridgeLocalSlashCommandParser,
   ToolSessionBinding,
   ToolSessionBindingStore,
 } from '../port/SlashCommandControlPlanePort.js';
@@ -111,26 +111,17 @@ export class InMemorySessionModelOverrideStore implements SessionModelOverrideSt
   }
 }
 
-/** 最小 slash 语法解析器，只识别控制面命令，不做业务校验。 */
-export class SimpleSlashCommandParser implements SlashCommandParser {
-  tryParse(input: SlashCommandParseInput): SlashCommandParseResult {
-    const normalized = this.normalizeInput(input);
+/** 最小 bridge-local slash 语法解析器，只识别本地控制命令，不做业务校验。 */
+export class SimpleBridgeLocalSlashCommandParser implements BridgeLocalSlashCommandParser {
+  tryParse(input: BridgeLocalSlashCommandParseInput): BridgeLocalSlashCommandParseResult {
+    const normalized = input.text;
     if (!normalized.startsWith('/')) {
       return { kind: 'none' };
     }
     return this.parseKnownCommand(normalized);
   }
 
-  /** 群聊下仅剥离首段 `@xxx ` mention；单聊严格按原文判断。 */
-  private normalizeInput(input: SlashCommandParseInput): string {
-    const normalized = input.text.trim();
-    if (!input.isGroupChat) {
-      return normalized;
-    }
-    return normalized.replace(/^@\S+\s+/, '').trim();
-  }
-
-  private parseKnownCommand(normalized: string): SlashCommandParseResult {
+  private parseKnownCommand(normalized: string): BridgeLocalSlashCommandParseResult {
     const standaloneCommandResult = this.parseStandaloneCommand(normalized);
     if (standaloneCommandResult) {
       return standaloneCommandResult;
@@ -144,7 +135,7 @@ export class SimpleSlashCommandParser implements SlashCommandParser {
     return { kind: 'none' };
   }
 
-  private parseStandaloneCommand(normalized: string): SlashCommandParseResult | undefined {
+  private parseStandaloneCommand(normalized: string): BridgeLocalSlashCommandParseResult | undefined {
     const standaloneCommands: Array<'new' | 'sessions' | 'models'> = ['new', 'sessions', 'models'];
 
     for (const commandKind of standaloneCommands) {
@@ -160,11 +151,11 @@ export class SimpleSlashCommandParser implements SlashCommandParser {
     return undefined;
   }
 
-  private parseParameterizedCommand(normalized: string): SlashCommandParseResult | undefined {
+  private parseParameterizedCommand(normalized: string): BridgeLocalSlashCommandParseResult | undefined {
     return this.parseSessionCommand(normalized) ?? this.parseModelCommand(normalized);
   }
 
-  private parseSessionCommand(normalized: string): SlashCommandParseResult | undefined {
+  private parseSessionCommand(normalized: string): BridgeLocalSlashCommandParseResult | undefined {
     const sessionCommandPattern = /^\/session\s+(\S+)$/u;
     const sessionMatch = normalized.match(sessionCommandPattern);
     if (sessionMatch) {
@@ -176,7 +167,7 @@ export class SimpleSlashCommandParser implements SlashCommandParser {
     return undefined;
   }
 
-  private parseModelCommand(normalized: string): SlashCommandParseResult | undefined {
+  private parseModelCommand(normalized: string): BridgeLocalSlashCommandParseResult | undefined {
     const modelCommandPattern = /^\/model\s+([^/\s]+)\/([^/\s]+)$/u;
     const modelMatch = normalized.match(modelCommandPattern);
     if (modelMatch) {

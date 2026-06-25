@@ -1,22 +1,17 @@
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
-import type {
-  SlashCommandParser,
-} from '../../port/SlashCommandControlPlanePort.js';
 import {
   DefaultSlashCommandReplyPresenter,
-  SlashCommandExecutor,
 } from '../../usecase/index.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import {
-  BridgeLocalSlashClassifier,
   ChatMessageClassifier,
-  type ChatExecutionContextResolver,
-  OpenCodeNativeSlashClassifier,
   SdkChatRunPlanner,
   SdkSlashExecutionUseCase,
-  type SessionIsolationSlashCommandExecutionPort,
-  StaticSlashCapabilityProvider,
 } from './SdkChatControlPlane.js';
+import {
+  SdkChatSlashCommandExecutor,
+  type SdkChatSlashCommandExecutorDependencies,
+} from './SdkChatSlashCommandExecutor.js';
 import type {
   BusinessEntryContextResolver,
 } from './session-isolation/index.js';
@@ -25,10 +20,7 @@ import { EntryAwareChatSessionResolver } from './session-isolation/index.js';
 type EntryAwareChatSessionResolverDependencies = ConstructorParameters<typeof EntryAwareChatSessionResolver>[0];
 
 export interface CreateSdkChatRunPlannerInput {
-  slashCommandParser: SlashCommandParser;
-  slashCommandExecutor: SlashCommandExecutor;
-  sessionIsolationSlashCommandExecutor: SessionIsolationSlashCommandExecutionPort;
-  contextResolver: ChatExecutionContextResolver;
+  slashCommandExecutorDependencies: SdkChatSlashCommandExecutorDependencies;
   businessEntryContextResolver: BusinessEntryContextResolver;
   entryAwareChatSessionResolver: EntryAwareChatSessionResolverDependencies;
   opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
@@ -42,40 +34,35 @@ export interface CreateSdkChatRunPlannerInput {
  * 避免 `SdkBridgeRuntime` 直接理解 chat/slash 内部结构。
  */
 export function createSdkChatRunPlanner(input: CreateSdkChatRunPlannerInput): SdkChatRunPlanner {
+  const slashCommandExecutor = new SdkChatSlashCommandExecutor({
+    ...input.slashCommandExecutorDependencies,
+    logger: input.logger,
+  });
   return new SdkChatRunPlanner({
     chatMessageClassifier: new ChatMessageClassifier({
-      bridgeLocalSlashClassifier: new BridgeLocalSlashClassifier({
-        slashCommandParser: input.slashCommandParser,
-        slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-      }),
-      openCodeNativeSlashClassifier: new OpenCodeNativeSlashClassifier({
-        nativeCommandCatalog: {
-          listCommands: async (catalogInput) => {
-            const result = await input.opencodeSessionGatewayAdapter.listNativeCommands({
-              ...(catalogInput.directory ? { directory: catalogInput.directory } : {}),
-              logger: input.logger,
-            });
-            if (!result.success) {
-              return {
-                success: false,
-                reason: mapNativeCommandListFailureReason(result.errorEvidence?.sourceOperation),
-              };
-            }
+      nativeCommandCatalog: {
+        listCommands: async (catalogInput) => {
+          const result = await input.opencodeSessionGatewayAdapter.listNativeCommands({
+            ...(catalogInput.directory ? { directory: catalogInput.directory } : {}),
+            logger: input.logger,
+          });
+          if (!result.success) {
             return {
-              success: true,
-              commands: result.data.commands,
+              success: false,
+              reason: mapNativeCommandListFailureReason(result.errorEvidence?.sourceOperation),
             };
-          },
+          }
+          return {
+            success: true,
+            commands: result.data.commands,
+          };
         },
-      }),
+      },
     }),
     slashExecutionUseCase: new SdkSlashExecutionUseCase({
-      slashCommandExecutor: input.slashCommandExecutor,
-      sessionIsolationSlashCommandExecutor: input.sessionIsolationSlashCommandExecutor,
+      slashCommandExecutor,
       replyPresenter: new DefaultSlashCommandReplyPresenter(),
-      contextResolver: input.contextResolver,
     }),
-    contextResolver: input.contextResolver,
     businessEntryContextResolver: input.businessEntryContextResolver,
     effectiveDirectory: input.effectiveDirectory,
     normalChatSessionResolver: new EntryAwareChatSessionResolver(input.entryAwareChatSessionResolver),

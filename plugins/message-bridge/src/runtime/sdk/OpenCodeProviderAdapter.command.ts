@@ -1,6 +1,5 @@
 import type {
   ProviderError,
-  ProviderRunMessageInput,
 } from '@wecode/bridge-runtime-sdk';
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
 import type {
@@ -10,9 +9,8 @@ import type {
 } from '../../port/SessionScopedActionGatewayPort.js';
 import type { ActionResult } from '../../types/action-runtime.js';
 import { getErrorMessage } from '../../utils/error.js';
-import type { BridgeLogger } from '../AppLogger.js';
 import type {
-  ChatExecutionContext,
+  ChatActionContext,
   ExecutionSessionInvalidationPort,
 } from './SdkChatControlPlane.js';
 import type {
@@ -32,36 +30,33 @@ type CommandSessionActionResult = ActionResult<CommandSessionResultData>;
  */
 export async function bindProviderCommandTerminal(input: {
   activeRun: ActiveProviderRunHandle;
-  message: ProviderRunMessageInput;
-  context: ChatExecutionContext;
+  context: ChatActionContext;
   commandName: string;
   arguments: string;
-  effectiveDirectory?: string;
-  logger: BridgeLogger;
   gatewayAdapter: OpencodeSessionGatewayAdapter;
   executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   activeRuns: ActiveRunRegistry;
 }): Promise<void> {
   const startedAt = Date.now();
-  input.logger.info('provider_adapter.command.started', {
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.info('provider_adapter.command.started', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     commandName: input.commandName,
     hasArguments: Boolean(input.arguments),
-    hasAssistantId: Boolean(input.message.assistantId),
+    hasAssistantId: Boolean(input.context.message.assistantId),
   });
 
   try {
     // session.command 返回 command 生成的 assistant message；provider 终态在本层显式映射。
     const commandResult = await input.gatewayAdapter.commandSession({
-      sessionId: input.context.opencodeSessionId,
+      sessionId: input.context.sessionContext.opencodeSessionId,
       commandName: input.commandName,
       arguments: input.arguments,
-      ...(input.effectiveDirectory ? { directory: input.effectiveDirectory } : {}),
-      agent: input.message.assistantId,
-      modelOverride: input.context.modelOverride,
-      logger: input.logger,
+      ...(input.context.effectiveDirectory ? { directory: input.context.effectiveDirectory } : {}),
+      agent: input.context.message.assistantId,
+      modelOverride: input.context.sessionContext.modelOverride,
+      logger: input.context.logger,
     });
 
     if (!commandResult.success) {
@@ -82,9 +77,9 @@ function handleCommandFailure(
   invalidateExecutionSessionAfterFailure(input, commandResult);
   const sourceOperation = commandResult.errorEvidence?.sourceOperation;
   const sourceErrorCode = commandResult.errorEvidence?.sourceErrorCode;
-  input.logger.warn('provider_adapter.command.failed', {
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.warn('provider_adapter.command.failed', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     commandName: input.commandName,
     durationMs: Math.max(0, Date.now() - startedAt),
@@ -107,9 +102,9 @@ function handleCommandSuccess(
   commandResult: Extract<CommandSessionActionResult, { success: true }>,
 ): void {
   const terminal = deriveCommandTerminal(commandResult.data);
-  input.logger.info('provider_adapter.command.completed', appendTerminalSourceEvidence({
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.info('provider_adapter.command.completed', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     commandName: input.commandName,
     durationMs: Math.max(0, Date.now() - startedAt),
@@ -117,7 +112,7 @@ function handleCommandSuccess(
     providerOutcome: terminal.kind === 'failed' ? 'failed' : 'completed',
   }, terminal.kind === 'failed' ? terminal.errorDetails : undefined));
   if (terminal.kind === 'aborted') {
-    input.activeRuns.abortAllByHostSession(input.context.opencodeSessionId, 'prompt_terminal_aborted');
+    input.activeRuns.abortAllByHostSession(input.context.sessionContext.opencodeSessionId, 'prompt_terminal_aborted');
     return;
   }
   input.activeRun.settlePromptTerminal(toProviderTerminalResult(terminal));
@@ -129,9 +124,9 @@ function handleCommandException(
   error: unknown,
 ): void {
   invalidateExecutionSessionAfterFailure(input, error);
-  input.logger.error('provider_adapter.command.threw', appendTerminalSourceEvidence({
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.error('provider_adapter.command.threw', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     commandName: input.commandName,
     durationMs: Math.max(0, Date.now() - startedAt),
@@ -153,8 +148,8 @@ function invalidateExecutionSessionAfterFailure(
   error: unknown,
 ): void {
   input.executionSessionInvalidationPort.invalidateAfterFailure({
-    conversationId: input.message.toolSessionId,
-    hostSessionId: input.context.opencodeSessionId,
+    conversationId: input.context.anchor,
+    hostSessionId: input.context.sessionContext.opencodeSessionId,
     error,
   });
 }

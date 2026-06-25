@@ -390,7 +390,7 @@ function buildCommandPayloadFailure(
 export class OpencodeSessionGatewayAdapter implements SessionCreationPort, SessionScopedActionGatewayPort {
   private readonly sessionLookupResolver: SessionLookupResolver;
 
-  constructor(private readonly getClient: () => BridgeSdkClient | null) {
+  constructor(private readonly getClient: () => BridgeSdkClient) {
     this.sessionLookupResolver = new SessionLookupResolver(getClient);
   }
 
@@ -564,14 +564,6 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
     logger?: BridgeLogger;
   }): Promise<ActionResult<{ commands: Array<{ name: string }> }>> {
     const client = this.getClient();
-    if (!client) {
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'OpenCode SDK client is unavailable',
-        errorEvidence: { sourceOperation: 'command.list' },
-      };
-    }
     if (!client.session.command) {
       return {
         success: false,

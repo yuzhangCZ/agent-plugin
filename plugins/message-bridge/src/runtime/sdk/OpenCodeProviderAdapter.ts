@@ -27,8 +27,8 @@ import type {
   QuestionReplyCommandPort,
 } from '../../port/session-isolation/inbound/index.js';
 import type {
+  ChatActionContext,
   ChatExecutionContextResolver,
-  ChatRunContext,
   ChatQueuedExecution,
   EventAnchorResolver,
   ExecutionSessionInvalidationPort,
@@ -305,35 +305,31 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       return plan.run;
     }
 
-    return this.enqueueChatExecution(input, plan.context, plan.execution);
+    return this.enqueueChatExecution(plan.context, plan.execution);
   }
 
   private enqueueChatExecution(
-    input: ProviderRunMessageInput,
-    context: ChatRunContext,
+    context: ChatActionContext,
     execution: ChatQueuedExecution,
   ): ProviderRun {
     const activeRun = this.createActiveRunHandle(
-      input.toolSessionId,
-      input.runId,
-      context.opencodeSessionId,
+      context.anchor,
+      context.message.runId,
+      context.sessionContext.opencodeSessionId,
     );
     if (execution.kind === 'native_command') {
       this.logger.info('provider_adapter.command.prepare_succeeded', {
-        toolSessionId: input.toolSessionId,
-        opencodeSessionId: context.opencodeSessionId,
+        toolSessionId: context.anchor,
+        opencodeSessionId: context.sessionContext.opencodeSessionId,
         runId: activeRun.runId,
         commandName: execution.commandName,
-        hasAssistantId: Boolean(input.assistantId),
+        hasAssistantId: Boolean(context.message.assistantId),
       });
       this.runCoordinator.enqueue(activeRun, () => bindProviderCommandTerminal({
         activeRun,
-        message: input,
         context,
         commandName: execution.commandName,
         arguments: execution.arguments,
-        ...(this.effectiveDirectory ? { effectiveDirectory: this.effectiveDirectory } : {}),
-        logger: this.logger,
         gatewayAdapter: this.opencodeSessionGatewayAdapter,
         executionSessionInvalidationPort: this.executionSessionInvalidationPort,
         activeRuns: this.activeRuns,
@@ -346,17 +342,14 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       };
     }
     this.logger.info('provider_adapter.prompt.prepare_succeeded', {
-      toolSessionId: input.toolSessionId,
-      opencodeSessionId: context.opencodeSessionId,
+      toolSessionId: context.anchor,
+      opencodeSessionId: context.sessionContext.opencodeSessionId,
       runId: activeRun.runId,
-      hasAssistantId: Boolean(input.assistantId),
+      hasAssistantId: Boolean(context.message.assistantId),
     });
     this.runCoordinator.enqueue(activeRun, () => bindProviderPromptTerminal({
       activeRun,
-      message: input,
       context,
-      ...(this.effectiveDirectory ? { effectiveDirectory: this.effectiveDirectory } : {}),
-      logger: this.logger,
       gatewayAdapter: this.opencodeSessionGatewayAdapter,
       executionSessionInvalidationPort: this.executionSessionInvalidationPort,
       activeRuns: this.activeRuns,

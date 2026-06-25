@@ -1,14 +1,12 @@
 import type {
   ProviderError,
-  ProviderRunMessageInput,
 } from '@wecode/bridge-runtime-sdk';
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
 import type { PromptSessionResultData } from '../../port/SessionScopedActionGatewayPort.js';
 import type { ActionResult } from '../../types/action-runtime.js';
 import { getErrorMessage } from '../../utils/error.js';
-import type { BridgeLogger } from '../AppLogger.js';
 import type {
-  ChatExecutionContext,
+  ChatActionContext,
   ExecutionSessionInvalidationPort,
 } from './SdkChatControlPlane.js';
 import type {
@@ -24,10 +22,7 @@ type PromptSessionActionResult = ActionResult<PromptSessionResultData>;
 
 export async function bindProviderPromptTerminal(input: {
   activeRun: ActiveProviderRunHandle;
-  message: ProviderRunMessageInput;
-  context: ChatExecutionContext;
-  effectiveDirectory?: string;
-  logger: BridgeLogger;
+  context: ChatActionContext;
   gatewayAdapter: OpencodeSessionGatewayAdapter;
   executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
   activeRuns: ActiveRunRegistry;
@@ -37,12 +32,12 @@ export async function bindProviderPromptTerminal(input: {
 
   try {
     const promptResult = await input.gatewayAdapter.promptSession({
-      sessionId: input.context.opencodeSessionId,
-      text: input.message.text,
-      ...(input.effectiveDirectory ? { directory: input.effectiveDirectory } : {}),
-      agent: input.message.assistantId,
-      modelOverride: input.context.modelOverride,
-      logger: input.logger,
+      sessionId: input.context.sessionContext.opencodeSessionId,
+      text: input.context.message.text,
+      ...(input.context.effectiveDirectory ? { directory: input.context.effectiveDirectory } : {}),
+      agent: input.context.message.assistantId,
+      modelOverride: input.context.sessionContext.modelOverride,
+      logger: input.context.logger,
     });
 
     if (!promptResult.success) {
@@ -60,12 +55,12 @@ function logPromptStarted(
   startedAt: number,
 ): void {
   void startedAt;
-  input.logger.info('provider_adapter.prompt.started', {
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.info('provider_adapter.prompt.started', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
-    hasAssistantId: Boolean(input.message.assistantId),
-    textLength: input.message.text.length,
+    hasAssistantId: Boolean(input.context.message.assistantId),
+    textLength: input.context.message.text.length,
   });
 }
 
@@ -77,9 +72,9 @@ function handlePromptFailure(
   invalidateExecutionSessionAfterFailure(input, promptResult);
   const sourceOperation = promptResult.errorEvidence?.sourceOperation;
   const sourceErrorCode = promptResult.errorEvidence?.sourceErrorCode;
-  input.logger.warn('provider_adapter.prompt.failed', {
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.warn('provider_adapter.prompt.failed', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     durationMs: Math.max(0, Date.now() - startedAt),
     providerOutcome: 'failed',
@@ -102,7 +97,7 @@ function handlePromptSuccess(
 ): void {
   logPromptCompleted(input, startedAt, promptResult.data.terminal);
   if (promptResult.data.terminal.kind === 'aborted') {
-    input.activeRuns.abortAllByHostSession(input.context.opencodeSessionId, 'prompt_terminal_aborted');
+    input.activeRuns.abortAllByHostSession(input.context.sessionContext.opencodeSessionId, 'prompt_terminal_aborted');
     return;
   }
   input.activeRun.settlePromptTerminal(toProviderTerminalResult(promptResult.data.terminal));
@@ -114,9 +109,9 @@ function handlePromptException(
   error: unknown,
 ): void {
   invalidateExecutionSessionAfterFailure(input, error);
-  input.logger.error('provider_adapter.prompt.threw', appendTerminalSourceEvidence({
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.error('provider_adapter.prompt.threw', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     durationMs: Math.max(0, Date.now() - startedAt),
     error: getErrorMessage(error),
@@ -137,8 +132,8 @@ function invalidateExecutionSessionAfterFailure(
   error: unknown,
 ): void {
   input.executionSessionInvalidationPort.invalidateAfterFailure({
-    conversationId: input.message.toolSessionId,
-    hostSessionId: input.context.opencodeSessionId,
+    conversationId: input.context.anchor,
+    hostSessionId: input.context.sessionContext.opencodeSessionId,
     error,
   });
 }
@@ -174,9 +169,9 @@ function logPromptCompleted(
   startedAt: number,
   terminal: PromptSessionResultData['terminal'],
 ): void {
-  input.logger.info('provider_adapter.prompt.completed', appendTerminalSourceEvidence({
-    toolSessionId: input.message.toolSessionId,
-    opencodeSessionId: input.context.opencodeSessionId,
+  input.context.logger?.info('provider_adapter.prompt.completed', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
     runId: input.activeRun.runId,
     durationMs: Math.max(0, Date.now() - startedAt),
     terminalKind: terminal.kind,
