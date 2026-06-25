@@ -41,8 +41,7 @@ export interface PermissionReplyPayloadTarget {
 
 export type PermissionReplyPayload = PermissionReplyPayloadTarget;
 
-export interface StatusQueryPayload {
-}
+export type StatusQueryPayload = Record<string, never>;
 
 export interface AbortSessionPayload {
   toolSessionId: string;
@@ -50,7 +49,7 @@ export interface AbortSessionPayload {
 
 export interface QuestionReplyPayload {
   questionId: string;
-  answer: string;
+  answers: string[][];
 }
 
 export interface InvokePayloadByAction {

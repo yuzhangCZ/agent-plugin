@@ -10,8 +10,6 @@ import {
 } from '../../src/adapter/index.ts';
 import { SubagentSessionMapper } from '../../src/session/SubagentSessionMapper.ts';
 import {
-  CreateSessionRequestNormalizer,
-  CreateSessionUseCase,
   DefaultSlashCommandReplyPresenter,
   SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
@@ -25,7 +23,6 @@ import {
 import {
   ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
-  DefaultCreatedSessionBindingPort,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
   SdkChatPreprocessor,
@@ -214,16 +211,10 @@ function createAdapter(overrides = {}) {
   const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
   const modelOverrideStore = new InMemorySessionModelOverrideStore();
   const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => sdkClient);
-  const createSessionUseCase = new CreateSessionUseCase(opencodeSessionGatewayAdapter);
-  const createSessionRequestNormalizer = new CreateSessionRequestNormalizer();
   const hostSessionCreationPort = {
     createSession: async (input) => {
-      const normalized = createSessionRequestNormalizer.fromChatContext({
-        assistantId: input?.assistantId,
-        imGroupId: input?.imGroupId,
-      });
-      const result = await createSessionUseCase.execute({
-        ...normalized,
+      void input;
+      const result = await opencodeSessionGatewayAdapter.createSession({
         directory: overrides.bridgeDirectory ?? '/workspace/test',
       });
       if (!result.success || !result.data.sessionId) {
@@ -282,7 +273,11 @@ function createAdapter(overrides = {}) {
         throw new Error('runtime.sdk_client_unavailable');
       }
       const result = await sdkClient.config.providers({});
-      const providers = Array.isArray(result?.data?.providers) ? result.data.providers : Array.isArray(result?.data) ? result.data : [];
+      const providers = [
+        result?.data?.providers,
+        result?.data,
+        [],
+      ].find(Array.isArray);
       return providers.flatMap((provider) => {
         const providerId = provider?.id ?? provider?.providerID ?? provider?.name;
         if (!providerId || !provider?.models) {
@@ -325,12 +320,22 @@ function createAdapter(overrides = {}) {
     bindingStore.bind(anchor, sessionId);
     ownershipResolver.attach(sessionId, anchor);
   }
+  const createSessionCommandPort = overrides.createSessionCommandPort ?? {
+    execute: async (input) => ({
+      kind: 'entry_owned',
+      toolSessionId: 'ses-created-command',
+      session: {
+        id: 'ses-created-command',
+        title: input?.title,
+        directory: overrides.bridgeDirectory ?? '/workspace/test',
+      },
+    }),
+  };
 
   return new OpenCodeProviderAdapter({
     rawClient: createRawClient(),
     logger,
-    createSessionUseCase,
-    ...(overrides.createSessionCommandPort ? { createSessionCommandPort: overrides.createSessionCommandPort } : {}),
+    createSessionCommandPort,
     ...(overrides.closeSessionCommandPort ? { closeSessionCommandPort: overrides.closeSessionCommandPort } : {}),
     ...(overrides.abortSessionCommandPort ? { abortSessionCommandPort: overrides.abortSessionCommandPort } : {}),
     ...(overrides.questionReplyCommandPort ? { questionReplyCommandPort: overrides.questionReplyCommandPort } : {}),
@@ -347,10 +352,6 @@ function createAdapter(overrides = {}) {
       ownershipResolver,
     }),
     eventAnchorResolver: new DefaultEventAnchorResolver({
-      ownershipResolver,
-    }),
-    createdSessionBindingPort: new DefaultCreatedSessionBindingPort({
-      bindingStore,
       ownershipResolver,
     }),
     subagentSessionMapper: new SubagentSessionMapper(() => sdkClient),
@@ -617,9 +618,9 @@ test('provider adapter delegates question replies to session-isolation command p
   assert.deepEqual(await adapter.replyQuestion({
     traceId: 'trace-question-port',
     questionId: 'question-a',
-    answers: [['answer-a']],
+    answers: [['answer-a'], ['answer-b', 'answer-c']],
   }), { applied: true });
-  assert.deepEqual(calls, [{ questionId: 'question-a', answer: 'answer-a' }]);
+  assert.deepEqual(calls, [{ questionId: 'question-a', answers: [['answer-a'], ['answer-b', 'answer-c']] }]);
   assert.equal(legacyReplyCalls, 0);
 });
 
@@ -1976,16 +1977,18 @@ test('provider adapter keeps active run routing when session-isolation host even
   }]);
 });
 
-test('provider adapter createSession returns real OpenCode sessionId and establishes identity binding', async () => {
+test('provider adapter createSession delegates to session-isolation command port by default', async () => {
+  const calls = [];
   const adapter = createAdapter({
-    session: {
-      create: async () => ({
-        data: {
-          id: 'ses-created-identity',
-          title: 'Identity Session',
-          directory: '/workspace/identity',
-        },
-      }),
+    createSessionCommandPort: {
+      execute: async (input) => {
+        calls.push(input);
+        return {
+          kind: 'entry_owned',
+          toolSessionId: 'ses-created-command',
+          session: { id: 'ses-created-command', title: 'Identity Session' },
+        };
+      },
     },
   });
 
@@ -1995,18 +1998,15 @@ test('provider adapter createSession returns real OpenCode sessionId and establi
   });
 
   assert.deepEqual(result, {
-    toolSessionId: 'ses-created-identity',
+    toolSessionId: 'ses-created-command',
     title: 'Identity Session',
   });
-  assert.deepEqual(adapter.contextResolver.dependencies.bindingStore.get('ses-created-identity'), {
-    anchor: 'ses-created-identity',
-    activeOpencodeSessionId: 'ses-created-identity',
-    status: 'active',
-  });
-  assert.equal(
-    adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-identity'),
-    'ses-created-identity',
-  );
+  assert.deepEqual(calls, [{
+    title: 'Identity Session',
+    directory: '/workspace/test',
+  }]);
+  assert.equal(adapter.contextResolver.dependencies.bindingStore.get('ses-created-command'), undefined);
+  assert.equal(adapter.contextResolver.dependencies.ownershipResolver.resolveAttachedAnchor('ses-created-command'), undefined);
 });
 
 test('provider adapter createSession delegates creation and ownership to session-isolation command port', async () => {
@@ -2142,6 +2142,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
         state: {
           status: 'running',
           title: '读取文件',
+          input: { command: 'ls -la' },
         },
       },
     },
@@ -2158,6 +2159,24 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
         state: {
           status: 'completed',
           title: '标题不能当工具名',
+        },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'part-tool-update-invalid-input',
+        sessionID: 'tool-tool-update',
+        messageID: 'msg-tool-update',
+        type: 'tool',
+        tool: 'bash',
+        callID: 'call-invalid-input',
+        state: {
+          status: 'running',
+          input: 'ls -la',
+          output: 'total 24',
         },
       },
     },
@@ -2191,6 +2210,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
       toolName: 'read_file',
       status: 'running',
       title: '读取文件',
+      input: { command: 'ls -la' },
       raw: {
         part: {
           id: 'part-tool-update',
@@ -2202,6 +2222,7 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
           state: {
             status: 'running',
             title: '读取文件',
+            input: { command: 'ls -la' },
           },
         },
       },
@@ -2224,6 +2245,30 @@ test('provider adapter maps tool parts using part.tool and records diagnostics w
           state: {
             status: 'completed',
             title: '标题不能当工具名',
+          },
+        },
+      },
+    },
+    {
+      type: 'tool.update',
+      messageId: 'msg-tool-update',
+      partId: 'part-tool-update-invalid-input',
+      toolCallId: 'call-invalid-input',
+      toolName: 'bash',
+      status: 'running',
+      output: 'total 24',
+      raw: {
+        part: {
+          id: 'part-tool-update-invalid-input',
+          sessionID: 'tool-tool-update',
+          messageID: 'msg-tool-update',
+          type: 'tool',
+          tool: 'bash',
+          callID: 'call-invalid-input',
+          state: {
+            status: 'running',
+            input: 'ls -la',
+            output: 'total 24',
           },
         },
       },
@@ -3595,6 +3640,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       id: 'perm-1',
       permission: 'file_write',
       partID: 'part-permission-1',
+      patterns: ['src/app.ts'],
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -3615,17 +3661,93 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       },
     },
   });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-3',
+      permission: 'bash',
+      patterns: ['npm test'],
+      metadata: {
+        command: 'npm test',
+        description: 'Run tests',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-4',
+      permission: 'edit',
+      patterns: ['src/index.ts'],
+      metadata: {
+        filepath: '/repo/src/index.ts',
+        diff: '--- old\n+++ new',
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-5',
+      permission: 'bash',
+      metadata: {},
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-6',
+      permission: 'task',
+      metadata: {},
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'tool-permission',
+      id: 'perm-7',
+      permission: 'bash',
+      metadata: new Proxy({}, {
+        get(_target, property) {
+          if (property === 'description') {
+            throw new Error('metadata read failed');
+          }
+          return undefined;
+        },
+      }),
+    },
+  });
+  const throwingMetadataProperties = {
+    sessionID: 'tool-permission',
+    id: 'perm-8',
+    permission: 'bash',
+  };
+  Object.defineProperty(throwingMetadataProperties, 'metadata', {
+    enumerable: true,
+    get() {
+      throw new Error('metadata getter failed');
+    },
+  });
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: throwingMetadataProperties,
+  });
 
   promptDeferred.resolve(createPromptResponse());
   const facts = await collect(run.facts);
 
-  assert.equal(facts.length, 2);
+  assert.equal(facts.length, 8);
   assert.deepEqual(facts[0], {
     type: 'permission.ask',
     messageId: 'msg-tool-1',
     partId: 'part-permission-1',
     permissionId: 'perm-1',
     permType: 'file_write',
+    title: 'src/app.ts',
     metadata: {
       scope: 'workspace',
     },
@@ -3634,6 +3756,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       id: 'perm-1',
       permission: 'file_write',
       partID: 'part-permission-1',
+      patterns: ['src/app.ts'],
       tool: {
         messageID: 'msg-tool-1',
         callID: 'call-tool-1',
@@ -3653,6 +3776,7 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       partId: '<generated>',
       permissionId: 'perm-2',
       permType: 'shell',
+      title: '',
       metadata: {
         scope: 'fallback',
       },
@@ -3666,6 +3790,31 @@ test('provider adapter maps permission.asked permission field and legacy type fa
       },
     },
   );
+  assert.equal(facts[2].type, 'permission.ask');
+  assert.equal(facts[2].permissionId, 'perm-3');
+  assert.equal(facts[2].permType, 'bash');
+  assert.equal(facts[2].title, 'Run tests');
+  assert.equal(facts[3].type, 'permission.ask');
+  assert.equal(facts[3].permissionId, 'perm-4');
+  assert.equal(facts[3].permType, 'edit');
+  assert.equal(facts[3].title, 'Edit /repo/src/index.ts');
+  assert.equal(facts[4].type, 'permission.ask');
+  assert.equal(facts[4].permissionId, 'perm-5');
+  assert.equal(facts[4].permType, 'bash');
+  assert.equal(facts[4].title, '');
+  assert.equal(facts[5].type, 'permission.ask');
+  assert.equal(facts[5].permissionId, 'perm-6');
+  assert.equal(facts[5].permType, 'task');
+  assert.equal(facts[5].title, '');
+  assert.equal(facts[6].type, 'permission.ask');
+  assert.equal(facts[6].permissionId, 'perm-7');
+  assert.equal(facts[6].permType, 'bash');
+  assert.equal(facts[6].title, '');
+  assert.equal(facts[7].type, 'permission.ask');
+  assert.equal(facts[7].permissionId, 'perm-8');
+  assert.equal(facts[7].permType, 'bash');
+  assert.equal(facts[7].title, '');
+  assert.equal('metadata' in facts[7], false);
   assert.match(facts[1].partId, /^prt_[0-9a-f]{32}$/);
   assert.deepEqual(pendingInteractions, [
     {
@@ -3677,6 +3826,42 @@ test('provider adapter maps permission.asked permission field and legacy type fa
     {
       kind: 'permission',
       tokenId: 'perm-2',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-3',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-4',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-5',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-6',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-7',
+      toolSessionId: 'tool-permission',
+      hostSessionId: 'tool-permission',
+    },
+    {
+      kind: 'permission',
+      tokenId: 'perm-8',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
     },

@@ -37,7 +37,6 @@ export class ReconnectOrchestrator {
 
   reset(): void {
     this.policy.reset();
-    this.state.setReconnecting(false);
   }
 
   scheduleReconnect(): void {
@@ -45,9 +44,10 @@ export class ReconnectOrchestrator {
       return;
     }
 
+    const generation = this.state.beginReconnectWindow();
     const reconnectDecision = this.policy.scheduleNextAttempt();
     if (!reconnectDecision.ok) {
-      this.state.setReconnecting(false);
+      this.state.closeReconnectExhaustedIfCurrent(generation);
       this.context.telemetry.logReconnectExhausted(reconnectDecision.elapsedMs, reconnectDecision.maxElapsedMs);
       return;
     }
@@ -59,17 +59,17 @@ export class ReconnectOrchestrator {
       elapsedMs: reconnectDecision.elapsedMs,
     };
     this.context.logger?.warn?.('gateway.reconnect.scheduled', reconnectLogFields);
-    this.state.setReconnecting(true);
 
     this.scheduler.schedule(async () => {
-      if (this.state.isManuallyDisconnected() || this.context.abortSignal?.aborted) {
-        this.state.setReconnecting(false);
+      if (!this.state.isCurrentGeneration(generation)
+        || this.state.isManuallyDisconnected()
+        || this.context.abortSignal?.aborted) {
         return;
       }
 
       const exhaustedDecision = this.policy.getExhaustedDecision();
       if (exhaustedDecision) {
-        this.state.setReconnecting(false);
+        this.state.closeReconnectExhaustedIfCurrent(generation);
         this.context.telemetry.logReconnectExhausted(exhaustedDecision.elapsedMs, exhaustedDecision.maxElapsedMs);
         return;
       }
@@ -85,7 +85,6 @@ export class ReconnectOrchestrator {
           this.scheduleReconnect();
           return;
         }
-        this.state.setReconnecting(false);
         this.context.logger?.warn?.('gateway.reconnect.failed', {
           attempt: reconnectDecision.attempt,
           reconnectAttempts: reconnectDecision.attempt,

@@ -41,7 +41,6 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@agent-plugin/gateway-client": "workspace:*",
     "@wecode/bridge-runtime-sdk": "workspace:*",
     "@opencode-ai/plugin": "1.2.15",
     "@opencode-ai/sdk": "1.2.15",

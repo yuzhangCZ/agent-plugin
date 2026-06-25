@@ -2,12 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
-import { GatewayClientError } from '../src/errors/GatewayClientError.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
 import { HandshakeFrameProcessor } from '../src/application/runtime/HandshakeFrameProcessor.ts';
 import { InboundFrameClassifier } from '../src/application/runtime/InboundFrameClassifier.ts';
 import { InboundFrameRouter } from '../src/application/runtime/InboundFrameRouter.ts';
-import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from '../src/application/runtime/GatewayRuntimeContracts.ts';
+import type {
+  GatewayRuntimeContext,
+  GatewayRuntimeStatePort,
+} from '../src/application/runtime/GatewayRuntimeContracts.ts';
+import { GatewayClientStatus } from '../src/domain/state.ts';
+import { GatewayClientError } from '../src/errors/GatewayClientError.ts';
 
 function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayRuntimeContext {
   return {
@@ -31,12 +35,11 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
       },
     } as GatewayRuntimeContext['telemetry'],
     sink: {
-      emitStateChange() {},
+      emitStatusChange() {},
       emitInbound() {},
       emitOutbound() {},
       emitHeartbeat() {},
       emitMessage() {},
-      emitError() {},
     },
     reconnectEnabled: true,
     authSubprotocolBuilder: () => 'auth.test',
@@ -44,31 +47,51 @@ function createContext(overrides: Partial<GatewayRuntimeContext> = {}): GatewayR
   };
 }
 
-function createState(state = 'CONNECTING'): GatewayRuntimeStatePort {
-  let currentState = state as ReturnType<GatewayRuntimeStatePort['getState']>;
-  let manuallyDisconnected = false;
-  let reconnecting = false;
+function createState(status: GatewayClientStatus = GatewayClientStatus.connecting()): GatewayRuntimeStatePort {
+  let currentStatus = status;
   return {
-    getState() {
-      return currentState;
-    },
-    setState(next) {
-      currentState = next;
+    getStatus() {
+      return currentStatus;
     },
     isConnected() {
-      return currentState === 'CONNECTED' || currentState === 'READY';
+      return currentStatus.isReady();
     },
     isManuallyDisconnected() {
-      return manuallyDisconnected;
+      return false;
     },
-    setManuallyDisconnected(value) {
-      manuallyDisconnected = value;
+    beginConnect() {
+      return { generation: 0, sessionId: 1 };
     },
-    isReconnecting() {
-      return reconnecting;
+    finishConnectIfCurrent() {
+      currentStatus = GatewayClientStatus.ready();
+      return true;
     },
-    setReconnecting(value) {
-      reconnecting = value;
+    markReconnectingIfCurrent() {
+      currentStatus = GatewayClientStatus.reconnecting();
+      return true;
+    },
+    beginReconnectWindow() {
+      currentStatus = GatewayClientStatus.reconnecting();
+      return 0;
+    },
+    closeReconnectExhaustedIfCurrent() {
+      currentStatus = GatewayClientStatus.closed(new GatewayClientError({
+        code: 'GATEWAY_RECONNECT_EXHAUSTED',
+        disposition: 'runtime_failure',
+        retryable: false,
+        message: 'gateway_reconnect_exhausted',
+      }));
+      return true;
+    },
+    isCurrentGeneration() {
+      return true;
+    },
+    closeIfCurrent(_token, error) {
+      currentStatus = GatewayClientStatus.closed(error);
+      return true;
+    },
+    isCurrentSession() {
+      return true;
     },
   };
 }
@@ -94,7 +117,6 @@ test('handshake frame processor interprets register_ok and register_rejected wit
   assert.equal(rejected.kind, 'rejected');
   assert.equal(rejected.error.code, 'GATEWAY_HANDSHAKE_REJECTED');
   assert.equal(rejected.error.disposition, 'startup_failure');
-  assert.equal(rejected.error.stage, 'handshake');
 });
 
 test('inbound frame classifier separates handshake control from business and invalid frames', async () => {
@@ -114,15 +136,20 @@ test('inbound frame classifier separates handshake control from business and inv
 });
 
 test('inbound frame router surfaces invalid business frames without transport side effects', async () => {
-  const errors: GatewayClientError[] = [];
+  const logs: Array<{ message: string; meta?: Record<string, unknown> }> = [];
   const messages: unknown[] = [];
   const inbound: unknown[] = [];
-  const state = createState('READY');
+  const state = createState(GatewayClientStatus.ready());
   const router = new InboundFrameRouter(
     new BusinessMessageHandler(),
     createContext({
+      logger: {
+        error(message, meta) {
+          logs.push({ message, meta });
+        },
+      },
       sink: {
-        emitStateChange() {},
+        emitStatusChange() {},
         emitInbound(message) {
           inbound.push(message);
         },
@@ -130,9 +157,6 @@ test('inbound frame router surfaces invalid business frames without transport si
         emitHeartbeat() {},
         emitMessage(message) {
           messages.push(message);
-        },
-        emitError(error) {
-          errors.push(error);
         },
       },
     }),
@@ -159,8 +183,5 @@ test('inbound frame router surfaces invalid business frames without transport si
 
   assert.equal(messages.length, 0);
   assert.equal(inbound.length, 0);
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0]!.code, 'GATEWAY_INBOUND_PROTOCOL_INVALID');
-  assert.equal(errors[0]!.disposition, 'diagnostic');
-  assert.equal(errors[0]!.stage, 'ready');
+  assert.equal(logs[0]?.message, 'gateway.business.validation_failed');
 });

@@ -110,7 +110,7 @@ export interface SessionScopedActionGatewayPort {
   }): Promise<ActionResult<PermissionReplyResultData>>;
   replyQuestion(parameters: {
     questionId: string;
-    answer: string;
+    answers: string[][];
     logger?: BridgeLogger;
   }): Promise<ActionResult<QuestionReplyResultData>>;
 }

@@ -27,19 +27,19 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
   const malformedConfigPaths: string[] = [];
   const root: Record<string, unknown> = asRecord(config) ?? {};
 
-  const agentsRaw = root["agents"];
+  const agentsRaw = root.agents;
   if (agentsRaw !== undefined && !asRecord(agentsRaw)) {
     malformedConfigPaths.push("agents");
   }
   const agents: Record<string, unknown> = asRecord(agentsRaw) ?? {};
 
-  const defaultsRaw = agents["defaults"];
+  const defaultsRaw = agents.defaults;
   if (defaultsRaw !== undefined && !asRecord(defaultsRaw)) {
     malformedConfigPaths.push("agents.defaults");
   }
   const defaults: Record<string, unknown> = asRecord(defaultsRaw) ?? {};
 
-  const channelsRaw = root["channels"];
+  const channelsRaw = root.channels;
   if (channelsRaw !== undefined && !asRecord(channelsRaw)) {
     malformedConfigPaths.push("channels");
   }
@@ -51,7 +51,7 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
   }
   const messageBridge: Record<string, unknown> = asRecord(messageBridgeRaw) ?? {};
 
-  const streamingRaw = messageBridge["streaming"];
+  const streamingRaw = messageBridge.streaming;
   let streamingEnabled = true;
   let streamingSource: StreamingSource = "default_on";
   if (streamingRaw === true) {
@@ -62,6 +62,8 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     streamingSource = "explicit_off";
   } else if (streamingRaw !== undefined) {
     malformedConfigPaths.push("channels.message-bridge.streaming");
+  } else {
+    // eslint ignore elseif-without-else
   }
 
   if (!streamingEnabled) {
@@ -74,10 +76,10 @@ export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffe
     };
   }
 
-  const injectBlockStreamingDefault = defaults["blockStreamingDefault"] === undefined;
-  const injectBlockStreamingBreak = defaults["blockStreamingBreak"] === undefined;
-  const injectBlockStreamingChunk = defaults["blockStreamingChunk"] === undefined;
-  const injectBlockStreamingCoalesce = defaults["blockStreamingCoalesce"] === undefined;
+  const injectBlockStreamingDefault = defaults.blockStreamingDefault === undefined;
+  const injectBlockStreamingBreak = defaults.blockStreamingBreak === undefined;
+  const injectBlockStreamingChunk = defaults.blockStreamingChunk === undefined;
+  const injectBlockStreamingCoalesce = defaults.blockStreamingCoalesce === undefined;
   const streamDefaultsInjected =
     injectBlockStreamingDefault ||
     injectBlockStreamingBreak ||

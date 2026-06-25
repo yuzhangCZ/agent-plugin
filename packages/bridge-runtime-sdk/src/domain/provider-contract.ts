@@ -44,13 +44,15 @@ export interface ProviderCommandError {
  * provider 注入给 Runtime 的 outbound 发送器。
  */
 export interface RuntimeOutboundEmitter {
+  /**
+   * 发送一批 provider 主动产生的 facts。
+   * @deprecated 请改用 `emitOutboundRun()`，用 `runId` 表达主动发送的执行边界。
+   */
   emitOutboundMessage(input: EmitOutboundMessageInput): Promise<RuntimeAppliedResult>;
   /**
    * 发送一轮 provider 主动产生的 facts 流。
-   * @remarks
-   * 新版 SDK 会注入该能力；保持可选是为了不破坏只使用 `emitOutboundMessage` 的既有 provider 类型实现。
    */
-  emitOutboundRun?(input: EmitOutboundRunInput): Promise<RuntimeAppliedResult>;
+  emitOutboundRun(input: EmitOutboundRunInput): Promise<RuntimeAppliedResult>;
 }
 
 /**
@@ -123,7 +125,6 @@ export interface ProviderRunMessageInput {
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
-    imGroupId?: string;
     suppressReply?: boolean;
   };
 }
@@ -296,7 +297,7 @@ export interface ToolUpdateFact extends ProviderFactBase {
   toolName: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   title?: string;
-  input?: string;
+  input?: Record<string, unknown>;
   output?: string;
   error?: string;
   raw?: unknown;
@@ -360,6 +361,7 @@ export interface PermissionAskFact extends ProviderFactBase {
    */
   permissionId: string;
   permType: string;
+  /** 展示标题；投影时 undefined 会被替换为空字符串。 */
   title?: string;
   metadata?: Record<string, unknown>;
   raw?: unknown;

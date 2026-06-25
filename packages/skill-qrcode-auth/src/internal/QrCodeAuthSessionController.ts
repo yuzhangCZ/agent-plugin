@@ -123,11 +123,14 @@ export class QrCodeAuthSessionController {
           type: "confirmed",
           qrcode: result.qrcode,
           credentials: result.credentials,
+          assistantInfo: result.assistantInfo,
         });
         return true;
       case "failed":
         this.emitFailure(result);
         return true;
+      default:
+        return false;
     }
   }
 

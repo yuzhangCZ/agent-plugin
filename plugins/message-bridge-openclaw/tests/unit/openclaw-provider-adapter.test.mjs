@@ -1058,6 +1058,48 @@ test("provider adapter maps runtime approval gateway events and resolves permiss
   ]);
 });
 
+test("provider adapter supplies fallback title for runtime approval gateway events", async () => {
+  let gatewayListener;
+  const emitted = [];
+  const provider = createAdapter({
+    runtime: {
+      events: {
+        onGatewayEvent(listener) {
+          gatewayListener = listener;
+          return () => true;
+        },
+      },
+    },
+  });
+
+  await provider.initialize({
+    outbound: {
+      async emitOutboundMessage(input) {
+        const facts = [];
+        for await (const fact of input.facts) {
+          facts.push(fact);
+        }
+        emitted.push({ input, facts });
+        return { applied: true };
+      },
+    },
+  });
+
+  gatewayListener({
+    event: "exec.approval.requested",
+    payload: {
+      id: "approval-fallback-title-1",
+      sessionID: "ses_gateway_permission_fallback_title_1",
+      type: "exec",
+    },
+  });
+  await flushEvents();
+
+  assert.equal(emitted.length, 1);
+  const permissionFact = emitted[0].facts.find((fact) => fact.type === "permission.ask");
+  assert.equal(permissionFact.title, "");
+});
+
 test("provider adapter skips runtime approval events missing permType and records a warning", async () => {
   let gatewayListener;
   const warnings = [];
@@ -1283,7 +1325,7 @@ test("provider adapter debug logs raw runtime agent and reply dispatcher events"
           },
           async dispatchReplyWithBufferedBlockDispatcher({ ctx, dispatcherOptions }) {
             await dispatcherOptions.deliver({ text: "hello" }, { kind: "block" });
-            provider["handleRuntimeAgentEvent"]({
+            provider.handleRuntimeAgentEvent({
               stream: "assistant",
               sessionKey: ctx.SessionKey,
               data: {

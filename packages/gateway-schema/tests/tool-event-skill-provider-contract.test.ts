@@ -19,7 +19,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         status: 'running',
         toolCallId: 'call-1',
         title: 'Execute ls',
-        input: 'ls',
+        input: { command: 'ls' },
         output: 'file-a',
       },
     },
@@ -93,6 +93,194 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       protocol: 'cloud',
       type: item.type,
       properties: item.properties,
+    });
+  }
+});
+
+test('validateToolEvent preserves skill provider stream content verbatim', () => {
+  const cases = [
+    { type: 'text.delta', content: '' },
+    { type: 'text.delta', content: '  leading and trailing  ' },
+    { type: 'text.done', content: '\n\nfinal answer\t' },
+    { type: 'thinking.delta', content: '   ' },
+    { type: 'thinking.done', content: '\t\n  ' },
+  ] as const;
+
+  for (const item of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: item.type,
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        content: item.content,
+      },
+    });
+
+    assert.equal(result.ok, true, item.type);
+    if (!result.ok) {
+      continue;
+    }
+
+    assert.equal(result.value.properties.content, item.content);
+  }
+});
+
+test('validateToolEvent preserves skill provider tool.update content fields verbatim', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'tool.update',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-1',
+      toolName: 'bash',
+      status: 'completed',
+      toolCallId: 'call-1',
+      title: '  Run command\t',
+      input: { command: 'ls -la' },
+      output: '   ',
+      error: '\nfailed\t',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    messageId: 'msg-1',
+    partId: 'part-1',
+    toolName: 'bash',
+    status: 'completed',
+    toolCallId: 'call-1',
+    title: '  Run command\t',
+    input: { command: 'ls -la' },
+    output: '   ',
+    error: '\nfailed\t',
+  });
+});
+
+test('validateToolEvent preserves empty skill provider permission.ask title', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'permission.ask',
+    properties: {
+      partId: 'part-permission-1',
+      permissionId: 'permission-1',
+      permType: 'file_write',
+      title: '',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    partId: 'part-permission-1',
+    permissionId: 'permission-1',
+    permType: 'file_write',
+    title: '',
+  });
+});
+
+test('validateToolEvent preserves skill provider stream protocol fields verbatim', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'tool.update',
+    properties: {
+      messageId: ' msg-1 ',
+      partId: '\tpart-1',
+      toolName: '   ',
+      status: 'running',
+      toolCallId: ' call-1 ',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.properties, {
+    messageId: ' msg-1 ',
+    partId: '\tpart-1',
+    toolName: '   ',
+    status: 'running',
+    toolCallId: ' call-1 ',
+  });
+});
+
+test('validateToolEvent rejects non-string skill provider stream content', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'text.delta',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-1',
+      content: 42,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+
+  assertWireViolationShape(result.error, {
+    stage: 'event',
+    eventType: 'text.delta',
+  });
+});
+
+test('validateToolEvent rejects empty skill provider stream protocol fields', () => {
+  const cases = [
+    { field: 'messageId', properties: { messageId: '', partId: 'part-1' } },
+    { field: 'partId', properties: { messageId: 'msg-1', partId: '' } },
+    {
+      field: 'toolCallId',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        toolName: 'bash',
+        status: 'running',
+        toolCallId: '',
+      },
+      type: 'tool.update',
+    },
+    {
+      field: 'toolName',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        toolName: '',
+        status: 'running',
+        toolCallId: 'call-1',
+      },
+      type: 'tool.update',
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: testCase.type ?? 'text.delta',
+      properties: {
+        ...testCase.properties,
+        ...(testCase.type ? {} : { content: 'hello' }),
+      },
+    });
+
+    assert.equal(result.ok, false, testCase.field);
+    if (result.ok) {
+      continue;
+    }
+
+    assertWireViolationShape(result.error, {
+      stage: 'event',
+      eventType: testCase.type ?? 'text.delta',
     });
   }
 });
@@ -234,7 +422,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
       },
     },
     {
-      name: 'tool.update non-string input',
+      name: 'tool.update non-object input',
       eventType: 'tool.update',
       input: {
         protocol: 'cloud',
@@ -245,7 +433,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           toolName: 'bash',
           status: 'running',
           toolCallId: 'call-1',
-          input: { command: 'ls' },
+          input: 'ls',
         },
       },
     },
@@ -293,6 +481,21 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           toolCallId: 'perm-1',
           permissionId: 'perm-1',
           permType: 'file_write',
+          title: '允许写文件',
+        },
+      },
+    },
+    {
+      name: 'permission.ask missing title',
+      eventType: 'permission.ask',
+      input: {
+        protocol: 'cloud',
+        type: 'permission.ask',
+        properties: {
+          messageId: 'msg-1',
+          partId: 'part-5',
+          permissionId: 'perm-1',
+          permType: 'file_write',
         },
       },
     },
@@ -306,6 +509,7 @@ test('validateToolEvent fail-closes malformed skill events', () => {
           messageId: 'msg-1',
           partId: 'part-5',
           permissionId: 'perm-1',
+          title: '允许写文件',
         },
       },
     },

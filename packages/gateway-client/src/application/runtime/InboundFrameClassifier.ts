@@ -42,9 +42,9 @@ export class InboundFrameClassifier {
     this.adapter = new InboundProtocolAdapter(wireCodec);
   }
 
-  async classify(event: { data: string | ArrayBuffer | Blob | Uint8Array }): Promise<InboundClassificationResult> {
+  classify(event: { data: string | ArrayBuffer | Blob | Uint8Array }): InboundClassificationResult {
     this.context.telemetry.logRawFrame('onMessage', event.data);
-    const decoded = await this.decoder.decode(event.data);
+    const decoded = this.decoder.decode(event.data);
     if (decoded.kind !== 'parsed') {
       return { kind: 'nonparsed', frame: decoded };
     }

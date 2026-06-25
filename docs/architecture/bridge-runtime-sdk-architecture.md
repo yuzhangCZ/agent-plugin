@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 目标态架构设计
 
-**Version:** 0.6  
-**Date:** 2026-04-20  
+**Version:** 0.7  
+**Date:** 2026-06-15  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
 **Related:** [bridge-runtime-sdk 对外集成文档](../design/interfaces/bridge-runtime-sdk-integration.md), [Gateway Schema / Protocol 架构设计](./gateway-schema-architecture.md), [三方 Agent Runtime 系统分层架构设计](./third-party-agent-runtime-architecture.md)
@@ -135,6 +135,8 @@ Facade 不负责：
 - 承载 request run / outbound / interaction 规则
 - 直接派生 `SkillProviderEvent`
 - 直接拼装协议层 payload
+
+Facade 暴露的 runtime lifecycle 状态是 SDK 自身状态机，不直接复用 gateway-client 的连接状态对象。`getStatus()` 对外保持 `{ state, failureReason }` 结构，稳定错误分类通过 diagnostics 暴露。
 
 ### 4.2 Runtime Core
 

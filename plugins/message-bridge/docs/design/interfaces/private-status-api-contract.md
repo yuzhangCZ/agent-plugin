@@ -25,8 +25,8 @@
 
 ## External Dependencies
 
-- `@agent-plugin/gateway-client` 提供连接状态与错误事实
-- `@agent-plugin/gateway-client` 保证启动期 `connect()` reject 的失败已进入 `error` 事件流，且二者语义一致
+- `@wecode/bridge-runtime-sdk` 提供 runtime 生命周期状态与结构化错误事实
+- `@wecode/bridge-runtime-sdk` 保证 failed status 的 `error.code` 可用于插件侧稳定失败分类
 - 宿主 `app.log()` 提供可选状态 API 日志出口
 
 ## 概述
@@ -217,6 +217,13 @@ interface QrCodeAuthRunInput {
 事件模型：
 
 ```ts
+interface QrCodeAssistantInfo {
+  name: string;
+  nameEn: string;
+  desc: string;
+  descEn: string;
+}
+
 type QrCodeAuthSnapshot =
   | {
       type: "qrcode_generated";
@@ -243,6 +250,7 @@ type QrCodeAuthSnapshot =
         ak: string;
         sk: string;
       };
+      assistantInfo: QrCodeAssistantInfo;
     }
   | {
       type: "failed";
@@ -252,7 +260,7 @@ type QrCodeAuthSnapshot =
     };
 ```
 
-以上代码块与下表用于提供业务接入所需的接口摘要；类型真源仍以 `packages/skill-qrcode-auth/src/types.ts` 为准。
+以上代码块与下表用于提供业务接入所需的接口摘要；类型真源仍以 `packages/skill-qrcode-auth/src/types.ts` 为准。`confirmed.assistantInfo` 的包级方案归档在 `packages/skill-qrcode-auth/docs/design/qrcode-auth-confirmed-assistant-info-solution.md`。
 
 | `type` | 是否终态 | 额外字段 | 说明 |
 |---|---|---|---|
@@ -260,7 +268,7 @@ type QrCodeAuthSnapshot =
 | `scanned` | 否 | `qrcode` | 当前二维码已扫码，等待用户确认 |
 | `expired` | 否 | `qrcode` | 当前二维码已过期；若策略允许，运行时可继续刷新下一张二维码 |
 | `cancelled` | 是 | `qrcode` | 用户取消授权，本次会话结束 |
-| `confirmed` | 是 | `qrcode` `credentials` | 用户确认授权成功，`credentials` 内返回 `ak/sk` |
+| `confirmed` | 是 | `qrcode` `credentials` `assistantInfo` | 用户确认授权成功，`credentials` 内返回 `ak/sk`，`assistantInfo` 返回助理名称和描述 |
 | `failed` | 是 | `qrcode?` `reasonCode` `serviceError?` | 授权流程失败；失败分类与服务错误信息通过字段输出 |
 
 字段补充说明：
@@ -274,6 +282,10 @@ type QrCodeAuthSnapshot =
 | `expiresAt` | `string` | `qrcode_generated` | 当前二维码过期时间 |
 | `credentials.ak` | `string` | `confirmed` | 授权成功后返回的访问凭据 AK |
 | `credentials.sk` | `string` | `confirmed` | 授权成功后返回的访问凭据 SK |
+| `assistantInfo.name` | `string` | `confirmed` | 助理中文名称，服务端缺失时为空字符串 |
+| `assistantInfo.nameEn` | `string` | `confirmed` | 助理英文名称，服务端缺失时为空字符串 |
+| `assistantInfo.desc` | `string` | `confirmed` | 助理中文描述，服务端缺失时为空字符串 |
+| `assistantInfo.descEn` | `string` | `confirmed` | 助理英文描述，服务端缺失时为空字符串 |
 | `reasonCode` | `"timeout" \| "network_error" \| "auth_service_error"` | `failed` | 稳定失败分类 |
 | `serviceError` | `QrCodeAuthServiceError` | `failed` | 服务端错误的安全子集，可能为空 |
 

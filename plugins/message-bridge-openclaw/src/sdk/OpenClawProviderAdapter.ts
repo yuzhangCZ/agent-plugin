@@ -56,6 +56,46 @@ import {
 
 export type { OpenClawProviderAdapterOptions } from "./provider-adapter-types.js";
 
+function resolvePermissionDecision(reply: ProviderPermissionReplyInput["reply"]): "allow-once" | "allow-always" | "deny" {
+  if (reply === "once") {
+    return "allow-once";
+  }
+  if (reply === "always") {
+    return "allow-always";
+  }
+  return "deny";
+}
+
+function getRuntimeReplyEventName(kind: "tool" | "block" | "final"): "onTool" | "onBlock" | "onFinal" {
+  if (kind === "block") {
+    return "onBlock";
+  }
+  if (kind === "final") {
+    return "onFinal";
+  }
+  return "onTool";
+}
+
+function getRuntimeGatewayEventName(evt: RuntimeGatewayEvent): string {
+  if (typeof evt.event === "string") {
+    return evt.event;
+  }
+  if (typeof evt.type === "string") {
+    return evt.type;
+  }
+  return "";
+}
+
+function getPayloadDeltaText(payload: Record<string, unknown>): string {
+  if (typeof payload.delta === "string") {
+    return payload.delta;
+  }
+  if (typeof payload.text === "string") {
+    return payload.text;
+  }
+  return "";
+}
+
 /**
  * OpenClaw 宿主能力到 SDK Provider SPI 的适配层。
  * @remarks
@@ -190,12 +230,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
       });
     }
 
-    const decision =
-      input.reply === "once"
-        ? "allow-once"
-        : input.reply === "always"
-          ? "allow-always"
-          : "deny";
+    const decision = resolvePermissionDecision(input.reply);
     await this.approvalPort.resolve({
       permissionId: input.permissionId,
       decision,
@@ -466,7 +501,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
         deliver: async (rawPayload: unknown, info: { kind: "tool" | "block" | "final" }) => {
           this.logChatRawEvent({
             source: "runtime_reply_dispatcher",
-            eventName: info.kind === "block" ? "onBlock" : info.kind === "final" ? "onFinal" : "onTool",
+            eventName: getRuntimeReplyEventName(info.kind),
             toolSessionId: state.toolSessionId,
             sessionKey: state.sessionKey,
             payload: rawPayload,
@@ -670,7 +705,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   private async handleRuntimeGatewayEvent(evt: RuntimeGatewayEvent): Promise<void> {
-    const eventName = typeof evt.event === "string" ? evt.event : typeof evt.type === "string" ? evt.type : "";
+    const eventName = getRuntimeGatewayEventName(evt);
     const payload = asRecord(evt.payload) ?? asRecord(evt.data);
     if (!eventName || !payload) {
       return;
@@ -709,7 +744,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
 
     const messageId = asTrimmedString(payload.messageId) ?? `msg_${randomUUID()}`;
     const metadata = pickRecord(payload, "metadata") ?? pickRecord(payload, "meta");
-    const title = asTrimmedString(payload.title);
+    const title = asTrimmedString(payload.title) ?? "";
     const expiresAt = typeof payload.expiresAt === "number" ? payload.expiresAt : undefined;
     const record = this.approvalRegistry.upsertPending({
       toolSessionId,
@@ -732,7 +767,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
           partId: `part_${randomUUID()}`,
           permissionId,
           permType,
-          ...(record.title ? { title: record.title } : {}),
+          title: record.title,
           metadata: {
             ...(record.metadata ?? {}),
             ...(record.expiresAt !== undefined ? { expiresAt: record.expiresAt } : {}),
@@ -929,11 +964,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
 
     const phase = asTrimmedString(payload.phase) ?? "delta";
-    const deltaText = typeof payload.delta === "string"
-      ? payload.delta
-      : typeof payload.text === "string"
-        ? payload.text
-        : "";
+    const deltaText = getPayloadDeltaText(payload);
     const shouldEmitReasoningDelta =
       deltaText.length > 0 &&
       (phase !== "finish" && phase !== "result" || state.accumulatedThinking.length === 0);

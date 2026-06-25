@@ -291,6 +291,8 @@ export class TerminalCliPresenter implements Presenter {
         return;
       case "failed":
         return;
+      default:
+        return;
     }
   }
 

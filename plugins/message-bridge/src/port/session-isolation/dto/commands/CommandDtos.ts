@@ -54,7 +54,7 @@ export interface AbortAnchoredRunInput {
 
 export interface QuestionReplyCommandInput {
   questionId: string;
-  answer: string;
+  answers: string[][];
 }
 
 export interface PermissionReplyCommandInput {

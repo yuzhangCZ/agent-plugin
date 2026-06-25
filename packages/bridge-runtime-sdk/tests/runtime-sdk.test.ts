@@ -2,8 +2,15 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
+import { normalizeDownstream } from '@agent-plugin/gateway-schema';
+import {
+  BridgeRuntimeError,
+  createBridgeRuntime,
+} from '../src/index.ts';
 import type {
   BridgeGatewayHostConfig,
+  BridgeGatewayLogger,
   BridgeRuntimeOptions,
   ProviderFact,
   ProviderRun,
@@ -13,10 +20,93 @@ import type {
 } from '../src/index.ts';
 import type {
   BridgeGatewayHostConnection,
-  BridgeGatewayHostError,
-  BridgeGatewayHostState,
 } from '../src/infrastructure/gateway/gateway-host.ts';
-import { createBridgeRuntime } from '../src/index.ts';
+import { BridgeGatewayLoggerObservationAdapter } from '../src/adapters/observation/runtime-logger-observation.ts';
+import { GatewayProbeDriver } from '../src/adapters/gateway/GatewayProbeDriver.ts';
+import { GatewayRuntimeDriver } from '../src/adapters/gateway/GatewayRuntimeDriver.ts';
+import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
+import type { RuntimeObservationEvent } from '../src/application/runtime-observation/index.ts';
+import {
+  fromGatewayClosedFailure,
+  fromGatewayConnectFailure,
+  fromProbeFailure,
+  fromProviderStartFailure,
+  fromRuntimeInternalFailure,
+} from '../src/application/runtime-error-classifier.ts';
+
+function assertBridgeRuntimeError(
+  error: unknown,
+  expected: { code: BridgeRuntimeError['code']; message: string },
+): void {
+  assert.equal(error instanceof Error, true);
+  assert.equal((error as Error).name, 'BridgeRuntimeError');
+  assert.equal((error as BridgeRuntimeError).code, expected.code);
+  assert.equal((error as Error).message, expected.message);
+}
+
+test('runtime error classifier owns lifecycle gateway and fallback mappings', () => {
+  assertBridgeRuntimeError(fromGatewayConnectFailure(new GatewayClientError({
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    disposition: 'startup_failure',
+    retryable: false,
+    message: 'rejected',
+  })), {
+    code: 'gateway_handshake_rejected',
+    message: 'rejected',
+  });
+  assertBridgeRuntimeError(fromGatewayConnectFailure(new GatewayClientError({
+    code: 'GATEWAY_NOT_READY',
+    disposition: 'runtime_failure',
+    retryable: false,
+    message: 'not ready',
+  })), {
+    code: 'gateway_unknown_error',
+    message: 'not ready',
+  });
+  assertBridgeRuntimeError(fromGatewayConnectFailure({
+    code: 'GATEWAY_HANDSHAKE_REJECTED',
+    message: 'plain object is not gateway client error',
+  }), {
+    code: 'gateway_unknown_error',
+    message: 'plain object is not gateway client error',
+  });
+  assertBridgeRuntimeError(fromProviderStartFailure(new Error('provider failed')), {
+    code: 'provider_unavailable',
+    message: 'provider failed',
+  });
+  assertBridgeRuntimeError(fromRuntimeInternalFailure(new Error('cleanup failed')), {
+    code: 'runtime_internal_error',
+    message: 'cleanup failed',
+  });
+  assertBridgeRuntimeError(fromRuntimeInternalFailure(new GatewayClientError({
+    code: 'GATEWAY_TRANSPORT_ERROR',
+    disposition: 'runtime_failure',
+    retryable: false,
+    message: 'cleanup gateway failure',
+  })), {
+    code: 'runtime_internal_error',
+    message: 'cleanup gateway failure',
+  });
+  assertBridgeRuntimeError(fromProbeFailure(new Error('probe failed')), {
+    code: 'probe_unknown_error',
+    message: 'probe failed',
+  });
+  assert.equal(fromGatewayClosedFailure(new GatewayClientError({
+    code: 'GATEWAY_CLOSED_MANUAL',
+    disposition: 'cancelled',
+    retryable: false,
+    message: 'manual',
+  })), null);
+  assert.equal(fromGatewayClosedFailure(new GatewayClientError({
+    code: 'GATEWAY_CONNECT_ABORTED',
+    disposition: 'cancelled',
+    retryable: false,
+    message: 'aborted',
+  })), null);
+
+  const existing = new BridgeRuntimeError('runtime_internal_error', 'already classified');
+  assert.equal(fromRuntimeInternalFailure(existing), existing);
+});
 
 function createAsyncFacts(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
   return {
@@ -48,6 +138,18 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+function createTestObservation() {
+  const events: RuntimeObservationEvent[] = [];
+  return {
+    events,
+    observation: new DefaultRuntimeObservation({
+      record(event) {
+        events.push(event);
+      },
+    }),
+  };
+}
+
 function createHangingFacts(
   facts: ProviderFact[],
   release: Promise<unknown>,
@@ -64,22 +166,28 @@ function createHangingFacts(
 
 class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
-  state: BridgeGatewayHostState = 'DISCONNECTED';
+  state: 'DISCONNECTED' | 'CONNECTING' | 'READY' = 'DISCONNECTED';
   connectError: Error | null = null;
+  reconnecting = false;
+  closedCode: 'GATEWAY_CLOSED_MANUAL' | 'GATEWAY_CONNECT_ABORTED' | 'GATEWAY_AUTH_REJECTED' | 'GATEWAY_TRANSPORT_ERROR' | 'GATEWAY_RECONNECT_EXHAUSTED' | null = null;
 
   async connect(): Promise<void> {
+    this.reconnecting = false;
+    this.closedCode = null;
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     if (this.connectError) {
       throw this.connectError;
     }
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
+    this.reconnecting = false;
+    this.closedCode = 'GATEWAY_CLOSED_MANUAL';
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   }
 
   send(message: unknown): void {
@@ -91,14 +199,20 @@ class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
     return this.state === 'CONNECTED' || this.state === 'READY';
   }
 
-  getState(): BridgeGatewayHostState {
-    return this.state;
-  }
-
   getStatus() {
-    return {
-      isReady: () => this.state === 'READY',
-    };
+    if (this.state === 'READY') {
+      return GatewayClientStatus.ready();
+    }
+    if (this.reconnecting) {
+      return GatewayClientStatus.reconnecting();
+    }
+    if (this.closedCode) {
+      return GatewayClientStatus.closed(this.createClosedError(this.closedCode));
+    }
+    if (this.state === 'DISCONNECTED') {
+      return GatewayClientStatus.closed();
+    }
+    return GatewayClientStatus.connecting();
   }
 
   override on(event: string, listener: (...args: unknown[]) => void): this {
@@ -117,15 +231,43 @@ class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
     this.emit('heartbeat', message);
   }
 
-  emitError(error: BridgeGatewayHostError): void {
-    this.emit('error', error);
+  emitStatus(): void {
+    this.emit('statusChange', this.getStatus());
+  }
+
+  emitClosed(code: string, message?: string): void {
+    this.reconnecting = false;
+    const closedCode = code as NonNullable<typeof this.closedCode>;
+    this.closedCode = closedCode;
+    this.state = 'DISCONNECTED';
+    this.emit('statusChange', GatewayClientStatus.closed(this.createClosedError(closedCode, message)));
+  }
+
+  emitError(error: { code: string; message?: string }): void {
+    this.emitClosed(error.code, error.message);
+  }
+
+  private createClosedError(code: NonNullable<typeof this.closedCode>, message?: string): GatewayClientError {
+    return new GatewayClientError({
+      code,
+      disposition: code === 'GATEWAY_CLOSED_MANUAL' || code === 'GATEWAY_CONNECT_ABORTED'
+        ? 'cancelled'
+        : 'runtime_failure',
+      retryable: false,
+      message: message ?? code,
+    });
   }
 }
 
 function createRuntimeOptions(
   provider: ThirdPartyAgentProvider,
   connection: FakeGatewayClient,
-  extra?: Partial<BridgeRuntimeOptions>,
+  extra?: Partial<BridgeRuntimeOptions> & {
+    toolDoneCompatDelay?: {
+      sleep?: (ms: number) => Promise<void>;
+      delayMs?: number;
+    };
+  },
 ): BridgeRuntimeOptions {
   return {
     provider,
@@ -143,6 +285,9 @@ function createRuntimeOptions(
     } satisfies BridgeGatewayHostConfig,
     connectionFactory: () => connection,
     traceIdFactory: () => 'trace-fixed',
+    toolDoneCompatDelay: {
+      sleep: async () => {},
+    },
     ...extra,
   };
 }
@@ -152,6 +297,81 @@ function flushEvents(): Promise<void> {
     setImmediate(resolve);
   });
 }
+
+test('default runtime observation maps gateway probe events', () => {
+  const { events, observation } = createTestObservation();
+
+  observation.gatewayProbeRequested('ws://gateway.local', 50);
+  observation.gatewayProbeCompleted('ws://gateway.local', 'connect_error', 12, 'gateway_not_connected');
+
+  assert.deepEqual(events, [
+    {
+      type: 'gateway_probe',
+      phase: 'requested',
+      gatewayUrl: 'ws://gateway.local',
+      timeoutMs: 50,
+    },
+    {
+      type: 'gateway_probe',
+      phase: 'completed',
+      gatewayUrl: 'ws://gateway.local',
+      state: 'connect_error',
+      latencyMs: 12,
+      reason: 'gateway_not_connected',
+    },
+  ]);
+});
+
+test('logger observation adapter projects gateway probe events', () => {
+  const records: Array<{ level: string; message: string; meta: Record<string, unknown> }> = [];
+  const adapter = new BridgeGatewayLoggerObservationAdapter({
+    info(message, meta) {
+      records.push({ level: 'info', message, meta: meta ?? {} });
+    },
+    warn(message, meta) {
+      records.push({ level: 'warn', message, meta: meta ?? {} });
+    },
+    error(message, meta) {
+      records.push({ level: 'error', message, meta: meta ?? {} });
+    },
+  });
+
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'requested',
+    gatewayUrl: 'ws://gateway.local',
+    timeoutMs: 50,
+  });
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: 'ws://gateway.local',
+    state: 'connect_error',
+    latencyMs: 12,
+    reason: 'gateway_not_connected',
+  });
+
+  assert.deepEqual(records, [
+    {
+      level: 'info',
+      message: 'runtime_sdk.gateway_probe.requested',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        timeoutMs: 50,
+      },
+    },
+    {
+      level: 'error',
+      message: 'runtime_sdk.gateway_probe.completed',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        state: 'connect_error',
+        latencyMs: 12,
+        reason: 'gateway_not_connected',
+      },
+    },
+  ]);
+});
 
 function createProvider(): ThirdPartyAgentProvider {
   return {
@@ -210,6 +430,95 @@ function createInvalidInvokeInboundFrame() {
     },
   };
 }
+
+test('runtime lifecycle public api exposes stable start stop getStatus contract', async () => {
+  const connection = new FakeGatewayClient();
+  const initializeGate = createDeferred<void>();
+  const disposeGate = createDeferred<void>();
+  let factoryCalls = 0;
+  let connectCalls = 0;
+  let disconnectCalls = 0;
+  let disposeCalls = 0;
+  const provider = createProvider();
+  provider.initialize = async () => {
+    await initializeGate.promise;
+  };
+  provider.dispose = async () => {
+    disposeCalls += 1;
+    await disposeGate.promise;
+  };
+  connection.connect = async function connect(): Promise<void> {
+    connectCalls += 1;
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await flushEvents();
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  connection.disconnect = async function disconnect(): Promise<void> {
+    disconnectCalls += 1;
+    this.reconnecting = false;
+    this.closedCode = 'GATEWAY_CLOSED_MANUAL';
+    this.state = 'DISCONNECTED';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(provider, connection, {
+      connectionFactory: () => {
+        factoryCalls += 1;
+        return connection;
+      },
+    }),
+  );
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+  assert.equal(factoryCalls, 0);
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const startingStatus = runtime.getStatus();
+  assert.equal(startingStatus.state, 'starting');
+  assert.equal(startingStatus.failureReason, null);
+  assert.equal(startingStatus.error, undefined);
+  assert.equal(factoryCalls, 0);
+  assert.equal(connectCalls, 0);
+
+  initializeGate.resolve();
+  await startPromise;
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'ready',
+    failureReason: null,
+  });
+  assert.equal(factoryCalls, 1);
+  assert.equal(connectCalls, 1);
+
+  await runtime.start();
+  assert.equal(factoryCalls, 1);
+  assert.equal(connectCalls, 1);
+
+  const stopPromise = runtime.stop();
+  await flushEvents();
+  const stoppingStatus = runtime.getStatus();
+  assert.equal(stoppingStatus.state, 'stopping');
+  assert.equal(stoppingStatus.failureReason, null);
+  assert.equal(stoppingStatus.error, undefined);
+  assert.equal(disconnectCalls, 1);
+  assert.equal(disposeCalls, 1);
+
+  disposeGate.resolve();
+  await stopPromise;
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+
+  await runtime.stop();
+  assert.equal(disconnectCalls, 1);
+  assert.equal(disposeCalls, 1);
+});
 
 test('runtime starts, consumes downstream messages from gateway-client, and projects uplinks', async () => {
   const connection = new FakeGatewayClient();
@@ -288,6 +597,75 @@ test('runtime starts, consumes downstream messages from gateway-client, and proj
   assert.deepEqual(runtime.getStatus(), {
     state: 'idle',
     failureReason: null,
+  });
+});
+
+test('runtime preserves stream fact content verbatim when projecting uplinks', async () => {
+  const connection = new FakeGatewayClient();
+  const originalContent = '  keep leading spaces\nand trailing tabs\t';
+  const toolContent = {
+    title: '  Run command\t',
+    input: { command: 'ls -la' },
+    output: '',
+    error: '\nfailed\t',
+  };
+  const provider: ThirdPartyAgentProvider = {
+    ...createProvider(),
+    async runMessage() {
+      return createFakeRun(
+        [
+          { type: 'message.start', messageId: 'msg-1' },
+          { type: 'text.delta', messageId: 'msg-1', partId: 'part-1', content: originalContent },
+          {
+            type: 'tool.update',
+            messageId: 'msg-1',
+            partId: 'part-tool-1',
+            toolCallId: 'tool-call-1',
+            toolName: 'bash',
+            status: 'error',
+            ...toolContent,
+          },
+          { type: 'message.done', messageId: 'msg-1' },
+        ],
+        { outcome: 'completed' },
+      );
+    },
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent[1], {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'text.delta',
+      properties: { messageId: 'msg-1', partId: 'part-1', content: originalContent },
+    },
+  });
+  assert.deepEqual(connection.sent[2], {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'tool.update',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-tool-1',
+        toolCallId: 'tool-call-1',
+        toolName: 'bash',
+        status: 'error',
+        ...toolContent,
+      },
+    },
   });
 });
 
@@ -727,9 +1105,62 @@ test('start_request_run passes typed invoke.chat context to provider runMessage'
     context: {
       assistantAccount: 'assistant-account',
       sendUserAccount: 'user-account',
-      imGroupId: 'group-1',
       suppressReply: true,
     },
+  });
+});
+
+test('start_request_run does not synthesize extParameters from legacy imGroupId', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedInput: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage(input) {
+          capturedInput = input as unknown as Record<string, unknown>;
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    payload: {
+      toolSessionId: 'tool-legacy-im',
+      text: 'hi',
+      imGroupId: 'group-legacy',
+    },
+  });
+  await flushEvents();
+
+  assert.equal(typeof capturedInput?.runId, 'string');
+  assert.deepEqual(capturedInput, {
+    traceId: 'trace-fixed',
+    runId: capturedInput?.runId,
+    toolSessionId: 'tool-legacy-im',
+    text: 'hi',
   });
 });
 
@@ -782,7 +1213,7 @@ test('start_request_run omits absent extParameters in provider runMessage input'
   assert.equal('extParameters' in capturedInput, false);
 });
 
-test('runtime consumes question replies by questionId and forwards structured answers', async () => {
+test('runtime consumes legacy question answer by questionId and forwards normalized answers', async () => {
   const connection = new FakeGatewayClient();
   let capturedQuestionReply: Record<string, unknown> | undefined;
   const runtime = await createBridgeRuntime(
@@ -844,17 +1275,91 @@ test('runtime consumes question replies by questionId and forwards structured an
     payload: { toolSessionId: 'tool-1', text: 'hi' },
   });
   await flushEvents();
-  connection.emitMessage({
+  const legacyQuestionReply = normalizeDownstream({
     type: 'invoke',
     action: 'question_reply',
     payload: { questionId: 'question-1', answer: 'A' },
   });
+  assert.equal(legacyQuestionReply.ok, true);
+  connection.emitMessage(legacyQuestionReply.value);
   await flushEvents();
 
   assert.deepEqual(capturedQuestionReply, {
     traceId: 'trace-fixed',
     questionId: 'question-1',
     answers: [['A']],
+  });
+});
+
+test('runtime forwards structured question replies without flattening answers', async () => {
+  const connection = new FakeGatewayClient();
+  let capturedQuestionReply: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              { type: 'message.start', messageId: 'msg-1' },
+              {
+                type: 'question.ask',
+                messageId: 'msg-1',
+                partId: 'part-question-1',
+                questionId: 'question-1',
+                status: 'running',
+                questions: [
+                  { question: 'Pick one', options: [{ label: 'A' }] },
+                  { question: 'Pick many', options: [{ label: 'B' }, { label: 'C' }] },
+                ],
+              },
+              { type: 'message.done', messageId: 'msg-1' },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion(input) {
+          capturedQuestionReply = input as unknown as Record<string, unknown>;
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'question_reply',
+    payload: { questionId: 'question-1', answers: [['A'], ['B', 'C']] },
+  });
+  await flushEvents();
+
+  assert.deepEqual(capturedQuestionReply, {
+    traceId: 'trace-fixed',
+    questionId: 'question-1',
+    answers: [['A'], ['B', 'C']],
   });
 });
 
@@ -990,7 +1495,7 @@ test('close_session preserves pending question reply token routing', async () =>
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-close-1', answer: 'yes' },
+    payload: { questionId: 'question-close-1', answers: [['yes']] },
   });
   await flushEvents();
 
@@ -1392,7 +1897,7 @@ test('question.ask duplicate registration in the same session is idempotent', as
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-1', answer: 'A' },
+    payload: { questionId: 'question-1', answers: [['A']] },
   });
   await flushEvents();
 
@@ -1722,13 +2227,13 @@ test('question.ask rejects globally duplicated questionId across sessions withou
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-dup', answer: 'A' },
+    payload: { questionId: 'question-dup', answers: [['A']] },
   });
   await flushEvents();
   connection.emitMessage({
     type: 'invoke',
     action: 'question_reply',
-    payload: { questionId: 'question-current', answer: 'B' },
+    payload: { questionId: 'question-current', answers: [['B']] },
   });
   await flushEvents();
 
@@ -1751,6 +2256,143 @@ test('question.ask rejects globally duplicated questionId across sessions withou
     phase: 'runtime',
     message: 'question interaction reply target must be globally unique',
     code: 'pending_interaction_conflict',
+  });
+});
+
+test('permission.ask preserves empty title during projection', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.ask',
+                partId: 'permission-empty-title',
+                permissionId: 'permission-empty-title',
+                permType: 'file_write',
+                title: '',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const permissionEvent = connection.sent.find((message) => message.type === 'tool_event' && message.event?.type === 'permission.ask');
+  assert.ok(permissionEvent);
+  assert.deepStrictEqual(permissionEvent, {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'permission.ask',
+      properties: {
+        partId: 'permission-empty-title',
+        permissionId: 'permission-empty-title',
+        permType: 'file_write',
+        title: '',
+      },
+    },
+  });
+});
+
+test('permission.ask defaults missing title to empty string during projection', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.ask',
+                partId: 'permission-missing-title',
+                permissionId: 'permission-missing-title',
+                permType: 'file_write',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  const permissionEvent = connection.sent.find((message) => message.type === 'tool_event' && message.event?.type === 'permission.ask');
+  assert.ok(permissionEvent);
+  assert.deepStrictEqual(permissionEvent, {
+    type: 'tool_event',
+    toolSessionId: 'tool-1',
+    event: {
+      protocol: 'cloud',
+      type: 'permission.ask',
+      properties: {
+        partId: 'permission-missing-title',
+        permissionId: 'permission-missing-title',
+        permType: 'file_write',
+        title: '',
+      },
+    },
   });
 });
 
@@ -1877,10 +2519,10 @@ test('runtime start trusts gateway-client connect READY contract', async () => {
   const connection = new FakeGatewayClient();
   connection.connect = async function connect(): Promise<void> {
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     await flushEvents();
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
 
@@ -1893,13 +2535,13 @@ test('runtime start disconnects owned connection when startup fails after connec
   let disconnectCalls = 0;
   connection.connect = async function connect(): Promise<void> {
     this.state = 'CONNECTED';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     throw new Error('connect_failed_after_open');
   };
   connection.disconnect = function disconnect(): void {
     disconnectCalls += 1;
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
 
@@ -1909,6 +2551,7 @@ test('runtime start disconnects owned connection when startup fails after connec
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
   });
 });
 
@@ -1950,13 +2593,315 @@ test('runtime start rejects and enters failed when provider initialize fails', a
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'provider_init_failed',
+    error: new BridgeRuntimeError('provider_unavailable', 'provider_init_failed'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'startup_failure',
     phase: 'start',
     message: 'provider_init_failed',
-    code: undefined,
+    code: 'provider_unavailable',
   });
+});
+
+test('failed runtime status returns immutable cloned BridgeRuntimeError snapshots', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async initialize() {
+          throw new Error('provider_init_failed');
+        },
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await assert.rejects(runtime.start(), /provider_init_failed/);
+  const first = runtime.getStatus();
+  const second = runtime.getStatus();
+
+  assert.ok(first.error instanceof BridgeRuntimeError);
+  assert.ok(Object.isFrozen(first.error));
+  assert.notEqual(first.error, second.error);
+  assert.equal(second.error?.code, 'provider_unavailable');
+  assert.equal(second.error?.message, 'provider_init_failed');
+});
+
+test('runtime start wraps provider initialize failure as BridgeRuntimeError', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async initialize() {
+          throw new Error('provider_init_failed');
+        },
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun([], { outcome: 'completed' });
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'provider_unavailable',
+        message: 'provider_init_failed',
+      });
+      return true;
+    },
+  );
+});
+
+test('runtime start maps typed gateway-client connect failure into status error', async () => {
+  const connection = new FakeGatewayClient();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    throw new GatewayClientError({
+      code: 'GATEWAY_HANDSHAKE_TIMEOUT',
+      disposition: 'startup_failure',
+      retryable: true,
+      message: 'handshake timed out',
+    });
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'gateway_handshake_timeout',
+        message: 'handshake timed out',
+      });
+      return true;
+    },
+  );
+
+  const firstStatus = runtime.getStatus();
+  const secondStatus = runtime.getStatus();
+  assert.equal(firstStatus.state, 'failed');
+  assert.equal(firstStatus.failureReason, 'handshake timed out');
+  assert.equal(firstStatus.error?.code, 'gateway_handshake_timeout');
+  assert.equal(firstStatus.error?.message, 'handshake timed out');
+  assert.ok(firstStatus.error instanceof BridgeRuntimeError);
+  assert.ok(Object.isFrozen(firstStatus.error));
+  assert.notEqual(firstStatus.error, secondStatus.error);
+  assert.equal(secondStatus.error?.code, 'gateway_handshake_timeout');
+});
+
+test('runtime start preserves original message when disconnect cleanup throws', async () => {
+  const connection = new FakeGatewayClient();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTED';
+    this.emitStatus();
+    throw new Error('connect_failed_after_open');
+  };
+  connection.disconnect = function disconnect(): void {
+    throw new Error('disconnect_cleanup_failed');
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await assert.rejects(
+    runtime.start(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'gateway_unknown_error',
+        message: 'connect_failed_after_open',
+      });
+      return true;
+    },
+  );
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
+  });
+});
+
+test('runtime stop wraps dispose failure as BridgeRuntimeError', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    throw new Error('provider_dispose_failed');
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'provider_dispose_failed',
+      });
+      return true;
+    },
+  );
+});
+
+test('runtime stop still disposes provider when disconnect throws', async () => {
+  const connection = new FakeGatewayClient();
+  let disposeCalls = 0;
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeCalls += 1;
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.disconnect = function disconnect(): void {
+    throw new Error('disconnect_failed');
+  };
+
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'disconnect_failed',
+      });
+      return true;
+    },
+  );
+  assert.equal(disposeCalls, 1);
+});
+
+test('runtime stop maps typed gateway-client disconnect failure as runtime internal error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.disconnect = async function disconnect(): Promise<void> {
+    throw new GatewayClientError({
+      code: 'GATEWAY_TRANSPORT_ERROR',
+      disposition: 'runtime_failure',
+      retryable: false,
+      message: 'disconnect transport failed',
+    });
+  };
+
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'disconnect transport failed',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'disconnect transport failed',
+    error: new BridgeRuntimeError('runtime_internal_error', 'disconnect transport failed'),
+  });
+});
+
+test('runtime stop maps typed gateway-client provider cleanup failure as runtime internal error', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    throw new GatewayClientError({
+      code: 'GATEWAY_AUTH_REJECTED',
+      disposition: 'runtime_failure',
+      retryable: false,
+      message: 'provider cleanup gateway failure',
+    });
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    runtime.stop(),
+    (error) => {
+      assertBridgeRuntimeError(error, {
+        code: 'runtime_internal_error',
+        message: 'provider cleanup gateway failure',
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'provider cleanup gateway failure',
+    error: new BridgeRuntimeError('runtime_internal_error', 'provider cleanup gateway failure'),
+  });
+});
+
+test('gateway runtime driver detaches observers when async disconnect rejects', async () => {
+  const connection = new FakeGatewayClient();
+  const options = createRuntimeOptions(createProvider(), connection);
+  const { observation } = createTestObservation();
+  const driver = new GatewayRuntimeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    inboundPolicy: {
+      handle() {},
+    },
+    connectionFactory: () => connection,
+  });
+  let statusChanges = 0;
+  driver.attach({
+    onGatewayStatusChanged() {
+      statusChanges += 1;
+    },
+    onBusinessMessage() {},
+  });
+
+  await driver.connect();
+  connection.disconnect = async function disconnect(): Promise<void> {
+    throw new Error('disconnect_async_failed');
+  };
+
+  await assert.rejects(driver.disconnect(), /disconnect_async_failed/);
+  connection.reconnecting = true;
+  connection.emitStatus();
+
+  assert.equal(statusChanges, 2);
+  assert.equal(driver.isReady(), false);
 });
 
 test('runtime reflects reconnecting and returns to ready after gateway reconnects', async () => {
@@ -1991,7 +2936,9 @@ test('runtime reflects reconnecting and returns to ready after gateway reconnect
   );
 
   await runtime.start();
-  connection.disconnect();
+  connection.reconnecting = true;
+  connection.state = 'DISCONNECTED';
+  connection.emitStatus();
   assert.equal(runtime.getStatus().state, 'reconnecting');
 
   await connection.connect();
@@ -2111,7 +3058,7 @@ test('question_reply missing pending interaction projects tool_error', async () 
     type: 'invoke',
     action: 'question_reply',
     welinkSessionId: 'welink-question-missing-1',
-    payload: { questionId: 'question-missing-1', answer: 'A' },
+    payload: { questionId: 'question-missing-1', answers: [['A']] },
   });
   await flushEvents();
 
@@ -2299,7 +3246,7 @@ test('runtime handles invalid invoke inbound frames and records transport diagno
     message: 'payload.text is required',
     code: 'missing_required_field',
   });
-  assert.equal(runtime.getDiagnostics().gatewayState, 'READY');
+  assert.equal(runtime.getDiagnostics().gatewayState, 'ready');
   assert.equal(typeof runtime.getDiagnostics().lastInboundAt, 'number');
   assert.equal(typeof runtime.getDiagnostics().lastOutboundAt, 'number');
   assert.equal(typeof runtime.getDiagnostics().lastHeartbeatAt, 'number');
@@ -2390,6 +3337,114 @@ test('request run projects session.error exactly once before terminal tool_error
     type: 'tool_error',
     toolSessionId: 'tool-1',
     error: 'agent offline',
+  });
+});
+
+test('request run delays terminal tool_done by 100ms', async () => {
+  const connection = new FakeGatewayClient();
+  const delay = createDeferred<void>();
+  const delayCalls: number[] = [];
+  const provider = createProvider();
+  provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return delay.promise;
+      },
+    },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(delayCalls, [100]);
+  assert.equal(connection.sent.some((message) => (
+    typeof message === 'object' && message !== null && 'type' in message && message.type === 'tool_done'
+  )), false);
+  assert.equal(runtime.getDiagnostics().uplinks.some((message) => message.type === 'tool_done'), false);
+
+  delay.resolve();
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_done',
+    toolSessionId: 'tool-1',
+  });
+  assert.equal(runtime.getDiagnostics().uplinks.at(-1)?.type, 'tool_done');
+});
+
+test('request run sends terminal tool_error without compatibility delay', async () => {
+  const connection = new FakeGatewayClient();
+  const delayCalls: number[] = [];
+  const provider = createProvider();
+  provider.runMessage = async () => createFakeRun([], {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'provider failed',
+    },
+  });
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return Promise.resolve();
+      },
+    },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(delayCalls, []);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    error: 'provider failed',
+  });
+});
+
+test('request run skips terminal tool_done delay when compatibility delay is disabled', async () => {
+  const connection = new FakeGatewayClient();
+  const delayCalls: number[] = [];
+  const provider = createProvider();
+  provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    toolDoneCompatDelay: {
+      sleep(ms) {
+        delayCalls.push(ms);
+        return Promise.resolve();
+      },
+      delayMs: 0,
+    },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(delayCalls, []);
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_done',
+    toolSessionId: 'tool-1',
   });
 });
 
@@ -2788,7 +3843,6 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
   connection.emitError({
     code: 'GATEWAY_HANDSHAKE_REJECTED',
     disposition: 'runtime_failure',
-    stage: 'ready',
     retryable: false,
     message: 'rejected',
   });
@@ -2797,6 +3851,7 @@ test('runtime marks non-retryable gateway errors as failed', async () => {
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'rejected',
+    error: new BridgeRuntimeError('gateway_handshake_rejected', 'rejected'),
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'gateway_runtime_failure',
@@ -2850,18 +3905,82 @@ test('failed start does not drift back to reconnecting or ready after later gate
   const connection = new FakeGatewayClient();
   connection.connect = async function connect(): Promise<void> {
     this.state = 'CONNECTED';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     throw new Error('connect_failed_after_open');
   };
   const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
 
   await assert.rejects(runtime.start(), /connect_failed_after_open/);
-  connection.emit('stateChange', 'READY');
-  connection.emit('stateChange', 'DISCONNECTED');
+  connection.state = 'READY';
+  connection.emitStatus();
+  connection.state = 'DISCONNECTED';
+  connection.emitStatus();
 
   assert.deepEqual(runtime.getStatus(), {
     state: 'failed',
     failureReason: 'connect_failed_after_open',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'connect_failed_after_open'),
+  });
+});
+
+test('gateway runtime error preserves original gateway failure code in diagnostics', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitError({
+    code: 'GATEWAY_FATAL',
+    message: 'gateway_runtime_failed',
+    retryable: false,
+  });
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'gateway_runtime_failed',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed'),
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'gateway_runtime_failure',
+    phase: 'runtime',
+    message: 'gateway_runtime_failed',
+    code: 'GATEWAY_FATAL',
+  });
+});
+
+test('gateway non-retryable closed status marks running runtime failed', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.closedCode = 'GATEWAY_TRANSPORT_ERROR';
+  connection.state = 'DISCONNECTED';
+  connection.emitStatus();
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'GATEWAY_TRANSPORT_ERROR',
+    error: new BridgeRuntimeError('gateway_transport_error', 'GATEWAY_TRANSPORT_ERROR'),
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'gateway_runtime_failure',
+    phase: 'runtime',
+    message: 'GATEWAY_TRANSPORT_ERROR',
+    code: 'GATEWAY_TRANSPORT_ERROR',
+  });
+});
+
+test('manual gateway close does not mark running runtime failed', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.closedCode = 'GATEWAY_CLOSED_MANUAL';
+  connection.state = 'DISCONNECTED';
+  connection.emitStatus();
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'ready',
+    failureReason: null,
   });
 });
 
@@ -2964,18 +4083,18 @@ test('different runtimes with the same gateway url and ak own separate connectio
   firstConnection.connect = async function connect(): Promise<void> {
     firstConnectCalls += 1;
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     await flushEvents();
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   secondConnection.connect = async function connect(): Promise<void> {
     secondConnectCalls += 1;
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     await flushEvents();
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
 
   const provider: ThirdPartyAgentProvider = {
@@ -3052,10 +4171,10 @@ test('concurrent start on one runtime creates and connects once', async () => {
   connection.connect = async function connect(): Promise<void> {
     connectCalls += 1;
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     await flushEvents();
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(createProvider(), connection, {
@@ -3073,6 +4192,192 @@ test('concurrent start on one runtime creates and connects once', async () => {
   assert.equal(runtime.getStatus().state, 'ready');
 });
 
+test('start waits for in-flight stop before reconnecting', async () => {
+  const connection = new FakeGatewayClient();
+  let connectCalls = 0;
+  let disposeStarted = false;
+  const disposeGate = createDeferred<void>();
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeStarted = true;
+    await disposeGate.promise;
+  };
+  connection.connect = async function connect(): Promise<void> {
+    connectCalls += 1;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  const stopPromise = runtime.stop();
+  while (!disposeStarted) {
+    await flushEvents();
+  }
+  const restartPromise = runtime.start();
+  await flushEvents();
+
+  assert.equal(connectCalls, 1);
+  disposeGate.resolve();
+  await stopPromise;
+  await restartPromise;
+
+  assert.equal(connectCalls, 2);
+  assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('stop during start settles to idle', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  let disconnectCalls = 0;
+  const logs: Array<{ message: string; meta: Record<string, unknown> }> = [];
+  const logger: BridgeGatewayLogger = {
+    info(message, meta) {
+      logs.push({ message, meta: meta ?? {} });
+    },
+  };
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  connection.disconnect = async function disconnect(): Promise<void> {
+    disconnectCalls += 1;
+    this.state = 'DISCONNECTED';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection, { logger }));
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const stopPromise = runtime.stop();
+  connectGate.resolve();
+  await Promise.all([startPromise, stopPromise]);
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+  assert.equal(logs.some((log) => log.message === 'runtime_sdk.start.completed'), false);
+  assert.equal(logs.some((log) => log.message === 'runtime_sdk.stop.completed'), true);
+  assert.equal(disconnectCalls, 1);
+});
+
+test('stop during start avoids duplicate disconnect when no connection becomes ready', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  let disconnectCalls = 0;
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await connectGate.promise;
+  };
+  connection.disconnect = async function disconnect(): Promise<void> {
+    disconnectCalls += 1;
+    this.state = 'DISCONNECTED';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const stopPromise = runtime.stop();
+  connectGate.resolve();
+  await Promise.all([startPromise, stopPromise]);
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+  assert.equal(disconnectCalls, 1);
+});
+
+test('stop during start ignores stale connect rejection', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  const logs: Array<{ message: string; meta: Record<string, unknown> }> = [];
+  const logger: BridgeGatewayLogger = {
+    error(message, meta) {
+      logs.push({ message, meta: meta ?? {} });
+    },
+    info(message, meta) {
+      logs.push({ message, meta: meta ?? {} });
+    },
+  };
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  connection.disconnect = function disconnect(): void {
+    connectGate.reject(new Error('connect_aborted_by_stop'));
+    this.state = 'DISCONNECTED';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection, { logger }));
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const stopPromise = runtime.stop();
+  await Promise.all([startPromise, stopPromise]);
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+  assert.equal(logs.some((log) => log.message === 'runtime_sdk.start.failed'), false);
+  assert.equal(logs.some((log) => log.message === 'runtime_sdk.stop.completed'), true);
+  assert.equal(
+    runtime.getDiagnostics().failures.some((failure) => failure.kind === 'startup_failure'),
+    false,
+  );
+});
+
+test('gateway runtime error during start is not overwritten by later connect completion', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    this.emitError({
+      code: 'GATEWAY_FATAL',
+      message: 'gateway_runtime_failed_during_start',
+      retryable: false,
+    });
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'gateway_runtime_failed_during_start',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed_during_start'),
+  });
+
+  connectGate.resolve();
+  await startPromise;
+
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'failed',
+    failureReason: 'gateway_runtime_failed_during_start',
+    error: new BridgeRuntimeError('gateway_unknown_error', 'gateway_runtime_failed_during_start'),
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'gateway_runtime_failure',
+    phase: 'runtime',
+    message: 'gateway_runtime_failed_during_start',
+    code: 'GATEWAY_FATAL',
+  });
+});
+
 test('concurrent probe on one runtime creates one temporary connection', async () => {
   const connection = new FakeGatewayClient();
   let factoryCalls = 0;
@@ -3080,10 +4385,10 @@ test('concurrent probe on one runtime creates one temporary connection', async (
   connection.connect = async function connect(): Promise<void> {
     connectCalls += 1;
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     await flushEvents();
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(createProvider(), connection, {
@@ -3105,6 +4410,107 @@ test('concurrent probe on one runtime creates one temporary connection', async (
   assert.deepEqual(second, first);
 });
 
+test('concurrent probe with different timeouts creates independent temporary connections', async () => {
+  let factoryCalls = 0;
+  let connectCalls = 0;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), new FakeGatewayClient(), {
+      connectionFactory: () => {
+        factoryCalls += 1;
+        const connection = new FakeGatewayClient();
+        connection.connect = async function connect(): Promise<void> {
+          connectCalls += 1;
+          this.state = 'READY';
+          this.emitStatus();
+        };
+        return connection;
+      },
+    }),
+  );
+
+  const [first, second] = await Promise.all([
+    runtime.probe({ timeoutMs: 50 }),
+    runtime.probe({ timeoutMs: 75 }),
+  ]);
+
+  assert.equal(factoryCalls, 2);
+  assert.equal(connectCalls, 2);
+  assert.equal(first.state, 'ready');
+  assert.equal(second.state, 'ready');
+});
+
+test('probe during starting returns connecting without waiting for startPromise', async () => {
+  const connection = new FakeGatewayClient();
+  const connectGate = createDeferred<void>();
+  let probeConnectionCreated = false;
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await connectGate.promise;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), connection, {
+      connectionFactory: () => {
+        if (connection.state === 'CONNECTING') {
+          probeConnectionCreated = true;
+        }
+        return connection;
+      },
+    }),
+  );
+
+  const startPromise = runtime.start();
+  await flushEvents();
+  const probeResult = await runtime.probe({ timeoutMs: 5_000 });
+  connectGate.resolve();
+  await startPromise;
+
+  assert.deepEqual(probeResult, {
+    state: 'connecting',
+    latencyMs: probeResult.latencyMs,
+    reason: 'runtime_lifecycle_busy_probe_skipped',
+  });
+  assert.equal(probeConnectionCreated, false);
+});
+
+test('probe during stopping returns connecting without temporary connection', async () => {
+  const connection = new FakeGatewayClient();
+  let disposeStarted = false;
+  const disposeGate = createDeferred<void>();
+  let factoryCalls = 0;
+  const provider = createProvider();
+  provider.dispose = async () => {
+    disposeStarted = true;
+    await disposeGate.promise;
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(provider, connection, {
+      connectionFactory: () => {
+        factoryCalls += 1;
+        return connection;
+      },
+    }),
+  );
+
+  await runtime.start();
+  const stopPromise = runtime.stop();
+  while (!disposeStarted) {
+    await flushEvents();
+  }
+  const probeResult = await runtime.probe({ timeoutMs: 50 });
+  disposeGate.resolve();
+  await stopPromise;
+
+  assert.deepEqual(probeResult, {
+    state: 'connecting',
+    latencyMs: probeResult.latencyMs,
+    reason: 'runtime_lifecycle_busy_probe_skipped',
+  });
+  assert.equal(factoryCalls, 1);
+});
+
 test('start cancels in-flight probe before creating runtime connection', async () => {
   const probeConnection = new FakeGatewayClient();
   const runtimeConnection = new FakeGatewayClient();
@@ -3112,12 +4518,12 @@ test('start cancels in-flight probe before creating runtime connection', async (
   let runtimeConnectCalls = 0;
   probeConnection.connect = async function connect(): Promise<void> {
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   runtimeConnection.connect = async function connect(): Promise<void> {
     runtimeConnectCalls += 1;
     this.state = 'READY';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
   };
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(createProvider(), runtimeConnection, {
@@ -3139,21 +4545,208 @@ test('start cancels in-flight probe before creating runtime connection', async (
 
   assert.deepEqual(createdConnections, ['probe', 'runtime']);
   assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
   assert.equal(runtimeConnectCalls, 1);
   assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('start cancels same-tick in-flight probe before temporary probe becomes ready', async () => {
+  const probeConnection = new FakeGatewayClient();
+  const runtimeConnection = new FakeGatewayClient();
+  const createdConnections: string[] = [];
+  let runtimeConnectCalls = 0;
+  probeConnection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+    await flushEvents();
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  runtimeConnection.connect = async function connect(): Promise<void> {
+    runtimeConnectCalls += 1;
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), runtimeConnection, {
+      connectionFactory: () => {
+        if (createdConnections.length === 0) {
+          createdConnections.push('probe');
+          return probeConnection;
+        }
+        createdConnections.push('runtime');
+        return runtimeConnection;
+      },
+    }),
+  );
+
+  const probe = runtime.probe({ timeoutMs: 5_000 });
+  await runtime.start();
+  const probeResult = await probe;
+
+  assert.deepEqual(createdConnections, ['probe', 'runtime']);
+  assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
+  assert.equal(runtimeConnectCalls, 1);
+  assert.equal(runtime.getStatus().state, 'ready');
+});
+
+test('stop cancels in-flight probe without starting runtime lifecycle', async () => {
+  const probeConnection = new FakeGatewayClient();
+  probeConnection.connect = async function connect(): Promise<void> {
+    this.state = 'CONNECTING';
+    this.emitStatus();
+  };
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), probeConnection, {
+      connectionFactory: () => probeConnection,
+    }),
+  );
+
+  const probe = runtime.probe({ timeoutMs: 5_000 });
+  await flushEvents();
+  await runtime.stop();
+  const probeResult = await probe;
+
+  assert.equal(probeResult.state, 'cancelled');
+  assert.equal(probeResult.reason, 'probe_cancelled_for_runtime_lifecycle');
+  assert.deepEqual(runtime.getStatus(), {
+    state: 'idle',
+    failureReason: null,
+  });
+});
+
+test('gateway probe returns cancelled for pre-aborted signal without creating connection', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('probe_pre_cancelled'));
+  let factoryCalls = 0;
+  const options = createRuntimeOptions(createProvider(), new FakeGatewayClient());
+  const { observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => {
+      factoryCalls += 1;
+      return new FakeGatewayClient();
+    },
+  });
+
+  const result = await driver.probe({
+    timeoutMs: 5_000,
+    abortSignal: controller.signal,
+  });
+
+  assert.deepEqual(result, {
+    state: 'cancelled',
+    latencyMs: result.latencyMs,
+    reason: 'probe_pre_cancelled',
+  });
+  assert.equal(factoryCalls, 0);
+});
+
+test('gateway probe maps synchronous connect throw to result and disconnects connection', async () => {
+  const connection = new FakeGatewayClient();
+  let disconnectCalls = 0;
+  connection.connect = function connect(): Promise<void> {
+    throw new Error('gateway_websocket_error');
+  };
+  connection.disconnect = function disconnect(): void {
+    disconnectCalls += 1;
+    this.state = 'DISCONNECTED';
+  };
+  const options = createRuntimeOptions(createProvider(), connection);
+  const { events, observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => connection,
+  });
+
+  const result = await driver.probe({ timeoutMs: 5_000 });
+
+  assert.deepEqual(result, {
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'gateway_websocket_error',
+  });
+  assert.equal(disconnectCalls, 1);
+  assert.deepEqual(events.at(-1), {
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: options.gatewayHost.url,
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'gateway_websocket_error',
+  });
+});
+
+test('gateway probe maps connection factory throw to connect error result', async () => {
+  const options = createRuntimeOptions(createProvider(), new FakeGatewayClient());
+  const { events, observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => {
+      throw new Error('probe_factory_failed');
+    },
+  });
+
+  const result = await driver.probe({ timeoutMs: 5_000 });
+
+  assert.deepEqual(result, {
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'probe_factory_failed',
+  });
+  assert.deepEqual(events.at(-1), {
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: options.gatewayHost.url,
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'probe_factory_failed',
+  });
+});
+
+test('gateway probe ignores disconnect teardown failure after ready', async () => {
+  const connection = new FakeGatewayClient();
+  let disconnectCalls = 0;
+  connection.connect = async function connect(): Promise<void> {
+    this.state = 'READY';
+    this.emitStatus();
+  };
+  connection.disconnect = function disconnect(): void {
+    disconnectCalls += 1;
+    throw new Error('probe_disconnect_cleanup_failed');
+  };
+  const options = createRuntimeOptions(createProvider(), connection);
+  const { observation } = createTestObservation();
+  const driver = new GatewayProbeDriver({
+    gatewayHost: options.gatewayHost,
+    observation,
+    connectionFactory: () => connection,
+  });
+
+  const result = await driver.probe({ timeoutMs: 5_000 });
+
+  assert.deepEqual(result, {
+    state: 'ready',
+    latencyMs: result.latencyMs,
+    reason: 'probe_connected',
+  });
+  assert.equal(disconnectCalls, 1);
 });
 
 test('probe waits for connect rejection before classifying startup rejection', async () => {
   const connection = new FakeGatewayClient();
   connection.connect = async function connect(): Promise<void> {
     this.state = 'CONNECTING';
-    this.emit('stateChange', this.state);
+    this.emitStatus();
     this.state = 'DISCONNECTED';
-    this.emit('stateChange', this.state);
-    throw Object.assign(new Error('gateway_register_rejected'), {
+    this.emitStatus();
+    throw new GatewayClientError({
       code: 'GATEWAY_HANDSHAKE_REJECTED',
       disposition: 'startup_failure',
-      stage: 'handshake',
       retryable: false,
       message: 'gateway_register_rejected',
     });
@@ -3173,4 +4766,50 @@ test('probe waits for connect rejection before classifying startup rejection', a
     reason: 'gateway_register_rejected',
   });
   assert.equal(result.latencyMs >= 0, true);
+  assert.equal(runtime.getDiagnostics().failures.length, 0);
+});
+
+test('probe classifies gateway rejection by error code instead of message', async () => {
+  const connection = new FakeGatewayClient();
+  connection.connect = async function connect(): Promise<void> {
+    throw new GatewayClientError({
+      code: 'GATEWAY_HANDSHAKE_REJECTED',
+      disposition: 'startup_failure',
+      retryable: false,
+      message: 'gateway_websocket_error',
+    });
+  };
+
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), connection, {
+      connectionFactory: () => connection,
+    }),
+  );
+
+  const result = await runtime.probe({ timeoutMs: 50 });
+
+  assert.deepEqual(result, {
+    state: 'rejected',
+    latencyMs: result.latencyMs,
+    reason: 'gateway_websocket_error',
+  });
+});
+
+test('probe connection factory failure resolves connect_error without diagnostics failure', async () => {
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(createProvider(), new FakeGatewayClient(), {
+      connectionFactory: () => {
+        throw new Error('probe_factory_failed');
+      },
+    }),
+  );
+
+  const result = await runtime.probe({ timeoutMs: 50 });
+
+  assert.deepEqual(result, {
+    state: 'connect_error',
+    latencyMs: result.latencyMs,
+    reason: 'probe_factory_failed',
+  });
+  assert.equal(runtime.getDiagnostics().failures.length, 0);
 });

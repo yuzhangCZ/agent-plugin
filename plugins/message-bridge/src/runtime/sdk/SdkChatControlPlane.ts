@@ -61,10 +61,6 @@ export interface EventAnchorResolver {
   resolveForEvent(opencodeSessionId: string): { anchor: string } | undefined;
 }
 
-export interface CreatedSessionBindingPort {
-  register(anchor: string, opencodeSessionId: string): void;
-}
-
 export interface SessionAttachmentPort {
   switchAttachedSession(input: { toolSessionId: string; sessionId: string }): Promise<{ applied: boolean }>;
 }
@@ -121,14 +117,14 @@ export class ChatEntryPolicy {
     slashCapabilityProvider: StaticSlashCapabilityProvider;
   }) {}
 
-  decide(input: ProviderRunMessageInput, policy?: BusinessEntryPolicy): EntryPolicyDecision {
+  decide(input: ProviderRunMessageInput, entryContext?: BusinessEntryContext): EntryPolicyDecision {
     if (input.context?.suppressReply) {
       return { kind: 'deny', text: GROUP_CHAT_DENY_REPLY_TEXT };
     }
 
     const parseResult = this.dependencies.slashCommandParser.tryParse({
       text: input.text,
-      isGroupChat: Boolean(input.context?.imGroupId?.trim()),
+      isGroupChat: this.isImGroupEntry(entryContext),
     });
 
     if (parseResult.kind === 'none') {
@@ -140,7 +136,7 @@ export class ChatEntryPolicy {
       : parseResult.command;
 
     const allowed = this.dependencies.slashCapabilityProvider.isAllowed({
-      policy,
+      policy: entryContext?.policy,
       command: descriptor,
     });
     if (!allowed) {
@@ -164,6 +160,12 @@ export class ChatEntryPolicy {
       descriptor,
       command: parseResult.command,
     };
+  }
+
+  private isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean {
+    const entryKey = entryContext?.entryKey;
+    return entryKey?.businessSessionDomain.toLowerCase() === 'im'
+      && entryKey.businessSessionType.toLowerCase() === 'group';
   }
 
 }
@@ -333,7 +335,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
   async resolveForControlAction(anchor: string, logger?: BridgeLogger): Promise<{ opencodeSessionId: string }> {
     const existing = this.dependencies.bindingStore.get(anchor);
-    if (!existing || existing.status !== 'active') {
+    if (existing?.status !== 'active') {
       const notFoundError = new Error('session_not_found');
       Object.assign(notFoundError, { errorEvidence: { sourceOperation: 'session.get', sourceErrorCode: 'session_not_found' } });
       throw notFoundError;
@@ -358,7 +360,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
   private async resolveActiveBinding(anchor: string, logger?: BridgeLogger): Promise<ChatExecutionContext | undefined> {
     const existing = this.dependencies.bindingStore.get(anchor);
-    if (!existing || existing.status !== 'active') {
+    if (existing?.status !== 'active') {
       return undefined;
     }
 
@@ -460,7 +462,7 @@ export class DefaultExecutionSessionInvalidationPort implements ExecutionSession
       return;
     }
     const binding = this.dependencies.bindingStore.get(input.conversationId);
-    if (!binding || binding.activeOpencodeSessionId !== input.hostSessionId) {
+    if (binding?.activeOpencodeSessionId !== input.hostSessionId) {
       return;
     }
     this.dependencies.bindingStore.invalidate(input.conversationId);
@@ -492,20 +494,5 @@ export class DefaultEventAnchorResolver implements EventAnchorResolver {
   resolveForEvent(opencodeSessionId: string): { anchor: string } | undefined {
     const anchor = this.dependencies.ownershipResolver.resolveAttachedAnchor(opencodeSessionId);
     return anchor ? { anchor } : undefined;
-  }
-}
-
-/**
- * create_session 后建立 anchor 到 active session 的绑定。
- */
-export class DefaultCreatedSessionBindingPort implements CreatedSessionBindingPort {
-  constructor(private readonly dependencies: {
-    bindingStore: ToolSessionBindingStore;
-    ownershipResolver: OpencodeSessionOwnershipResolver;
-  }) {}
-
-  register(anchor: string, opencodeSessionId: string): void {
-    this.dependencies.bindingStore.bind(anchor, opencodeSessionId);
-    this.dependencies.ownershipResolver.attach(opencodeSessionId, anchor);
   }
 }

@@ -1,5 +1,11 @@
 import type { BridgeGatewayLogger } from '../../infrastructure/gateway/gateway-host.ts';
-import type { RuntimeObservationEvent, RuntimeObservationPort } from '../../application/runtime-observation/index.ts';
+import type {
+  GatewayProbeObservationEvent,
+  RuntimeObservationEvent,
+  RuntimeObservationPort,
+} from '../../application/runtime-observation/index.ts';
+
+type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 function redactMeta(meta: Record<string, unknown>): Record<string, unknown> {
   const sensitiveKeys = ['ak', 'sk', 'token', 'authorization', 'cookie', 'secret', 'password', 'content', 'text', 'answers'];
@@ -17,11 +23,105 @@ function redactMeta(meta: Record<string, unknown>): Record<string, unknown> {
 
 function write(
   logger: BridgeGatewayLogger | undefined,
-  level: 'debug' | 'info' | 'warn' | 'error',
+  level: RuntimeLogLevel,
   message: string,
   meta: Record<string, unknown>,
 ): void {
   logger?.[level]?.(message, redactMeta(meta));
+}
+
+function getGatewayProbeLogLevel(event: GatewayProbeObservationEvent): RuntimeLogLevel {
+  if (event.phase !== 'completed') {
+    return 'info';
+  }
+  if (event.state === 'connect_error') {
+    return 'error';
+  }
+  if (event.state === 'timeout' || event.state === 'rejected') {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function getRuntimeLifecycleCategory(action: Extract<RuntimeObservationEvent, { type: 'runtime_lifecycle' }>['action']): string {
+  if (action.startsWith('start')) {
+    return 'start';
+  }
+  if (action.startsWith('stop')) {
+    return 'stop';
+  }
+  return 'core';
+}
+
+function getDownstreamProcessedLogLevel(action: Extract<RuntimeObservationEvent, { type: 'downstream_processed' }>['action']): RuntimeLogLevel {
+  if (action === 'failed') {
+    return 'error';
+  }
+  if (action === 'invalid_invoke_rejected') {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function getUsecaseProgressLogLevel(phase: Extract<RuntimeObservationEvent, { type: 'usecase_progress' }>['phase']): RuntimeLogLevel {
+  if (phase === 'failed') {
+    return 'error';
+  }
+  if (phase === 'conflict') {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function getProviderCallLogLevel(phase: Extract<RuntimeObservationEvent, { type: 'provider_call' }>['phase']): RuntimeLogLevel {
+  if (phase === 'failed') {
+    return 'error';
+  }
+  if (phase === 'started') {
+    return 'debug';
+  }
+  return 'info';
+}
+
+function getFactProcessedMeta(event: Extract<RuntimeObservationEvent, { type: 'fact_processed' }>): Record<string, unknown> {
+  if (event.phase === 'received') {
+    return {
+      toolSessionId: event.toolSessionId,
+      factType: event.fact.type,
+      profile: event.profile,
+    };
+  }
+  if (event.phase === 'derived_event_projected') {
+    return {
+      toolSessionId: event.toolSessionId,
+      factType: event.factType,
+      eventType: event.event.type,
+      profile: event.profile,
+    };
+  }
+  return {
+    toolSessionId: event.toolSessionId,
+    factType: event.factType,
+    uplinkType: event.uplinkType,
+    profile: event.profile,
+  };
+}
+
+function getInteractionActionName(action: Extract<RuntimeObservationEvent, { type: 'interaction_changed' }>['action']): string {
+  if (action === 'consume') {
+    return 'consumed';
+  }
+  if (action === 'register') {
+    return 'registered';
+  }
+  return 'conflict';
+}
+
+function getFailureRecordedLogLevel(kind: Extract<RuntimeObservationEvent, { type: 'failure_recorded' }>['kind']): RuntimeLogLevel {
+  if (kind === 'inbound_validation_failure' || kind === 'outbound_validation_failure') {
+    return 'warn';
+  }
+  return 'error';
 }
 
 /**
@@ -34,13 +134,14 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
     this.logger = logger;
   }
 
+  // eslint-disable-next-line max-lines-per-function, complexity -- observation 日志投影按事件类型集中分派，保持日志命名在单一出口维护。
   record(event: RuntimeObservationEvent): void {
     switch (event.type) {
       case 'runtime_lifecycle':
         write(
           this.logger,
           event.action.endsWith('failed') ? 'error' : 'info',
-          `runtime_sdk.${event.action.startsWith('start') ? 'start' : event.action.startsWith('stop') ? 'stop' : 'core'}.${event.action.replace(/^(start_|stop_|core_)/, '')}`,
+          `runtime_sdk.${getRuntimeLifecycleCategory(event.action)}.${event.action.replace(/^(start_|stop_|core_)/, '')}`,
           {
             failureReason: event.failureReason,
             code: event.code,
@@ -51,6 +152,24 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
         write(this.logger, 'info', 'runtime_sdk.gateway.state_changed', {
           gatewayState: event.state,
         });
+        return;
+      case 'gateway_probe':
+        write(
+          this.logger,
+          getGatewayProbeLogLevel(event),
+          `runtime_sdk.gateway_probe.${event.phase}`,
+          event.phase === 'requested'
+            ? {
+                gatewayUrl: event.gatewayUrl,
+                timeoutMs: event.timeoutMs,
+              }
+            : {
+                gatewayUrl: event.gatewayUrl,
+                state: event.state,
+                latencyMs: event.latencyMs,
+                reason: event.reason,
+              },
+        );
         return;
       case 'downstream_received':
         write(this.logger, 'info', 'runtime_sdk.downstream.received', {
@@ -63,7 +182,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
       case 'downstream_processed':
         write(
           this.logger,
-          event.action === 'failed' ? 'error' : event.action === 'invalid_invoke_rejected' ? 'warn' : 'info',
+          getDownstreamProcessedLogLevel(event.action),
           `runtime_sdk.downstream.${event.action}`,
           {
             messageType: event.messageType,
@@ -93,7 +212,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
       case 'usecase_progress':
         write(
           this.logger,
-          event.phase === 'failed' ? 'error' : event.phase === 'conflict' ? 'warn' : 'info',
+          getUsecaseProgressLogLevel(event.phase),
           `runtime_sdk.usecase.${event.usecase}.${event.phase}`,
           {
             traceId: event.traceId,
@@ -109,7 +228,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
       case 'provider_call':
         write(
           this.logger,
-          event.phase === 'failed' ? 'error' : event.phase === 'started' ? 'debug' : 'info',
+          getProviderCallLogLevel(event.phase),
           `runtime_sdk.provider.${event.command}.${event.phase}`,
           {
             traceId: event.traceId,
@@ -125,32 +244,14 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           this.logger,
           'debug',
           `runtime_sdk.fact.${event.phase}`,
-          event.phase === 'received'
-            ? {
-                toolSessionId: event.toolSessionId,
-                factType: event.fact.type,
-                profile: event.profile,
-              }
-            : event.phase === 'derived_event_projected'
-              ? {
-                  toolSessionId: event.toolSessionId,
-                  factType: event.factType,
-                  eventType: event.event.type,
-                  profile: event.profile,
-                }
-              : {
-                  toolSessionId: event.toolSessionId,
-                  factType: event.factType,
-                  uplinkType: event.uplinkType,
-                  profile: event.profile,
-                },
+          getFactProcessedMeta(event),
         );
         return;
       case 'interaction_changed':
         write(
           this.logger,
           event.action === 'conflict' ? 'warn' : 'info',
-          `runtime_sdk.interaction.${event.action === 'consume' ? 'consumed' : event.action === 'register' ? 'registered' : 'conflict'}`,
+          `runtime_sdk.interaction.${getInteractionActionName(event.action)}`,
           {
             kind: event.kind,
             toolSessionId: event.toolSessionId,
@@ -168,6 +269,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           `runtime_sdk.uplink.${event.phase}`,
           {
             messageType: event.messageType,
+            eventType: event.eventType,
             toolSessionId: event.toolSessionId,
             welinkSessionId: event.welinkSessionId,
             code: event.code,
@@ -192,7 +294,7 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
       case 'failure_recorded':
         write(
           this.logger,
-          event.kind === 'inbound_validation_failure' || event.kind === 'outbound_validation_failure' ? 'warn' : 'error',
+          getFailureRecordedLogLevel(event.kind),
           'runtime_sdk.failure.recorded',
           {
             kind: event.kind,
@@ -203,6 +305,8 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
         );
         return;
       case 'gateway_activity':
+        return;
+      default:
         return;
     }
   }

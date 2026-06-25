@@ -29,6 +29,7 @@ export class GatewayOutboundSinkAdapter implements OutboundSink {
         validation.error.violation.code,
         validation.error.violation.field,
         validation.error.violation.message,
+        validation.error.violation.eventType,
       );
       this.observation.failureRecorded(
         RUNTIME_FAILURE_KIND.outboundValidation,

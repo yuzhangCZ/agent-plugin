@@ -24,7 +24,6 @@ export class HandshakeFrameProcessor {
         error: buildProtocolViolationError(frame, {
           code: 'GATEWAY_HANDSHAKE_INVALID',
           disposition: 'startup_failure',
-          stage: 'handshake',
         }),
       };
     }
@@ -39,7 +38,6 @@ export class HandshakeFrameProcessor {
         error: new GatewayClientError({
           code: 'GATEWAY_HANDSHAKE_REJECTED',
           disposition: 'startup_failure',
-          stage: 'handshake',
           retryable: false,
           message: frame.message.reason || 'gateway_register_rejected',
           details: { reason: frame.message.reason },
@@ -52,7 +50,6 @@ export class HandshakeFrameProcessor {
       error: new GatewayClientError({
         code: 'GATEWAY_HANDSHAKE_INVALID',
         disposition: 'startup_failure',
-        stage: 'handshake',
         retryable: false,
         message: 'Unsupported gateway control message',
         details: { messageType: frame.messageType },

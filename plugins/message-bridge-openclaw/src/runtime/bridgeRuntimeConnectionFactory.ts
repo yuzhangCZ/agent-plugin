@@ -1,4 +1,4 @@
-import type { BridgeGatewayHostConfig, BridgeRuntimeOptions } from "@agent-plugin/bridge-runtime-sdk";
+import type { BridgeGatewayHostConfig, BridgeRuntimeOptions } from "@wecode/bridge-runtime-sdk";
 
 /**
  * 仅用于 OpenClaw 装配层的 gateway connection 最小能力面。

@@ -439,7 +439,7 @@ type SdkRuntimeCommand =
 | `close_session` | `{ toolSessionId: string }` |
 | `abort_session` | `{ toolSessionId: string }` |
 | `permission_reply` | `{ permissionId: string, toolSessionId: string, response: 'once' | 'always' | 'reject' }` |
-| `question_reply` | `{ questionId?: string, answer: string, toolCallId?: string }` |
+| `question_reply` | `{ questionId?: string, answers: string[][], answer?: string, toolCallId?: string }`，`answer` 仅兼容输入，可为历史普通字符串或 `string[][]` JSON 字符串，归一化后不保留 |
 
 #### 5.3.3 输出数据：bridge 回给网关的业务报文
 
@@ -598,7 +598,7 @@ type SdkFact = {
 | `close_session` | `{ toolSessionId }` |
 | `abort_session` | `{ toolSessionId }` |
 | `permission_reply` | `{ permissionId, toolSessionId, response }` |
-| `question_reply` | `{ questionId?, answer, toolCallId? }` |
+| `question_reply` | `{ questionId?, answers, answer?, toolCallId? }`，`answer` 仅兼容输入，可为历史普通字符串或 `string[][]` JSON 字符串 |
 | `status_query` | `{}` |
 
 #### 6.3.2 内部数据：SDK 请求体
@@ -1015,12 +1015,12 @@ sequenceDiagram
   GW->>SKILL: B2 上行事件\nquestion.asked + welinkSessionId 路由
   SKILL->>UI: B1 展示问题\n{ uiSessionId, type:'question.asked', options }
 
-  UI->>SKILL: B1 下行源数据\n{ uiSessionId, type:'question_reply', answer, questionId? / toolCallId? }
-  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'question_reply', payload:{ questionId?, answer, toolCallId? } }
+  UI->>SKILL: B1 下行源数据\n{ uiSessionId, type:'question_reply', answers, questionId? / toolCallId? }
+  SKILL->>GW: B2 输出数据\n{ welinkSessionId, action:'question_reply', payload:{ questionId?, answers, toolCallId? } }
   GW->>BRIDGE: B3 下行源报文\ninvoke { welinkSessionId, action:'question_reply', payload }
   BRIDGE->>BRIDGE: B3 内部封装\nSdkRuntimeCommand
   BRIDGE->>BRIDGE: B3 内部归一\n优先取 questionId，缺失时回退 toolCallId
-  BRIDGE->>SDK: B4 下行输出\nPOST /question/{requestID}/reply { answers:[[answer]] }
+  BRIDGE->>SDK: B4 下行输出\nPOST /question/{requestID}/reply { answers }
   SDK-->>BRIDGE: reply success
   Note over BRIDGE,GW: 当前实现成功后无独立 success 回执\n后续以 OpenCode 事件继续驱动上行
 ```

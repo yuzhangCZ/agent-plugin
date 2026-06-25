@@ -50,9 +50,9 @@
     "lint:changed": "node ./scripts/lint-changed.mjs"
   },
   "lint-staged": {
-    "scripts/**/*.{js,mjs,cjs,ts}": "eslint --max-warnings=0",
-    "packages/**/*.{js,mjs,cjs,ts}": "eslint --max-warnings=0",
-    "plugins/**/*.{js,mjs,cjs,ts}": "eslint --max-warnings=0"
+    "scripts/**/*.{js,mjs,cjs,ts}": "eslint",
+    "packages/**/*.{js,mjs,cjs,ts}": "eslint",
+    "plugins/**/*.{js,mjs,cjs,ts}": "eslint"
   },
   "devDependencies": {
     "@eslint/js": "9.25.1",

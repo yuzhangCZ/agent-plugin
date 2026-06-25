@@ -11,6 +11,7 @@ export class ToolErrorMessageCatalog {
       case 'pending_interaction_not_found':
         return '当前交互已失效，请刷新后重试';
       case 'request_run_failed':
+      default:
         return '当前请求处理失败，请重试';
     }
   }

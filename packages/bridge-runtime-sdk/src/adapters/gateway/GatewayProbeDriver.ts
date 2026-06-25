@@ -1,0 +1,204 @@
+import type {
+  BridgeGatewayHostConfig,
+  BridgeGatewayHostConnection,
+  BridgeGatewayLogger,
+  BridgeGatewayProbeResult,
+} from '../../infrastructure/gateway/gateway-host.ts';
+import { GatewayClientError } from '@agent-plugin/gateway-client';
+import type { GatewayProbeDriver as GatewayProbeDriverPort } from '../../application/ports/gateway-runtime-driver.ts';
+import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
+import { normalizeErrorMessage } from '../../application/runtime-error.ts';
+import {
+  createDefaultBridgeGatewayHostConnection,
+  normalizeBridgeGatewayHostConfig,
+} from '../../infrastructure/gateway/gateway-host.ts';
+
+interface GatewayProbeDriverOptions {
+  gatewayHost: BridgeGatewayHostConfig;
+  logger?: BridgeGatewayLogger;
+  debug?: boolean;
+  observation: RuntimeObservation;
+  connectionFactory?: (config: BridgeGatewayHostConfig) => BridgeGatewayHostConnection;
+}
+
+interface GatewayProbeInput {
+  timeoutMs: number;
+  abortSignal?: AbortSignal;
+}
+
+/**
+ * gateway 临时探测驱动适配器。
+ * @remarks probe 使用旁路连接，不 attach runtime observers，也不持有主连接状态。
+ */
+export class GatewayProbeDriver implements GatewayProbeDriverPort {
+  private readonly options: GatewayProbeDriverOptions;
+  private readonly normalizedGatewayHost;
+
+  constructor(options: GatewayProbeDriverOptions) {
+    this.options = options;
+    this.normalizedGatewayHost = normalizeBridgeGatewayHostConfig(options.gatewayHost, {
+      logger: options.logger,
+      debug: options.debug,
+    });
+  }
+
+  probe(input: { timeoutMs: number; abortSignal?: AbortSignal }): Promise<BridgeGatewayProbeResult> {
+    return this.probeGatewayHost(input);
+  }
+
+  private async probeGatewayHost(input: GatewayProbeInput): Promise<BridgeGatewayProbeResult> {
+    const now = Date.now;
+    const startedAt = now();
+    const gatewayHost = this.normalizedGatewayHost;
+
+    this.options.observation.gatewayProbeRequested(gatewayHost.url, input.timeoutMs);
+
+    if (input.abortSignal?.aborted) {
+      const result = this.createCancelledResult(startedAt, now, input.abortSignal);
+      this.recordProbeCompleted(result);
+      return result;
+    }
+
+    let connection: BridgeGatewayHostConnection;
+    try {
+      connection = this.createProbeConnection();
+    } catch (error) {
+      const result = {
+        state: 'connect_error',
+        latencyMs: this.elapsedMs(startedAt, now),
+        reason: normalizeErrorMessage(error),
+      } satisfies BridgeGatewayProbeResult;
+      this.recordProbeCompleted(result);
+      return result;
+    }
+
+    return await new Promise((resolve) => {
+      let settled = false;
+
+      const finish = (result: BridgeGatewayProbeResult) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        input.abortSignal?.removeEventListener('abort', onAbort);
+        this.recordProbeCompleted(result);
+        void this.disconnectBestEffort(connection);
+        resolve(result);
+      };
+
+      const onAbort = () => {
+        const result = this.createCancelledResult(startedAt, now, input.abortSignal);
+        finish(result);
+      };
+
+      input.abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+      const timer = setTimeout(() => {
+        const result = {
+          state: 'timeout',
+          latencyMs: this.elapsedMs(startedAt, now),
+          reason: 'probe timed out before READY',
+        } satisfies BridgeGatewayProbeResult;
+        finish(result);
+      }, input.timeoutMs);
+
+      connection.on('statusChange', (status) => {
+        if (settled) {
+          return;
+        }
+        if (status.isReady()) {
+          const result = {
+            state: 'ready',
+            latencyMs: this.elapsedMs(startedAt, now),
+            reason: 'probe_connected',
+          } satisfies BridgeGatewayProbeResult;
+          finish(result);
+        }
+      });
+
+      try {
+        connection.connect().catch((error) => {
+          if (settled) {
+            return;
+          }
+          finish(this.handleConnectFailure(startedAt, now, error));
+        });
+      } catch (error) {
+        finish(this.handleConnectFailure(startedAt, now, error));
+      }
+    });
+  }
+
+  private recordProbeCompleted(result: BridgeGatewayProbeResult): void {
+    this.options.observation.gatewayProbeCompleted(
+      this.normalizedGatewayHost.url,
+      result.state,
+      result.latencyMs,
+      result.reason,
+    );
+  }
+
+  private async disconnectBestEffort(connection: BridgeGatewayHostConnection): Promise<void> {
+    try {
+      await connection.disconnect();
+    } catch {
+      // probe teardown failure 不影响探测结果。
+    }
+  }
+
+  private createProbeConnection(): BridgeGatewayHostConnection {
+    return this.options.connectionFactory?.(this.options.gatewayHost)
+      ?? createDefaultBridgeGatewayHostConnection(this.normalizedGatewayHost);
+  }
+
+  private createCancelledResult(
+    startedAt: number,
+    now: () => number,
+    abortSignal: AbortSignal | undefined,
+  ): BridgeGatewayProbeResult {
+    return {
+      state: 'cancelled',
+      latencyMs: this.elapsedMs(startedAt, now),
+      reason: this.toCancelledReason(abortSignal),
+    };
+  }
+
+  private handleConnectFailure(
+    startedAt: number,
+    now: () => number,
+    error: unknown,
+  ): BridgeGatewayProbeResult {
+    const message = normalizeErrorMessage(error);
+    const result = {
+      state: this.isRejectedProbeError(error) ? 'rejected' : 'connect_error',
+      latencyMs: this.elapsedMs(startedAt, now),
+      reason: message,
+    } satisfies BridgeGatewayProbeResult;
+    return result;
+  }
+
+  private elapsedMs(startedAt: number, now: () => number): number {
+    return Math.max(0, now() - startedAt);
+  }
+
+  private isRejectedProbeError(error: unknown): boolean {
+    if (error instanceof GatewayClientError) {
+      return error.code === 'GATEWAY_AUTH_REJECTED'
+        || error.code === 'GATEWAY_HANDSHAKE_REJECTED'
+        || error.code === 'GATEWAY_HANDSHAKE_INVALID';
+    }
+    return false;
+  }
+
+  private toCancelledReason(abortSignal: AbortSignal | undefined): string {
+    const reason = abortSignal?.reason;
+    if (reason instanceof Error) {
+      return reason.message;
+    }
+    if (typeof reason === 'string') {
+      return reason;
+    }
+    return 'probe_cancelled_for_runtime_lifecycle';
+  }
+}

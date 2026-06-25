@@ -89,7 +89,9 @@ function createFileOpsWithRenameFailure(targetPath: string, options: { failRollb
   let renameAttempts = 0;
   return {
     access,
-    mkdir,
+    async mkdir(path: string, options: { recursive: true }) {
+      await mkdir(path, options);
+    },
     mkdtemp,
     readFile,
     rm,

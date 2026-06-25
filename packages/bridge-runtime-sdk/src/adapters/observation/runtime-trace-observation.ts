@@ -59,7 +59,7 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
         return;
       case 'gateway_state_changed':
         this.trace.recordGatewayState(event.state);
-        if (event.state === 'READY') {
+        if (event.state === 'ready') {
           this.trace.recordReadyAt(event.occurredAt ?? Date.now());
         }
         return;

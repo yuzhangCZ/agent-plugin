@@ -39,15 +39,21 @@ async function main() {
 
   const pluginEntries = await readdir(pluginsDir, { withFileTypes: true });
   for (const entry of pluginEntries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     productionRoots.push(path.join(pluginsDir, entry.name, 'src'));
   }
 
   try {
     const packageEntries = await readdir(packagesDir, { withFileTypes: true });
     for (const entry of packageEntries) {
-      if (!entry.isDirectory()) continue;
-      if (entry.name === 'test-support') continue;
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      if (entry.name === 'test-support') {
+        continue;
+      }
       productionRoots.push(path.join(packagesDir, entry.name, 'src'));
     }
   } catch (error) {

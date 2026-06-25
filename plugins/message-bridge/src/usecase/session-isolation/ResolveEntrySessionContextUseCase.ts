@@ -78,6 +78,8 @@ export class DefaultResolveEntrySessionContextUseCase implements ResolveEntrySes
       visibleSessionIds: visibleSessions.map((candidate) => candidate.id),
       resolvedSessionId: session?.id,
       directory: input.directory,
+      roots: input.roots,
+      start: input.start,
       hasBinding: Boolean(binding),
     });
 

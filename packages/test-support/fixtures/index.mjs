@@ -504,7 +504,7 @@ export function createQuestionReplyInvokeMessage(overrides = {}) {
     action: 'question_reply',
     payload: {
       questionId: 'question-1',
-      answer: 'ok',
+      answers: [['ok']],
     },
     ...overrides,
   });

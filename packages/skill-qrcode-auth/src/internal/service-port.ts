@@ -1,4 +1,5 @@
 import type {
+  QrCodeAssistantInfo,
   QrCodeAuthFailureReasonCode,
   QrCodeAuthServiceError,
   QrCodeDisplayData,
@@ -53,6 +54,7 @@ export type QueryQrCodeSessionResult =
         ak: string;
         sk: string;
       };
+      assistantInfo: QrCodeAssistantInfo;
     }
   | QrCodeAuthFailureResult;
 
