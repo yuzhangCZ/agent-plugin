@@ -57,7 +57,10 @@ export class ObservedProviderCommandHandlers implements ProviderCommandHandlers 
     this.observation.providerCallStarted('listSlashCommands', input.traceId);
     try {
       const result = await this.handlers.listSlashCommands(input);
-      this.observation.providerCallSucceeded('listSlashCommands', input.traceId);
+      this.observation.providerCallSucceeded('listSlashCommands', input.traceId, {
+        slashCommandCount: result.slashCommands.length,
+        slashCommands: result.slashCommands,
+      });
       return result;
     } catch (error) {
       this.observation.providerCallFailed('listSlashCommands', input.traceId, error);

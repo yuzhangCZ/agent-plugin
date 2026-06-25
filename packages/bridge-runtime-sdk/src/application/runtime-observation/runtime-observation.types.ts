@@ -2,7 +2,7 @@ import type { GatewayDownstreamBusinessRequest, GatewayUplinkBusinessMessage, Sk
 
 import type { BridgeGatewayProbeResult } from '../../public-contract.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from '../constants/runtime.ts';
-import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
+import type { ProviderFact, ProviderSlashCommand, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 
 /**
@@ -151,6 +151,8 @@ export type ProviderCallObservationEvent = {
   traceId?: string;
   toolSessionId?: string;
   runId?: string;
+  slashCommandCount?: number;
+  slashCommands?: ProviderSlashCommand[];
   error?: string;
   code?: string;
 };
@@ -278,6 +280,8 @@ export type RuntimeObservationProviderContext = {
   toolSessionId?: string;
   runId?: string;
   welinkSessionId?: string;
+  slashCommandCount?: number;
+  slashCommands?: ProviderSlashCommand[];
 };
 
 export type RuntimeObservationTerminalContext = {

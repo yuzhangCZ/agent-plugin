@@ -164,6 +164,14 @@ test('logger observation adapter projects observation events into runtime_sdk lo
     error: 'provider_unavailable',
   });
   adapter.record({
+    type: 'provider_call',
+    phase: 'succeeded',
+    command: 'listSlashCommands',
+    traceId: 'trace-list',
+    slashCommandCount: 1,
+    slashCommands: [{ command: '/new', description: '新建会话' }],
+  });
+  adapter.record({
     type: 'fact_processed',
     phase: 'received',
     toolSessionId: 'tool-1',
@@ -174,6 +182,10 @@ test('logger observation adapter projects observation events into runtime_sdk lo
   assert.equal(hasLog(logger.logs, 'runtime_sdk.start.requested', 'info'), true);
   assert.equal(hasLog(logger.logs, 'runtime_sdk.provider.startRequestRun.started', 'debug'), true);
   assert.equal(hasLog(logger.logs, 'runtime_sdk.provider.startRequestRun.failed', 'error'), true);
+  const slashLog = logger.logs.find((log) => log.message === 'runtime_sdk.provider.listSlashCommands.succeeded');
+  assert.equal(slashLog?.level, 'info');
+  assert.deepEqual(slashLog?.meta?.slashCommands, [{ command: '/new', description: '新建会话' }]);
+  assert.equal(slashLog?.meta?.slashCommandCount, 1);
   assert.equal(hasLog(logger.logs, 'runtime_sdk.fact.received', 'debug'), true);
 });
 
@@ -335,6 +347,13 @@ test('observed provider handlers emit started and failed observation events', as
       async createSession() {
         return { toolSessionId: 'tool-1' };
       },
+      async listSlashCommands() {
+        return {
+          slashCommands: [
+            { command: '/new', description: '新建会话' },
+          ],
+        };
+      },
       async startRequestRun() {
         return {
           runId: 'run-1',
@@ -361,6 +380,7 @@ test('observed provider handlers emit started and failed observation events', as
   );
 
   await assert.rejects(() => handlers.queryStatus({ traceId: 'trace-1' }), /provider_down/);
+  await handlers.listSlashCommands({ traceId: 'trace-list' });
   assert.deepEqual(port.events, [
     {
       type: 'provider_call',
@@ -375,6 +395,22 @@ test('observed provider handlers emit started and failed observation events', as
       traceId: 'trace-1',
       error: 'provider_down',
       code: undefined,
+    },
+    {
+      type: 'provider_call',
+      phase: 'started',
+      command: 'listSlashCommands',
+      traceId: 'trace-list',
+    },
+    {
+      type: 'provider_call',
+      phase: 'succeeded',
+      command: 'listSlashCommands',
+      traceId: 'trace-list',
+      slashCommandCount: 1,
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+      ],
     },
   ]);
 });
