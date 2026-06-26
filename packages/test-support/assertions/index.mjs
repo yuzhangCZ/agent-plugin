@@ -6,20 +6,32 @@ function assertNoField(message, fieldName) {
 
 export function assertToolDoneShape(message, expected = {}) {
   assert.strictEqual(message.type, 'tool_done');
-  if ('welinkSessionId' in expected) assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
-  if ('toolSessionId' in expected) assert.strictEqual(message.toolSessionId, expected.toolSessionId);
-  if ('reason' in expected) assert.strictEqual(message.reason, expected.reason);
+  if ('welinkSessionId' in expected) {
+    assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
+  }
+  if ('toolSessionId' in expected) {
+    assert.strictEqual(message.toolSessionId, expected.toolSessionId);
+  }
+  if ('reason' in expected) {
+    assert.strictEqual(message.reason, expected.reason);
+  }
 }
 
 export function assertSessionCreatedShape(message, expected = {}) {
   assert.strictEqual(message.type, 'session_created');
-  if ('welinkSessionId' in expected) assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
-  if ('toolSessionId' in expected) assert.strictEqual(message.toolSessionId, expected.toolSessionId);
+  if ('welinkSessionId' in expected) {
+    assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
+  }
+  if ('toolSessionId' in expected) {
+    assert.strictEqual(message.toolSessionId, expected.toolSessionId);
+  }
 }
 
 export function assertStatusResponseShape(message, expected = {}) {
   assert.strictEqual(message.type, 'status_response');
-  if ('opencodeOnline' in expected) assert.strictEqual(message.opencodeOnline, expected.opencodeOnline);
+  if ('opencodeOnline' in expected) {
+    assert.strictEqual(message.opencodeOnline, expected.opencodeOnline);
+  }
   if (expected.envelopeFree === true) {
     assertNoField(message, 'welinkSessionId');
     assertNoField(message, 'sessionId');
@@ -28,10 +40,18 @@ export function assertStatusResponseShape(message, expected = {}) {
 
 export function assertToolErrorShape(message, expected = {}) {
   assert.strictEqual(message.type, 'tool_error');
-  if ('welinkSessionId' in expected) assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
-  if ('toolSessionId' in expected) assert.strictEqual(message.toolSessionId, expected.toolSessionId);
-  if ('error' in expected) assert.strictEqual(message.error, expected.error);
-  if ('reason' in expected) assert.strictEqual(message.reason, expected.reason);
+  if ('welinkSessionId' in expected) {
+    assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
+  }
+  if ('toolSessionId' in expected) {
+    assert.strictEqual(message.toolSessionId, expected.toolSessionId);
+  }
+  if ('error' in expected) {
+    assert.strictEqual(message.error, expected.error);
+  }
+  if ('reason' in expected) {
+    assert.strictEqual(message.reason, expected.reason);
+  }
   if ('hasCode' in expected) {
     assert.strictEqual('code' in message, expected.hasCode);
   }
@@ -83,9 +103,15 @@ export function assertInvalidInvokeToolErrorContract(message, expected = {}) {
 
 export function assertNormalizedDownstreamInvokeShape(message, expected = {}) {
   assert.strictEqual(message.type, 'invoke');
-  if ('action' in expected) assert.strictEqual(message.action, expected.action);
-  if ('welinkSessionId' in expected) assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
-  if ('payload' in expected) assert.deepStrictEqual(message.payload, expected.payload);
+  if ('action' in expected) {
+    assert.strictEqual(message.action, expected.action);
+  }
+  if ('welinkSessionId' in expected) {
+    assert.strictEqual(message.welinkSessionId, expected.welinkSessionId);
+  }
+  if ('payload' in expected) {
+    assert.deepStrictEqual(message.payload, expected.payload);
+  }
   if (expected.hasLegacySessionFields === false && message.action === 'create_session') {
     assertNoField(message.payload, 'sessionId');
     assertNoField(message.payload, 'metadata');
@@ -94,30 +120,58 @@ export function assertNormalizedDownstreamInvokeShape(message, expected = {}) {
 
 export function assertToolEventShape(message, expected = {}) {
   assert.strictEqual(message.type, 'tool_event');
-  if ('toolSessionId' in expected) assert.strictEqual(message.toolSessionId, expected.toolSessionId);
-  if ('eventType' in expected) assert.strictEqual(message.event?.type, expected.eventType);
-  if ('protocol' in expected) assert.strictEqual(message.event?.protocol, expected.protocol);
-  if (expected.hasProtocol === false) assertNoField(message.event, 'protocol');
+  if ('toolSessionId' in expected) {
+    assert.strictEqual(message.toolSessionId, expected.toolSessionId);
+  }
+  if ('eventType' in expected) {
+    assert.strictEqual(message.event?.type, expected.eventType);
+  }
+  if ('protocol' in expected) {
+    assert.strictEqual(message.event?.protocol, expected.protocol);
+  }
+  if (expected.hasProtocol === false) {
+    assertNoField(message.event, 'protocol');
+  }
 }
 
 export function assertSimpleToolEventShape(message, expected = {}) {
   assert.strictEqual(message.type, expected.type);
-  if ('properties' in expected) assert.deepStrictEqual(message.properties, expected.properties);
+  if ('properties' in expected) {
+    assert.deepStrictEqual(message.properties, expected.properties);
+  }
 }
 
 export function assertWireViolationShape(message, expected = {}) {
   const violation = message?.violation ?? message;
   assert.strictEqual(typeof message, 'object');
   assert.ok(violation);
-  if ('stage' in expected) assert.strictEqual(violation.stage, expected.stage);
-  if ('code' in expected) assert.strictEqual(violation.code, expected.code);
-  if ('field' in expected) assert.strictEqual(violation.field, expected.field);
-  if ('message' in expected) assert.strictEqual(violation.message, expected.message);
-  if ('messageType' in expected) assert.strictEqual(violation.messageType, expected.messageType);
-  if ('action' in expected) assert.strictEqual(violation.action, expected.action);
-  if ('eventType' in expected) assert.strictEqual(violation.eventType, expected.eventType);
-  if ('welinkSessionId' in expected) assert.strictEqual(violation.welinkSessionId, expected.welinkSessionId);
-  if ('toolSessionId' in expected) assert.strictEqual(violation.toolSessionId, expected.toolSessionId);
+  if ('stage' in expected) {
+    assert.strictEqual(violation.stage, expected.stage);
+  }
+  if ('code' in expected) {
+    assert.strictEqual(violation.code, expected.code);
+  }
+  if ('field' in expected) {
+    assert.strictEqual(violation.field, expected.field);
+  }
+  if ('message' in expected) {
+    assert.strictEqual(violation.message, expected.message);
+  }
+  if ('messageType' in expected) {
+    assert.strictEqual(violation.messageType, expected.messageType);
+  }
+  if ('action' in expected) {
+    assert.strictEqual(violation.action, expected.action);
+  }
+  if ('eventType' in expected) {
+    assert.strictEqual(violation.eventType, expected.eventType);
+  }
+  if ('welinkSessionId' in expected) {
+    assert.strictEqual(violation.welinkSessionId, expected.welinkSessionId);
+  }
+  if ('toolSessionId' in expected) {
+    assert.strictEqual(violation.toolSessionId, expected.toolSessionId);
+  }
 }
 
 export function assertProjectedMessageUpdatedShape(message, expected = {}) {
@@ -127,14 +181,30 @@ export function assertProjectedMessageUpdatedShape(message, expected = {}) {
     assert.fail('message.updated should include properties.info');
   }
 
-  if ('id' in expected) assert.strictEqual(info.id, expected.id);
-  if ('sessionID' in expected) assert.strictEqual(info.sessionID, expected.sessionID);
-  if ('role' in expected) assert.strictEqual(info.role, expected.role);
-  if ('created' in expected) assert.strictEqual(info.time.created, expected.created);
-  if ('completed' in expected) assert.strictEqual(info.time.completed, expected.completed);
-  if ('model' in expected) assert.deepStrictEqual(info.model, expected.model);
-  if ('finish' in expected) assert.strictEqual(info.finish, expected.finish);
-  if ('error' in expected) assert.deepStrictEqual(info.error, expected.error);
+  if ('id' in expected) {
+    assert.strictEqual(info.id, expected.id);
+  }
+  if ('sessionID' in expected) {
+    assert.strictEqual(info.sessionID, expected.sessionID);
+  }
+  if ('role' in expected) {
+    assert.strictEqual(info.role, expected.role);
+  }
+  if ('created' in expected) {
+    assert.strictEqual(info.time.created, expected.created);
+  }
+  if ('completed' in expected) {
+    assert.strictEqual(info.time.completed, expected.completed);
+  }
+  if ('model' in expected) {
+    assert.deepStrictEqual(info.model, expected.model);
+  }
+  if ('finish' in expected) {
+    assert.strictEqual(info.finish, expected.finish);
+  }
+  if ('error' in expected) {
+    assert.deepStrictEqual(info.error, expected.error);
+  }
 
   const summary = message.properties?.info?.summary;
   if ('hasSummary' in expected) {
@@ -143,10 +213,18 @@ export function assertProjectedMessageUpdatedShape(message, expected = {}) {
   if (!summary) {
     return;
   }
-  if ('files' in expected) assert.strictEqual(summary.files, expected.files);
-  if ('additions' in expected) assert.strictEqual(summary.additions, expected.additions);
-  if ('deletions' in expected) assert.strictEqual(summary.deletions, expected.deletions);
-  if ('diffCount' in expected) assert.strictEqual(summary.diffs?.length ?? 0, expected.diffCount);
+  if ('files' in expected) {
+    assert.strictEqual(summary.files, expected.files);
+  }
+  if ('additions' in expected) {
+    assert.strictEqual(summary.additions, expected.additions);
+  }
+  if ('deletions' in expected) {
+    assert.strictEqual(summary.deletions, expected.deletions);
+  }
+  if ('diffCount' in expected) {
+    assert.strictEqual(summary.diffs?.length ?? 0, expected.diffCount);
+  }
   if (Array.isArray(summary.diffs) && summary.diffs.length > 0) {
     for (const diff of summary.diffs) {
       assert.strictEqual('before' in diff, false);
@@ -162,9 +240,15 @@ export function assertMessagePartUpdatedShape(message, expected = {}) {
     assert.fail('message.part.updated should include properties.part');
   }
 
-  if ('partType' in expected) assert.strictEqual(part.type, expected.partType);
-  if ('part' in expected) assert.deepStrictEqual(part, expected.part);
-  if ('delta' in expected) assert.strictEqual(message.properties.delta, expected.delta);
+  if ('partType' in expected) {
+    assert.strictEqual(part.type, expected.partType);
+  }
+  if ('part' in expected) {
+    assert.deepStrictEqual(part, expected.part);
+  }
+  if ('delta' in expected) {
+    assert.strictEqual(message.properties.delta, expected.delta);
+  }
   if (expected.hasDelta === false) {
     assert.strictEqual('delta' in message.properties, false);
   }

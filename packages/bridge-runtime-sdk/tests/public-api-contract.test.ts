@@ -31,6 +31,16 @@ test('stable entry exports executable runtime factory and public contracts', () 
   assert.equal(typeof runtimeSdk.qrcodeAuth.run, 'function');
 });
 
+test('public contract keeps qrcode auth types owned by skill-qrcode-auth', async () => {
+  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+
+  assert.match(publicContractSource, /export \{ qrcodeAuth \} from '@wecode\/skill-qrcode-auth';/);
+  assert.match(publicContractSource, /QrCodeAssistantInfo/);
+  assert.match(publicContractSource, /from '@wecode\/skill-qrcode-auth';/);
+  assert.equal(indexSource.includes("from './public-contract.ts';"), true);
+});
+
 test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('BridgeRuntimeFacade' in runtimeSdk, false);
   assert.equal('DefaultRuntimeCommandDispatcher' in runtimeSdk, false);

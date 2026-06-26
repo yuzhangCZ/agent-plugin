@@ -245,13 +245,14 @@ function normalizePromptMessage(result: unknown): PromptSessionResultData['messa
 function normalizeCommandList(result: unknown): Array<{ name: string; description?: string }> {
   const data = extractResultData<unknown>(result);
   const root = readRecord(data);
-  const candidates = Array.isArray(data)
-    ? data
-    : Array.isArray(root?.commands)
-      ? root.commands
-      : Array.isArray(root?.items)
-        ? root.items
-        : [];
+  let candidates: unknown[] = [];
+  if (Array.isArray(data)) {
+    candidates = data;
+  } else if (Array.isArray(root?.commands)) {
+    candidates = root.commands;
+  } else if (Array.isArray(root?.items)) {
+    candidates = root.items;
+  }
   return candidates
     .map((item) => {
       if (typeof item === 'string') {
@@ -429,7 +430,11 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       : undefined;
   }
 
-  async createSession(parameters: { title?: string; directory?: string; permission?: Array<Record<string, unknown>> }): Promise<ActionResult<CreateSessionResultData>> {
+  async createSession(parameters: {
+    title?: string;
+    directory?: string;
+    permission?: Array<Record<string, unknown>>;
+  }): Promise<ActionResult<CreateSessionResultData>> {
     const client = this.requireClient();
     const executionResult = await safeExecute(
       client.session.create({

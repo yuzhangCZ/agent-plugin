@@ -207,9 +207,15 @@ export class InstallPluginCliUseCase {
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "started");
       }
-      const credentials = await this.qrCodeAuth.run(context, (snapshot) => {
-        this.presenter.qrSnapshot(snapshot);
-      });
+      const credentials = await this.qrCodeAuth.run(
+        context,
+        (snapshot) => {
+          this.presenter.qrSnapshot(snapshot);
+        },
+        (snapshot) => {
+          this.presenter.qrSnapshotDiagnostic(snapshot);
+        },
+      );
       if (context.verbose) {
         this.emitStage(context.host, currentStage, "succeeded");
       }

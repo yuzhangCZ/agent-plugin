@@ -66,8 +66,11 @@ function findAvailablePort(port) {
       const address = server.address();
       const resolvedPort = typeof address === 'object' && address ? address.port : port;
       server.close((err) => {
-        if (err) reject(err);
-        else resolve(resolvedPort);
+        if (err) {
+          reject(err);
+        } else {
+          resolve(resolvedPort);
+        }
       });
     });
   });
@@ -75,7 +78,9 @@ function findAvailablePort(port) {
 
 async function cleanup() {
   for (const proc of [opencodeProc, gatewayProc]) {
-    if (!proc || proc.killed) continue;
+    if (!proc || proc.killed) {
+      continue;
+    }
     proc.kill();
   }
   await rm(tmpHome, { recursive: true, force: true }).catch(() => {});
@@ -114,7 +119,9 @@ async function withTimeout(task, ms, label, category, timeoutCode) {
       }),
     ]);
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -375,11 +382,10 @@ async function main() {
   }
 
   console.log('[4/5] Waiting for protocol evidence...');
-  const evidenceWaitMs =
-    scenario === 'permission-roundtrip' ? 15_000 :
-    scenario === 'directory-context' ? 15_000 :
-    scenario === 'chat-stream' ? 8_000 :
-    8_000;
+  let evidenceWaitMs = 8_000;
+  if (scenario === 'permission-roundtrip' || scenario === 'directory-context') {
+    evidenceWaitMs = 15_000;
+  }
   const { opencodeLogText, gatewayLogText } = await withTimeout(
     () => waitForScenarioEvidence(evidenceWaitMs),
     evidenceWaitMs + 2_000,

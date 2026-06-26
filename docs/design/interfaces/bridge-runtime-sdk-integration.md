@@ -40,7 +40,11 @@ npm install @wecode/bridge-runtime-sdk
 
 ## 2.1 Changelog
 
-### 2026-06-16
+### 2026-06-22
+
+- `QrCodeAuthSnapshot` 的 `confirmed` 事件新增 `assistantInfo` 字段，携带助理 `name`、`nameEn`、`desc`、`descEn` 基础信息；服务端字段缺失时 SDK 统一补为空字符串。
+
+### 2026-06-16 （1.0.3-beta）
 
 - 所有 Provider fact 类型移除 `toolSessionId` 字段；该字段由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
 - 所有 Provider fact 类型新增 `subagentSessionId?` 和 `subagentName?` 可选字段（继承自 `ProviderFactBase`）。
@@ -66,12 +70,12 @@ npm install @wecode/bridge-runtime-sdk
 - `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
 - Breaking change: `ToolUpdateFact.input` 从 `string` 改为 `Record<string, unknown>`；集成方必须传入 JSON 对象，不能传字符串、数组、`null`、数字或布尔值。
 
-### 2026-06-02
+### 2026-06-02 （1.0.2-beta）
 
 - Breaking change: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
 - 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
 
-### 2026-06-01
+### 2026-06-01 （1.0.1-beta）
 
 - `PermissionAskFact`: `permissionType?: string` -> `permType: string`
 - `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
@@ -741,6 +745,7 @@ await context.outbound.emitOutboundRun({
 | `expiresAt` | `string` | 否 | 仅二维码生成事件携带的过期时间。 |
 | `credentials.ak` | `string` | 否 | 仅确认成功事件携带的 AK。 |
 | `credentials.sk` | `string` | 否 | 仅确认成功事件携带的 SK。 |
+| `assistantInfo` | `{ name: string; nameEn: string; desc: string; descEn: string }` | 否 | 仅确认成功事件携带的助理信息，字段缺失时为空字符串。 |
 | `reasonCode` | `'timeout' \| 'network_error' \| 'auth_service_error'` | 否 | 仅失败事件携带的失败原因。 |
 | `serviceError` | `QrCodeAuthServiceError` | 否 | 仅失败事件携带的服务错误信息。 |
 
@@ -752,7 +757,7 @@ await context.outbound.emitOutboundRun({
 | `scanned` | 当前二维码已被扫码，但用户尚未确认授权；流程继续轮询，不是终态。 |
 | `expired` | 当前二维码已过期；如果 `policy.refreshOnExpired` 允许且未超过 `policy.maxRefreshCount`，SDK 会创建新二维码并再次发出 `qrcode_generated`。 |
 | `cancelled` | 用户取消授权；这是终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
-| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
+| `confirmed` | 用户确认授权成功；携带 `credentials.ak`、`credentials.sk` 和 `assistantInfo`，这是成功终态，`qrcodeAuth.run()` 会在该快照发出后结束。 |
 | `failed` | 授权流程失败；携带 `reasonCode`，可能携带 `serviceError`，这是失败终态。 |
 
 - 内部等待轮询态不会作为 `QrCodeAuthSnapshot` 暴露给调用方。
@@ -1031,7 +1036,7 @@ yield { type: 'message.done', messageId: 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430
   - `messageId` 建议以 `msg_` 开头，例如 `msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8`
   - `partId` 建议以 `prt_` 开头，例如 `prt_f47ac10b-58cc-4372-a567-0e02b2c3d479`
 - `messageId` 在同一 `toolSessionId` 内跨多轮 run 不可重复打开或关闭后重开。
-- `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。
+- `partId` 在同一 `messageId` 内标识唯一片段；同一 `partId` 不可同时用于文本片段和思考片段。(**partId在会话内唯一，服务端限制**)
 
 ### 8.6 `ProviderError`
 

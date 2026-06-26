@@ -119,6 +119,7 @@ export interface Presenter {
   }): void;
   pluginInstalled(): void;
   qrSnapshot(snapshot: CliQrSnapshot): void;
+  qrSnapshotDiagnostic(snapshot: unknown): void;
   assistantCreated(input: {
     host: InstallContext["host"];
     primaryConfigPath: string;
@@ -133,5 +134,9 @@ export interface Presenter {
 }
 
 export interface QrCodeAuthPort {
-  run(context: InstallContext, onSnapshot: (snapshot: CliQrSnapshot) => void): Promise<{ ak: string; sk: string }>;
+  run(
+    context: InstallContext,
+    onSnapshot: (snapshot: CliQrSnapshot) => void,
+    onDiagnostic?: (snapshot: unknown) => void,
+  ): Promise<{ ak: string; sk: string }>;
 }

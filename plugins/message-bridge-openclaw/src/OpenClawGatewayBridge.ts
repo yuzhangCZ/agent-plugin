@@ -120,17 +120,20 @@ export class OpenClawGatewayBridge {
     const runtimeStatus = this.bridgeRuntimeFacade.getStatus();
     const diagnostics = this.bridgeRuntimeFacade.getDiagnostics();
     const streamingStatus = this.resolveStreamingStatus();
-    const nextRuntimePhase =
-      this.runtimePhaseOverride ??
-      (runtimeStatus.state === "ready"
-        ? "ready"
-        : runtimeStatus.state === "starting" || runtimeStatus.state === "reconnecting"
-          ? "connecting"
-          : runtimeStatus.state === "stopping"
-            ? "stopping"
-            : runtimeStatus.state === "failed"
-              ? "failed"
-              : "idle");
+    let nextRuntimePhase = this.runtimePhaseOverride;
+    if (nextRuntimePhase == null) {
+      if (runtimeStatus.state === "ready") {
+        nextRuntimePhase = "ready";
+      } else if (runtimeStatus.state === "starting" || runtimeStatus.state === "reconnecting") {
+        nextRuntimePhase = "connecting";
+      } else if (runtimeStatus.state === "stopping") {
+        nextRuntimePhase = "stopping";
+      } else if (runtimeStatus.state === "failed") {
+        nextRuntimePhase = "failed";
+      } else {
+        nextRuntimePhase = "idle";
+      }
+    }
 
     if (diagnostics.gatewayState && diagnostics.gatewayState !== this.lastLoggedGatewayState) {
       this.lastLoggedGatewayState = diagnostics.gatewayState;

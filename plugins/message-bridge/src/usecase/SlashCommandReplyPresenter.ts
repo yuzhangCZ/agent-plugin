@@ -135,7 +135,7 @@ export class DefaultSlashCommandReplyPresenter implements SlashCommandReplyPrese
   }
 
   private joinInline(parts: Array<string | undefined>): string {
-    return parts.filter((part) => part && part.trim()).join(' ');
+    return parts.filter((part) => part?.trim()).join(' ');
   }
 
   private assertNever(value: never): never {

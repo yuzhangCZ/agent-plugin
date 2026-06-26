@@ -111,6 +111,52 @@ test("TerminalCliPresenter renders qrcode refresh transcript", () => {
   );
 });
 
+test("TerminalCliPresenter renders qrcode status snapshots", () => {
+  const presenter = createPresenter();
+  const { stdout, stderr } = captureIo(() => {
+    presenter.qrSnapshot({ type: "scanned" });
+    presenter.qrSnapshot({ type: "confirmed" });
+    presenter.qrSnapshot({ type: "cancelled", message: "WeLink 创建助理已取消" });
+  });
+
+  assert.equal(stderr, "");
+  assert.equal(
+    stdout,
+    "[skill-plugin-cli] 二维码状态：已扫码，请在 WeLink 中创建助理\n"
+      + "[skill-plugin-cli] 二维码状态：已确认\n"
+      + "[skill-plugin-cli] 二维码状态：已取消\n",
+  );
+});
+
+test("TerminalCliPresenter renders redacted verbose qrcode snapshots", () => {
+  const presenter = createPresenter();
+  const { stdout, stderr } = captureIo(() => {
+    presenter.qrSnapshotDiagnostic({
+      accessToken: "access-token-1",
+      credentials: {
+        ak: "ak-1",
+        sk: "sk-1",
+      },
+      nested: {
+        access_token: "access-token-2",
+        authToken: "auth-token-1",
+        "qrcode-token": "qrcode-token-2",
+        qrcodeToken: "qrcode-token-1",
+        refreshToken: "refresh-token-1",
+        token: "token-1",
+      },
+      status: "confirmed",
+    });
+  });
+
+  assert.equal(stderr, "");
+  assert.equal(
+    stdout,
+    "[skill-plugin-cli][verbose] qrcode snapshot: "
+      + "{\"accessToken\":\"<redacted>\",\"credentials\":{\"ak\":\"<redacted>\",\"sk\":\"<redacted>\"},\"nested\":{\"access_token\":\"<redacted>\",\"authToken\":\"<redacted>\",\"qrcode-token\":\"<redacted>\",\"qrcodeToken\":\"<redacted>\",\"refreshToken\":\"<redacted>\",\"token\":\"<redacted>\"},\"status\":\"confirmed\"}\n",
+  );
+});
+
 test("TerminalCliPresenter renders weUrl fallback when qrcode rendering fails", () => {
   const presenter = createPresenter(() => {
     throw new Error("render failed");
@@ -190,7 +236,7 @@ test("TerminalCliPresenter renders fallback and warning diagnostics", () => {
 test("TerminalCliPresenter renders reinstall notice in default mode", () => {
   const presenter = createPresenter();
   const { stdout, stderr } = captureIo(() => {
-    presenter.reinstallDetected({ host: "openclaw" });
+    presenter.reinstallDetected();
   });
 
   assert.equal(stderr, "");

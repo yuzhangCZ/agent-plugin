@@ -269,7 +269,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
   async resolveForControlAction(anchor: string, logger?: BridgeLogger): Promise<{ opencodeSessionId: string }> {
     const existing = this.dependencies.bindingStore.get(anchor);
-    if (!existing || existing.status !== 'active') {
+    if (existing?.status !== 'active') {
       const notFoundError = new Error('session_not_found');
       Object.assign(notFoundError, { errorEvidence: { sourceOperation: 'session.get', sourceErrorCode: 'session_not_found' } });
       throw notFoundError;
@@ -294,7 +294,7 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
   private async resolveActiveBinding(anchor: string, logger?: BridgeLogger): Promise<ChatExecutionContext | undefined> {
     const existing = this.dependencies.bindingStore.get(anchor);
-    if (!existing || existing.status !== 'active') {
+    if (existing?.status !== 'active') {
       return undefined;
     }
 
@@ -396,7 +396,7 @@ export class DefaultExecutionSessionInvalidationPort implements ExecutionSession
       return;
     }
     const binding = this.dependencies.bindingStore.get(input.conversationId);
-    if (!binding || binding.activeOpencodeSessionId !== input.hostSessionId) {
+    if (binding?.activeOpencodeSessionId !== input.hostSessionId) {
       return;
     }
     this.dependencies.bindingStore.invalidate(input.conversationId);

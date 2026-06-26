@@ -160,6 +160,8 @@ export function toProviderTerminalResult(terminal: PromptSessionTerminal): Provi
           ...(terminal.errorDetails ? { details: terminal.errorDetails } : {}),
         },
       };
+    default:
+      return { outcome: 'failed', error: { code: 'internal_error', message: 'unknown terminal result' } };
   }
 }
 

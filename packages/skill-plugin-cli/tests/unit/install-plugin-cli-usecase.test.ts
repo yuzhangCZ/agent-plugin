@@ -3,7 +3,7 @@ import test from "node:test";
 import { InstallPluginCliUseCase } from "../../src/application/InstallPluginCliUseCase.ts";
 import { ResolveInstallContextUseCase } from "../../src/application/ResolveInstallContextUseCase.ts";
 import type { HostAdapter, MacAddressResolver, Presenter, ProcessCommandTrace, ProcessTraceSink, QrCodeAuthPort, RegistryConfigAdapter } from "../../src/domain/ports.ts";
-import type { HostAvailabilityResult, HostConfigureResult, HostPreflightResult, InstalledPluginArtifact, ParsedInstallCommand } from "../../src/domain/types.ts";
+import type { HostAvailabilityResult, HostConfigureResult, HostPreflightResult, InstallContext, InstalledPluginArtifact, ParsedInstallCommand } from "../../src/domain/types.ts";
 import { InstallCliError } from "../../src/domain/errors.ts";
 
 class FakeRegistryConfigAdapter implements RegistryConfigAdapter {
@@ -64,6 +64,7 @@ class RecordingPresenter implements Presenter {
     this.events.push("pluginInstalled");
   }
   qrSnapshot() {}
+  qrSnapshotDiagnostic() {}
   assistantCreated() {}
   availabilityChecked() {}
   completed() {
@@ -100,7 +101,9 @@ function createHostAdapter(options: {
       };
     },
     async installPlugin() {
-      if (options.installError) throw options.installError;
+      if (options.installError) {
+        throw options.installError;
+      }
       return options.installResult || {
         installStrategy: "host-native",
         pluginSpec: "@wecode/skill-opencode-plugin",
@@ -131,14 +134,19 @@ function createHostAdapter(options: {
   };
 }
 
-function createUseCase(hostAdapter: HostAdapter, presenter: RecordingPresenter) {
+function createUseCase(
+  hostAdapter: HostAdapter,
+  presenter: RecordingPresenter,
+  options: { onQrContext?: (context: InstallContext) => void } = {},
+) {
   const resolveContext = new ResolveInstallContextUseCase(
     new FakeRegistryConfigAdapter(),
     new FakeMacAddressResolver(),
     { opencode: hostAdapter, openclaw: hostAdapter as unknown as HostAdapter },
   );
   const qrCodeAuth: QrCodeAuthPort = {
-    async run() {
+    async run(context) {
+      options.onQrContext?.(context);
       return { ak: "ak", sk: "sk" };
     },
   };
@@ -165,7 +173,7 @@ function createCommand(installStrategy: "host-native" | "fallback"): ParsedInsta
 }
 
 test("InstallPluginCliUseCase passes artifact from install stage into verify stage and aggregates warnings", async () => {
-  let verifiedArtifact: InstalledPluginArtifact | null = null;
+  const verifiedArtifact: { current?: InstalledPluginArtifact } = {};
   const presenter = new RecordingPresenter();
   const useCase = createUseCase(createHostAdapter({
     installResult: {
@@ -178,14 +186,14 @@ test("InstallPluginCliUseCase passes artifact from install stage into verify sta
     },
     cleanupWarnings: ["cleanup failed"],
     verifySpy: (artifact) => {
-      verifiedArtifact = artifact;
+      verifiedArtifact.current = artifact;
     },
     existingPluginDetected: true,
   }), presenter);
 
   const result = await useCase.execute(createCommand("fallback"));
   assert.equal(result.status, "success");
-  assert.equal(verifiedArtifact?.pluginSpec, "/tmp/plugin/package");
+  assert.equal(verifiedArtifact.current?.pluginSpec, "/tmp/plugin/package");
   assert.deepEqual(result.warningMessages, ["cleanup failed"]);
   assert.deepEqual(presenter.warnings, ["cleanup failed"]);
   assert.match(presenter.infos.join("\n"), /strategy=fallback/);
@@ -203,4 +211,20 @@ test("InstallPluginCliUseCase fails host-native install without suggesting fallb
   assert.equal(result.status, "failed");
   assert.doesNotMatch(presenter.infos.join("\n"), /resolved=/);
   assert.doesNotMatch(presenter.infos.join("\n"), /applied=/);
+});
+
+test("InstallPluginCliUseCase passes host name as qrcode channel", async () => {
+  const received: string[] = [];
+  const presenter = new RecordingPresenter();
+  const hostAdapter = createHostAdapter({});
+  const useCase = createUseCase(hostAdapter, presenter, {
+    onQrContext(context) {
+      received.push(`${context.host}:${context.channel}`);
+    },
+  });
+
+  await useCase.execute({ ...createCommand("host-native"), host: "opencode" });
+  await useCase.execute({ ...createCommand("host-native"), host: "openclaw" });
+
+  assert.deepEqual(received, ["opencode:opencode", "openclaw:openclaw"]);
 });

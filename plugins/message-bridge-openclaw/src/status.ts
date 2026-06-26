@@ -48,11 +48,39 @@ const IGNORABLE_PROBE_CANCEL_REASONS = new Set([
   PROBE_CANCELLED_FOR_RUNTIME_START,
 ]);
 
+const DEFAULT_STREAMING_PATH_ISSUE = {
+  message: "当前宿主缺少 route resolver，message-bridge 会退化为非流式回退路径。",
+  fix: "升级或校验当前 OpenClaw 宿主，确保 runtime.channel.routing.resolveAgentRoute 与 runtime.channel.reply 都可用。",
+};
+
+const STREAMING_PATH_ISSUES: Record<string, { message: string; fix: string }> = {
+  missing_reply_runtime: {
+    message: "当前宿主缺少 reply runtime，message-bridge 会退化为非流式回退路径。",
+    fix: DEFAULT_STREAMING_PATH_ISSUE.fix,
+  },
+  runtime_reply_final_only: {
+    message: "当前宿主虽然提供了 runtime reply，但没有产出可用的增量 block，message-bridge 只能在结束时一次性返回最终文本。",
+    fix: "校验当前 OpenClaw 宿主、模型路由和 block streaming 配置，确认 runtime.channel.reply 是否真的会持续产出非空 block。",
+  },
+  plugin_streaming_disabled_runtime_reply: {
+    message: "当前账号显式关闭了 streaming，message-bridge 会使用非流式输出模式。",
+    fix: "将 channels.message-bridge.streaming 设为 true，或删除该字段以使用默认开启。",
+  },
+};
+
 const silentLogger: BridgeLogger = {
   info() {},
   warn() {},
   error() {},
 };
+
+function getStreamingPathIssueMessage(reason: string): string {
+  return STREAMING_PATH_ISSUES[reason]?.message ?? DEFAULT_STREAMING_PATH_ISSUE.message;
+}
+
+function getStreamingPathIssueFix(reason: string): string {
+  return STREAMING_PATH_ISSUES[reason]?.fix ?? DEFAULT_STREAMING_PATH_ISSUE.fix;
+}
 
 const probeProvider: ThirdPartyAgentProvider = {
   async health() {
@@ -175,7 +203,7 @@ function isRuntimeHealthy(
   runtime: MessageBridgeStatusSnapshot | undefined,
   nowAt: number,
 ): boolean {
-  if (!runtime || runtime.connected !== true || typeof runtime.lastReadyAt !== "number") {
+  if (runtime?.connected !== true || typeof runtime.lastReadyAt !== "number") {
     return false;
   }
   if (typeof runtime.lastHeartbeatAt !== "number") {
@@ -528,25 +556,11 @@ export function collectMessageBridgeStatusIssues(
 
     if ((snapshot.streamingPathHealthy ?? false) === false) {
       const reason = typeof snapshot.streamingPathReason === "string" ? snapshot.streamingPathReason : "missing_route_resolver";
-      const message =
-        reason === "missing_reply_runtime"
-          ? "当前宿主缺少 reply runtime，message-bridge 会退化为非流式回退路径。"
-          : reason === "runtime_reply_final_only"
-            ? "当前宿主虽然提供了 runtime reply，但没有产出可用的增量 block，message-bridge 只能在结束时一次性返回最终文本。"
-          : reason === "plugin_streaming_disabled_runtime_reply"
-            ? "当前账号显式关闭了 streaming，message-bridge 会使用非流式输出模式。"
-            : "当前宿主缺少 route resolver，message-bridge 会退化为非流式回退路径。";
-      const fix =
-        reason === "plugin_streaming_disabled_runtime_reply"
-          ? "将 channels.message-bridge.streaming 设为 true，或删除该字段以使用默认开启。"
-          : reason === "runtime_reply_final_only"
-            ? "校验当前 OpenClaw 宿主、模型路由和 block streaming 配置，确认 runtime.channel.reply 是否真的会持续产出非空 block。"
-          : "升级或校验当前 OpenClaw 宿主，确保 runtime.channel.routing.resolveAgentRoute 与 runtime.channel.reply 都可用。";
       issues.push(
         createRuntimeIssue({
           accountId: snapshot.accountId,
-          message,
-          fix,
+          message: getStreamingPathIssueMessage(reason),
+          fix: getStreamingPathIssueFix(reason),
         }),
       );
     }
@@ -561,7 +575,7 @@ export function collectMessageBridgeStatusIssues(
       );
     }
 
-    if (probe && probe.state === "rejected" && !suppressDuplicateConnectionIssue) {
+    if (probe?.state === "rejected" && !suppressDuplicateConnectionIssue) {
       const rawReason = probeReason;
       const reason = rawReason ? `：${rawReason}` : "";
       if (rawReason && isAuthRejectedReason(rawReason)) {
@@ -583,15 +597,15 @@ export function collectMessageBridgeStatusIssues(
       }
     }
 
-    if (probe && probe.state === "connecting") {
+    if (probe?.state === "connecting") {
       continue;
     }
 
-    if (probe && probe.state === "cancelled" && IGNORABLE_PROBE_CANCEL_REASONS.has(probeReason)) {
+    if (probe?.state === "cancelled" && IGNORABLE_PROBE_CANCEL_REASONS.has(probeReason)) {
       continue;
     }
 
-    if (probe && probe.state === "connect_error") {
+    if (probe?.state === "connect_error") {
       const reason =
         typeof probe.reason === "string" && probe.reason.trim()
           ? `：${probe.reason.trim()}`
@@ -605,7 +619,7 @@ export function collectMessageBridgeStatusIssues(
       );
     }
 
-    if (probe && probe.state === "timeout") {
+    if (probe?.state === "timeout") {
       issues.push(
         createRuntimeIssue({
           accountId: snapshot.accountId,

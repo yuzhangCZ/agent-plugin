@@ -17,8 +17,12 @@ function parseVersion(text: string) {
 
 function compareVersion(a: number[], b: number[]) {
   for (let index = 0; index < 3; index += 1) {
-    if (a[index] > b[index]) return 1;
-    if (a[index] < b[index]) return -1;
+    if (a[index] > b[index]) {
+      return 1;
+    }
+    if (a[index] < b[index]) {
+      return -1;
+    }
   }
   return 0;
 }

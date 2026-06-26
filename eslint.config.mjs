@@ -4,7 +4,15 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
+  'brace-style': ['error', '1tbs', { allowSingleLine: false }],
   complexity: ['warn', { max: 12 }],
+  curly: ['error', 'all'],
+  'default-case': [
+    'error',
+    {
+      commentPattern: '^no default$',
+    },
+  ],
   'max-depth': ['warn', 4],
   'max-classes-per-file': ['warn', 1],
   'max-lines': [
@@ -23,8 +31,52 @@ const cleanCodeRules = {
       skipComments: true,
     },
   ],
+  'max-len': [
+    'warn',
+    {
+      code: 160,
+      ignoreRegExpLiterals: true,
+      ignoreUrls: true,
+      tabWidth: 2,
+    },
+  ],
   'max-params': ['warn', 5],
+  'no-nested-ternary': 'error',
   'max-statements': ['warn', 40],
+};
+
+const strictCodeRules = {
+  'no-var': 'error',
+};
+
+const typeCheckedTypeScriptProjects = [
+  'plugins/message-bridge/tsconfig.json',
+  'plugins/message-bridge-openclaw/tsconfig.typecheck.json',
+  'packages/bridge-runtime-sdk/tsconfig.json',
+  'packages/gateway-client/tsconfig.json',
+  'packages/gateway-schema/tsconfig.json',
+  'packages/skill-qrcode-auth/tsconfig.json',
+  'packages/skill-plugin-cli/tsconfig.json',
+];
+
+const typeCheckedTypeScriptFiles = [
+  'plugins/message-bridge/src/**/*.ts',
+  'plugins/message-bridge-openclaw/src/**/*.ts',
+  'packages/bridge-runtime-sdk/src/**/*.ts',
+  'packages/gateway-client/src/**/*.ts',
+  'packages/gateway-schema/src/**/*.ts',
+  'packages/skill-qrcode-auth/src/**/*.ts',
+  'packages/skill-plugin-cli/src/**/*.ts',
+];
+
+const typeCheckedTypeScriptRules = {
+  '@typescript-eslint/dot-notation': [
+    'error',
+    {
+      allowIndexSignaturePropertyAccess: true,
+    },
+  ],
+  '@typescript-eslint/prefer-optional-chain': 'error',
 };
 
 // 首轮接入阶段只把可疑代码形态标为 warning，避免历史复杂度债务直接阻断 CI。
@@ -101,6 +153,8 @@ export default defineConfig([
     },
     rules: {
       ...js.configs.recommended.rules,
+      'dot-notation': 'error',
+      ...strictCodeRules,
       ...firstPassBaselineRules,
       ...cleanCodeRules,
     },
@@ -128,8 +182,20 @@ export default defineConfig([
       'no-useless-escape': 'warn',
       'prefer-const': 'warn',
       ...firstPassTypeScriptBaselineRules,
+      ...strictCodeRules,
       ...cleanCodeRules,
     },
+  },
+  // 这些规则需要 TypeScript type checker；只覆盖已纳入 tsconfig 的主源码，避免脚本/夹具文件出现 parser project 误报。
+  {
+    files: typeCheckedTypeScriptFiles,
+    languageOptions: {
+      parserOptions: {
+        project: typeCheckedTypeScriptProjects,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: typeCheckedTypeScriptRules,
   },
   {
     files: [

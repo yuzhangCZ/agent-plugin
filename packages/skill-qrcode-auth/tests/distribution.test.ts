@@ -64,6 +64,7 @@ test("prod bundle can be imported and exposes qrcodeAuth.run", { concurrency: fa
 
   const indexDts = await readFile(path.join(distRoot, "index.d.ts"), "utf8");
   assert.match(indexDts, /qrcodeAuth/);
+  assert.match(indexDts, /QrCodeAssistantInfo/);
 
   for (const filePath of declarationFiles) {
     const content = await readFile(filePath, "utf8");

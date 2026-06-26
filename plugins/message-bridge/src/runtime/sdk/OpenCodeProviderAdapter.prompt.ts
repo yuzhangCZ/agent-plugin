@@ -187,5 +187,11 @@ function logPromptCompleted(
 }
 
 function mapPromptTerminalOutcome(kind: PromptSessionResultData['terminal']['kind']): 'completed' | 'aborted' | 'failed' {
-  return kind === 'failed' ? 'failed' : kind === 'aborted' ? 'aborted' : 'completed';
+  if (kind === 'failed') {
+    return 'failed';
+  }
+  if (kind === 'aborted') {
+    return 'aborted';
+  }
+  return 'completed';
 }

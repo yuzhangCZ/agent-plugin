@@ -32,12 +32,12 @@ function asFunction<T extends (...args: never[]) => unknown>(value: unknown, bin
 function normalizeHealthResponse(response: unknown): OpencodeHealthResult {
   if (isRecord(response) && 'error' in response && response.error !== undefined) {
     const error = response.error;
-    const message =
-      isRecord(error) && typeof error.message === 'string'
-        ? error.message
-        : typeof error === 'string'
-          ? error
-          : 'OpenCode health request failed';
+    let message = 'OpenCode health request failed';
+    if (isRecord(error) && typeof error.message === 'string') {
+      message = error.message;
+    } else if (typeof error === 'string') {
+      message = error;
+    }
     throw new Error(message);
   }
 
@@ -72,9 +72,15 @@ function buildLegacyCreateOptions(parameters?: {
   }
 
   const body: Record<string, unknown> = {};
-  if (parameters.parentID !== undefined) body.parentID = parameters.parentID;
-  if (parameters.title !== undefined) body.title = parameters.title;
-  if (parameters.permission !== undefined) body.permission = parameters.permission;
+  if (parameters.parentID !== undefined) {
+    body.parentID = parameters.parentID;
+  }
+  if (parameters.title !== undefined) {
+    body.title = parameters.title;
+  }
+  if (parameters.permission !== undefined) {
+    body.permission = parameters.permission;
+  }
 
   return {
     ...(Object.keys(body).length > 0 ? { body } : {}),
@@ -119,15 +125,33 @@ function buildLegacyPromptOptions(parameters: {
   parts?: Array<{ type: 'text'; text: string }>;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  if (parameters.messageID !== undefined) body.messageID = parameters.messageID;
-  if (parameters.model !== undefined) body.model = parameters.model;
-  if (parameters.agent !== undefined) body.agent = parameters.agent;
-  if (parameters.noReply !== undefined) body.noReply = parameters.noReply;
-  if (parameters.tools !== undefined) body.tools = parameters.tools;
-  if (parameters.format !== undefined) body.format = parameters.format;
-  if (parameters.system !== undefined) body.system = parameters.system;
-  if (parameters.variant !== undefined) body.variant = parameters.variant;
-  if (parameters.parts !== undefined) body.parts = parameters.parts;
+  if (parameters.messageID !== undefined) {
+    body.messageID = parameters.messageID;
+  }
+  if (parameters.model !== undefined) {
+    body.model = parameters.model;
+  }
+  if (parameters.agent !== undefined) {
+    body.agent = parameters.agent;
+  }
+  if (parameters.noReply !== undefined) {
+    body.noReply = parameters.noReply;
+  }
+  if (parameters.tools !== undefined) {
+    body.tools = parameters.tools;
+  }
+  if (parameters.format !== undefined) {
+    body.format = parameters.format;
+  }
+  if (parameters.system !== undefined) {
+    body.system = parameters.system;
+  }
+  if (parameters.variant !== undefined) {
+    body.variant = parameters.variant;
+  }
+  if (parameters.parts !== undefined) {
+    body.parts = parameters.parts;
+  }
 
   return {
     path: { id: parameters.sessionID },
@@ -148,10 +172,18 @@ function buildLegacyCommandOptions(parameters: {
   const body: Record<string, unknown> = {
     command: parameters.command,
   };
-  if (parameters.messageID !== undefined) body.messageID = parameters.messageID;
-  if (parameters.arguments !== undefined) body.arguments = parameters.arguments;
-  if (parameters.agent !== undefined) body.agent = parameters.agent;
-  if (parameters.model !== undefined) body.model = parameters.model;
+  if (parameters.messageID !== undefined) {
+    body.messageID = parameters.messageID;
+  }
+  if (parameters.arguments !== undefined) {
+    body.arguments = parameters.arguments;
+  }
+  if (parameters.agent !== undefined) {
+    body.agent = parameters.agent;
+  }
+  if (parameters.model !== undefined) {
+    body.model = parameters.model;
+  }
 
   return {
     path: { id: parameters.sessionID },
@@ -165,7 +197,7 @@ function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGl
   const rawClient = isRecord(root?._client) ? root._client : undefined;
   const globalHealth = asFunction<(options?: Record<string, unknown>) => Promise<OpencodeHealthResult> | OpencodeHealthResult>(
     global?.health,
-    global,
+  global,
   );
 
   if (globalHealth) {

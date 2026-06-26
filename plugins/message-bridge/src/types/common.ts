@@ -81,17 +81,6 @@ export const CONNECTION_STATES = ['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'RE
 
 export type ConnectionState = typeof CONNECTION_STATES[number];
 
-export function stateToErrorCode(state: ConnectionState): ErrorCode {
-  switch (state) {
-    case 'DISCONNECTED':
-    case 'CONNECTING':
-      return 'GATEWAY_UNREACHABLE';
-    case 'CONNECTED':
-    case 'READY':
-      return 'AGENT_NOT_READY';
-  }
-}
-
 export function buildMessageId(): string {
   return randomUUID();
 }

@@ -44,7 +44,7 @@ const noopArtifactPort: PluginArtifactPort = {
 test("OpenClawHostAdapter preflight accepts versions newer than the minimum runtime", async () => {
   const adapter = new OpenClawHostAdapter(createProcessRunner("2026.4.12"), noopArtifactPort);
 
-  const result = await adapter.preflight({} as never);
+  const result = await adapter.preflight();
 
   assert.equal(result.version, "2026.4.12");
   assert.equal(result.versionSupported, true);
@@ -55,7 +55,7 @@ test("OpenClawHostAdapter preflight accepts versions newer than the minimum runt
 test("OpenClawHostAdapter preflight reports versions older than the minimum runtime", async () => {
   const adapter = new OpenClawHostAdapter(createProcessRunner("2026.3.23"), noopArtifactPort);
 
-  const result = await adapter.preflight({} as never);
+  const result = await adapter.preflight();
 
   assert.equal(result.version, "2026.3.23");
   assert.equal(result.versionSupported, false);
@@ -65,7 +65,7 @@ test("OpenClawHostAdapter preflight reports versions older than the minimum runt
 test("OpenClawHostAdapter confirmAvailability returns manual gateway restart next steps after probe", async () => {
   const adapter = new OpenClawHostAdapter(createProcessRunner("2026.4.12"), noopArtifactPort);
 
-  const result = await adapter.confirmAvailability({} as never);
+  const result = await adapter.confirmAvailability();
 
   assert.deepEqual(result, {
     nextAction: {
@@ -103,7 +103,7 @@ test("OpenClawHostAdapter fallback install uses local tarball path", async () =>
     environment: "prod",
     registry: "https://npm.example.com",
     mac: "",
-    channel: "openx",
+    channel: "openclaw",
     verbose: false,
   });
 
@@ -135,7 +135,7 @@ test("OpenClawHostAdapter preflight reports existing plugin when probe succeeds"
   };
   const adapter = new OpenClawHostAdapter(processRunner, noopArtifactPort);
 
-  const result = await adapter.preflight({} as never);
+  const result = await adapter.preflight();
 
   assert.equal(result.existingPluginDetected, true);
 });
