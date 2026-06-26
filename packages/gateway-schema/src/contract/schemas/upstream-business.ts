@@ -94,7 +94,7 @@ export type SlashCommandItem = z.output<typeof slashCommandItemSchema>;
 
 export const slashCommandsResultMessageSchema = z.object({
   type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.SLASH_COMMANDS_RESULT_MESSAGE_TYPE),
-  welinkSessionId: requiredTrimmedString,
+  toolSessionId: requiredTrimmedString,
   traceId: requiredTrimmedString,
   payload: z.object({
     slashCommands: z.array(slashCommandItemSchema),

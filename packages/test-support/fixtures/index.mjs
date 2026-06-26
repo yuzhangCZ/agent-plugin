@@ -71,19 +71,20 @@ export function createStatusQueryMessage(overrides = {}) {
 }
 
 export function createQuerySlashCommandsInvokeMessage(overrides = {}) {
-  return createInvokeMessage({
-    welinkSessionId: 'wl-slash-commands',
+  return {
+    type: 'invoke',
+    toolSessionId: 'tool-slash-commands',
     traceId: 'trace-slash-commands',
     action: 'query_slash_commands',
     payload: {},
     ...overrides,
-  });
+  };
 }
 
 export function createSlashCommandsResultMessage(overrides = {}) {
   return {
     type: 'slash_commands_result',
-    welinkSessionId: 'wl-slash-commands',
+    toolSessionId: 'tool-slash-commands',
     traceId: 'trace-slash-commands',
     payload: {
       slashCommands: [

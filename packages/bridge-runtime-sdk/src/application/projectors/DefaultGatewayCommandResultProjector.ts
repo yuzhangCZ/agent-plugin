@@ -27,13 +27,13 @@ export class DefaultGatewayCommandResultProjector implements GatewayCommandResul
   }
 
   projectSlashCommands(input: {
-    welinkSessionId: string;
+    toolSessionId: string;
     traceId: string;
     slashCommands: ProviderSlashCommand[];
   }): SlashCommandsResultMessage {
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.slashCommandsResult,
-      welinkSessionId: input.welinkSessionId,
+      toolSessionId: input.toolSessionId,
       traceId: input.traceId,
       payload: {
         slashCommands: input.slashCommands,

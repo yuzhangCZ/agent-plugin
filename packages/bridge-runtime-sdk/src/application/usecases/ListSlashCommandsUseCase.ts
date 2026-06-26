@@ -30,7 +30,7 @@ export class ListSlashCommandsUseCase implements ListSlashCommandsUseCasePort {
 
   async execute(command: Extract<RuntimeCommand, { kind: 'list_slash_commands' }>): Promise<void> {
     const context = {
-      welinkSessionId: command.source.welinkSessionId,
+      toolSessionId: command.source.toolSessionId,
     };
     this.observation.usecaseStarted('list_slash_commands', command.traceId, context);
     let slashCommands: ProviderSlashCommand[] = [];
@@ -47,7 +47,7 @@ export class ListSlashCommandsUseCase implements ListSlashCommandsUseCasePort {
     }
 
     const uplink = this.projector.projectSlashCommands({
-      welinkSessionId: command.source.welinkSessionId,
+      toolSessionId: command.source.toolSessionId,
       traceId: command.source.traceId,
       slashCommands,
     });

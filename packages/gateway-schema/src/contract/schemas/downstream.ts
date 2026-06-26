@@ -282,14 +282,14 @@ export const querySlashCommandsInvokeSchema = z
   .object({
     type: z.literal(INVOKE_MESSAGE_TYPE),
     action: z.literal(QUERY_SLASH_COMMANDS_ACTION),
-    welinkSessionId: requiredTrimmedString,
+    toolSessionId: requiredTrimmedString,
     traceId: requiredTrimmedString,
     payload: querySlashCommandsPayloadSchema.optional(),
   })
   .transform((message) => ({
     type: message.type,
     action: message.action,
-    welinkSessionId: message.welinkSessionId,
+    toolSessionId: message.toolSessionId,
     traceId: message.traceId,
     payload: message.payload,
   }))

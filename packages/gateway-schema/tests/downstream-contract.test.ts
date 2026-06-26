@@ -101,7 +101,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
     [
       'query_slash_commands',
       createQuerySlashCommandsInvokeMessage({
-        welinkSessionId: 'wl-query-slash',
+        toolSessionId: 'tool-query-slash',
         traceId: 'trace-query-slash',
         payload: {
           extParameters: {
@@ -115,7 +115,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
       }),
       {
         type: 'invoke',
-        welinkSessionId: 'wl-query-slash',
+        toolSessionId: 'tool-query-slash',
         traceId: 'trace-query-slash',
         action: 'query_slash_commands',
         payload: {
@@ -170,6 +170,9 @@ test('normalizeDownstream accepts the full downstream contract', () => {
   ];
 
   for (const [name, input, expected] of cases) {
+    if (name === 'query_slash_commands') {
+      assert.equal('welinkSessionId' in input, false);
+    }
     const result = normalizeDownstream(input);
     assert.equal(result.ok, true, name);
     assert.deepEqual(result.value, expected);
@@ -712,7 +715,7 @@ test('normalizeDownstream rejects non object businessExtParam and platformExtPar
 test('normalizeDownstream preserves query_slash_commands empty extParameters object', () => {
   const result = normalizeDownstream(
     createQuerySlashCommandsInvokeMessage({
-      welinkSessionId: 'wl-query-empty-ext',
+      toolSessionId: 'tool-query-empty-ext',
       traceId: 'trace-query-empty-ext',
       payload: {
         extParameters: {},
@@ -728,7 +731,7 @@ test('normalizeDownstream preserves query_slash_commands empty extParameters obj
   assert.deepStrictEqual(result.value, {
     type: 'invoke',
     action: 'query_slash_commands',
-    welinkSessionId: 'wl-query-empty-ext',
+    toolSessionId: 'tool-query-empty-ext',
     traceId: 'trace-query-empty-ext',
     payload: {
       extParameters: {},
@@ -736,10 +739,29 @@ test('normalizeDownstream preserves query_slash_commands empty extParameters obj
   });
 });
 
+test('normalizeDownstream rejects query_slash_commands without toolSessionId', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'query_slash_commands',
+    welinkSessionId: 'wl-query-legacy',
+    traceId: 'trace-query-legacy',
+    payload: {},
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'missing_required_field',
+    field: 'toolSessionId',
+    messageType: 'invoke',
+    action: 'query_slash_commands',
+  });
+});
+
 test('normalizeDownstream preserves query_slash_commands extParameters extension objects', () => {
   const result = normalizeDownstream(
     createQuerySlashCommandsInvokeMessage({
-      welinkSessionId: 'wl-query-ext',
+      toolSessionId: 'tool-query-ext',
       traceId: 'trace-query-ext',
       payload: {
         extParameters: {

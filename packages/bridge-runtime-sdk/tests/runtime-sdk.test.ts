@@ -713,7 +713,7 @@ test('runtime responds to query_slash_commands with provider slash command list'
   connection.emitMessage({
     type: 'invoke',
     action: 'query_slash_commands',
-    welinkSessionId: 'welink-slash-1',
+    toolSessionId: 'tool-slash-1',
     traceId: 'trace-slash-1',
     payload: {
       extParameters: {
@@ -739,7 +739,7 @@ test('runtime responds to query_slash_commands with provider slash command list'
   });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'slash_commands_result',
-    welinkSessionId: 'welink-slash-1',
+    toolSessionId: 'tool-slash-1',
     traceId: 'trace-slash-1',
     payload: {
       slashCommands: [
@@ -763,7 +763,7 @@ test('runtime returns empty slash command list when provider listSlashCommands f
   connection.emitMessage({
     type: 'invoke',
     action: 'query_slash_commands',
-    welinkSessionId: 'welink-slash-failed',
+    toolSessionId: 'tool-slash-failed',
     traceId: 'trace-slash-failed',
     payload: {},
   });
@@ -771,7 +771,7 @@ test('runtime returns empty slash command list when provider listSlashCommands f
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'slash_commands_result',
-    welinkSessionId: 'welink-slash-failed',
+    toolSessionId: 'tool-slash-failed',
     traceId: 'trace-slash-failed',
     payload: {
       slashCommands: [],

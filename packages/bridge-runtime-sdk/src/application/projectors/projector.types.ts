@@ -41,7 +41,7 @@ export interface GatewayCommandResultProjector {
   projectStatus(input: { online: boolean }): StatusResponseMessage;
   projectSessionCreated(input: { welinkSessionId: string; toolSessionId: string }): SessionCreatedMessage;
   projectSlashCommands(input: {
-    welinkSessionId: string;
+    toolSessionId: string;
     traceId: string;
     slashCommands: ProviderSlashCommand[];
   }): SlashCommandsResultMessage;

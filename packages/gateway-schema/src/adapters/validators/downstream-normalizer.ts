@@ -128,6 +128,7 @@ function normalizeInvokeMessage(message: PlainObject): Result<InvokeMessage, Wir
           );
     }
     case QUERY_SLASH_COMMANDS_ACTION: {
+      const toolSessionId = asString(message.toolSessionId);
       const parsed = querySlashCommandsInvokeSchema.safeParse(message);
       return parsed.success
         ? ok(parsed.data)
@@ -136,7 +137,7 @@ function normalizeInvokeMessage(message: PlainObject): Result<InvokeMessage, Wir
               stage: 'payload',
               messageType: INVOKE_MESSAGE_TYPE,
               action,
-              welinkSessionId,
+              toolSessionId,
             }).violation,
           );
     }

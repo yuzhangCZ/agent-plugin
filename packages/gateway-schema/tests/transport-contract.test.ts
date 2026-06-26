@@ -130,6 +130,27 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
   assert.equal(controlResult.ok, false);
 });
 
+test('validateGatewayUpstreamTransportMessage rejects legacy slash_commands_result welinkSessionId', () => {
+  const result = validateGatewayUpstreamTransportMessage({
+    type: 'slash_commands_result',
+    welinkSessionId: 'wl-slash-legacy',
+    traceId: 'trace-slash-legacy',
+    payload: {
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'transport',
+    code: 'missing_required_field',
+    field: 'toolSessionId',
+    messageType: 'slash_commands_result',
+  });
+});
+
 test('validateGatewayUpstreamTransportMessage accepts control messages through the upstream transport union', () => {
   const controlMessages = [
     {
