@@ -562,68 +562,27 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
       },
     });
   }
-  async listNativeCommands(parameters: {
-    directory?: string;
-    logger?: BridgeLogger;
-  }): Promise<ActionResult<{ commands: Array<{ name: string }> }>> {
-    const client = this.getClient();
-    if (!client.session.command) {
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'OpenCode session.command is unavailable',
-        errorEvidence: { sourceOperation: 'session.command' },
-      };
-    }
-    if (!client.command?.list) {
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'OpenCode command.list is unavailable',
-        errorEvidence: { sourceOperation: 'command.list' },
-      };
-    }
-    parameters.logger?.debug('opencode_native_command.list.requested', {
-      directory: parameters.directory,
-    });
-    return this.executeSdkCall({
-      failurePrefix: 'Failed to list OpenCode commands',
-      sourceOperation: 'command.list',
-      promiseFactory: () => client.command?.list({
-        ...(parameters.directory ? { directory: parameters.directory } : {}),
-      }) ?? Promise.reject(new Error('OpenCode command.list is unavailable')),
-      onSuccess: (result) => ({
-        success: true,
-        data: {
-          commands: normalizeCommandList(result),
-        },
-      }),
-    });
-  }
-
+  /**
+   * Best-effort 查询 OpenCode command catalog。
+   * @remarks catalog 只代表可展示/预检的命令清单，不检查 `session.command` 执行能力；
+   * `command.list` 能力不可用或调用失败时在本边界记录日志并返回空列表，让调用方按“无 catalog”降级。
+   */
   async listCommandCatalog(parameters: {
     directory?: string;
     logger?: BridgeLogger;
-  }): Promise<ActionResult<{ commands: Array<{ name: string; description?: string }> }>> {
-    const client = this.getClient();
-    if (!client) {
-      return {
-        success: false,
-        errorCode: 'SDK_UNREACHABLE',
-        errorMessage: 'OpenCode SDK client is unavailable',
-        errorEvidence: { sourceOperation: 'command.list' },
-      };
-    }
+  }): Promise<{ commands: Array<{ name: string; description?: string }> }> {
+    const client = this.requireClient();
     if (!client.command?.list) {
-      return {
-        success: true,
-        data: { commands: [] },
-      };
+      parameters.logger?.warn('opencode_command_catalog.list.unavailable', {
+        directory: parameters.directory,
+        reason: 'command.list_unavailable',
+      });
+      return { commands: [] };
     }
     parameters.logger?.debug('opencode_command_catalog.list.requested', {
       directory: parameters.directory,
     });
-    return this.executeSdkCall({
+    const result = await this.executeSdkCall({
       failurePrefix: 'Failed to list OpenCode commands',
       sourceOperation: 'command.list',
       promiseFactory: () => client.command?.list({
@@ -636,6 +595,17 @@ export class OpencodeSessionGatewayAdapter implements SessionCreationPort, Sessi
         },
       }),
     });
+    if (!result.success) {
+      parameters.logger?.warn('opencode_command_catalog.list.failed', {
+        directory: parameters.directory,
+        error: result.errorMessage ?? 'command.list failed',
+        sourceOperation: result.errorEvidence?.sourceOperation ?? 'command.list',
+        sourceErrorCode: result.errorEvidence?.sourceErrorCode,
+        httpStatus: result.errorEvidence?.httpStatus,
+      });
+      return { commands: [] };
+    }
+    return result.data;
   }
 
   async commandSession(parameters: {

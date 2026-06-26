@@ -14,9 +14,7 @@ import type {
   SessionScope,
   SessionModelOverride,
   SessionModelOverrideStore,
-  SlashCommand,
   SlashCommandContext,
-  SlashCommandDescriptor,
   SlashCommandFailure,
   SlashCommandFailureCode,
   SlashCommandReplyPresenter,
@@ -25,8 +23,6 @@ import type {
 import type { BridgeLogger } from '../AppLogger.js';
 import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
 import type {
-  ChatMessageClassification,
-  ChatMessageClassifierPort,
   SlashCommandClassification,
 } from './ChatMessageClassifier.js';
 import type { SdkChatSlashCommandExecutor } from './SdkChatSlashCommandExecutor.js';
@@ -36,7 +32,6 @@ export {
   type ChatMessageClassifierPort,
   type OpenCodeNativeCommandCatalog,
   type OpenCodeNativeCommandDescriptor,
-  type OpenCodeNativeCommandListResult,
   type SlashCapabilityProvider,
   type SlashCommandClassification,
 } from './ChatMessageClassifier.js';

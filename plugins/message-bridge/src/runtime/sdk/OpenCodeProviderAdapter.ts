@@ -252,17 +252,8 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       ...(this.effectiveDirectory ? { directory: this.effectiveDirectory } : {}),
       logger: this.logger,
     });
-    if (!result.success) {
-      this.logger.warn('provider_adapter.slash_commands.command_list_failed', {
-        traceId: input.traceId,
-        error: result.errorMessage ?? 'command.list failed',
-        sourceOperation: result.errorEvidence?.sourceOperation,
-        sourceErrorCode: result.errorEvidence?.sourceErrorCode,
-      });
-      return { slashCommands: [...commands.values()] };
-    }
 
-    for (const command of result.data.commands) {
+    for (const command of result.commands) {
       const normalized = this.normalizeOpenCodeSlashCommand(command);
       if (!normalized || commands.has(normalized.command)) {
         continue;

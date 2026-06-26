@@ -274,7 +274,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     }]);
   });
 
-  test('lists OpenCode native commands only when command.list and session.command are available', async () => {
+  test('lists OpenCode command catalog without requiring session.command', async () => {
     const calls = [];
     const { logger } = createLoggerSpy();
     const adapter = new OpencodeSessionGatewayAdapter(() => ({
@@ -284,7 +284,6 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
         delete: async () => ({}),
         get: async () => ({ data: { id: 'unused' } }),
         prompt: async () => createPromptResponse(),
-        command: async () => createPromptResponse(),
       },
       command: {
         list: async (options) => {
@@ -299,18 +298,89 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
       },
     }));
 
-    const result = await adapter.listNativeCommands({
+    const result = await adapter.listCommandCatalog({
       directory: '/workspace/native',
       logger,
     });
 
     assert.deepStrictEqual(result, {
-      success: true,
-      data: {
-        commands: [{ name: 'init' }, { name: 'review' }, { name: 'compact' }],
-      },
+      commands: [{ name: 'init' }, { name: 'review' }, { name: 'compact' }],
     });
     assert.deepStrictEqual(calls, [{ directory: '/workspace/native' }]);
+  });
+
+  test('returns empty command catalog and logs when command.list is unavailable', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.listCommandCatalog({
+      directory: '/workspace/native',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, { commands: [] });
+    assert.deepStrictEqual(entries, [{
+      level: 'warn',
+      message: 'opencode_command_catalog.list.unavailable',
+      extra: {
+        directory: '/workspace/native',
+        reason: 'command.list_unavailable',
+      },
+    }]);
+  });
+
+  test('returns empty command catalog and logs when command.list fails', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+      },
+      command: {
+        list: async () => {
+          throw new Error('boom');
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.listCommandCatalog({
+      directory: '/workspace/native',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, { commands: [] });
+    assert.deepStrictEqual(entries.filter((entry) => entry.level === 'warn'), [{
+      level: 'warn',
+      message: 'opencode_command_catalog.list.failed',
+      extra: {
+        directory: '/workspace/native',
+        error: 'Failed to list OpenCode commands: boom',
+        sourceOperation: 'command.list',
+        sourceErrorCode: undefined,
+        httpStatus: undefined,
+      },
+    }]);
   });
 
   test('executes OpenCode native command through session.command without prompt fallback', async () => {

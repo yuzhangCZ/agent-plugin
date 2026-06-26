@@ -42,20 +42,11 @@ export function createSdkChatRunPlanner(input: CreateSdkChatRunPlannerInput): Sd
     chatMessageClassifier: new ChatMessageClassifier({
       nativeCommandCatalog: {
         listCommands: async (catalogInput) => {
-          const result = await input.opencodeSessionGatewayAdapter.listNativeCommands({
+          const result = await input.opencodeSessionGatewayAdapter.listCommandCatalog({
             ...(catalogInput.directory ? { directory: catalogInput.directory } : {}),
             logger: input.logger,
           });
-          if (!result.success) {
-            return {
-              success: false,
-              reason: mapNativeCommandListFailureReason(result.errorEvidence?.sourceOperation),
-            };
-          }
-          return {
-            success: true,
-            commands: result.data.commands,
-          };
+          return result.commands;
         },
       },
     }),
@@ -67,14 +58,4 @@ export function createSdkChatRunPlanner(input: CreateSdkChatRunPlannerInput): Sd
     effectiveDirectory: input.effectiveDirectory,
     normalChatSessionResolver: new EntryAwareChatSessionResolver(input.entryAwareChatSessionResolver),
   });
-}
-
-function mapNativeCommandListFailureReason(sourceOperation: unknown): string {
-  if (sourceOperation === 'session.command') {
-    return 'session.command_unavailable';
-  }
-  if (sourceOperation === 'command.list') {
-    return 'command.list_failed';
-  }
-  return 'opencode_native_command_unavailable';
 }

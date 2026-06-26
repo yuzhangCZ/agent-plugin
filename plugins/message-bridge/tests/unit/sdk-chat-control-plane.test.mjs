@@ -107,7 +107,7 @@ test('ChatMessageClassifier classifies local slash before native slash', async (
     nativeCommandCatalog: {
       listCommands: async () => {
         nativeCalls += 1;
-        return { success: true, commands: [{ name: 'sessions' }] };
+        return [{ name: 'sessions' }];
       },
     },
   });
@@ -140,7 +140,7 @@ test('ChatMessageClassifier records native preflight fallback diagnostics', asyn
   const logs = [];
   const classifier = new ChatMessageClassifier({
     nativeCommandCatalog: {
-      listCommands: async () => ({ success: false, reason: 'command.list_failed' }),
+      listCommands: async () => [],
     },
   });
 
@@ -160,7 +160,7 @@ test('ChatMessageClassifier records native preflight fallback diagnostics', asyn
 
   assert.deepEqual(decision, {
     kind: 'normal_chat',
-    fallbackReason: 'command.list_failed',
+    fallbackReason: 'command_not_found',
     commandName: 'init',
   });
   assert.deepEqual(logs, [{
@@ -170,7 +170,7 @@ test('ChatMessageClassifier records native preflight fallback diagnostics', asyn
       toolSessionId: 'tool-native-fallback-log',
       runId: 'run-native-fallback-log',
       commandName: 'init',
-      reason: 'command.list_failed',
+      reason: 'command_not_found',
     },
   }]);
 });
@@ -433,7 +433,7 @@ test('ChatMessageClassifier keeps bridge-local slash commands ahead of OpenCode 
     nativeCommandCatalog: {
       listCommands: async () => {
         listCalls += 1;
-        return { success: true, commands: [{ name: 'new' }] };
+        return [{ name: 'new' }];
       },
     },
   });
@@ -468,7 +468,7 @@ test('ChatMessageClassifier returns local invalid without OpenCode native fallba
     nativeCommandCatalog: {
       listCommands: async () => {
         listCalls += 1;
-        return { success: true, commands: [{ name: 'session' }] };
+        return [{ name: 'session' }];
       },
     },
   });
@@ -502,7 +502,7 @@ test('ChatMessageClassifier resolves unknown slash to OpenCode native command af
     nativeCommandCatalog: {
       listCommands: async (input) => {
         assert.deepEqual(input, { directory: '/workspace/native' });
-        return { success: true, commands: [{ name: 'init' }] };
+        return [{ name: 'init' }];
       },
     },
   });
@@ -534,7 +534,7 @@ test('ChatMessageClassifier resolves unknown slash to OpenCode native command af
 test('ChatMessageClassifier trusts OpenCode native catalog names without slash normalization', async () => {
   const classifier = createDefaultChatMessageClassifier({
     nativeCommandCatalog: {
-      listCommands: async () => ({ success: true, commands: [{ name: '/init' }] }),
+      listCommands: async () => [{ name: '/init' }],
     },
   });
 
@@ -561,7 +561,7 @@ test('ChatMessageClassifier trusts OpenCode native catalog names without slash n
 test('ChatMessageClassifier keeps empty OpenCode native command arguments explicit', async () => {
   const classifier = createDefaultChatMessageClassifier({
     nativeCommandCatalog: {
-      listCommands: async () => ({ success: true, commands: [{ name: 'init' }] }),
+      listCommands: async () => [{ name: 'init' }],
     },
   });
 
@@ -591,7 +591,7 @@ test('ChatMessageClassifier keeps empty OpenCode native command arguments explic
 test('ChatMessageClassifier falls back to normal chat when OpenCode native command preflight cannot prove a command', async () => {
   const classifier = createDefaultChatMessageClassifier({
     nativeCommandCatalog: {
-      listCommands: async () => ({ success: false, reason: 'command.list_failed' }),
+      listCommands: async () => [],
     },
   });
 
@@ -610,7 +610,7 @@ test('ChatMessageClassifier falls back to normal chat when OpenCode native comma
     }),
     {
       kind: 'normal_chat',
-      fallbackReason: 'command.list_failed',
+      fallbackReason: 'command_not_found',
       commandName: 'init',
     },
   );

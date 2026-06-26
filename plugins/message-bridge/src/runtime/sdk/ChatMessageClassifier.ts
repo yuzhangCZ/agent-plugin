@@ -16,12 +16,8 @@ export interface OpenCodeNativeCommandDescriptor {
   name: string;
 }
 
-export type OpenCodeNativeCommandListResult =
-  | { success: true; commands: OpenCodeNativeCommandDescriptor[] }
-  | { success: false; reason: string };
-
 export interface OpenCodeNativeCommandCatalog {
-  listCommands(input: { directory?: string }): Promise<OpenCodeNativeCommandListResult>;
+  listCommands(input: { directory?: string }): Promise<OpenCodeNativeCommandDescriptor[]>;
 }
 
 export type BridgeLocalSlashClassification =
@@ -176,18 +172,11 @@ export class ChatMessageClassifier implements ChatMessageClassifierPort {
       };
     }
 
-    const listResult = await this.dependencies.nativeCommandCatalog.listCommands({
+    const commands = await this.dependencies.nativeCommandCatalog.listCommands({
       ...(input.directory ? { directory: input.directory } : {}),
     });
-    if (!listResult.success) {
-      return {
-        kind: 'normal_chat',
-        fallbackReason: listResult.reason,
-        commandName: nativeCommand.commandName,
-      };
-    }
 
-    if (!listResult.commands.some((command) => command.name === nativeCommand.commandName)) {
+    if (!commands.some((command) => command.name === nativeCommand.commandName)) {
       return {
         kind: 'normal_chat',
         fallbackReason: 'command_not_found',

@@ -323,14 +323,11 @@ function createAdapter(overrides = {}) {
           ? {
               nativeCommandCatalog: {
                 listCommands: async (input) => {
-                  const result = await opencodeSessionGatewayAdapter.listNativeCommands({
+                  const result = await opencodeSessionGatewayAdapter.listCommandCatalog({
                     ...(input.directory ? { directory: input.directory } : {}),
                     logger,
                   });
-                  if (!result.success) {
-                    return { success: false, reason: 'command.list_failed' };
-                  }
-                  return { success: true, commands: result.data.commands };
+                  return result.commands;
                 },
               },
             }
@@ -2820,22 +2817,6 @@ test('provider adapter returns local slash commands when OpenCode command.list i
 
   const result = await adapter.listSlashCommands({
     traceId: 'trace-list-local-only',
-  });
-
-  assert.deepEqual(result.slashCommands.map((command) => command.command), [
-    '/new',
-    '/sessions',
-    '/session',
-    '/models',
-    '/model',
-  ]);
-});
-
-test('provider adapter keeps local slash commands when sdk client is unavailable during catalog query', async () => {
-  const adapter = createAdapter({ sdkClient: null });
-
-  const result = await adapter.listSlashCommands({
-    traceId: 'trace-list-sdk-missing',
   });
 
   assert.deepEqual(result.slashCommands.map((command) => command.command), [
