@@ -97,18 +97,16 @@ function createActionContext(overrides = {}) {
 
 function createDefaultChatMessageClassifier(options = {}) {
   return new ChatMessageClassifier({
-    ...(options.nativeCommandCatalog ? { nativeCommandCatalog: options.nativeCommandCatalog } : {}),
+    ...(options.listNativeCommands ? { listNativeCommands: options.listNativeCommands } : {}),
   });
 }
 
 test('ChatMessageClassifier classifies local slash before native slash', async () => {
   let nativeCalls = 0;
   const classifier = new ChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => {
-        nativeCalls += 1;
-        return [{ name: 'sessions' }];
-      },
+    listNativeCommands: async () => {
+      nativeCalls += 1;
+      return [{ name: 'sessions' }];
     },
   });
 
@@ -139,9 +137,7 @@ test('ChatMessageClassifier classifies local slash before native slash', async (
 test('ChatMessageClassifier records native preflight fallback diagnostics', async () => {
   const logs = [];
   const classifier = new ChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => [],
-    },
+    listNativeCommands: async () => [],
   });
 
   const decision = await classifier.classify({
@@ -430,11 +426,9 @@ test('ChatMessageClassifier strips only one leading group mention', async () => 
 test('ChatMessageClassifier keeps bridge-local slash commands ahead of OpenCode native commands', async () => {
   let listCalls = 0;
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => {
-        listCalls += 1;
-        return [{ name: 'new' }];
-      },
+    listNativeCommands: async () => {
+      listCalls += 1;
+      return [{ name: 'new' }];
     },
   });
 
@@ -465,11 +459,9 @@ test('ChatMessageClassifier keeps bridge-local slash commands ahead of OpenCode 
 test('ChatMessageClassifier returns local invalid without OpenCode native fallback', async () => {
   let listCalls = 0;
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => {
-        listCalls += 1;
-        return [{ name: 'session' }];
-      },
+    listNativeCommands: async () => {
+      listCalls += 1;
+      return [{ name: 'session' }];
     },
   });
 
@@ -499,11 +491,9 @@ test('ChatMessageClassifier returns local invalid without OpenCode native fallba
 
 test('ChatMessageClassifier resolves unknown slash to OpenCode native command after command.list preflight', async () => {
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async (input) => {
-        assert.deepEqual(input, { directory: '/workspace/native' });
-        return [{ name: 'init' }];
-      },
+    listNativeCommands: async (input) => {
+      assert.deepEqual(input, { directory: '/workspace/native' });
+      return [{ name: 'init' }];
     },
   });
 
@@ -533,9 +523,7 @@ test('ChatMessageClassifier resolves unknown slash to OpenCode native command af
 
 test('ChatMessageClassifier trusts OpenCode native catalog names without slash normalization', async () => {
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => [{ name: '/init' }],
-    },
+    listNativeCommands: async () => [{ name: '/init' }],
   });
 
   const decision = await classifier.classify({
@@ -560,9 +548,7 @@ test('ChatMessageClassifier trusts OpenCode native catalog names without slash n
 
 test('ChatMessageClassifier keeps empty OpenCode native command arguments explicit', async () => {
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => [{ name: 'init' }],
-    },
+    listNativeCommands: async () => [{ name: 'init' }],
   });
 
   const decision = await classifier.classify({
@@ -590,9 +576,7 @@ test('ChatMessageClassifier keeps empty OpenCode native command arguments explic
 
 test('ChatMessageClassifier falls back to normal chat when OpenCode native command preflight cannot prove a command', async () => {
   const classifier = createDefaultChatMessageClassifier({
-    nativeCommandCatalog: {
-      listCommands: async () => [],
-    },
+    listNativeCommands: async () => [],
   });
 
   assert.deepEqual(

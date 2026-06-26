@@ -318,21 +318,19 @@ function createAdapter(overrides = {}) {
     hostSessionQueryPort,
   });
   const chatRunPlanner = overrides.chatRunPlanner ?? new SdkChatRunPlanner({
-      chatMessageClassifier: new ChatMessageClassifier({
-        ...(overrides.enableNativeCommandDispatch
-          ? {
-              nativeCommandCatalog: {
-                listCommands: async (input) => {
-                  const result = await opencodeSessionGatewayAdapter.listCommandCatalog({
-                    ...(input.directory ? { directory: input.directory } : {}),
-                    logger,
-                  });
-                  return result.commands;
-                },
-              },
-            }
-          : {}),
-      }),
+    chatMessageClassifier: new ChatMessageClassifier({
+      ...(overrides.enableNativeCommandDispatch
+        ? {
+            listNativeCommands: async (input) => {
+              const result = await opencodeSessionGatewayAdapter.listCommandCatalog({
+                ...(input.directory ? { directory: input.directory } : {}),
+                logger,
+              });
+              return result.commands;
+            },
+          }
+        : {}),
+    }),
     slashExecutionUseCase: new SdkSlashExecutionUseCase({
       slashCommandExecutor: {
         execute: async (input) => {

@@ -40,14 +40,12 @@ export function createSdkChatRunPlanner(input: CreateSdkChatRunPlannerInput): Sd
   });
   return new SdkChatRunPlanner({
     chatMessageClassifier: new ChatMessageClassifier({
-      nativeCommandCatalog: {
-        listCommands: async (catalogInput) => {
-          const result = await input.opencodeSessionGatewayAdapter.listCommandCatalog({
-            ...(catalogInput.directory ? { directory: catalogInput.directory } : {}),
-            logger: input.logger,
-          });
-          return result.commands;
-        },
+      listNativeCommands: async (catalogInput) => {
+        const result = await input.opencodeSessionGatewayAdapter.listCommandCatalog({
+          ...(catalogInput.directory ? { directory: catalogInput.directory } : {}),
+          logger: input.logger,
+        });
+        return result.commands;
       },
     }),
     slashExecutionUseCase: new SdkSlashExecutionUseCase({

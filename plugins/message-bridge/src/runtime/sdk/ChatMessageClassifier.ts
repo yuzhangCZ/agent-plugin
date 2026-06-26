@@ -16,9 +16,7 @@ export interface OpenCodeNativeCommandDescriptor {
   name: string;
 }
 
-export interface OpenCodeNativeCommandCatalog {
-  listCommands(input: { directory?: string }): Promise<OpenCodeNativeCommandDescriptor[]>;
-}
+export type ListOpenCodeNativeCommands = (input: { directory?: string }) => Promise<OpenCodeNativeCommandDescriptor[]>;
 
 export type BridgeLocalSlashClassification =
   | {
@@ -80,7 +78,7 @@ export class ChatMessageClassifier implements ChatMessageClassifierPort {
   constructor(private readonly dependencies: {
     slashCommandParser?: BridgeLocalSlashCommandParser;
     slashCapabilityProvider?: SlashCapabilityProvider;
-    nativeCommandCatalog?: OpenCodeNativeCommandCatalog;
+    listNativeCommands?: ListOpenCodeNativeCommands;
   }) {
     this.bridgeLocalSlashCommandParser = dependencies.slashCommandParser ?? new SimpleBridgeLocalSlashCommandParser();
     this.slashCapabilityProvider = dependencies.slashCapabilityProvider ?? new StaticSlashCapabilityProvider();
@@ -164,7 +162,7 @@ export class ChatMessageClassifier implements ChatMessageClassifierPort {
       return { kind: 'normal_chat' };
     }
 
-    if (!this.dependencies.nativeCommandCatalog) {
+    if (!this.dependencies.listNativeCommands) {
       return {
         kind: 'normal_chat',
         fallbackReason: 'session.command_unavailable',
@@ -172,7 +170,7 @@ export class ChatMessageClassifier implements ChatMessageClassifierPort {
       };
     }
 
-    const commands = await this.dependencies.nativeCommandCatalog.listCommands({
+    const commands = await this.dependencies.listNativeCommands({
       ...(input.directory ? { directory: input.directory } : {}),
     });
 

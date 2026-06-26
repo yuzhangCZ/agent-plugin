@@ -30,7 +30,7 @@ export {
   ChatMessageClassifier,
   type ChatMessageClassification,
   type ChatMessageClassifierPort,
-  type OpenCodeNativeCommandCatalog,
+  type ListOpenCodeNativeCommands,
   type OpenCodeNativeCommandDescriptor,
   type SlashCapabilityProvider,
   type SlashCommandClassification,
