@@ -35,7 +35,6 @@ const [
   QUERY_SLASH_COMMANDS_ACTION,
 ] = INVOKE_ACTIONS;
 
-// todo: case内部逻辑相似，大量重复逻辑
 function normalizeInvokeMessage(message: PlainObject): Result<InvokeMessage, WireContractViolation> {
   const welinkSessionId = asString(message.welinkSessionId);
   const action = asString(message.action);

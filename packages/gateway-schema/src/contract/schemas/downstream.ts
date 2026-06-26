@@ -60,7 +60,6 @@ export const extParametersSchema: z.ZodType<ExtParameters> = z
   })
   .transform((extParameters) => extParameters as ExtParameters);
 
-// todo: 大量的重复逻辑xxx ？（xx:  xx2): {} 这个有必要吗？
 export const chatPayloadSchema = z
   .object({
     toolSessionId: requiredTrimmedString,

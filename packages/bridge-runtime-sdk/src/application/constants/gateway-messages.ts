@@ -1,4 +1,3 @@
-// todo: bride-runtime-sdk没必要重复定义类型，统一从gateway-schema导出
 export const GATEWAY_UPLINK_MESSAGE_TYPE = {
   toolEvent: 'tool_event',
   statusResponse: 'status_response',
