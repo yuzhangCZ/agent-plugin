@@ -88,6 +88,7 @@ export interface PromptSessionResultData {
 
 export interface CommandSessionResultData {
   message: PromptSessionResultData['message'];
+  terminal: PromptSessionTerminal;
 }
 
 export interface SessionScopedActionGatewayPort {

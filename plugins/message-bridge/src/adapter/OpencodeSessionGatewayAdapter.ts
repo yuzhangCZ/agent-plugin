@@ -371,7 +371,10 @@ function buildCommandPayloadFailure(
   if (message) {
     return {
       success: true,
-      data: { message },
+      data: {
+        message,
+        terminal: derivePromptTerminal(message),
+      },
     };
   }
 

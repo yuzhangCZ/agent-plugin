@@ -2649,6 +2649,125 @@ test('provider adapter executes native command with explicit empty arguments thr
   }]);
 });
 
+test('provider adapter maps native command assistant error to failed terminal result', async () => {
+  const adapter = createAdapter({
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      command: async () => createPromptResponse({
+        info: {
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'provider failed',
+              statusCode: 429,
+              isRetryable: true,
+            },
+          },
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-error',
+    runId: 'run-native-error',
+    toolSessionId: 'anchor-native-error',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'APIError: provider failed statusCode=429',
+      details: {
+        name: 'APIError',
+        message: 'provider failed',
+        statusCode: 429,
+        isRetryable: true,
+      },
+    },
+  });
+});
+
+test('provider adapter maps native command MessageAbortedError to aborted terminal result', async () => {
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      command: async () => createPromptResponse({
+        info: {
+          error: {
+            name: 'MessageAbortedError',
+            data: {
+              message: 'User aborted',
+            },
+          },
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-aborted',
+    runId: 'run-native-aborted',
+    toolSessionId: 'anchor-native-aborted',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), { outcome: 'aborted' });
+  assert.deepEqual(
+    logs.find((log) => log.message === 'provider_adapter.command.completed')?.extra.providerOutcome,
+    'aborted',
+  );
+});
+
+test('provider adapter maps invalid native command response to failed result without prompt fallback', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      prompt: async () => {
+        calls.push({ type: 'prompt' });
+        return createPromptResponse();
+      },
+      command: async () => {
+        calls.push({ type: 'command' });
+        return { data: { invalid: true } };
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-invalid',
+    runId: 'run-native-invalid',
+    toolSessionId: 'anchor-native-invalid',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'provider_unavailable',
+      message: 'Failed to execute command: Invalid command response',
+    },
+  });
+  assert.deepEqual(calls, [{ type: 'command' }]);
+});
+
 test('provider adapter lists local slash commands and OpenCode command catalog with local precedence', async () => {
   const adapter = createAdapter({
     command: {

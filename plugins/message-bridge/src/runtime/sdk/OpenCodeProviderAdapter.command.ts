@@ -4,7 +4,6 @@ import type {
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
 import type {
   CommandSessionResultData,
-  PromptSessionAssistantError,
   PromptSessionTerminal,
 } from '../../port/SessionScopedActionGatewayPort.js';
 import type { ActionResult } from '../../types/action-runtime.js';
@@ -48,7 +47,7 @@ export async function bindProviderCommandTerminal(input: {
   });
 
   try {
-    // session.command 返回 command 生成的 assistant message；provider 终态在本层显式映射。
+    // session.command 返回 command 生成的 assistant message；终态由 gateway adapter 统一归一化。
     const commandResult = await input.gatewayAdapter.commandSession({
       sessionId: input.context.sessionContext.opencodeSessionId,
       commandName: input.commandName,
@@ -101,7 +100,7 @@ function handleCommandSuccess(
   startedAt: number,
   commandResult: Extract<CommandSessionActionResult, { success: true }>,
 ): void {
-  const terminal = deriveCommandTerminal(commandResult.data);
+  const terminal = commandResult.data.terminal;
   input.context.logger?.info('provider_adapter.command.completed', appendTerminalSourceEvidence({
     toolSessionId: input.context.anchor,
     opencodeSessionId: input.context.sessionContext.opencodeSessionId,
@@ -109,13 +108,17 @@ function handleCommandSuccess(
     commandName: input.commandName,
     durationMs: Math.max(0, Date.now() - startedAt),
     terminalKind: terminal.kind,
-    providerOutcome: terminal.kind === 'failed' ? 'failed' : 'completed',
+    providerOutcome: mapCommandTerminalOutcome(terminal.kind),
   }, terminal.kind === 'failed' ? terminal.errorDetails : undefined));
   if (terminal.kind === 'aborted') {
     input.activeRuns.abortAllByHostSession(input.context.sessionContext.opencodeSessionId, 'prompt_terminal_aborted');
     return;
   }
   input.activeRun.settlePromptTerminal(toProviderTerminalResult(terminal));
+}
+
+function mapCommandTerminalOutcome(kind: PromptSessionTerminal['kind']): 'completed' | 'aborted' | 'failed' {
+  return kind === 'failed' ? 'failed' : kind === 'aborted' ? 'aborted' : 'completed';
 }
 
 function handleCommandException(
@@ -178,27 +181,4 @@ function buildCommandFailureError(
     code: 'provider_unavailable',
     message: commandResult.errorMessage ?? 'provider_unavailable',
   };
-}
-
-function deriveCommandTerminal(result: CommandSessionResultData): PromptSessionTerminal {
-  const error = result.message.info.error;
-  if (!error) {
-    return { kind: 'completed' };
-  }
-  if (error.name === 'MessageAbortedError') {
-    return { kind: 'aborted' };
-  }
-  return {
-    kind: 'failed',
-    errorCode: 'internal_error',
-    errorMessage: formatCommandError(error),
-    errorDetails: {
-      name: error.name,
-      ...(error.details ?? {}),
-    },
-  };
-}
-
-function formatCommandError(error: PromptSessionAssistantError): string {
-  return error.message ? `${error.name}: ${error.message}` : error.name;
 }
