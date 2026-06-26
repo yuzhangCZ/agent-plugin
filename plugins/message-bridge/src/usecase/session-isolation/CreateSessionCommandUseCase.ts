@@ -38,7 +38,6 @@ export class DefaultCreateSessionCommandUseCase {
 
   async execute(input: CreateSessionCommandInput): Promise<CreateSessionCommandResult> {
     const entryKey = this.dependencies.businessEntryKeyResolver.resolve({
-      source: 'create_session',
       extParameters: input.extParameters,
     });
     if (!entryKey) {

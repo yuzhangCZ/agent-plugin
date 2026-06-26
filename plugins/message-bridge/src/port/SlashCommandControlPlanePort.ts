@@ -81,14 +81,13 @@ export interface SlashCommandDescriptor {
   kind: SlashCommand['kind'];
 }
 
-/** slash parser 输入：文本与群聊上下文必须显式传入。 */
-export interface SlashCommandParseInput {
+/** bridge-local slash parser 输入：文本已由 chat classifier 完成场景规范化。 */
+export interface BridgeLocalSlashCommandParseInput {
   text: string;
-  isGroupChat: boolean;
 }
 
-/** slash parser 三态结果：命中、已知命令但参数非法、非 slash。 */
-export type SlashCommandParseResult =
+/** bridge-local slash parser 三态结果：命中、已知本地命令但参数非法、非本地命令。 */
+export type BridgeLocalSlashCommandParseResult =
   | { kind: 'matched'; command: SlashCommand }
   | { kind: 'invalid'; command: SlashCommandDescriptor }
   | { kind: 'none' };
@@ -187,46 +186,13 @@ export interface HostModelCatalogPort {
   listModels(): Promise<HostModelInfo[]>;
 }
 
-/** slash 语法解析器。 */
-export interface SlashCommandParser {
-  tryParse(input: SlashCommandParseInput): SlashCommandParseResult;
+/** bridge-local slash 语法解析器，只识别 message-bridge 本地控制命令。 */
+export interface BridgeLocalSlashCommandParser {
+  tryParse(input: BridgeLocalSlashCommandParseInput): BridgeLocalSlashCommandParseResult;
 }
 
 /** slash 回包 presenter。 */
 export interface SlashCommandReplyPresenter {
   presentSuccess(result: SlashCommandResult): string;
   presentFailure(command: SlashCommandDescriptor, error: SlashCommandFailure): string;
-}
-
-/** slash 成功回包的送达阶段。 */
-export type SlashCommandSuccessDeliveryFailureStage =
-  | 'message.updated'
-  | 'message.part.updated.step-start'
-  | 'message.part.updated.text-seed'
-  | 'message.part.delta.text'
-  | 'message.part.updated.text-final'
-  | 'message.part.updated.step-finish'
-  | 'tool_done';
-
-/** slash 成功回包的投递结果。 */
-export type SlashCommandSuccessDeliveryResult =
-  | { success: true }
-  | { success: false; failureStage: SlashCommandSuccessDeliveryFailureStage };
-
-/** slash 失败回包的送达阶段；与成功路径保持一致，最终也必须收敛到 tool_done。 */
-export type SlashCommandFailureDeliveryFailureStage = SlashCommandSuccessDeliveryFailureStage;
-
-/** slash 失败回包的投递结果。 */
-export type SlashCommandFailureDeliveryResult =
-  | { success: true }
-  | { success: false; failureStage: SlashCommandFailureDeliveryFailureStage };
-
-/** slash 完成态发送端口。 */
-export interface SlashCommandCompletionPort {
-  completeSuccess(
-    input: { anchor: ExternalConversationAnchor; welinkSessionId?: string; text: string },
-  ): Promise<SlashCommandSuccessDeliveryResult>;
-  completeFailure(
-    input: { anchor: ExternalConversationAnchor; welinkSessionId?: string; text: string },
-  ): Promise<SlashCommandFailureDeliveryResult>;
 }

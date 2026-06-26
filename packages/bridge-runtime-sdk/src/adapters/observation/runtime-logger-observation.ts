@@ -234,6 +234,8 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
             traceId: event.traceId,
             toolSessionId: event.toolSessionId,
             runId: event.runId,
+            slashCommandCount: event.slashCommandCount,
+            slashCommands: event.slashCommands,
             error: event.error,
             code: event.code,
           },

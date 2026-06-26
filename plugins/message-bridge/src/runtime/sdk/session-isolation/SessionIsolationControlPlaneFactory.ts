@@ -42,7 +42,6 @@ import type {
 } from '../../../port/session-isolation/outbound/index.js';
 import type { RuntimePendingInteractionRegistry } from './RuntimePendingInteractionRegistry.js';
 import type { RuntimeAnchorRepository } from '../../../usecase/session-isolation/CreateSessionCommandUseCase.js';
-import { SessionIsolationSlashCommandExecutor } from './SessionIsolationSlashCommandExecutor.js';
 import type { BridgeLogger } from '../../AppLogger.js';
 
 export interface SessionIsolationControlPlaneDependencies {
@@ -72,7 +71,6 @@ export interface SessionIsolationControlPlane {
   hostEventPort: DefaultHostEventUseCase;
   resolveEntrySessionContextUseCase: DefaultResolveEntrySessionContextUseCase;
   switchAttachedSessionUseCase: DefaultSwitchAttachedSessionUseCase;
-  slashCommandExecutor: SessionIsolationSlashCommandExecutor;
 }
 
 type SessionIsolationRepositories = {
@@ -155,14 +153,6 @@ function createHostEventPort(input: {
   });
 }
 
-function createRuntimeAnchorRepositoryFallback(): RuntimeAnchorRepository {
-  return {
-    isAnchorOnly: async () => false,
-    createAnchorOnly: async () => undefined,
-    delete: async () => undefined,
-  };
-}
-
 /**
  * 装配正式 session-isolation 控制面对象图。
  * @remarks 这是 runtime 迁移的单一装配入口，避免 repository/usecase wiring 散落在插件主链。
@@ -227,13 +217,6 @@ export function createSessionIsolationControlPlane(
     ownedHostEventForwarder: dependencies.ownedHostEventForwarder,
     ownedSessionCoordinator,
   });
-  const slashCommandExecutor = new SessionIsolationSlashCommandExecutor({
-    resolveEntrySessionContextUseCase,
-    switchAttachedSessionUseCase,
-    createOwnedSessionUseCase,
-    runtimeAnchorRepository: dependencies.runtimeAnchorRepository ?? createRuntimeAnchorRepositoryFallback(),
-    ...(dependencies.logger ? { logger: dependencies.logger } : {}),
-  });
 
   return {
     createSessionCommandPort,
@@ -245,6 +228,5 @@ export function createSessionIsolationControlPlane(
     hostEventPort,
     resolveEntrySessionContextUseCase,
     switchAttachedSessionUseCase,
-    slashCommandExecutor,
   };
 }

@@ -274,6 +274,300 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     }]);
   });
 
+  test('lists OpenCode command catalog without requiring session.command', async () => {
+    const calls = [];
+    const { logger } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+      },
+      command: {
+        list: async (options) => {
+          calls.push(options);
+          return { data: [{ name: 'init' }, { id: 'review' }, 'compact'] };
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.listCommandCatalog({
+      directory: '/workspace/native',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, {
+      commands: [{ name: 'init' }, { name: 'review' }, { name: 'compact' }],
+    });
+    assert.deepStrictEqual(calls, [{ directory: '/workspace/native' }]);
+  });
+
+  test('returns empty command catalog and logs when command.list is unavailable', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.listCommandCatalog({
+      directory: '/workspace/native',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, { commands: [] });
+    assert.deepStrictEqual(entries, [{
+      level: 'warn',
+      message: 'opencode_command_catalog.list.unavailable',
+      extra: {
+        directory: '/workspace/native',
+        reason: 'command.list_unavailable',
+      },
+    }]);
+  });
+
+  test('returns empty command catalog and logs when command.list fails', async () => {
+    const { logger, entries } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+      },
+      command: {
+        list: async () => {
+          throw new Error('boom');
+        },
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.listCommandCatalog({
+      directory: '/workspace/native',
+      logger,
+    });
+
+    assert.deepStrictEqual(result, { commands: [] });
+    assert.deepStrictEqual(entries.filter((entry) => entry.level === 'warn'), [{
+      level: 'warn',
+      message: 'opencode_command_catalog.list.failed',
+      extra: {
+        directory: '/workspace/native',
+        error: 'Failed to list OpenCode commands: boom',
+        sourceOperation: 'command.list',
+        sourceErrorCode: undefined,
+        httpStatus: undefined,
+      },
+    }]);
+  });
+
+  test('executes OpenCode native command through session.command without prompt fallback', async () => {
+    const calls = [];
+    const { logger } = createLoggerSpy();
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => {
+          calls.push({ type: 'prompt' });
+          return createPromptResponse();
+        },
+        command: async (options) => {
+          calls.push({ type: 'command', options });
+          return createPromptResponse();
+        },
+      },
+      command: {
+        list: async () => ({ data: [] }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.commandSession({
+      sessionId: 'ses-command',
+      commandName: 'init',
+      arguments: 'project now',
+      directory: '/workspace/native',
+      agent: 'build',
+      modelOverride: { providerId: 'test', modelId: 'test-model' },
+      logger,
+    });
+
+    assert.equal(result.success, true);
+    assert.deepStrictEqual(Object.keys(result.data).sort(), ['message', 'terminal']);
+    assert.equal(result.data.message.info.id, 'msg-assistant-1');
+    assert.deepStrictEqual(result.data.terminal, { kind: 'completed' });
+    assert.deepStrictEqual(calls, [{
+      type: 'command',
+      options: {
+        sessionID: 'ses-command',
+        command: 'init',
+        arguments: 'project now',
+        directory: '/workspace/native',
+        model: 'test/test-model',
+        agent: 'build',
+      },
+    }]);
+  });
+
+  test('derives command terminal with the same assistant error shape as prompt terminal', async () => {
+    const assistantError = {
+      name: 'APIError',
+      data: {
+        message: 'provider failed',
+        statusCode: 429,
+        isRetryable: true,
+      },
+    };
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse({ info: { error: assistantError } }),
+        command: async () => createPromptResponse({ info: { error: assistantError } }),
+      },
+      command: {
+        list: async () => ({ data: [] }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const promptResult = await adapter.promptSession({
+      sessionId: 'ses-command-error',
+      text: 'hello',
+    });
+    const commandResult = await adapter.commandSession({
+      sessionId: 'ses-command-error',
+      commandName: 'init',
+      arguments: '',
+    });
+
+    assert.equal(promptResult.success, true);
+    assert.equal(commandResult.success, true);
+    assert.deepStrictEqual(commandResult.data.terminal, promptResult.data.terminal);
+    assert.deepStrictEqual(commandResult.data.terminal, {
+      kind: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'APIError: provider failed statusCode=429',
+      errorDetails: {
+        name: 'APIError',
+        message: 'provider failed',
+        statusCode: 429,
+        isRetryable: true,
+      },
+    });
+  });
+
+  test('derives aborted terminal for MessageAbortedError returned by session.command', async () => {
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+        command: async () => createPromptResponse({
+          info: {
+            error: {
+              name: 'MessageAbortedError',
+              data: {
+                message: 'User aborted',
+              },
+            },
+          },
+        }),
+      },
+      command: {
+        list: async () => ({ data: [] }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.commandSession({
+      sessionId: 'ses-command-abort',
+      commandName: 'init',
+      arguments: '',
+    });
+
+    assert.equal(result.success, true);
+    assert.deepStrictEqual(result.data.terminal, { kind: 'aborted' });
+  });
+
+  test('passes empty string arguments when OpenCode native command has no arguments', async () => {
+    const calls = [];
+    const adapter = new OpencodeSessionGatewayAdapter(() => ({
+      session: {
+        create: async () => ({}),
+        abort: async () => ({}),
+        delete: async () => ({}),
+        get: async () => ({ data: { id: 'unused' } }),
+        prompt: async () => createPromptResponse(),
+        command: async (options) => {
+          calls.push(options);
+          return createPromptResponse();
+        },
+      },
+      command: {
+        list: async () => ({ data: [] }),
+      },
+      postSessionIdPermissionsPermissionId: async () => ({}),
+      _client: {
+        get: async () => ({}),
+        post: async () => ({}),
+      },
+    }));
+
+    const result = await adapter.commandSession({
+      sessionId: 'ses-command-empty-args',
+      commandName: 'init',
+    });
+
+    assert.equal(result.success, true);
+    assert.deepStrictEqual(calls, [{
+      sessionID: 'ses-command-empty-args',
+      command: 'init',
+      arguments: '',
+    }]);
+  });
+
   test('keeps bare APIError terminal when assistant info.error only provides name', async () => {
     const { logger, entries } = createLoggerSpy();
     const adapter = new OpencodeSessionGatewayAdapter(() => ({

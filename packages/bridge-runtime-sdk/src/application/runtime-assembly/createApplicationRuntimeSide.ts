@@ -27,6 +27,7 @@ import {
   AbortExecutionUseCase,
   CloseSessionUseCase,
   CreateSessionUseCase,
+  ListSlashCommandsUseCase,
   QueryStatusUseCase,
   ReplyPermissionUseCase,
   ReplyQuestionUseCase,
@@ -99,6 +100,7 @@ export function createApplicationRuntimeSide(
   );
   const dispatcher = new RuntimeCommandDispatcher({
     query_status: new QueryStatusUseCase(providerHandlers, sink, commandResultProjector, observation),
+    list_slash_commands: new ListSlashCommandsUseCase(providerHandlers, sink, commandResultProjector, observation),
     create_session: new CreateSessionUseCase(
       providerHandlers,
       sessionRegistry,

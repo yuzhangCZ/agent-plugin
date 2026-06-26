@@ -12,6 +12,12 @@ export type CreateSessionRuntimeCommand = {
   source: Extract<GatewayDownstreamBusinessRequest, { type: 'invoke'; action: 'create_session' }>;
 };
 
+export type ListSlashCommandsRuntimeCommand = {
+  kind: 'list_slash_commands';
+  traceId: string;
+  source: Extract<GatewayDownstreamBusinessRequest, { type: 'invoke'; action: 'query_slash_commands' }>;
+};
+
 export type StartRequestRunRuntimeCommand = {
   kind: 'start_request_run';
   traceId: string;
@@ -48,6 +54,7 @@ export type AbortExecutionRuntimeCommand = {
 export type RuntimeCommand =
   | QueryStatusRuntimeCommand
   | CreateSessionRuntimeCommand
+  | ListSlashCommandsRuntimeCommand
   | StartRequestRunRuntimeCommand
   | ReplyQuestionRuntimeCommand
   | ReplyPermissionRuntimeCommand

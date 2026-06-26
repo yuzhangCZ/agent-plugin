@@ -86,6 +86,11 @@ export interface PromptSessionResultData {
   terminal: PromptSessionTerminal;
 }
 
+export interface CommandSessionResultData {
+  message: PromptSessionResultData['message'];
+  terminal: PromptSessionTerminal;
+}
+
 export interface SessionScopedActionGatewayPort {
   promptSession(parameters: {
     sessionId: string;
@@ -95,6 +100,15 @@ export interface SessionScopedActionGatewayPort {
     modelOverride?: SessionModelOverride;
     logger?: BridgeLogger;
   }): Promise<ActionResult<PromptSessionResultData>>;
+  commandSession(parameters: {
+    sessionId: string;
+    commandName: string;
+    arguments?: string;
+    directory?: string;
+    agent?: string;
+    modelOverride?: SessionModelOverride;
+    logger?: BridgeLogger;
+  }): Promise<ActionResult<CommandSessionResultData>>;
   abortSession(parameters: {
     sessionId: string;
     logger?: BridgeLogger;

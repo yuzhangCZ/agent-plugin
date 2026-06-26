@@ -10,15 +10,27 @@ import {
   optionalStrictTrimmedString,
   requiredTrimmedString,
 } from './shared.ts';
-import type { ExtParameters, PlatformExtParam } from '../types/ext-parameters.ts';
+import type { ExtParameters } from '../types/ext-parameters.ts';
 import { jsonValueSchema } from './tool-event/opencode-provider-event/json.ts';
 
 const [INVOKE_MESSAGE_TYPE, STATUS_QUERY_MESSAGE_TYPE] = DOWNSTREAM_MESSAGE_TYPES;
-const [CHAT_ACTION, CREATE_SESSION_ACTION, CLOSE_SESSION_ACTION, PERMISSION_REPLY_ACTION, ABORT_SESSION_ACTION, QUESTION_REPLY_ACTION] =
+const [
+  CHAT_ACTION,
+  CREATE_SESSION_ACTION,
+  CLOSE_SESSION_ACTION,
+  PERMISSION_REPLY_ACTION,
+  ABORT_SESSION_ACTION,
+  QUESTION_REPLY_ACTION,
+  QUERY_SLASH_COMMANDS_ACTION,
+] =
   INVOKE_ACTIONS;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return isPlainObject(value) && jsonValueSchema.safeParse(value).success;
 }
 
 export const statusQueryMessageSchema = z.object({
@@ -26,60 +38,29 @@ export const statusQueryMessageSchema = z.object({
 });
 export type StatusQueryMessage = z.output<typeof statusQueryMessageSchema>;
 
-const requiredStringArrayItemSchema = z.string().transform((value) => value.trim()).pipe(z.string().min(1));
-
-export const platformExtParamSchema: z.ZodType<PlatformExtParam> = z
-  .object({
-    businessSessionDomain: optionalStrictTrimmedString,
-    businessSessionType: optionalStrictTrimmedString,
-    businessSessionId: optionalStrictTrimmedString,
-    allowedSlashCommands: z.array(requiredStringArrayItemSchema).optional(),
-  })
-  .passthrough()
-  .transform((platformExtParam) => ({
-    ...Object.fromEntries(
-      Object.entries(platformExtParam).filter(
-        ([key]) =>
-          key !== 'businessSessionDomain'
-          && key !== 'businessSessionType'
-          && key !== 'businessSessionId'
-          && key !== 'allowedSlashCommands',
-      ),
-    ),
-    ...(platformExtParam.businessSessionDomain
-      ? { businessSessionDomain: platformExtParam.businessSessionDomain }
-      : {}),
-    ...(platformExtParam.businessSessionType
-      ? { businessSessionType: platformExtParam.businessSessionType }
-      : {}),
-    ...(platformExtParam.businessSessionId ? { businessSessionId: platformExtParam.businessSessionId } : {}),
-    ...(platformExtParam.allowedSlashCommands !== undefined
-      ? { allowedSlashCommands: platformExtParam.allowedSlashCommands }
-      : {}),
-  }));
-
+/**
+ * gateway 下行业务扩展透传容器。
+ * @remarks gateway-schema 只校验顶层容器和约定扩展块的 JSON object 可序列化性；
+ * `platformExtParam` 内部业务字段不在这里解释，`PlatformExtParam` 类型仅为 public type 兼容保留。
+ */
 export const extParametersSchema: z.ZodType<ExtParameters> = z
   .custom<Record<string, unknown>>(isPlainObject, {
     message: 'Expected plain object',
   })
-  .pipe(
-    z
-      .object({
-        businessExtParam: jsonValueSchema.optional(),
-        platformExtParam: platformExtParamSchema.optional(),
-      })
-      .passthrough()
-      .transform((extParameters) => ({
-        ...Object.fromEntries(
-          Object.entries(extParameters).filter(
-            ([key]) => key !== 'businessExtParam' && key !== 'platformExtParam',
-          ),
-        ),
-        ...(extParameters.businessExtParam !== undefined ? { businessExtParam: extParameters.businessExtParam } : {}),
-        ...(extParameters.platformExtParam !== undefined ? { platformExtParam: extParameters.platformExtParam } : {}),
-      })),
-  );
+  .superRefine((extParameters, context) => {
+    for (const key of ['businessExtParam', 'platformExtParam'] as const) {
+      if (extParameters[key] !== undefined && !isJsonObject(extParameters[key])) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${key} must be a JSON object`,
+          path: [key],
+        });
+      }
+    }
+  })
+  .transform((extParameters) => extParameters as ExtParameters);
 
+// todo: 大量的重复逻辑xxx ？（xx:  xx2): {} 这个有必要吗？
 export const chatPayloadSchema = z
   .object({
     toolSessionId: requiredTrimmedString,
@@ -198,6 +179,16 @@ export const questionReplyPayloadSchema = z
   });
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
+export const querySlashCommandsPayloadSchema = z
+  .object({
+    extParameters: extParametersSchema.optional(),
+  })
+  .transform((payload) => ({
+    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+  }))
+
+export type QuerySlashCommandsPayload = z.output<typeof querySlashCommandsPayloadSchema>;
+
 export const chatInvokeSchema = z
   .object({
     type: z.literal(INVOKE_MESSAGE_TYPE),
@@ -287,6 +278,22 @@ export const questionReplyInvokeSchema = z
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
   }));
 
+export const querySlashCommandsInvokeSchema = z
+  .object({
+    type: z.literal(INVOKE_MESSAGE_TYPE),
+    action: z.literal(QUERY_SLASH_COMMANDS_ACTION),
+    toolSessionId: requiredTrimmedString,
+    traceId: requiredTrimmedString,
+    payload: querySlashCommandsPayloadSchema.optional(),
+  })
+  .transform((message) => ({
+    type: message.type,
+    action: message.action,
+    toolSessionId: message.toolSessionId,
+    traceId: message.traceId,
+    payload: message.payload,
+  }))
+
 export const invokeMessageSchema = z.union([
   chatInvokeSchema,
   createSessionInvokeSchema,
@@ -294,6 +301,7 @@ export const invokeMessageSchema = z.union([
   permissionReplyInvokeSchema,
   abortSessionInvokeSchema,
   questionReplyInvokeSchema,
+  querySlashCommandsInvokeSchema,
 ]);
 export type InvokeMessage = z.output<typeof invokeMessageSchema>;
 
@@ -377,6 +385,7 @@ export interface ActionResultDataByAction {
   permission_reply: PermissionReplyResultData;
   abort_session: AbortSessionResultData;
   question_reply: QuestionReplyResultData;
+  query_slash_commands: void;
 }
 
 export interface ActionResultDataByName extends ActionResultDataByAction {

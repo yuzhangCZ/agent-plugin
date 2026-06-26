@@ -1,4 +1,5 @@
-import type { SessionCreatedMessage, StatusResponseMessage } from '@agent-plugin/gateway-schema';
+import type { SessionCreatedMessage, SlashCommandsResultMessage, StatusResponseMessage } from '@agent-plugin/gateway-schema';
+import type { ProviderSlashCommand } from '../../domain/provider.ts';
 
 import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../constants/gateway-messages.ts';
 import type { GatewayCommandResultProjector } from './projector.types.ts';
@@ -21,6 +22,21 @@ export class DefaultGatewayCommandResultProjector implements GatewayCommandResul
       toolSessionId: input.toolSessionId,
       session: {
         sessionId: input.toolSessionId,
+      },
+    };
+  }
+
+  projectSlashCommands(input: {
+    toolSessionId: string;
+    traceId: string;
+    slashCommands: ProviderSlashCommand[];
+  }): SlashCommandsResultMessage {
+    return {
+      type: GATEWAY_UPLINK_MESSAGE_TYPE.slashCommandsResult,
+      toolSessionId: input.toolSessionId,
+      traceId: input.traceId,
+      payload: {
+        slashCommands: input.slashCommands,
       },
     };
   }

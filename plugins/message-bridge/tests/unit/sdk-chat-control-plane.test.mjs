@@ -5,16 +5,14 @@ import {
   InMemoryOpencodeSessionOwnershipResolver,
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
-  SimpleSlashCommandParser,
 } from '../../src/adapter/index.ts';
-import { DefaultSlashCommandReplyPresenter, SlashCommandExecutor } from '../../src/usecase/index.ts';
+import { DefaultSlashCommandReplyPresenter } from '../../src/usecase/index.ts';
 import {
-  ChatEntryPolicy,
+  ChatMessageClassifier,
   DefaultChatExecutionContextResolver,
   DefaultExecutionSessionInvalidationPort,
-  SdkChatPreprocessor,
+  SdkChatRunPlanner,
   SdkSlashExecutionUseCase,
-  StaticSlashCapabilityProvider,
 } from '../../src/runtime/sdk/SdkChatControlPlane.ts';
 import {
   BusinessEntryContextResolver,
@@ -39,6 +37,263 @@ function createLogger() {
   };
 }
 
+function createEntryContext(overrides = {}) {
+  return {
+    entryKey: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: 'user-a',
+    },
+    policy: {
+      entryKey: 'im:direct:user-a',
+      controlled: true,
+      allowOpencodeNativeSessions: false,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+    },
+    ...overrides,
+  };
+}
+
+function createBusinessEntryContextResolver() {
+  return new BusinessEntryContextResolver({
+    businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+    businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+  });
+}
+
+function createActionContext(overrides = {}) {
+  const message = overrides.message ?? {
+    traceId: 'trace-action',
+    runId: 'run-action',
+    toolSessionId: 'anchor-action',
+    text: 'hello',
+  };
+  const {
+    opencodeSessionId,
+    session,
+    scope,
+    modelOverride,
+    bootstrapSource,
+    directory,
+    sessionContext,
+    effectiveDirectory,
+    ...rest
+  } = overrides;
+  return {
+    message,
+    anchor: message.toolSessionId,
+    entryContext: createEntryContext(),
+    sessionContext: {
+      opencodeSessionId: opencodeSessionId ?? sessionContext?.opencodeSessionId ?? 'ses-action',
+      ...(session ?? sessionContext?.session ? { session: session ?? sessionContext.session } : {}),
+      ...(scope ?? sessionContext?.scope ? { scope: scope ?? sessionContext.scope } : {}),
+      ...(modelOverride ?? sessionContext?.modelOverride ? { modelOverride: modelOverride ?? sessionContext.modelOverride } : {}),
+      bootstrapSource: bootstrapSource ?? sessionContext?.bootstrapSource ?? 'existing_binding',
+    },
+    ...(directory ?? effectiveDirectory ? { effectiveDirectory: directory ?? effectiveDirectory } : {}),
+    ...rest,
+  };
+}
+
+function createDefaultChatMessageClassifier(options = {}) {
+  return new ChatMessageClassifier({
+    ...(options.listNativeCommands ? { listNativeCommands: options.listNativeCommands } : {}),
+  });
+}
+
+test('ChatMessageClassifier classifies local slash before native slash', async () => {
+  let nativeCalls = 0;
+  const classifier = new ChatMessageClassifier({
+    listNativeCommands: async () => {
+      nativeCalls += 1;
+      return [{ name: 'sessions' }];
+    },
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-classify-local',
+        runId: 'run-classify-local',
+        toolSessionId: 'tool-classify-local',
+        text: '/sessions',
+      },
+      opencodeSessionId: 'ses-classify-local',
+      bootstrapSource: 'bootstrap_created',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'slash',
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'sessions' },
+      command: { kind: 'sessions' },
+    },
+  });
+  assert.equal(nativeCalls, 0);
+});
+
+test('ChatMessageClassifier records native preflight fallback diagnostics', async () => {
+  const logs = [];
+  const classifier = new ChatMessageClassifier({
+    listNativeCommands: async () => [],
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-native-fallback-log',
+        runId: 'run-native-fallback-log',
+        toolSessionId: 'tool-native-fallback-log',
+        text: '/init now',
+      },
+      opencodeSessionId: 'ses-native-fallback-log',
+      bootstrapSource: 'bootstrap_created',
+      logger: createCapturingLogger(logs),
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'normal_chat',
+    fallbackReason: 'command_not_found',
+    commandName: 'init',
+  });
+  assert.deepEqual(logs, [{
+    level: 'info',
+    message: 'sdk_chat_classifier.native_command_preflight_fallback',
+    extra: {
+      toolSessionId: 'tool-native-fallback-log',
+      runId: 'run-native-fallback-log',
+      commandName: 'init',
+      reason: 'command_not_found',
+    },
+  }]);
+});
+
+test('SdkChatRunPlanner returns queued_execution for normal chat', async () => {
+  const classifierInputs = [];
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: {
+      classify: async (input) => {
+        classifierInputs.push(input);
+        return { kind: 'normal_chat' };
+      },
+    },
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execute');
+      },
+    },
+    normalChatSessionResolver: {
+      resolve: async () => ({
+        opencodeSessionId: 'ses-plan-normal',
+        session: { id: 'ses-plan-normal' },
+        bootstrapSource: 'bootstrap_created',
+      }),
+    },
+    businessEntryContextResolver: createBusinessEntryContextResolver(),
+    effectiveDirectory: '/workspace',
+  });
+
+  const message = {
+    traceId: 'trace-plan-normal',
+    runId: 'run-plan-normal',
+    toolSessionId: 'tool-plan-normal',
+    text: 'hello',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-a',
+      },
+    },
+  };
+  const plan = await planner.plan(message);
+  const expectedEntryContext = createEntryContext({
+    policy: {
+      entryKey: 'im:direct:user-a',
+      controlled: false,
+      allowOpencodeNativeSessions: true,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      slashPolicySource: 'entry_template',
+    },
+  });
+
+  assert.deepEqual(plan, {
+    kind: 'queued_execution',
+    context: {
+      message,
+      anchor: 'tool-plan-normal',
+      entryContext: expectedEntryContext,
+      sessionContext: {
+        opencodeSessionId: 'ses-plan-normal',
+        session: { id: 'ses-plan-normal' },
+        bootstrapSource: 'bootstrap_created',
+      },
+      effectiveDirectory: '/workspace',
+    },
+    execution: {
+      kind: 'prompt',
+      text: 'hello',
+    },
+  });
+  assert.equal(classifierInputs.length, 1);
+  assert.equal(classifierInputs[0].context.sessionContext.opencodeSessionId, 'ses-plan-normal');
+  assert.equal(classifierInputs[0].context.effectiveDirectory, '/workspace');
+  assert.deepEqual(classifierInputs[0].context.entryContext, expectedEntryContext);
+});
+
+test('SdkChatRunPlanner requires entry-aware normal chat resolver', () => {
+  assert.throws(
+    () => new SdkChatRunPlanner({
+      chatMessageClassifier: {
+        classify: async () => ({ kind: 'normal_chat' }),
+      },
+      slashExecutionUseCase: {
+        execute: async () => {
+          throw new Error('unexpected_slash_execute');
+        },
+      },
+      businessEntryContextResolver: createBusinessEntryContextResolver(),
+    }),
+    /entry_aware_chat_session_resolver_required/u,
+  );
+});
+
+test('SdkChatRunPlanner suppressReply returns synthetic run without resolving context', async () => {
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: {
+      classify: async () => {
+        throw new Error('unexpected_classify');
+      },
+    },
+    slashExecutionUseCase: {
+      execute: async () => {
+        throw new Error('unexpected_slash_execute');
+      },
+    },
+    normalChatSessionResolver: {
+      resolve: async () => {
+        throw new Error('unexpected_normal_chat_resolve');
+      },
+    },
+    businessEntryContextResolver: createBusinessEntryContextResolver(),
+  });
+
+  const plan = await planner.plan({
+    traceId: 'trace-suppress-reply',
+    runId: 'run-suppress-reply',
+    toolSessionId: 'tool-suppress-reply',
+    text: '/sessions',
+    context: { suppressReply: true },
+  });
+
+  assert.equal(plan.kind, 'immediate_synthetic');
+  const facts = await collect(plan.run.facts);
+  assert.equal(facts[1].content, '本机器人不处理群聊消息，请勿在群内@提问');
+});
+
 function createCapturingLogger(entries) {
   const write = (level) => (message, extra) => {
     entries.push({ level, message, extra });
@@ -61,139 +316,325 @@ async function collect(asyncIterable) {
   return items;
 }
 
-test('ChatEntryPolicy denies suppressReply before slash parse', () => {
-  const policy = new ChatEntryPolicy({
-    slashCommandParser: new SimpleSlashCommandParser(),
-    slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-  });
+test('ChatMessageClassifier disables group-only forbidden slash commands', async () => {
+  const classifier = createDefaultChatMessageClassifier();
 
   assert.deepEqual(
-    policy.decide({
-      traceId: 'trace-1',
-      runId: 'run-1',
-      toolSessionId: 'anchor-1',
-      text: '/sessions',
-      context: { suppressReply: true },
+    await classifier.classify({
+      context: createActionContext({
+        message: {
+          traceId: 'trace-group-disabled',
+          runId: 'run-group-disabled',
+          toolSessionId: 'tool-group-disabled',
+          text: '@bot /sessions',
+        },
+        entryContext: {
+          entryKey: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'group-1',
+          },
+          policy: {
+            entryKey: 'im:group:group-1',
+            controlled: true,
+            allowOpencodeNativeSessions: false,
+            allowedSlashCommands: ['new'],
+          },
+        },
+      }),
     }),
     {
-      kind: 'deny',
-      text: '本机器人不处理群聊消息，请勿在群内@提问',
+      kind: 'slash',
+      slash: {
+        kind: 'bridge_local',
+        descriptor: { kind: 'sessions' },
+        disabledInEntry: true,
+      },
     },
   );
 });
 
-test('ChatEntryPolicy disables group-only forbidden slash commands', () => {
-  const policy = new ChatEntryPolicy({
-    slashCommandParser: new SimpleSlashCommandParser(),
-    slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-  });
+test('ChatMessageClassifier allows group slash commands when policy includes command', async () => {
+  const classifier = createDefaultChatMessageClassifier();
 
   assert.deepEqual(
-    policy.decide(
-      {
-        traceId: 'trace-2',
-        runId: 'run-2',
-        toolSessionId: 'anchor-2',
-        text: '@bot /sessions',
-      },
-      {
-        entryKey: {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: 'group-1',
+    await classifier.classify({
+      context: createActionContext({
+        message: {
+          traceId: 'trace-group-allowed',
+          runId: 'run-group-allowed',
+          toolSessionId: 'tool-group-allowed',
+          text: '@bot /sessions',
         },
-        policy: {
-          entryKey: 'im:group:group-1',
-          controlled: true,
-          allowOpencodeNativeSessions: false,
-          allowedSlashCommands: ['new'],
+        entryContext: {
+          entryKey: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'group-1',
+          },
+          policy: {
+            entryKey: 'im:group:group-1',
+            controlled: true,
+            allowOpencodeNativeSessions: false,
+            allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+          },
         },
-      },
-    ),
+      }),
+    }),
     {
       kind: 'slash',
-      descriptor: { kind: 'sessions' },
-      disabledInEntry: true,
+      slash: {
+        kind: 'bridge_local',
+        descriptor: { kind: 'sessions' },
+        command: { kind: 'sessions' },
+      },
     },
   );
 });
 
-test('ChatEntryPolicy allows group slash commands when policy includes command', () => {
-  const policy = new ChatEntryPolicy({
-    slashCommandParser: new SimpleSlashCommandParser(),
-    slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+test('ChatMessageClassifier strips only one leading group mention', async () => {
+  const classifier = createDefaultChatMessageClassifier();
+
+  assert.deepEqual(
+    await classifier.classify({
+      context: createActionContext({
+        message: {
+          traceId: 'trace-group-single-mention',
+          runId: 'run-group-single-mention',
+          toolSessionId: 'tool-group-single-mention',
+          text: '@bot @user /sessions',
+        },
+        entryContext: {
+          entryKey: {
+            businessSessionDomain: 'im',
+            businessSessionType: 'group',
+            businessSessionId: 'group-1',
+          },
+          policy: {
+            entryKey: 'im:group:group-1',
+            controlled: true,
+            allowOpencodeNativeSessions: false,
+            allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+          },
+        },
+      }),
+    }),
+    { kind: 'normal_chat' },
+  );
+});
+
+test('ChatMessageClassifier keeps bridge-local slash commands ahead of OpenCode native commands', async () => {
+  let listCalls = 0;
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async () => {
+      listCalls += 1;
+      return [{ name: 'new' }];
+    },
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-local-first',
+        runId: 'run-local-first',
+        toolSessionId: 'tool-local-first',
+        text: '/new',
+      },
+      opencodeSessionId: 'ses-local-first',
+      bootstrapSource: 'bootstrap_created',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'slash',
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'new' },
+      command: { kind: 'new' },
+    },
+  });
+  assert.equal(listCalls, 0);
+});
+
+test('ChatMessageClassifier returns local invalid without OpenCode native fallback', async () => {
+  let listCalls = 0;
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async () => {
+      listCalls += 1;
+      return [{ name: 'session' }];
+    },
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-local-invalid',
+        runId: 'run-local-invalid',
+        toolSessionId: 'tool-local-invalid',
+        text: '/session',
+      },
+      opencodeSessionId: 'ses-local-invalid',
+      bootstrapSource: 'bootstrap_created',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'slash',
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'session' },
+      invalid: true,
+    },
+  });
+  assert.equal(listCalls, 0);
+});
+
+test('ChatMessageClassifier resolves unknown slash to OpenCode native command after command.list preflight', async () => {
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async (input) => {
+      assert.deepEqual(input, { directory: '/workspace/native' });
+      return [{ name: 'init' }];
+    },
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-native',
+        runId: 'run-native',
+        toolSessionId: 'tool-native',
+        text: '/init project now',
+      },
+      opencodeSessionId: 'ses-native',
+      bootstrapSource: 'bootstrap_created',
+      directory: '/workspace/native',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'slash',
+    slash: {
+      kind: 'opencode_native',
+      commandName: 'init',
+      arguments: 'project now',
+    },
+  });
+});
+
+test('ChatMessageClassifier trusts OpenCode native catalog names without slash normalization', async () => {
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async () => [{ name: '/init' }],
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-native-slash-name',
+        runId: 'run-native-slash-name',
+        toolSessionId: 'tool-native-slash-name',
+        text: '/init project now',
+      },
+      opencodeSessionId: 'ses-native-slash-name',
+      bootstrapSource: 'bootstrap_created',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'normal_chat',
+    fallbackReason: 'command_not_found',
+    commandName: 'init',
+  });
+});
+
+test('ChatMessageClassifier keeps empty OpenCode native command arguments explicit', async () => {
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async () => [{ name: 'init' }],
+  });
+
+  const decision = await classifier.classify({
+    context: createActionContext({
+      message: {
+        traceId: 'trace-native-empty-args',
+        runId: 'run-native-empty-args',
+        toolSessionId: 'tool-native-empty-args',
+        text: '/init',
+      },
+      opencodeSessionId: 'ses-native-empty-args',
+      bootstrapSource: 'bootstrap_created',
+    }),
+  });
+
+  assert.deepEqual(decision, {
+    kind: 'slash',
+    slash: {
+      kind: 'opencode_native',
+      commandName: 'init',
+      arguments: '',
+    },
+  });
+});
+
+test('ChatMessageClassifier falls back to normal chat when OpenCode native command preflight cannot prove a command', async () => {
+  const classifier = createDefaultChatMessageClassifier({
+    listNativeCommands: async () => [],
   });
 
   assert.deepEqual(
-    policy.decide(
-      {
-        traceId: 'trace-group-allow',
-        runId: 'run-group-allow',
-        toolSessionId: 'anchor-group-allow',
-        text: '@bot /sessions',
-      },
-      {
-        entryKey: {
-          businessSessionDomain: 'im',
-          businessSessionType: 'group',
-          businessSessionId: 'group-1',
+    await classifier.classify({
+      context: createActionContext({
+        message: {
+          traceId: 'trace-native-fallback',
+          runId: 'run-native-fallback',
+          toolSessionId: 'tool-native-fallback',
+          text: '/init project now',
         },
-        policy: {
-          entryKey: 'im:group:group-1',
-          controlled: true,
-          allowOpencodeNativeSessions: false,
-          allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
-        },
-      },
-    ),
+        opencodeSessionId: 'ses-native-fallback',
+        bootstrapSource: 'bootstrap_created',
+      }),
+    }),
     {
-      kind: 'slash',
-      descriptor: { kind: 'sessions' },
-      command: { kind: 'sessions' },
+      kind: 'normal_chat',
+      fallbackReason: 'command_not_found',
+      commandName: 'init',
     },
   );
 });
 
 test('SdkSlashExecutionUseCase returns synthetic success run for /model and preserves legacy text', async () => {
-  const bindingStore = new InMemoryToolSessionBindingStore();
-  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
-  const modelOverrideStore = new InMemorySessionModelOverrideStore();
-  bindingStore.bind('anchor-3', 'ses-3');
-  ownershipResolver.attach('ses-3', 'anchor-3');
-
-  const contextResolver = new DefaultChatExecutionContextResolver({
-    bindingStore,
-    ownershipResolver,
-    modelOverrideStore,
-    hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
-    hostSessionQueryPort: {
-      getSession: async () => ({ id: 'ses-3' }),
-      listSessions: async () => [{ id: 'ses-3' }],
-    },
-  });
+  let executorInput;
   const usecase = new SdkSlashExecutionUseCase({
-    slashCommandExecutor: new SlashCommandExecutor({
-      bindingStore,
-      ownershipResolver,
-      modelOverrideStore,
-      hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
-      hostSessionQueryPort: {
-        getSession: async () => ({ id: 'ses-3' }),
-        listSessions: async () => [{ id: 'ses-3' }],
+    slashCommandExecutor: {
+      execute: async (input) => {
+        executorInput = input;
+        return {
+          kind: 'model',
+          sessionId: input.context.sessionContext.opencodeSessionId,
+          modelOverride: { providerId: 'openai', modelId: 'gpt-5.4' },
+        };
       },
-      hostModelCatalogPort: {
-        listModels: async () => [{ providerId: 'openai', modelId: 'gpt-5.4' }],
-      },
-    }),
+    },
     replyPresenter: new DefaultSlashCommandReplyPresenter(),
-    contextResolver,
+  });
+  const context = createActionContext({
+    anchor: 'anchor-3',
+    message: {
+      traceId: 'trace-model',
+      runId: 'run-model',
+      toolSessionId: 'anchor-3',
+      text: '/model openai/gpt-5.4',
+    },
+    opencodeSessionId: 'ses-3',
+    session: { id: 'ses-3' },
+    bootstrapSource: 'existing_binding',
   });
 
   const run = await usecase.execute({
-    anchor: 'anchor-3',
-    descriptor: { kind: 'model' },
-    command: { kind: 'model', providerId: 'openai', modelId: 'gpt-5.4' },
-    logger: createLogger(),
+    context,
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'model' },
+      command: { kind: 'model', providerId: 'openai', modelId: 'gpt-5.4' },
+    },
   });
 
   const facts = [];
@@ -204,33 +645,19 @@ test('SdkSlashExecutionUseCase returns synthetic success run for /model and pres
   assert.equal(facts[1].content, '后续请求将使用该模型 openai/gpt-5.4');
   assert.equal(facts[2].content, '后续请求将使用该模型 openai/gpt-5.4');
   assert.deepEqual(await run.result(), { outcome: 'completed' });
+  assert.deepEqual(executorInput, {
+    context,
+    command: { kind: 'model', providerId: 'openai', modelId: 'gpt-5.4' },
+  });
 });
 
-test('SdkSlashExecutionUseCase routes /sessions through session-isolation executor when entry context exists', async () => {
-  const bindingStore = new InMemoryToolSessionBindingStore();
-  const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
-  const modelOverrideStore = new InMemorySessionModelOverrideStore();
-  let formalExecutorInput;
+test('SdkSlashExecutionUseCase delegates /sessions to the single bridge-local executor', async () => {
+  let executorInput;
 
   const usecase = new SdkSlashExecutionUseCase({
-    slashCommandExecutor: new SlashCommandExecutor({
-      bindingStore,
-      ownershipResolver,
-      modelOverrideStore,
-      hostSessionCreationPort: { createSession: async () => ({ id: 'unexpected-create' }) },
-      hostSessionQueryPort: {
-        getSession: async () => ({ id: 'unexpected-get' }),
-        listSessions: async () => {
-          throw new Error('legacy slash sessions should not be used');
-        },
-      },
-      hostModelCatalogPort: {
-        listModels: async () => [],
-      },
-    }),
-    sessionIsolationSlashCommandExecutor: {
+    slashCommandExecutor: {
       execute: async (input) => {
-        formalExecutorInput = input;
+        executorInput = input;
         return {
           kind: 'sessions',
           activeSessionId: 'ses-formal',
@@ -239,39 +666,30 @@ test('SdkSlashExecutionUseCase routes /sessions through session-isolation execut
       },
     },
     replyPresenter: new DefaultSlashCommandReplyPresenter(),
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('legacy slash context resolver should not be used');
-      },
-      resolveForControlAction: async () => ({ opencodeSessionId: 'unexpected-control' }),
-    },
   });
 
-  const entryContext = {
-    entryKey: {
-      businessSessionDomain: 'im',
-      businessSessionType: 'direct',
-      businessSessionId: 'user-a',
-    },
-    policy: {
-      entryKey: 'im:direct:user-a',
-      controlled: true,
-      allowOpencodeNativeSessions: false,
-      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
-    },
-  };
-  const run = await usecase.execute({
+  const entryContext = createEntryContext();
+  const context = createActionContext({
     anchor: 'anchor-formal-sessions',
-    descriptor: { kind: 'sessions' },
-    command: { kind: 'sessions' },
-    ensuredContext: {
-      opencodeSessionId: 'ses-formal',
-      session: { id: 'ses-formal', title: 'formal session' },
-      bootstrapSource: 'existing_binding',
+    message: {
+      traceId: 'trace-formal-sessions',
+      runId: 'run-formal-sessions',
+      toolSessionId: 'anchor-formal-sessions',
+      text: '/sessions',
     },
-    entryContext,
+    opencodeSessionId: 'ses-formal',
+    session: { id: 'ses-formal', title: 'formal session' },
     directory: '/workspace/formal',
-    logger: createLogger(),
+    bootstrapSource: 'existing_binding',
+    entryContext,
+  });
+  const run = await usecase.execute({
+    context,
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'sessions' },
+      command: { kind: 'sessions' },
+    },
   });
 
   const facts = [];
@@ -280,90 +698,72 @@ test('SdkSlashExecutionUseCase routes /sessions through session-isolation execut
   }
 
   assert.equal(facts[1].content.includes('formal session'), true);
-  assert.deepEqual(formalExecutorInput, {
+  assert.deepEqual(executorInput, {
     command: { kind: 'sessions' },
-    anchor: 'anchor-formal-sessions',
-    ensuredContext: {
-      opencodeSessionId: 'ses-formal',
-      session: { id: 'ses-formal', title: 'formal session' },
-      bootstrapSource: 'existing_binding',
-    },
-    entryContext,
-    directory: '/workspace/formal',
+    context,
   });
 });
 
-test('SdkSlashExecutionUseCase still lets /new create a new session after ensure', async () => {
-  let legacyCreateCalls = 0;
+test('SdkSlashExecutionUseCase delegates /new after chat context is ensured', async () => {
+  let executorInput;
   const usecase = new SdkSlashExecutionUseCase({
-    slashCommandExecutor: new SlashCommandExecutor({
-      bindingStore: new InMemoryToolSessionBindingStore(),
-      ownershipResolver: new InMemoryOpencodeSessionOwnershipResolver(),
-      modelOverrideStore: new InMemorySessionModelOverrideStore(),
-      hostSessionCreationPort: {
-        createSession: async () => {
-          legacyCreateCalls += 1;
-          return { id: 'unexpected-create' };
-        },
+    slashCommandExecutor: {
+      execute: async (input) => {
+        executorInput = input;
+        return {
+          kind: 'new',
+          previousSessionId: input.context.sessionContext.opencodeSessionId,
+          session: { id: 'ses-created', title: 'created after ensure' },
+        };
       },
-      hostSessionQueryPort: {
-        getSession: async () => ({ id: 'unexpected-get' }),
-        listSessions: async () => [],
-      },
-      hostModelCatalogPort: {
-        listModels: async () => [],
-      },
-    }),
-    replyPresenter: new DefaultSlashCommandReplyPresenter(),
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => ({ opencodeSessionId: 'unexpected-control' }),
     },
+    replyPresenter: new DefaultSlashCommandReplyPresenter(),
+  });
+  const entryContext = createEntryContext();
+  const context = createActionContext({
+    anchor: 'anchor-new',
+    message: {
+      traceId: 'trace-new',
+      runId: 'run-new',
+      toolSessionId: 'anchor-new',
+      text: '/new',
+    },
+    opencodeSessionId: 'ses-ensured-new',
+    session: { id: 'ses-ensured-new', title: 'ensured new', directory: '/workspace/new' },
+    bootstrapSource: 'bootstrap_created',
+    entryContext,
   });
 
   const run = await usecase.execute({
-    anchor: 'anchor-new',
-    descriptor: { kind: 'new' },
-    command: { kind: 'new' },
-    ensuredContext: {
-      opencodeSessionId: 'ses-ensured-new',
-      session: { id: 'ses-ensured-new', title: 'ensured new', directory: '/workspace/new' },
-      bootstrapSource: 'bootstrap_created',
+    context,
+    slash: {
+      kind: 'bridge_local',
+      descriptor: { kind: 'new' },
+      command: { kind: 'new' },
     },
-    logger: createLogger(),
   });
 
   const facts = await collect(run.facts);
-  assert.equal(facts[1].content.includes('unexpected-create'), true);
-  assert.equal(legacyCreateCalls, 1);
+  assert.equal(facts[1].content.includes('ses-created'), true);
+  assert.deepEqual(executorInput, {
+    command: { kind: 'new' },
+    context,
+  });
 });
 
-test('SdkChatPreprocessor keeps ensure side effects before denied slash response', async () => {
+test('SdkChatRunPlanner keeps ensure side effects before denied slash response', async () => {
   const callOrder = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async (input) => {
         callOrder.push('slash');
-        assert.equal(input.disabledInEntry, true);
+        assert.equal(input.slash.disabledInEntry, true);
         return {
           runId: 'synthetic-denied-slash',
           facts: (async function* () {})(),
           result: async () => ({ outcome: 'completed' }),
         };
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -382,7 +782,7 @@ test('SdkChatPreprocessor keeps ensure side effects before denied slash response
     },
   });
 
-  const result = await preprocessor.preprocess({
+  const result = await planner.plan({
     traceId: 'trace-denied-slash-after-ensure',
     runId: 'run-denied-slash-after-ensure',
     toolSessionId: 'tool-denied-slash-after-ensure',
@@ -396,27 +796,16 @@ test('SdkChatPreprocessor keeps ensure side effects before denied slash response
     },
   });
 
-  assert.equal(result.kind, 'synthetic_run');
+  assert.equal(result.kind, 'immediate_synthetic');
   assert.deepEqual(callOrder, ['ensure', 'slash']);
 });
 
-test('SdkChatPreprocessor requires ensured real session before /models executes', async () => {
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+test('SdkChatRunPlanner requires ensured real session before /models executes', async () => {
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => {
         throw new Error('unexpected_slash_execute');
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -439,7 +828,7 @@ test('SdkChatPreprocessor requires ensured real session before /models executes'
   });
 
   await assert.rejects(
-    () => preprocessor.preprocess({
+    () => planner.plan({
       traceId: 'trace-models-requires-entry',
       runId: 'run-models-requires-entry',
       toolSessionId: 'tool-models-requires-entry',
@@ -883,30 +1272,19 @@ test('EntryAwareChatSessionResolver creates a new host session for anchor-only i
   assert.deepEqual(createdLog.extra.visibleSessionIds, ['ses-visible-existing']);
 });
 
-test('SdkChatPreprocessor ensures real session before slash execution', async () => {
+test('SdkChatRunPlanner ensures real session before slash execution', async () => {
   const callOrder = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async (input) => {
         callOrder.push('slash');
-        assert.equal(input.ensuredContext?.opencodeSessionId, 'ses-ensured-before-slash');
+        assert.equal(input.context.sessionContext.opencodeSessionId, 'ses-ensured-before-slash');
         return {
           runId: 'synthetic-test',
           facts: (async function* () {})(),
           result: async () => ({ outcome: 'completed' }),
         };
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -925,7 +1303,7 @@ test('SdkChatPreprocessor ensures real session before slash execution', async ()
     },
   });
 
-  await preprocessor.preprocess({
+  await planner.plan({
     traceId: 'trace-ensure-before-slash',
     runId: 'run-ensure-before-slash',
     toolSessionId: 'tool-ensure-before-slash',
@@ -1010,25 +1388,14 @@ test('EntryAwareChatSessionResolver keeps anchor-only state when chat businessSe
   assert.equal(await runtimeAnchorRepository.isAnchorOnly('tool-anchor-only'), true);
 });
 
-test('SdkChatPreprocessor fails closed before slash execution when business entry is missing', async () => {
+test('SdkChatRunPlanner fails closed before slash execution when business entry is missing', async () => {
   let slashExecuted = false;
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => {
         slashExecuted = true;
         throw new Error('unexpected_slash_execution');
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -1045,7 +1412,7 @@ test('SdkChatPreprocessor fails closed before slash execution when business entr
   });
 
   await assert.rejects(
-    () => preprocessor.preprocess({
+    () => planner.plan({
       traceId: 'trace-missing-entry-slash',
       runId: 'run-missing-entry-slash',
       toolSessionId: 'tool-missing-entry-slash',
@@ -1057,23 +1424,12 @@ test('SdkChatPreprocessor fails closed before slash execution when business entr
   assert.equal(slashExecuted, false);
 });
 
-test('SdkChatPreprocessor accepts miniapp chat when assistantAccount is missing but sendUserAccount is present', async () => {
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+test('SdkChatRunPlanner accepts miniapp chat when assistantAccount is missing but sendUserAccount is present', async () => {
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => {
         throw new Error('unexpected_slash_execution');
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -1104,7 +1460,7 @@ test('SdkChatPreprocessor accepts miniapp chat when assistantAccount is missing 
     },
   });
 
-  const result = await preprocessor.preprocess({
+  const message = {
     traceId: 'trace-miniapp-fallback',
     runId: 'run-miniapp-fallback',
     toolSessionId: 'tool-miniapp-fallback',
@@ -1117,34 +1473,46 @@ test('SdkChatPreprocessor accepts miniapp chat when assistantAccount is missing 
         businessSessionDomain: 'miniapp',
       },
     },
-  });
+  };
+  const result = await planner.plan(message);
 
   assert.deepEqual(result, {
-    kind: 'normal_chat',
+    kind: 'queued_execution',
     context: {
-      opencodeSessionId: 'ses-miniapp-fallback',
-      bootstrapSource: 'bootstrap_created',
+      message,
+      anchor: 'tool-miniapp-fallback',
+      sessionContext: {
+        opencodeSessionId: 'ses-miniapp-fallback',
+        bootstrapSource: 'bootstrap_created',
+      },
+      entryContext: {
+        entryKey: {
+          businessSessionDomain: 'miniapp',
+          businessSessionType: 'direct',
+          businessSessionId: 'miniapp-user-1',
+        },
+        policy: {
+          entryKey: 'miniapp:direct:miniapp-user-1',
+          controlled: false,
+          allowOpencodeNativeSessions: true,
+          allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+          slashPolicySource: 'entry_template',
+        },
+      },
+    },
+    execution: {
+      kind: 'prompt',
+      text: 'hello',
     },
   });
 });
 
-test('SdkChatPreprocessor fails closed when domain is missing even if im legacy fields exist', async () => {
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+test('SdkChatRunPlanner fails closed when domain is missing even if im legacy fields exist', async () => {
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => {
         throw new Error('unexpected_slash_execution');
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -1161,7 +1529,7 @@ test('SdkChatPreprocessor fails closed when domain is missing even if im legacy 
   });
 
   await assert.rejects(
-    () => preprocessor.preprocess({
+    () => planner.plan({
       traceId: 'trace-missing-domain-im',
       runId: 'run-missing-domain-im',
       toolSessionId: 'tool-missing-domain-im',
@@ -1176,29 +1544,18 @@ test('SdkChatPreprocessor fails closed when domain is missing even if im legacy 
   );
 });
 
-test('SdkChatPreprocessor applies request scoped slash policy after entry context resolution', async () => {
+test('SdkChatRunPlanner ignores request scoped slash policy after entry context resolution', async () => {
   const logs = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async (input) => {
-        assert.equal(input.disabledInEntry, true);
+        assert.equal(input.slash.disabledInEntry, true);
         return {
           runId: 'synthetic-disabled',
           facts: (async function* () {})(),
           result: async () => ({ outcome: 'completed' }),
         };
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -1214,7 +1571,7 @@ test('SdkChatPreprocessor applies request scoped slash policy after entry contex
     },
   });
 
-  const result = await preprocessor.preprocess({
+  const result = await planner.plan({
     traceId: 'trace-policy-slash',
     runId: 'run-policy-slash',
     toolSessionId: 'tool-policy-slash',
@@ -1229,18 +1586,18 @@ test('SdkChatPreprocessor applies request scoped slash policy after entry contex
     },
   }, createCapturingLogger(logs));
 
-  assert.equal(result.kind, 'synthetic_run');
+  assert.equal(result.kind, 'immediate_synthetic');
   assert.equal(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
+    logs.find((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision')?.level,
     'info',
   );
   assert.deepEqual(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
+    logs.find((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision')?.extra,
     {
       toolSessionId: 'tool-policy-slash',
       runId: 'run-policy-slash',
-      policySource: 'request_payload',
-      allowedSlashCommands: ['new'],
+      policySource: 'entry_template',
+      allowedSlashCommands: ['new', 'models', 'model'],
       decisionKind: 'slash',
       commandKind: 'sessions',
       disabledInEntry: true,
@@ -1249,27 +1606,16 @@ test('SdkChatPreprocessor applies request scoped slash policy after entry contex
   );
 });
 
-test('SdkChatPreprocessor records entry template slash policy source without request override', async () => {
+test('SdkChatRunPlanner records entry template slash policy source without request override', async () => {
   const logs = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => ({
         runId: 'synthetic-entry-template',
         facts: (async function* () {})(),
         result: async () => ({ outcome: 'completed' }),
       }),
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
-      },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
       businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
@@ -1284,7 +1630,7 @@ test('SdkChatPreprocessor records entry template slash policy source without req
     },
   });
 
-  const result = await preprocessor.preprocess({
+  const result = await planner.plan({
     traceId: 'trace-entry-template-slash',
     runId: 'run-entry-template-slash',
     toolSessionId: 'tool-entry-template-slash',
@@ -1301,13 +1647,13 @@ test('SdkChatPreprocessor records entry template slash policy source without req
     },
   }, createCapturingLogger(logs));
 
-  assert.equal(result.kind, 'synthetic_run');
+  assert.equal(result.kind, 'immediate_synthetic');
   assert.equal(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
+    logs.find((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision')?.level,
     'info',
   );
   assert.deepEqual(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
+    logs.find((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision')?.extra,
     {
       toolSessionId: 'tool-entry-template-slash',
       runId: 'run-entry-template-slash',
@@ -1321,78 +1667,49 @@ test('SdkChatPreprocessor records entry template slash policy source without req
   );
 });
 
-test('SdkChatPreprocessor records local default slash policy source without entry context', async () => {
+test('SdkChatRunPlanner fails closed for bridge-local slash without entry context', async () => {
+  let slashExecuted = false;
   const logs = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
-      execute: async () => ({
-        runId: 'synthetic-local-default',
-        facts: (async function* () {})(),
-        result: async () => ({ outcome: 'completed' }),
-      }),
+      execute: async () => {
+        slashExecuted = true;
+        throw new Error('unexpected_slash_execution');
+      },
     },
-    contextResolver: {
-      resolveForChat: async () => ({
-        opencodeSessionId: 'ses-local-default',
-        session: { id: 'ses-local-default' },
-        bootstrapSource: 'existing_binding',
-      }),
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
+    businessEntryContextResolver: createBusinessEntryContextResolver(),
+    normalChatSessionResolver: {
+      resolve: async () => {
+        throw new Error('unexpected_normal_chat_resolve');
       },
     },
   });
 
-  const result = await preprocessor.preprocess({
-    traceId: 'trace-local-default-slash',
-    runId: 'run-local-default-slash',
-    toolSessionId: 'tool-local-default-slash',
-    text: '/sessions',
-  }, createCapturingLogger(logs));
-
-  assert.equal(result.kind, 'synthetic_run');
-  assert.equal(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.level,
-    'info',
-  );
-  assert.deepEqual(
-    logs.find((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision')?.extra,
-    {
-      toolSessionId: 'tool-local-default-slash',
+  await assert.rejects(
+    () => planner.plan({
+      traceId: 'trace-local-default-slash',
       runId: 'run-local-default-slash',
-      policySource: 'local_default',
-      allowedSlashCommands: undefined,
-      decisionKind: 'slash',
-      commandKind: 'sessions',
-      disabledInEntry: false,
-      invalid: false,
-    },
+      toolSessionId: 'tool-local-default-slash',
+      text: '/sessions',
+    }, createCapturingLogger(logs)),
+    /business_entry_key_required/u,
+  );
+  assert.equal(slashExecuted, false);
+  assert.equal(
+    logs.some((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision'),
+    false,
   );
 });
 
-test('SdkChatPreprocessor passes effective directory to formal normal chat resolver', async () => {
+test('SdkChatRunPlanner passes effective directory to formal normal chat resolver', async () => {
   const resolverCalls = [];
   const logs = [];
-  const preprocessor = new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-    }),
+  const planner = new SdkChatRunPlanner({
+    chatMessageClassifier: createDefaultChatMessageClassifier(),
     slashExecutionUseCase: {
       execute: async () => {
         throw new Error('unexpected_slash_execution');
-      },
-    },
-    contextResolver: {
-      resolveForChat: async () => {
-        throw new Error('unexpected_context_resolve');
-      },
-      resolveForControlAction: async () => {
-        throw new Error('unexpected_control_resolve');
       },
     },
     businessEntryContextResolver: new BusinessEntryContextResolver({
@@ -1411,7 +1728,7 @@ test('SdkChatPreprocessor passes effective directory to formal normal chat resol
     },
   });
 
-  const result = await preprocessor.preprocess({
+  const result = await planner.plan({
     traceId: 'trace-formal-chat',
     runId: 'run-formal-chat',
     toolSessionId: 'tool-formal-chat',
@@ -1425,10 +1742,10 @@ test('SdkChatPreprocessor passes effective directory to formal normal chat resol
     },
   }, createCapturingLogger(logs));
 
-  assert.equal(result.kind, 'normal_chat');
+  assert.equal(result.kind, 'queued_execution');
   assert.equal(resolverCalls[0].directory, '/workspace/formal-chat');
   assert.equal(
-    logs.some((entry) => entry.message === 'sdk_chat_preprocessor.entry_policy_decision'),
+    logs.some((entry) => entry.message === 'sdk_chat_run_planner.entry_policy_decision'),
     false,
   );
 });

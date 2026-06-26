@@ -1,6 +1,7 @@
 export const DOWNSTREAM_MESSAGE_TYPES = ['invoke', 'status_query'] as const;
 export type DownstreamMessageType = (typeof DOWNSTREAM_MESSAGE_TYPES)[number];
 
+// todo： INVOKE_ACTIONS声明为对象，聚合所有字段，后续外部仅消费该对象 参考TRANSPORT_UPSTREAM_MESSAGE_TYPES
 export const INVOKE_ACTIONS = [
   'chat',
   'create_session',
@@ -8,6 +9,7 @@ export const INVOKE_ACTIONS = [
   'permission_reply',
   'abort_session',
   'question_reply',
+  'query_slash_commands',
 ] as const;
 
 export type InvokeAction = (typeof INVOKE_ACTIONS)[number];

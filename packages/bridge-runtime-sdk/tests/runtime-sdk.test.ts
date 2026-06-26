@@ -381,6 +381,9 @@ function createProvider(): ThirdPartyAgentProvider {
     async createSession() {
       return { toolSessionId: 'tool-1' };
     },
+    async listSlashCommands() {
+      return { slashCommands: [] };
+    },
     async runMessage() {
       return createFakeRun([], { outcome: 'completed' });
     },
@@ -683,6 +686,96 @@ test('runtime responds to status_query with provider health status', async () =>
   assert.deepEqual(connection.sent.at(-1), {
     type: 'status_response',
     opencodeOnline: true,
+  });
+});
+
+test('runtime responds to query_slash_commands with provider slash command list', async () => {
+  const connection = new FakeGatewayClient();
+  let providerInput;
+  const provider = createProvider();
+  provider.listSlashCommands = async (input) => {
+    providerInput = input;
+    return {
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+        { command: '/init', description: '初始化项目' },
+        { command: '//slash-init', description: 'slash-prefixed catalog name' },
+        { command: '/bad command', description: 'whitespace command' },
+        { command: '/foo/bar', description: 'nested command' },
+        { command: '', description: 'empty command' },
+        { command: '/review', description: `  ${'x'.repeat(60)}  ` },
+      ],
+    };
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'query_slash_commands',
+    toolSessionId: 'tool-slash-1',
+    traceId: 'trace-slash-1',
+    payload: {
+      extParameters: {
+        platformExtParam: {
+          businessSessionDomain: 'im',
+          businessSessionType: 'direct',
+          businessSessionId: 'user-a#bot-a',
+        },
+      },
+    },
+  });
+  await flushEvents();
+
+  assert.deepEqual(providerInput, {
+    traceId: 'trace-fixed',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-a#bot-a',
+      },
+    },
+  });
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'slash_commands_result',
+    toolSessionId: 'tool-slash-1',
+    traceId: 'trace-slash-1',
+    payload: {
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+        { command: '/init', description: '初始化项目' },
+        { command: '/review', description: 'x'.repeat(50) },
+      ],
+    },
+  });
+});
+
+test('runtime returns empty slash command list when provider listSlashCommands fails', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  provider.listSlashCommands = async () => {
+    throw new Error('command list failed');
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'query_slash_commands',
+    toolSessionId: 'tool-slash-failed',
+    traceId: 'trace-slash-failed',
+    payload: {},
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'slash_commands_result',
+    toolSessionId: 'tool-slash-failed',
+    traceId: 'trace-slash-failed',
+    payload: {
+      slashCommands: [],
+    },
   });
 });
 

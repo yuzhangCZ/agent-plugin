@@ -19,6 +19,7 @@ import {
   createSessionInvokeSchema,
   permissionReplyInvokeSchema,
   questionReplyInvokeSchema,
+  querySlashCommandsInvokeSchema,
   statusQueryMessageSchema,
 } from '../../contract/schemas/downstream.ts';
 import { asString, fail, isRecord, ok, unsupportedAction, unsupportedMessage } from './shared.ts';
@@ -31,8 +32,10 @@ const [
   PERMISSION_REPLY_ACTION,
   ABORT_SESSION_ACTION,
   QUESTION_REPLY_ACTION,
+  QUERY_SLASH_COMMANDS_ACTION,
 ] = INVOKE_ACTIONS;
 
+// todo: case内部逻辑相似，大量重复逻辑
 function normalizeInvokeMessage(message: PlainObject): Result<InvokeMessage, WireContractViolation> {
   const welinkSessionId = asString(message.welinkSessionId);
   const action = asString(message.action);
@@ -121,6 +124,20 @@ function normalizeInvokeMessage(message: PlainObject): Result<InvokeMessage, Wir
               messageType: INVOKE_MESSAGE_TYPE,
               action,
               welinkSessionId,
+            }).violation,
+          );
+    }
+    case QUERY_SLASH_COMMANDS_ACTION: {
+      const toolSessionId = asString(message.toolSessionId);
+      const parsed = querySlashCommandsInvokeSchema.safeParse(message);
+      return parsed.success
+        ? ok(parsed.data)
+        : fail(
+            zodErrorToWireViolation(parsed.error, {
+              stage: 'payload',
+              messageType: INVOKE_MESSAGE_TYPE,
+              action,
+              toolSessionId,
             }).violation,
           );
     }

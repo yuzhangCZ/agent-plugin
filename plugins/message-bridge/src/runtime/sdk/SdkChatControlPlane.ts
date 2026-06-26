@@ -5,7 +5,6 @@ import type {
 import type {
   BusinessEntryContext,
 } from './session-isolation/index.js';
-import type { BusinessEntryPolicy } from '../../port/session-isolation/dto/commands/index.js';
 
 import type {
   HostSessionCreateContext,
@@ -15,20 +14,32 @@ import type {
   SessionScope,
   SessionModelOverride,
   SessionModelOverrideStore,
-  SlashCommand,
   SlashCommandContext,
-  SlashCommandDescriptor,
-  SlashCommandParser,
+  SlashCommandFailure,
+  SlashCommandFailureCode,
   SlashCommandReplyPresenter,
-  SlashCommandResult,
   ToolSessionBindingStore,
 } from '../../port/SlashCommandControlPlanePort.js';
-import { SlashCommandExecutor } from '../../usecase/SlashCommandExecutor.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import { buildSyntheticRun } from './SdkChatControlPlane.helpers.js';
-export { SdkChatPreprocessor } from './SdkChatPreprocessor.js';
-
-const GROUP_CHAT_DENY_REPLY_TEXT = '本机器人不处理群聊消息，请勿在群内@提问';
+import type {
+  SlashCommandClassification,
+} from './ChatMessageClassifier.js';
+import type { SdkChatSlashCommandExecutor } from './SdkChatSlashCommandExecutor.js';
+export {
+  ChatMessageClassifier,
+  type ChatMessageClassification,
+  type ChatMessageClassifierPort,
+  type ListOpenCodeNativeCommands,
+  type OpenCodeNativeCommandDescriptor,
+  type SlashCapabilityProvider,
+  type SlashCommandClassification,
+} from './ChatMessageClassifier.js';
+export {
+  SdkChatRunPlanner,
+  type ChatQueuedExecution,
+  type ChatRunPlan,
+} from './SdkChatRunPlanner.js';
 
 export interface ChatExecutionContext {
   opencodeSessionId: string;
@@ -42,6 +53,20 @@ export interface ChatExecutionContext {
   scope?: SessionScope;
   modelOverride?: SessionModelOverride;
   bootstrapSource: SlashCommandContext['bootstrapSource'];
+}
+
+/**
+ * 一次 SDK chat action 的完整运行上下文。
+ * @remarks `sessionContext` 只描述已解析的 OpenCode 宿主会话；
+ * `effectiveDirectory` 是本次 action 的工作目录约束，不从宿主会话目录推导。
+ */
+export interface ChatActionContext {
+  message: ProviderRunMessageInput;
+  anchor: string;
+  entryContext: BusinessEntryContext;
+  sessionContext: ChatExecutionContext;
+  effectiveDirectory?: string;
+  logger?: BridgeLogger;
 }
 
 export interface ChatExecutionContextResolver {
@@ -65,217 +90,126 @@ export interface SessionAttachmentPort {
   switchAttachedSession(input: { toolSessionId: string; sessionId: string }): Promise<{ applied: boolean }>;
 }
 
-export interface SessionIsolationSlashCommandExecutionPort {
-  execute(input: {
-    command: SlashCommand;
-    anchor: string;
-    ensuredContext: ChatExecutionContext;
-    entryContext: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-  }): Promise<SlashCommandResult>;
-}
-
 export interface NormalChatSessionResolver {
   resolve(input: {
     message: ProviderRunMessageInput;
-    entryContext?: BusinessEntryContext;
+    entryContext: BusinessEntryContext;
     directory?: string;
     logger?: BridgeLogger;
   }): Promise<ChatExecutionContext>;
 }
 
-type EntryPolicyDecision =
-  | { kind: 'deny'; text: string }
-  | { kind: 'normal_chat' }
-  | {
-      kind: 'slash';
-      descriptor: SlashCommandDescriptor;
-      command?: SlashCommand;
-      disabledInEntry?: boolean;
-      invalid?: boolean;
-    };
+type SdkSlashExecutionUseCaseInputBase = {
+  context: ChatActionContext;
+};
+
+type SdkSlashExecutionUseCaseInput = SdkSlashExecutionUseCaseInputBase & {
+  slash: Extract<SlashCommandClassification, { kind: 'bridge_local' }>;
+};
 
 /**
- * SDK chat 入口的 slash 能力策略。
- */
-export class StaticSlashCapabilityProvider {
-  isAllowed(input: { policy?: BusinessEntryPolicy; command: SlashCommandDescriptor }): boolean {
-    if (!input.policy) {
-      return true;
-    }
-    return input.policy.allowedSlashCommands.includes(input.command.kind);
-  }
-}
-
-/**
- * SDK chat 入口判定器。
- */
-export class ChatEntryPolicy {
-  constructor(private readonly dependencies: {
-    slashCommandParser: SlashCommandParser;
-    slashCapabilityProvider: StaticSlashCapabilityProvider;
-  }) {}
-
-  decide(input: ProviderRunMessageInput, entryContext?: BusinessEntryContext): EntryPolicyDecision {
-    if (input.context?.suppressReply) {
-      return { kind: 'deny', text: GROUP_CHAT_DENY_REPLY_TEXT };
-    }
-
-    const parseResult = this.dependencies.slashCommandParser.tryParse({
-      text: input.text,
-      isGroupChat: this.isImGroupEntry(entryContext),
-    });
-
-    if (parseResult.kind === 'none') {
-      return { kind: 'normal_chat' };
-    }
-
-    const descriptor = parseResult.kind === 'matched'
-      ? { kind: parseResult.command.kind }
-      : parseResult.command;
-
-    const allowed = this.dependencies.slashCapabilityProvider.isAllowed({
-      policy: entryContext?.policy,
-      command: descriptor,
-    });
-    if (!allowed) {
-      return {
-        kind: 'slash',
-        descriptor,
-        disabledInEntry: true,
-      };
-    }
-
-    if (parseResult.kind === 'invalid') {
-      return {
-        kind: 'slash',
-        descriptor,
-        invalid: true,
-      };
-    }
-
-    return {
-      kind: 'slash',
-      descriptor,
-      command: parseResult.command,
-    };
-  }
-
-  private isImGroupEntry(entryContext: BusinessEntryContext | undefined): boolean {
-    const entryKey = entryContext?.entryKey;
-    return entryKey?.businessSessionDomain.toLowerCase() === 'im'
-      && entryKey.businessSessionType.toLowerCase() === 'group';
-  }
-
-}
-
-/**
- * slash synthetic run 执行器。
+ * bridge-local slash synthetic run 执行器。
+ * @remarks 仅处理插件本地实现的 slash command，例如 /new、/sessions、/session、/models、/model。
+ * OpenCode native slash command 在 `SdkChatRunPlanner` 中转为 queued native_command，
+ * 后续由 provider adapter 调用 OpenCode `session.command` 执行。
  */
 export class SdkSlashExecutionUseCase {
   constructor(private readonly dependencies: {
-    slashCommandExecutor: SlashCommandExecutor;
-    sessionIsolationSlashCommandExecutor?: SessionIsolationSlashCommandExecutionPort;
+    slashCommandExecutor: SdkChatSlashCommandExecutor;
     replyPresenter: SlashCommandReplyPresenter;
-    contextResolver: ChatExecutionContextResolver;
   }) {}
 
-  async execute(input: {
-    anchor: string;
-    descriptor: SlashCommandDescriptor;
-    command?: SlashCommand;
-    entryContext?: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-    ensuredContext?: ChatExecutionContext;
-    disabledInEntry?: boolean;
-    invalid?: boolean;
-    logger?: BridgeLogger;
-  }): Promise<ProviderRun> {
-    if (input.disabledInEntry) {
+  async execute(input: SdkSlashExecutionUseCaseInput): Promise<ProviderRun> {
+    if (input.slash.disabledInEntry) {
       return buildSyntheticRun(
-        input.anchor,
-        this.dependencies.replyPresenter.presentFailure(input.descriptor, {
+        input.context.anchor,
+        this.dependencies.replyPresenter.presentFailure(input.slash.descriptor, {
           code: 'command_disabled_in_group_chat',
           reasonKey: 'command_not_available_in_group_chat',
         }),
       );
     }
 
-    if (input.invalid || !input.command) {
+    if (input.slash.invalid || !input.slash.command) {
       return buildSyntheticRun(
-        input.anchor,
-        this.dependencies.replyPresenter.presentFailure(input.descriptor, {
+        input.context.anchor,
+        this.dependencies.replyPresenter.presentFailure(input.slash.descriptor, {
           code: 'invalid_command',
         }),
       );
     }
 
     try {
-      const formalResult = await this.executeSessionIsolationCommand(input);
-      if (formalResult) {
-        return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(formalResult));
-      }
-
-      const context = input.ensuredContext ?? await this.dependencies.contextResolver.resolveForChat(
-        input.anchor,
-        input.createContext,
-        input.logger,
-      );
-      const commandContext: SlashCommandContext = {
-        anchor: input.anchor,
-        activeOpencodeSessionId: context.opencodeSessionId,
-        scope: context.scope,
-        modelOverride: context.modelOverride,
-        bootstrapSource: context.bootstrapSource,
-      };
-      const result = await this.dependencies.slashCommandExecutor.execute(
-        input.command,
-        commandContext,
-        input.createContext,
-      );
-      return buildSyntheticRun(input.anchor, this.dependencies.replyPresenter.presentSuccess(result));
+      const result = await this.dependencies.slashCommandExecutor.execute({
+        command: input.slash.command,
+        context: input.context,
+      });
+      return buildSyntheticRun(input.context.anchor, this.dependencies.replyPresenter.presentSuccess(result));
     } catch (error) {
       return buildSyntheticRun(
-        input.anchor,
+        input.context.anchor,
         this.dependencies.replyPresenter.presentFailure(
-          input.descriptor,
-          this.dependencies.slashCommandExecutor.normalizeFailure(error),
+          input.slash.descriptor,
+          this.normalizeFailure(error),
         ),
       );
     }
   }
 
-  private async executeSessionIsolationCommand(input: {
-    anchor: string;
-    command?: SlashCommand;
-    entryContext?: BusinessEntryContext;
-    createContext?: HostSessionCreateContext;
-    directory?: string;
-    ensuredContext?: ChatExecutionContext;
-  }): Promise<SlashCommandResult | undefined> {
-    if (!input.command || !input.entryContext || !this.dependencies.sessionIsolationSlashCommandExecutor) {
-      return undefined;
+  private normalizeFailure(error: unknown): SlashCommandFailure {
+    const sourceErrorCode = this.extractSourceErrorCode(error);
+    if (sourceErrorCode === 'session_not_found') {
+      return { code: 'session_not_found' as const };
     }
-    if (!this.isSessionIsolationCommand(input.command)) {
-      return undefined;
+
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && typeof (error as { code: unknown }).code === 'string'
+    ) {
+      const normalizedError = error as {
+        code: string;
+        reasonKey?: unknown;
+      };
+      const reasonKey = this.isSlashCommandFailureReasonKey(normalizedError.reasonKey)
+        ? normalizedError.reasonKey
+        : undefined;
+      return {
+        code: this.isSlashCommandFailureCode(normalizedError.code) ? normalizedError.code : 'sdk_unreachable',
+        ...(reasonKey ? { reasonKey } : {}),
+      };
     }
-    return this.dependencies.sessionIsolationSlashCommandExecutor.execute({
-      command: input.command,
-      anchor: input.anchor,
-      ensuredContext: input.ensuredContext ?? {
-        opencodeSessionId: '',
-        bootstrapSource: 'bootstrap_created',
-      },
-      entryContext: input.entryContext,
-      ...(input.createContext ? { createContext: input.createContext } : {}),
-      ...(input.directory ? { directory: input.directory } : {}),
-    });
+
+    return { code: 'sdk_unreachable' as const };
   }
 
-  private isSessionIsolationCommand(command: SlashCommand): command is Extract<SlashCommand, { kind: 'new' | 'sessions' | 'session' }> {
-    return command.kind === 'new' || command.kind === 'sessions' || command.kind === 'session';
+  private extractSourceErrorCode(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null) {
+      return undefined;
+    }
+    const evidence = (error as {
+      errorEvidence?: { sourceErrorCode?: unknown };
+    }).errorEvidence;
+    return typeof evidence?.sourceErrorCode === 'string' ? evidence.sourceErrorCode : undefined;
+  }
+
+  private isSlashCommandFailureCode(code: string): code is SlashCommandFailureCode {
+    return code === 'session_not_found'
+      || code === 'session_out_of_scope'
+      || code === 'model_not_found'
+      || code === 'invalid_command'
+      || code === 'command_disabled_in_group_chat'
+      || code === 'sdk_unreachable';
+  }
+
+  private isSlashCommandFailureReasonKey(reasonKey: unknown): reasonKey is SlashCommandFailure['reasonKey'] {
+    return reasonKey === 'current_session_unavailable'
+      || reasonKey === 'target_session_out_of_scope'
+      || reasonKey === 'target_model_unavailable'
+      || reasonKey === 'unsupported_command'
+      || reasonKey === 'command_not_available_in_group_chat'
+      || reasonKey === 'host_unavailable';
   }
 }
 

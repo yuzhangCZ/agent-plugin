@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createGatewayWireMessageUpdatedEvent } from '../../test-support/fixtures/index.mjs';
+import {
+  createGatewayWireMessageUpdatedEvent,
+  createSlashCommandsResultMessage,
+} from '../../test-support/fixtures/index.mjs';
 import { assertWireViolationShape } from '../../test-support/assertions/index.mjs';
 import {
   gatewayUpstreamTransportMessageSchema,
@@ -72,6 +75,7 @@ test('validateGatewayUpstreamTransportMessage accepts the upstream transport env
       type: 'status_response',
       opencodeOnline: true,
     },
+    createSlashCommandsResultMessage(),
   ];
 
   for (const message of cases) {
@@ -106,6 +110,7 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
       type: 'status_response',
       opencodeOnline: true,
     },
+    createSlashCommandsResultMessage(),
   ];
 
   for (const message of businessMessages) {
@@ -123,6 +128,27 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
 
   const controlResult = validateGatewayUplinkBusinessMessage(control);
   assert.equal(controlResult.ok, false);
+});
+
+test('validateGatewayUpstreamTransportMessage rejects legacy slash_commands_result welinkSessionId', () => {
+  const result = validateGatewayUpstreamTransportMessage({
+    type: 'slash_commands_result',
+    welinkSessionId: 'wl-slash-legacy',
+    traceId: 'trace-slash-legacy',
+    payload: {
+      slashCommands: [
+        { command: '/new', description: '新建会话' },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'transport',
+    code: 'missing_required_field',
+    field: 'toolSessionId',
+    messageType: 'slash_commands_result',
+  });
 });
 
 test('validateGatewayUpstreamTransportMessage accepts control messages through the upstream transport union', () => {

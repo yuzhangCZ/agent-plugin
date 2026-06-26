@@ -54,6 +54,12 @@ function normalizeHealthResponse(response: unknown): OpencodeHealthResult {
 }
 
 type AdaptedGlobalHealth = NonNullable<HostClientLike['global']>['health'];
+type LegacySdkMethod = (options?: Record<string, unknown>) => Promise<unknown>;
+type LegacyRequiredSdkMethod = (options: Record<string, unknown>) => Promise<unknown>;
+type LegacyRawClient = {
+  get: LegacyRequiredSdkMethod;
+  post: LegacyRequiredSdkMethod;
+};
 
 function buildLegacyCreateOptions(parameters?: {
   directory?: string;
@@ -154,6 +160,38 @@ function buildLegacyPromptOptions(parameters: {
   };
 }
 
+function buildLegacyCommandOptions(parameters: {
+  sessionID: string;
+  directory?: string;
+  messageID?: string;
+  agent?: string;
+  model?: string;
+  command: string;
+  arguments?: string;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    command: parameters.command,
+  };
+  if (parameters.messageID !== undefined) {
+    body.messageID = parameters.messageID;
+  }
+  if (parameters.arguments !== undefined) {
+    body.arguments = parameters.arguments;
+  }
+  if (parameters.agent !== undefined) {
+    body.agent = parameters.agent;
+  }
+  if (parameters.model !== undefined) {
+    body.model = parameters.model;
+  }
+
+  return {
+    path: { id: parameters.sessionID },
+    body,
+    ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
+  };
+}
+
 function adaptGlobalHealth(root: Record<string, unknown> | undefined): AdaptedGlobalHealth {
   const global = isRecord(root?.global) ? root.global : undefined;
   const rawClient = isRecord(root?._client) ? root._client : undefined;
@@ -213,22 +251,42 @@ export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
   }
 
   const root = client as HostSdkClient;
+  const sessionCreate = asFunction<LegacySdkMethod>(root.session.create, root.session);
+  const sessionGet = asFunction<LegacyRequiredSdkMethod>(root.session.get, root.session);
+  const sessionList = asFunction<LegacySdkMethod>(root.session.list, root.session);
+  const sessionPrompt = asFunction<LegacyRequiredSdkMethod>(root.session.prompt, root.session);
+  const sessionCommand = asFunction<LegacyRequiredSdkMethod>(root.session.command, root.session);
+  const sessionAbort = asFunction<LegacyRequiredSdkMethod>(root.session.abort, root.session);
+  const sessionDelete = asFunction<LegacyRequiredSdkMethod>(root.session.delete, root.session);
+  const commandList = asFunction<LegacySdkMethod>(root.command?.list, root.command);
+  const configProviders = asFunction<LegacySdkMethod>(root.config.providers, root.config);
+  const rawClient = (root as unknown as { _client: LegacyRawClient })._client;
 
   return {
     session: {
-      create: (parameters) => root.session.create(buildLegacyCreateOptions(parameters)),
-      get: (parameters) => root.session.get(buildLegacySessionTarget(parameters)),
-      list: (parameters) => root.session.list(buildLegacyScopedQuery(parameters)),
-      prompt: (parameters) => root.session.prompt(buildLegacyPromptOptions(parameters)),
-      abort: (parameters) => root.session.abort(buildLegacySessionTarget(parameters)),
-      delete: (parameters) => root.session.delete(buildLegacySessionTarget(parameters)),
+      create: (parameters) => sessionCreate?.(buildLegacyCreateOptions(parameters)) ?? Promise.reject(new Error('OpenCode session.create is unavailable')),
+      get: (parameters) => sessionGet?.(buildLegacySessionTarget(parameters)) ?? Promise.reject(new Error('OpenCode session.get is unavailable')),
+      list: (parameters) => sessionList?.(buildLegacyScopedQuery(parameters)) ?? Promise.reject(new Error('OpenCode session.list is unavailable')),
+      prompt: (parameters) => sessionPrompt?.(buildLegacyPromptOptions(parameters)) ?? Promise.reject(new Error('OpenCode session.prompt is unavailable')),
+      ...(sessionCommand
+        ? { command: (parameters) => sessionCommand(buildLegacyCommandOptions(parameters)) }
+        : {}),
+      abort: (parameters) => sessionAbort?.(buildLegacySessionTarget(parameters)) ?? Promise.reject(new Error('OpenCode session.abort is unavailable')),
+      delete: (parameters) => sessionDelete?.(buildLegacySessionTarget(parameters)) ?? Promise.reject(new Error('OpenCode session.delete is unavailable')),
     },
+    ...(commandList
+      ? {
+          command: {
+            list: (parameters) => commandList(buildLegacyScopedQuery(parameters)),
+          },
+        }
+      : {}),
     config: {
-      providers: (parameters) => root.config.providers(buildLegacyScopedQuery(parameters)),
+      providers: (parameters) => configProviders?.(buildLegacyScopedQuery(parameters)) ?? Promise.reject(new Error('OpenCode config.providers is unavailable')),
     },
     permission: {
       // OpenCode server plugin 注入的 v1 client 没有高层 permission reply；这里直接走 requestID raw endpoint。
-      reply: (parameters) => root._client.post({
+      reply: (parameters) => rawClient.post({
         url: '/permission/{requestID}/reply',
         path: { requestID: parameters.permissionId },
         ...(parameters.directory ? { query: { directory: parameters.directory } } : {}),
@@ -242,7 +300,7 @@ export function createSdkAdapter(client: unknown): BridgeSdkClient | null {
     },
     question: {
       // 当前正式 SDK 仍缺少 question reply 高层方法，暂时仅在 adapter 内部保留 raw fallback。
-      reply: (parameters) => root._client.post({
+      reply: (parameters) => rawClient.post({
         url: '/question/{requestID}/reply',
         path: { requestID: parameters.questionId },
         body: { answers: parameters.answers },

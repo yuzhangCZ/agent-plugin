@@ -1,3 +1,4 @@
+import type { PluginInput } from '@opencode-ai/plugin';
 import { getErrorMessage } from '../utils/error.js';
 
 export interface OpencodeHealthResult {
@@ -46,6 +47,19 @@ export interface BridgeSessionClient {
     agent?: string;
     parts?: Array<{ type: 'text'; text: string }>;
   }): Promise<unknown>;
+  command?(options: {
+    sessionID: string;
+    directory?: string;
+    messageID?: string;
+    agent?: string;
+    model?: string;
+    command: string;
+    arguments?: string;
+  }): Promise<unknown>;
+}
+
+export interface BridgeCommandClient {
+  list(options?: { directory?: string }): Promise<unknown>;
 }
 
 export interface BridgeConfigClient {
@@ -69,28 +83,13 @@ export interface BridgeQuestionClient {
 
 export interface BridgeSdkClient {
   session: BridgeSessionClient;
+  command?: BridgeCommandClient;
   config: BridgeConfigClient;
   permission: BridgePermissionClient;
   question: BridgeQuestionClient;
 }
 
-export interface HostSdkClient {
-  session: {
-    create: (options?: Record<string, unknown>) => Promise<unknown>;
-    get: (options: Record<string, unknown>) => Promise<unknown>;
-    list: (options?: Record<string, unknown>) => Promise<unknown>;
-    prompt: (options: Record<string, unknown>) => Promise<unknown>;
-    abort: (options: Record<string, unknown>) => Promise<unknown>;
-    delete: (options: Record<string, unknown>) => Promise<unknown>;
-  };
-  config: {
-    providers: (options?: Record<string, unknown>) => Promise<unknown>;
-  };
-  _client: {
-    get: (options: Record<string, unknown>) => Promise<unknown>;
-    post: (options: Record<string, unknown>) => Promise<unknown>;
-  };
-}
+export type HostSdkClient = PluginInput['client'];
 
 export async function safeExecute<T>(
   promise: Promise<T>,

@@ -1,6 +1,7 @@
 import type {
   SessionCreatedMessage,
   SkillProviderEvent,
+  SlashCommandsResultMessage,
   StatusResponseMessage,
   ToolDoneMessage,
   ToolErrorMessage,
@@ -8,6 +9,7 @@ import type {
 } from '@agent-plugin/gateway-schema';
 
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
+import type { ProviderSlashCommand } from '../../domain/provider.ts';
 import type { OutboundSink } from '../ports/outbound-sink.ts';
 import type { ProjectableProviderFact } from './projectable-provider-fact.ts';
 
@@ -38,6 +40,11 @@ export interface SkillEventToGatewayMessageProjector {
 export interface GatewayCommandResultProjector {
   projectStatus(input: { online: boolean }): StatusResponseMessage;
   projectSessionCreated(input: { welinkSessionId: string; toolSessionId: string }): SessionCreatedMessage;
+  projectSlashCommands(input: {
+    toolSessionId: string;
+    traceId: string;
+    slashCommands: ProviderSlashCommand[];
+  }): SlashCommandsResultMessage;
 }
 
 /**

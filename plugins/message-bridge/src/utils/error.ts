@@ -15,8 +15,10 @@ export interface ToolErrorEvidence {
     | 'session.create'
     | 'session.get'
     | 'session.prompt'
+    | 'session.command'
     | 'session.abort'
     | 'session.delete'
+    | 'command.list'
     | 'permission.reply'
     | 'question.list'
     | 'question.reply';
@@ -57,8 +59,10 @@ function asSourceOperation(value: unknown): ToolErrorEvidence['sourceOperation']
     case 'session.create':
     case 'session.get':
     case 'session.prompt':
+    case 'session.command':
     case 'session.abort':
     case 'session.delete':
+    case 'command.list':
     case 'permission.reply':
     case 'question.list':
     case 'question.reply':

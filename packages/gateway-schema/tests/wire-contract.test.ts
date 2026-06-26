@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   createGatewayWireMessageUpdatedEvent,
+  createQuerySlashCommandsInvokeMessage,
+  createSlashCommandsResultMessage,
 } from '../../test-support/fixtures/index.mjs';
 import {
   assertProjectedMessageUpdatedShape,
@@ -164,6 +166,7 @@ test('gatewayWireProtocolSchema accepts downstream business requests', () => {
         title: 'hello',
       },
     },
+    createQuerySlashCommandsInvokeMessage(),
   ];
 
   for (const message of cases) {
@@ -189,6 +192,7 @@ test('gatewayWireProtocolSchema accepts downstream, uplink business, and control
       type: 'status_response',
       opencodeOnline: true,
     },
+    createSlashCommandsResultMessage(),
     {
       type: 'heartbeat',
       timestamp: '2026-03-30T00:00:00.000Z',
@@ -225,6 +229,7 @@ test('validateGatewayWireProtocolMessage accepts current-state downstream + upli
       type: 'tool_done',
       toolSessionId: 'tool-1',
     },
+    createSlashCommandsResultMessage(),
   ];
 
   for (const message of cases) {

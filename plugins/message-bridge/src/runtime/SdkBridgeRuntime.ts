@@ -5,12 +5,7 @@ import {
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
   OpencodeSessionGatewayAdapter,
-  SimpleSlashCommandParser,
 } from '../adapter/index.js';
-import {
-  DefaultSlashCommandReplyPresenter,
-  SlashCommandExecutor,
-} from '../usecase/index.js';
 import { SubagentSessionMapper } from '../session/SubagentSessionMapper.js';
 import type {
   HostModelCatalogPort,
@@ -36,19 +31,14 @@ import type { ManagedRuntime, ManagedRuntimeStartOptions } from './ManagedRuntim
 import type { BridgeEvent } from './types.js';
 import { OpenCodeProviderAdapter } from './sdk/OpenCodeProviderAdapter.js';
 import {
-  ChatEntryPolicy,
   DefaultChatExecutionContextResolver,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
-  SdkChatPreprocessor,
-  SdkSlashExecutionUseCase,
-  StaticSlashCapabilityProvider,
 } from './sdk/SdkChatControlPlane.js';
+import { createSdkChatRunPlanner } from './sdk/SdkChatRunPlannerFactory.js';
 import {
   DefaultBusinessEntryKeyResolver,
-  DefaultBusinessEntryPolicyResolver,
   BusinessEntryContextResolver,
-  EntryAwareChatSessionResolver,
   RuntimeAnchorRegistry,
   RuntimePendingInteractionRegistry,
   SessionIsolationDiagnostics,
@@ -157,7 +147,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     const bindingStore = new InMemoryToolSessionBindingStore();
     const ownershipResolver = new InMemoryOpencodeSessionOwnershipResolver();
     const sessionModelOverrideStore = new InMemorySessionModelOverrideStore();
-    const slashCommandParser = new SimpleSlashCommandParser();
     const opencodeSessionGatewayAdapter = new OpencodeSessionGatewayAdapter(() => startupValidation.sdkClient);
     // legacy chat/slash 控制面 bootstrap 出口：只负责给旧 resolver 创建可绑定的宿主会话。
     const legacyChatBootstrapSessionPort: HostSessionCreationPort = {
@@ -207,11 +196,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       listModels: async () => this.listHostModels(startupValidation.sdkClient),
     };
     const businessEntryKeyResolver = new DefaultBusinessEntryKeyResolver();
-    const businessEntryPolicyResolver = new DefaultBusinessEntryPolicyResolver();
-    const businessEntryContextResolver = new BusinessEntryContextResolver({
-      businessEntryKeyResolver,
-      businessEntryPolicyResolver,
-    });
+    const businessEntryContextResolver = new BusinessEntryContextResolver();
     const sessionIsolationDiagnostics = new SessionIsolationDiagnostics({
       logger: this.logger.child({ component: 'session_isolation' }),
     });
@@ -254,36 +239,27 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       hostSessionCreationPort: legacyChatBootstrapSessionPort,
       hostSessionQueryPort,
     });
-    const slashCommandExecutor = new SlashCommandExecutor({
-      bindingStore,
-      ownershipResolver,
-      modelOverrideStore: sessionModelOverrideStore,
-      hostSessionCreationPort: legacyChatBootstrapSessionPort,
-      hostSessionQueryPort,
-      hostModelCatalogPort,
-    });
-    const chatPreprocessor = new SdkChatPreprocessor({
-      chatEntryPolicy: new ChatEntryPolicy({
-        slashCommandParser,
-        slashCapabilityProvider: new StaticSlashCapabilityProvider(),
-      }),
-      slashExecutionUseCase: new SdkSlashExecutionUseCase({
-        slashCommandExecutor,
-        sessionIsolationSlashCommandExecutor: sessionIsolationControlPlane.slashCommandExecutor,
-        replyPresenter: new DefaultSlashCommandReplyPresenter(),
-        contextResolver,
-      }),
-      contextResolver,
+    const chatRunPlanner = createSdkChatRunPlanner({
+      slashCommandExecutorDependencies: {
+        resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
+        switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
+        createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
+        runtimeAnchorRepository: runtimeAnchorRegistry,
+        modelOverrideStore: sessionModelOverrideStore,
+        hostModelCatalogPort,
+      },
       businessEntryContextResolver,
       effectiveDirectory: config.bridgeDirectory,
-      normalChatSessionResolver: new EntryAwareChatSessionResolver({
+      opencodeSessionGatewayAdapter,
+      logger: this.logger,
+      entryAwareChatSessionResolver: {
         businessEntryKeyResolver,
         resolveEntrySessionContextUseCase: sessionIsolationControlPlane.resolveEntrySessionContextUseCase,
         switchAttachedSessionUseCase: sessionIsolationControlPlane.switchAttachedSessionUseCase,
         createOwnedSessionUseCase: sessionIsolationControlPlane.createOwnedSessionUseCase,
         runtimeAnchorRepository: runtimeAnchorRegistry,
         modelOverrideStore: sessionModelOverrideStore,
-      }),
+      },
     });
     this.providerAdapter = new OpenCodeProviderAdapter({
       rawClient: this.rawClient,
@@ -297,7 +273,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       pendingInteractionRecorder: pendingInteractionRegistry,
       effectiveDirectory: config.bridgeDirectory,
       opencodeSessionGatewayAdapter,
-      chatPreprocessor,
+      chatRunPlanner,
       contextResolver,
       executionSessionInvalidationPort: new DefaultExecutionSessionInvalidationPort({
         bindingStore,
@@ -331,12 +307,13 @@ export class SdkBridgeRuntime implements ManagedRuntime {
 
     let abortListener: (() => void) | undefined;
     try {
-      const startPromise = this.sdkRuntime.start();
+      const sdkRuntime = this.sdkRuntime;
+      const startPromise = sdkRuntime.start();
       if (options.abortSignal) {
         const { abortSignal } = options;
         const abortPromise = new Promise<never>((_, reject) => {
           abortListener = () => {
-            void this.sdkRuntime?.stop().catch(() => undefined);
+            void sdkRuntime.stop().catch(() => undefined);
             reject(new Error('runtime_start_aborted'));
           };
           if (abortSignal.aborted) {

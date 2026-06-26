@@ -5,9 +5,6 @@ import { gatewayToolEventPayloadSchema } from './tool-event/index.ts';
 import { optionalLooseTrimmedString, optionalStrictTrimmedString, requiredTrimmedString } from './shared.ts';
 import { TOOL_ERROR_REASONS, TRANSPORT_UPSTREAM_MESSAGE_TYPES } from '../literals/upstream.ts';
 
-const [, , , , TOOL_EVENT_MESSAGE_TYPE, TOOL_DONE_MESSAGE_TYPE, TOOL_ERROR_MESSAGE_TYPE, SESSION_CREATED_MESSAGE_TYPE, STATUS_RESPONSE_MESSAGE_TYPE] =
-  TRANSPORT_UPSTREAM_MESSAGE_TYPES;
-
 export const toolUsageSchema = z.object({
   tokens: z.number().optional(),
   inputTokens: z.number().optional(),
@@ -22,7 +19,7 @@ const optionalSubagentEnvelopeString = z.preprocess(
 );
 
 export const toolEventMessageSchema = z.object({
-  type: z.literal(TOOL_EVENT_MESSAGE_TYPE),
+  type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.TOOL_EVENT_MESSAGE_TYPE),
   toolSessionId: requiredTrimmedString,
   subagentSessionId: optionalSubagentEnvelopeString,
   subagentName: optionalSubagentEnvelopeString,
@@ -38,7 +35,7 @@ export type ToolEventMessage = z.output<typeof toolEventMessageSchema>;
 
 export const toolDoneMessageSchema = z
   .object({
-    type: z.literal(TOOL_DONE_MESSAGE_TYPE),
+    type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.TOOL_DONE_MESSAGE_TYPE),
     toolSessionId: requiredTrimmedString,
     welinkSessionId: optionalLooseTrimmedString,
     usage: toolUsageSchema.optional(),
@@ -53,7 +50,7 @@ export type ToolDoneMessage = z.output<typeof toolDoneMessageSchema>;
 
 export const toolErrorMessageSchema = z
   .object({
-    type: z.literal(TOOL_ERROR_MESSAGE_TYPE),
+    type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.TOOL_ERROR_MESSAGE_TYPE),
     welinkSessionId: optionalLooseTrimmedString,
     toolSessionId: optionalLooseTrimmedString,
     error: requiredTrimmedString,
@@ -70,7 +67,7 @@ export type ToolErrorMessage = z.output<typeof toolErrorMessageSchema>;
 
 export const sessionCreatedMessageSchema = z
   .object({
-    type: z.literal(SESSION_CREATED_MESSAGE_TYPE),
+    type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.SESSION_CREATED_MESSAGE_TYPE),
     welinkSessionId: requiredTrimmedString,
     toolSessionId: optionalStrictTrimmedString,
     session: createSessionResultDataSchema.optional(),
@@ -84,10 +81,26 @@ export const sessionCreatedMessageSchema = z
 export type SessionCreatedMessage = z.output<typeof sessionCreatedMessageSchema>;
 
 export const statusResponseMessageSchema = z.object({
-  type: z.literal(STATUS_RESPONSE_MESSAGE_TYPE),
+  type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.STATUS_RESPONSE_MESSAGE_TYPE),
   opencodeOnline: z.boolean(),
 });
 export type StatusResponseMessage = z.output<typeof statusResponseMessageSchema>;
+
+export const slashCommandItemSchema = z.object({
+  command: requiredTrimmedString,
+  description: z.string().transform((value) => value.trim()),
+});
+export type SlashCommandItem = z.output<typeof slashCommandItemSchema>;
+
+export const slashCommandsResultMessageSchema = z.object({
+  type: z.literal(TRANSPORT_UPSTREAM_MESSAGE_TYPES.SLASH_COMMANDS_RESULT_MESSAGE_TYPE),
+  toolSessionId: requiredTrimmedString,
+  traceId: requiredTrimmedString,
+  payload: z.object({
+    slashCommands: z.array(slashCommandItemSchema),
+  }),
+});
+export type SlashCommandsResultMessage = z.output<typeof slashCommandsResultMessageSchema>;
 
 export const gatewayUplinkBusinessMessageSchema = z.union([
   toolEventMessageSchema,
@@ -95,5 +108,6 @@ export const gatewayUplinkBusinessMessageSchema = z.union([
   toolErrorMessageSchema,
   sessionCreatedMessageSchema,
   statusResponseMessageSchema,
+  slashCommandsResultMessageSchema,
 ]);
 export type GatewayUplinkBusinessMessage = z.output<typeof gatewayUplinkBusinessMessageSchema>;

@@ -2,6 +2,7 @@ import type {
   AbortExecutionRuntimeCommand,
   CloseSessionRuntimeCommand,
   CreateSessionRuntimeCommand,
+  ListSlashCommandsRuntimeCommand,
   QueryStatusRuntimeCommand,
   ReplyPermissionRuntimeCommand,
   ReplyQuestionRuntimeCommand,
@@ -26,6 +27,11 @@ export type QueryStatusUseCase = RuntimeUseCase<QueryStatusRuntimeCommand>;
  * 创建会话用例。
  */
 export type CreateSessionUseCase = RuntimeUseCase<CreateSessionRuntimeCommand>;
+
+/**
+ * 查询 slash command 列表用例。
+ */
+export type ListSlashCommandsUseCase = RuntimeUseCase<ListSlashCommandsRuntimeCommand>;
 
 /**
  * 启动 request run 用例。
@@ -58,6 +64,7 @@ export type AbortExecutionUseCase = RuntimeUseCase<AbortExecutionRuntimeCommand>
 export interface RuntimeUseCaseMap {
   query_status: QueryStatusUseCase;
   create_session: CreateSessionUseCase;
+  list_slash_commands: ListSlashCommandsUseCase;
   start_request_run: StartRequestRunUseCase;
   reply_question: ReplyQuestionUseCase;
   reply_permission: ReplyPermissionUseCase;

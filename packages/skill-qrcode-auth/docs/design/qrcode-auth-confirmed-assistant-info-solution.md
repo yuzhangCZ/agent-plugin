@@ -1,9 +1,9 @@
 # skill-qrcode-auth confirmed 返回助理信息方案
 
-**Version:** 1.0  
-**Date:** 2026-06-22  
-**Status:** Active  
-**Owner:** agent-plugin maintainers  
+**Version:** 1.0
+**Date:** 2026-06-22
+**Status:** Active
+**Owner:** agent-plugin maintainers
 **Related:** `../../../../docs/design/qrcode-auth-session-solution.md`, `../../../../docs/design/qrcode-auth-exposure-solution.md`
 
 ## 1. 背景

@@ -155,6 +155,14 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
   }
 
   /**
+   * OpenClaw 当前没有可上报的 slash command 列表。
+   * @remarks 保持同一查询协议可用，宿主收到空列表后不展示候选命令。
+   */
+  async listSlashCommands(): Promise<{ slashCommands: [] }> {
+    return { slashCommands: [] };
+  }
+
+  /**
    * 启动一次 SDK request_run，并立即返回 fact 流与终态 promise。
    * @remarks OpenClaw 的实际执行在后台完成；这里先建立本地输出边界，
    * 这样 abort、宿主晚到事件和错误收口都能落到同一个 `ActiveRunState`。

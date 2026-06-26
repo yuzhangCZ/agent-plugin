@@ -6,6 +6,8 @@ import type {
   ProviderCreateSessionResult,
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRun,
@@ -47,6 +49,21 @@ export class ObservedProviderCommandHandlers implements ProviderCommandHandlers 
       return result;
     } catch (error) {
       this.observation.providerCallFailed('createSession', input.traceId, error);
+      throw error;
+    }
+  }
+
+  async listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult> {
+    this.observation.providerCallStarted('listSlashCommands', input.traceId);
+    try {
+      const result = await this.handlers.listSlashCommands(input);
+      this.observation.providerCallSucceeded('listSlashCommands', input.traceId, {
+        slashCommandCount: result.slashCommands.length,
+        slashCommands: result.slashCommands,
+      });
+      return result;
+    } catch (error) {
+      this.observation.providerCallFailed('listSlashCommands', input.traceId, error);
       throw error;
     }
   }

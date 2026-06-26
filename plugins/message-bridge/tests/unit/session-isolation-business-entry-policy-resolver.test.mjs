@@ -47,7 +47,7 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
     );
   });
 
-  test('intersects request scoped allowedSlashCommands with template', () => {
+  test('ignores request scoped allowedSlashCommands and keeps entry template', () => {
     const resolver = new DefaultBusinessEntryPolicyResolver();
 
     assert.deepStrictEqual(
@@ -67,13 +67,13 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         entryKey: 'im:group:group-a',
         controlled: true,
         allowOpencodeNativeSessions: false,
-        allowedSlashCommands: ['new', 'model'],
-        slashPolicySource: 'request_payload',
+        allowedSlashCommands: ['new', 'models', 'model'],
+        slashPolicySource: 'entry_template',
       },
     );
   });
 
-  test('treats empty allowedSlashCommands as explicit slash disable', () => {
+  test('does not treat empty allowedSlashCommands as explicit slash disable', () => {
     const resolver = new DefaultBusinessEntryPolicyResolver();
 
     assert.deepStrictEqual(
@@ -93,13 +93,13 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         entryKey: 'miniapp:direct:assistant-a',
         controlled: false,
         allowOpencodeNativeSessions: true,
-        allowedSlashCommands: [],
-        slashPolicySource: 'request_payload',
+        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        slashPolicySource: 'entry_template',
       },
     );
   });
 
-  test('filters invalid allowedSlashCommands before applying request policy', () => {
+  test('does not filter or apply request scoped allowedSlashCommands', () => {
     const resolver = new DefaultBusinessEntryPolicyResolver();
 
     assert.deepStrictEqual(
@@ -119,8 +119,8 @@ describe('DefaultBusinessEntryPolicyResolver', () => {
         entryKey: 'im:direct:user-a#bot-a',
         controlled: false,
         allowOpencodeNativeSessions: true,
-        allowedSlashCommands: ['sessions', 'new'],
-        slashPolicySource: 'request_payload',
+        allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+        slashPolicySource: 'entry_template',
       },
     );
   });

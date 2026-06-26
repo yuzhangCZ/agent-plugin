@@ -15,11 +15,14 @@ import type {
   ProviderFact,
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRun,
   ProviderRunMessageInput,
   ProviderRuntimeContext,
+  ProviderSlashCommand,
   ProviderTerminalResult,
   QuestionAnswer,
   QuestionAskFact,
@@ -53,11 +56,14 @@ export type {
   ProviderFact,
   ProviderHealthInput,
   ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRun,
   ProviderRunMessageInput,
   ProviderRuntimeContext,
+  ProviderSlashCommand,
   ProviderTerminalResult,
   QuestionAnswer,
   QuestionAskFact,
@@ -138,6 +144,7 @@ export interface RuntimeTraceProviderCall {
   command:
     | 'queryStatus'
     | 'createSession'
+    | 'listSlashCommands'
     | 'startRequestRun'
     | 'replyQuestion'
     | 'replyPermission'

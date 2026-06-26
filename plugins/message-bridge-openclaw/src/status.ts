@@ -89,6 +89,9 @@ const probeProvider: ThirdPartyAgentProvider = {
   async createSession() {
     return { toolSessionId: "probe" };
   },
+  async listSlashCommands() {
+    return { slashCommands: [] };
+  },
   async runMessage() {
     return {
       runId: "probe",

@@ -63,9 +63,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
         toolSessionId,
         text: command.source.payload.text,
         ...(command.source.payload.assistantId ? { assistantId: command.source.payload.assistantId } : {}),
-        ...(command.source.payload.extParameters !== undefined
-          ? { extParameters: command.source.payload.extParameters }
-          : {}),
+        ...(command.source.payload.extParameters !== undefined ? { extParameters: command.source.payload.extParameters } : {}),
         ...(Object.keys(providerContext).length > 0 ? { context: providerContext } : {}),
       });
       await this.coordinator.executeRun({

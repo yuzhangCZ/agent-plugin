@@ -1,0 +1,184 @@
+import type {
+  ProviderError,
+} from '@wecode/bridge-runtime-sdk';
+import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
+import type {
+  CommandSessionResultData,
+  PromptSessionTerminal,
+} from '../../port/SessionScopedActionGatewayPort.js';
+import type { ActionResult } from '../../types/action-runtime.js';
+import { getErrorMessage } from '../../utils/error.js';
+import type {
+  ChatActionContext,
+  ExecutionSessionInvalidationPort,
+} from './SdkChatControlPlane.js';
+import type {
+  ActiveProviderRunHandle,
+  ActiveRunRegistry,
+} from './OpenCodeProviderAdapter.run.js';
+import {
+  appendTerminalSourceEvidence,
+  toProviderTerminalResult,
+} from './OpenCodeProviderAdapter.helpers.js';
+
+type CommandSessionActionResult = ActionResult<CommandSessionResultData>;
+
+/**
+ * 绑定 OpenCode native command 的终态。
+ * @remarks `session.command` 调用失败后不回落 `session.prompt`，避免部分执行后的重复消息。
+ */
+export async function bindProviderCommandTerminal(input: {
+  activeRun: ActiveProviderRunHandle;
+  context: ChatActionContext;
+  commandName: string;
+  arguments: string;
+  gatewayAdapter: OpencodeSessionGatewayAdapter;
+  executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
+  activeRuns: ActiveRunRegistry;
+}): Promise<void> {
+  const startedAt = Date.now();
+  input.context.logger?.info('provider_adapter.command.started', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
+    runId: input.activeRun.runId,
+    commandName: input.commandName,
+    hasArguments: Boolean(input.arguments),
+    hasAssistantId: Boolean(input.context.message.assistantId),
+  });
+
+  try {
+    // session.command 返回 command 生成的 assistant message；终态由 gateway adapter 统一归一化。
+    const commandResult = await input.gatewayAdapter.commandSession({
+      sessionId: input.context.sessionContext.opencodeSessionId,
+      commandName: input.commandName,
+      arguments: input.arguments,
+      ...(input.context.effectiveDirectory ? { directory: input.context.effectiveDirectory } : {}),
+      agent: input.context.message.assistantId,
+      modelOverride: input.context.sessionContext.modelOverride,
+      logger: input.context.logger,
+    });
+
+    if (!commandResult.success) {
+      handleCommandFailure(input, startedAt, commandResult);
+      return;
+    }
+    handleCommandSuccess(input, startedAt, commandResult);
+  } catch (error) {
+    handleCommandException(input, startedAt, error);
+  }
+}
+
+function handleCommandFailure(
+  input: Parameters<typeof bindProviderCommandTerminal>[0],
+  startedAt: number,
+  commandResult: Extract<CommandSessionActionResult, { success: false }>,
+): void {
+  invalidateExecutionSessionAfterFailure(input, commandResult);
+  const sourceOperation = commandResult.errorEvidence?.sourceOperation;
+  const sourceErrorCode = commandResult.errorEvidence?.sourceErrorCode;
+  input.context.logger?.warn('provider_adapter.command.failed', {
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
+    runId: input.activeRun.runId,
+    commandName: input.commandName,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    providerOutcome: 'failed',
+    mappedProviderErrorCode: mapCommandFailureCode(sourceOperation, sourceErrorCode),
+    error: commandResult.errorMessage ?? 'provider_unavailable',
+    sourceOperation,
+    sourceErrorCode,
+    httpStatus: commandResult.errorEvidence?.httpStatus,
+  });
+  input.activeRun.settlePromptTerminal({
+    outcome: 'failed',
+    error: buildCommandFailureError(commandResult, sourceOperation, sourceErrorCode),
+  });
+}
+
+function handleCommandSuccess(
+  input: Parameters<typeof bindProviderCommandTerminal>[0],
+  startedAt: number,
+  commandResult: Extract<CommandSessionActionResult, { success: true }>,
+): void {
+  const terminal = commandResult.data.terminal;
+  input.context.logger?.info('provider_adapter.command.completed', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
+    runId: input.activeRun.runId,
+    commandName: input.commandName,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    terminalKind: terminal.kind,
+    providerOutcome: mapCommandTerminalOutcome(terminal.kind),
+  }, terminal.kind === 'failed' ? terminal.errorDetails : undefined));
+  if (terminal.kind === 'aborted') {
+    input.activeRuns.abortAllByHostSession(input.context.sessionContext.opencodeSessionId, 'prompt_terminal_aborted');
+    return;
+  }
+  input.activeRun.settlePromptTerminal(toProviderTerminalResult(terminal));
+}
+
+function mapCommandTerminalOutcome(kind: PromptSessionTerminal['kind']): 'completed' | 'aborted' | 'failed' {
+  return kind === 'failed' ? 'failed' : kind === 'aborted' ? 'aborted' : 'completed';
+}
+
+function handleCommandException(
+  input: Parameters<typeof bindProviderCommandTerminal>[0],
+  startedAt: number,
+  error: unknown,
+): void {
+  invalidateExecutionSessionAfterFailure(input, error);
+  input.context.logger?.error('provider_adapter.command.threw', appendTerminalSourceEvidence({
+    toolSessionId: input.context.anchor,
+    opencodeSessionId: input.context.sessionContext.opencodeSessionId,
+    runId: input.activeRun.runId,
+    commandName: input.commandName,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    error: getErrorMessage(error),
+    providerOutcome: 'failed',
+    mappedProviderErrorCode: 'internal_error',
+  }, error));
+  input.activeRun.settlePromptTerminal({
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: getErrorMessage(error),
+    },
+  });
+}
+
+function invalidateExecutionSessionAfterFailure(
+  input: Parameters<typeof bindProviderCommandTerminal>[0],
+  error: unknown,
+): void {
+  input.executionSessionInvalidationPort.invalidateAfterFailure({
+    conversationId: input.context.anchor,
+    hostSessionId: input.context.sessionContext.opencodeSessionId,
+    error,
+  });
+}
+
+function mapCommandFailureCode(
+  sourceOperation: unknown,
+  sourceErrorCode: unknown,
+): 'session_not_found' | 'provider_unavailable' {
+  return sourceOperation === 'session.get' && sourceErrorCode === 'session_not_found'
+    ? 'session_not_found'
+    : 'provider_unavailable';
+}
+
+function buildCommandFailureError(
+  commandResult: Extract<CommandSessionActionResult, { success: false }>,
+  sourceOperation: unknown,
+  sourceErrorCode: unknown,
+): ProviderError {
+  if (mapCommandFailureCode(sourceOperation, sourceErrorCode) === 'session_not_found') {
+    return {
+      code: 'session_not_found',
+      message: commandResult.errorMessage ?? 'session_not_found',
+    };
+  }
+  return {
+    code: 'provider_unavailable',
+    message: commandResult.errorMessage ?? 'provider_unavailable',
+  };
+}

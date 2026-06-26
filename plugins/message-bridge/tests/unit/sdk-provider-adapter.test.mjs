@@ -6,12 +6,10 @@ import {
   InMemorySessionModelOverrideStore,
   InMemoryToolSessionBindingStore,
   OpencodeSessionGatewayAdapter,
-  SimpleSlashCommandParser,
 } from '../../src/adapter/index.ts';
 import { SubagentSessionMapper } from '../../src/session/SubagentSessionMapper.ts';
 import {
   DefaultSlashCommandReplyPresenter,
-  SlashCommandExecutor,
 } from '../../src/usecase/index.ts';
 import { OpenCodeProviderAdapter } from '../../src/runtime/sdk/OpenCodeProviderAdapter.ts';
 import { HostSessionRunCoordinator } from '../../src/runtime/sdk/HostSessionRunCoordinator.ts';
@@ -21,14 +19,18 @@ import {
   ActiveRunRegistry,
 } from '../../src/runtime/sdk/OpenCodeProviderAdapter.run.ts';
 import {
-  ChatEntryPolicy,
+  ChatMessageClassifier,
   DefaultChatExecutionContextResolver,
   DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
-  SdkChatPreprocessor,
+  SdkChatRunPlanner,
   SdkSlashExecutionUseCase,
-  StaticSlashCapabilityProvider,
 } from '../../src/runtime/sdk/SdkChatControlPlane.ts';
+import {
+  BusinessEntryContextResolver,
+  DefaultBusinessEntryKeyResolver,
+  DefaultBusinessEntryPolicyResolver,
+} from '../../src/runtime/sdk/session-isolation/index.ts';
 
 function createDeferred() {
   let resolve;
@@ -110,6 +112,27 @@ function createCapturingLogger(logs) {
   };
 }
 
+function createFixedBusinessEntryContextResolver() {
+  const context = {
+    entryKey: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId: 'user-a',
+    },
+    policy: {
+      entryKey: 'im:direct:user-a',
+      controlled: false,
+      allowOpencodeNativeSessions: true,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+      slashPolicySource: 'entry_template',
+    },
+  };
+  return {
+    resolveOptional: () => context,
+    resolveRequired: () => context,
+  };
+}
+
 function createSdkClient(overrides = {}) {
   return {
     session: {
@@ -130,6 +153,7 @@ function createSdkClient(overrides = {}) {
       providers: async () => ({ data: [] }),
       ...(overrides.config ?? {}),
     },
+    ...(overrides.command ? { command: overrides.command } : {}),
     permission: {
       reply: async () => ({ data: true }),
       ...(overrides.permission ?? {}),
@@ -297,24 +321,69 @@ function createAdapter(overrides = {}) {
     hostSessionCreationPort,
     hostSessionQueryPort,
   });
-  const chatPreprocessor = overrides.chatPreprocessor ?? new SdkChatPreprocessor({
-    chatEntryPolicy: new ChatEntryPolicy({
-      slashCommandParser: new SimpleSlashCommandParser(),
-      slashCapabilityProvider: new StaticSlashCapabilityProvider(),
+  const chatRunPlanner = overrides.chatRunPlanner ?? new SdkChatRunPlanner({
+    chatMessageClassifier: new ChatMessageClassifier({
+      ...(overrides.enableNativeCommandDispatch
+        ? {
+            listNativeCommands: async (input) => {
+              const result = await opencodeSessionGatewayAdapter.listCommandCatalog({
+                ...(input.directory ? { directory: input.directory } : {}),
+                logger,
+              });
+              return result.commands;
+            },
+          }
+        : {}),
     }),
     slashExecutionUseCase: new SdkSlashExecutionUseCase({
-      slashCommandExecutor: new SlashCommandExecutor({
-        bindingStore,
-        ownershipResolver,
-        modelOverrideStore,
-        hostSessionCreationPort,
-        hostSessionQueryPort,
-        hostModelCatalogPort,
-      }),
+      slashCommandExecutor: {
+        execute: async (input) => {
+          switch (input.command.kind) {
+            case 'sessions':
+              return {
+                kind: 'sessions',
+                activeSessionId: input.context.sessionContext.opencodeSessionId,
+                sessions: await hostSessionQueryPort.listSessions({}),
+              };
+            case 'models':
+              return { kind: 'models', models: await hostModelCatalogPort.listModels() };
+            case 'model': {
+              const models = await hostModelCatalogPort.listModels();
+              const exists = models.some((item) => item.providerId === input.command.providerId && item.modelId === input.command.modelId);
+              if (!exists) {
+                throw { code: 'model_not_found' };
+              }
+              const override = {
+                providerId: input.command.providerId,
+                modelId: input.command.modelId,
+              };
+              modelOverrideStore.set(input.context.sessionContext.opencodeSessionId, override);
+              return {
+                kind: 'model',
+                sessionId: input.context.sessionContext.opencodeSessionId,
+                modelOverride: override,
+              };
+            }
+            case 'new':
+              return { kind: 'new', session: await hostSessionCreationPort.createSession() };
+            case 'session':
+              return { kind: 'session', session: { id: input.command.sessionId }, previousSessionId: input.context.sessionContext.opencodeSessionId };
+            default:
+              throw { code: 'invalid_command' };
+          }
+        },
+      },
       replyPresenter: new DefaultSlashCommandReplyPresenter(),
-      contextResolver,
     }),
-    contextResolver,
+    businessEntryContextResolver: overrides.businessEntryContextResolver ?? createFixedBusinessEntryContextResolver(),
+    normalChatSessionResolver: overrides.normalChatSessionResolver ?? {
+      resolve: async (input) => contextResolver.resolveForChat(
+        input.message.toolSessionId,
+        input.message.assistantId ? { assistantId: input.message.assistantId } : undefined,
+        input.logger,
+      ),
+    },
+    effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
   });
   for (const [anchor, sessionId] of overrides.bindings ?? []) {
     bindingStore.bind(anchor, sessionId);
@@ -345,7 +414,7 @@ function createAdapter(overrides = {}) {
     ...(overrides.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: overrides.finalIdleTimeoutMs } : {}),
     effectiveDirectory: overrides.bridgeDirectory ?? '/workspace/test',
     opencodeSessionGatewayAdapter,
-    chatPreprocessor,
+    chatRunPlanner,
     contextResolver,
     executionSessionInvalidationPort: new DefaultExecutionSessionInvalidationPort({
       bindingStore,
@@ -1401,18 +1470,25 @@ test('provider adapter keeps superseded running prompt as host head until its ta
 test('provider adapter clears superseded host tracking state after old prompt task finishes', async () => {
   const firstPrompt = createDeferred();
   const secondPrompt = createDeferred();
-  let preprocessCount = 0;
+  let planCount = 0;
   let promptCount = 0;
   const adapter = createAdapter({
-    chatPreprocessor: {
-      preprocess: async () => {
-        preprocessCount += 1;
+    chatRunPlanner: {
+      plan: async (message, logger) => {
+        planCount += 1;
         return {
-          kind: 'normal_chat',
+          kind: 'queued_execution',
           context: {
-            opencodeSessionId: preprocessCount === 1 ? 'host-old' : 'host-new',
-            bootstrapSource: 'existing_binding',
+            message,
+            anchor: message.toolSessionId,
+            sessionContext: {
+              opencodeSessionId: planCount === 1 ? 'host-old' : 'host-new',
+              bootstrapSource: 'existing_binding',
+            },
+            entryContext: createFixedBusinessEntryContextResolver().resolveRequired({}),
+            logger,
           },
+          execution: { kind: 'prompt', text: 'hello' },
         };
       },
     },
@@ -2448,8 +2524,8 @@ test('provider adapter closeSession legacy fallback clears queued TUI outbound r
 
 test('provider adapter maps missing business entry to invalid_input failed run', async () => {
   const adapter = createAdapter({
-    chatPreprocessor: {
-      preprocess: async () => {
+    chatRunPlanner: {
+      plan: async () => {
         throw new Error('business_entry_key_required');
       },
     },
@@ -2496,6 +2572,10 @@ test('provider adapter returns synthetic ProviderRun for suppressReply deny path
 test('provider adapter returns synthetic ProviderRun for slash command without calling prompt', async () => {
   let promptCalled = false;
   const adapter = createAdapter({
+    businessEntryContextResolver: new BusinessEntryContextResolver({
+      businessEntryKeyResolver: new DefaultBusinessEntryKeyResolver(),
+      businessEntryPolicyResolver: new DefaultBusinessEntryPolicyResolver(),
+    }),
     session: {
       prompt: async () => {
         promptCalled = true;
@@ -2512,6 +2592,13 @@ test('provider adapter returns synthetic ProviderRun for slash command without c
     runId: 'run-slash',
     toolSessionId: 'anchor-slash',
     text: '/sessions',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'direct',
+        businessSessionId: 'user-slash',
+      },
+    },
   });
 
   const facts = await collect(run.facts);
@@ -2520,6 +2607,314 @@ test('provider adapter returns synthetic ProviderRun for slash command without c
   assert.match(facts[1].content, /可切换会话列表/);
   assert.match(facts[2].content, /可切换会话列表/);
   assert.deepEqual(await run.result(), { outcome: 'completed' });
+});
+
+test('provider adapter executes native command with explicit empty arguments through command terminal', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      prompt: async () => {
+        calls.push({ type: 'prompt' });
+        return createPromptResponse();
+      },
+      command: async (options) => {
+        calls.push({ type: 'command', options });
+        return createPromptResponse();
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-empty',
+    runId: 'run-native-empty',
+    toolSessionId: 'anchor-native-empty',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), { outcome: 'completed' });
+  assert.deepEqual(calls, [{
+    type: 'command',
+    options: {
+      sessionID: 'session-created-1',
+      command: 'init',
+      arguments: '',
+      directory: '/workspace/test',
+    },
+  }]);
+});
+
+test('provider adapter maps native command assistant error to failed terminal result', async () => {
+  const adapter = createAdapter({
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      command: async () => createPromptResponse({
+        info: {
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'provider failed',
+              statusCode: 429,
+              isRetryable: true,
+            },
+          },
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-error',
+    runId: 'run-native-error',
+    toolSessionId: 'anchor-native-error',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'internal_error',
+      message: 'APIError: provider failed statusCode=429',
+      details: {
+        name: 'APIError',
+        message: 'provider failed',
+        statusCode: 429,
+        isRetryable: true,
+      },
+    },
+  });
+});
+
+test('provider adapter maps native command MessageAbortedError to aborted terminal result', async () => {
+  const logs = [];
+  const adapter = createAdapter({
+    logger: createCapturingLogger(logs),
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      command: async () => createPromptResponse({
+        info: {
+          error: {
+            name: 'MessageAbortedError',
+            data: {
+              message: 'User aborted',
+            },
+          },
+        },
+      }),
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-aborted',
+    runId: 'run-native-aborted',
+    toolSessionId: 'anchor-native-aborted',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), { outcome: 'aborted' });
+  assert.deepEqual(
+    logs.find((log) => log.message === 'provider_adapter.command.completed')?.extra.providerOutcome,
+    'aborted',
+  );
+});
+
+test('provider adapter maps invalid native command response to failed result without prompt fallback', async () => {
+  const calls = [];
+  const adapter = createAdapter({
+    enableNativeCommandDispatch: true,
+    command: {
+      list: async () => ({ data: [{ name: 'init' }] }),
+    },
+    session: {
+      prompt: async () => {
+        calls.push({ type: 'prompt' });
+        return createPromptResponse();
+      },
+      command: async () => {
+        calls.push({ type: 'command' });
+        return { data: { invalid: true } };
+      },
+    },
+  });
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-native-invalid',
+    runId: 'run-native-invalid',
+    toolSessionId: 'anchor-native-invalid',
+    text: '/init',
+  });
+
+  assert.deepEqual(await collect(run.facts), []);
+  assert.deepEqual(await run.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'provider_unavailable',
+      message: 'Failed to execute command: Invalid command response',
+    },
+  });
+  assert.deepEqual(calls, [{ type: 'command' }]);
+});
+
+test('provider adapter lists local slash commands and OpenCode command catalog with local precedence', async () => {
+  const adapter = createAdapter({
+    command: {
+      list: async (options) => {
+        assert.deepEqual(options, { directory: '/workspace/test' });
+        return {
+          data: [
+            { name: 'new', description: 'OpenCode duplicate should lose' },
+            { name: 'init', description: 'Initialize repository command' },
+            { name: '/slash-init', description: 'Slash-prefixed command' },
+            { name: 'review', description: 'x'.repeat(60) },
+            { name: 'bad command', description: 'trusted whitespace command' },
+          ],
+        };
+      },
+    },
+  });
+
+  const result = await adapter.listSlashCommands({
+    traceId: 'trace-list-slash',
+  });
+
+  assert.deepEqual(result.slashCommands.slice(0, 5), [
+    { command: '/new', description: '新建会话' },
+    { command: '/sessions', description: '查看可切换会话' },
+    { command: '/session', description: '切换到指定会话' },
+    { command: '/models', description: '查看可用模型' },
+    { command: '/model', description: '切换后续请求使用的模型' },
+  ]);
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '/init'), {
+    command: '/init',
+    description: 'Initialize repository command',
+  });
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '//slash-init'), {
+    command: '//slash-init',
+    description: 'Slash-prefixed command',
+  });
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '/review'), {
+    command: '/review',
+    description: 'x'.repeat(60),
+  });
+  assert.deepEqual(result.slashCommands.find((command) => command.command === '/bad command'), {
+    command: '/bad command',
+    description: 'trusted whitespace command',
+  });
+});
+
+test('provider adapter returns local slash commands when OpenCode command.list is unavailable', async () => {
+  const adapter = createAdapter();
+
+  const result = await adapter.listSlashCommands({
+    traceId: 'trace-list-local-only',
+  });
+
+  assert.deepEqual(result.slashCommands.map((command) => command.command), [
+    '/new',
+    '/sessions',
+    '/session',
+    '/models',
+    '/model',
+  ]);
+});
+
+test('provider adapter trims local slash commands by entry policy while keeping OpenCode native commands', async () => {
+  const adapter = createAdapter({
+    command: {
+      list: async () => ({
+        data: [
+          { name: 'init', description: 'Initialize repository command' },
+        ],
+      }),
+    },
+  });
+
+  const result = await adapter.listSlashCommands({
+    traceId: 'trace-list-group-entry',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-a',
+      },
+    },
+  });
+
+  assert.deepEqual(result.slashCommands.map((command) => command.command), [
+    '/new',
+    '/models',
+    '/model',
+    '/init',
+  ]);
+});
+
+test('provider adapter uses full local slash command list when entry cannot be resolved', async () => {
+  const adapter = createAdapter({
+    command: {
+      list: async () => ({
+        data: [
+          { name: 'init', description: 'Initialize repository command' },
+        ],
+      }),
+    },
+  });
+
+  const result = await adapter.listSlashCommands({
+    traceId: 'trace-list-unknown-entry',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+      },
+    },
+  });
+
+  assert.deepEqual(result.slashCommands.map((command) => command.command), [
+    '/new',
+    '/sessions',
+    '/session',
+    '/models',
+    '/model',
+    '/init',
+  ]);
+});
+
+test('provider adapter keeps local slash commands when OpenCode command.list fails', async () => {
+  const adapter = createAdapter({
+    command: {
+      list: async () => {
+        throw new Error('command list failed');
+      },
+    },
+  });
+
+  const result = await adapter.listSlashCommands({
+    traceId: 'trace-list-command-list-failed',
+    extParameters: {
+      platformExtParam: {
+        businessSessionDomain: 'im',
+        businessSessionType: 'group',
+        businessSessionId: 'group-a',
+      },
+    },
+  });
+
+  assert.deepEqual(result.slashCommands.map((command) => command.command), [
+    '/new',
+    '/models',
+    '/model',
+  ]);
 });
 
 test('provider adapter returns failed run when bound session.get proves stale session', async () => {
@@ -3111,7 +3506,7 @@ test('provider adapter records prompt lifecycle diagnostics around session.promp
   assert.equal(typeof infos[2].extra.durationMs, 'number');
 });
 
-test('provider adapter logs immediate failed run when preprocess rejects', async () => {
+test('provider adapter logs immediate failed run when planner rejects', async () => {
   const warnings = [];
   const logger = {
     ...createLogger(),
@@ -3120,8 +3515,8 @@ test('provider adapter logs immediate failed run when preprocess rejects', async
   };
   const adapter = createAdapter({
     logger,
-    chatPreprocessor: {
-      preprocess: async () => {
+    chatRunPlanner: {
+      plan: async () => {
         throw new Error('business_entry_key_required');
       },
     },
@@ -3149,7 +3544,7 @@ test('provider adapter logs immediate failed run when preprocess rejects', async
       providerOutcome: 'failed',
       mappedProviderErrorCode: 'invalid_input',
       error: 'business_entry_key_required',
-      failureStage: 'preprocess',
+      failureStage: 'plan',
     },
   });
 });

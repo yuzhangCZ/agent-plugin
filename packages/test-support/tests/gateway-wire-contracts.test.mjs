@@ -29,7 +29,6 @@ import {
 } from '../../gateway-schema/src/contract/literals/tool-event.ts';
 import {
   TRANSPORT_UPSTREAM_MESSAGE_TYPES,
-  UPSTREAM_MESSAGE_TYPES,
   TOOL_ERROR_REASONS,
 } from '../../gateway-schema/src/contract/literals/upstream.ts';
 
@@ -237,19 +236,20 @@ test('gateway wire constants stay aligned with downstream and transport capabili
     'permission_reply',
     'abort_session',
     'question_reply',
+    'query_slash_commands',
   ]);
-  assert.deepStrictEqual(TRANSPORT_UPSTREAM_MESSAGE_TYPES, [
-    'register',
-    'register_ok',
-    'register_rejected',
-    'heartbeat',
-    'tool_event',
-    'tool_done',
-    'tool_error',
-    'session_created',
-    'status_response',
-  ]);
-  assert.deepStrictEqual(UPSTREAM_MESSAGE_TYPES, TRANSPORT_UPSTREAM_MESSAGE_TYPES);
+  assert.deepStrictEqual(TRANSPORT_UPSTREAM_MESSAGE_TYPES, {
+    REGISTER_MESSAGE_TYPE: 'register',
+    REGISTER_OK_MESSAGE_TYPE: 'register_ok',
+    REGISTER_REJECTED_MESSAGE_TYPE: 'register_rejected',
+    HEARTBEAT_MESSAGE_TYPE: 'heartbeat',
+    TOOL_EVENT_MESSAGE_TYPE: 'tool_event',
+    TOOL_DONE_MESSAGE_TYPE: 'tool_done',
+    TOOL_ERROR_MESSAGE_TYPE: 'tool_error',
+    SESSION_CREATED_MESSAGE_TYPE: 'session_created',
+    STATUS_RESPONSE_MESSAGE_TYPE: 'status_response',
+    SLASH_COMMANDS_RESULT_MESSAGE_TYPE: 'slash_commands_result',
+  });
   assert.deepStrictEqual(TOOL_ERROR_REASONS, ['session_not_found']);
 });
 

@@ -98,8 +98,6 @@ export class EntryAwareChatSessionResolver {
 
   private resolveEntryKey(input: EntryAwareResolveInput): ResolvedBusinessEntryKey {
     const entryKey = input.entryContext?.entryKey ?? this.dependencies.businessEntryKeyResolver.resolve({
-      source: 'chat',
-      welinkSessionId: input.message.traceId,
       extParameters: input.message.extParameters,
       context: input.message.context,
     });

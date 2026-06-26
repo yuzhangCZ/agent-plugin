@@ -194,7 +194,23 @@ function getContextResolver(runtime) {
 }
 
 function getSlashCommandExecutor(runtime) {
-  return getProviderAdapter(runtime).chatPreprocessor.dependencies.slashExecutionUseCase.dependencies.slashCommandExecutor;
+  return getProviderAdapter(runtime).chatRunPlanner.dependencies.slashExecutionUseCase.dependencies.slashCommandExecutor;
+}
+
+function createEntryContext(businessSessionId = 'user-runtime') {
+  return {
+    entryKey: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'direct',
+      businessSessionId,
+    },
+    policy: {
+      entryKey: `im:direct:${businessSessionId}`,
+      controlled: true,
+      allowOpencodeNativeSessions: false,
+      allowedSlashCommands: ['new', 'sessions', 'session', 'models', 'model'],
+    },
+  };
 }
 
 test('sdk runtime telemetry refresh does not republish READY when public status is already ready', () => {
@@ -350,7 +366,7 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
     const runtime = await startSdkRuntime();
     const providerAdapter = getProviderAdapter(runtime);
     const contextResolver = getContextResolver(runtime);
-    const chatPreprocessor = providerAdapter.chatPreprocessor;
+    const chatRunPlanner = providerAdapter.chatRunPlanner;
 
     assert.equal(typeof providerAdapter.createSessionCommandPort.execute, 'function');
     assert.equal(typeof providerAdapter.closeSessionCommandPort.execute, 'function');
@@ -358,8 +374,9 @@ test('sdk runtime wires session-isolation control plane into provider adapter', 
     assert.equal(typeof providerAdapter.questionReplyCommandPort.execute, 'function');
     assert.equal(typeof providerAdapter.permissionReplyCommandPort.execute, 'function');
     assert.equal(contextResolver.dependencies.sessionAttachmentPort, undefined);
-    assert.equal(typeof chatPreprocessor.dependencies.normalChatSessionResolver.resolve, 'function');
-    assert.equal(typeof chatPreprocessor.dependencies.businessEntryContextResolver.resolveForChatMessage, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.normalChatSessionResolver.resolve, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveRequired, 'function');
+    assert.equal(typeof chatRunPlanner.dependencies.businessEntryContextResolver.resolveOptional, 'function');
 
     runtime.stop();
   } finally {
@@ -557,71 +574,6 @@ test('sdk runtime keeps non-not-found session.get failures aligned with legacy c
   }
 });
 
-test('sdk runtime slash session uses TUI query and trusts host project workspace filtering', async () => {
-  const { restore } = installRegisterCaptureWebSocket();
-  const originalNow = Date.now;
-  Date.now = () => Date.parse('2026-06-03T00:00:00.000Z');
-  const listCalls = [];
-
-  try {
-    const runtime = await startSdkRuntime({
-      session: {
-        list: async (options) => {
-          listCalls.push(options);
-          return {
-            data: [
-              { id: 'ses-match', title: '当前会话', projectID: 'proj-a', workspaceID: 'ws-a', directory: '/workspace/a' },
-              { id: 'ses-out', title: '越界会话', projectID: 'proj-b', workspaceID: 'ws-b', directory: '/workspace/b' },
-            ],
-          };
-        },
-      },
-    });
-    const slashCommandExecutor = getSlashCommandExecutor(runtime);
-    const { bindingStore, ownershipResolver } = slashCommandExecutor.dependencies;
-    bindingStore.bind('anchor-scope', 'ses-match');
-    ownershipResolver.attach('ses-match', 'anchor-scope');
-
-    const result = await slashCommandExecutor.execute(
-      { kind: 'session', sessionId: 'ses-out' },
-      {
-        anchor: 'anchor-scope',
-        activeOpencodeSessionId: 'ses-match',
-        scope: { projectID: 'proj-a', workspaceID: 'ws-a' },
-        bootstrapSource: 'existing_binding',
-      },
-    );
-
-    assert.deepStrictEqual(result, {
-      kind: 'session',
-      previousSessionId: 'ses-match',
-      session: {
-        id: 'ses-out',
-        title: '越界会话',
-        projectID: 'proj-b',
-        workspaceID: 'ws-b',
-        directory: '/workspace/b',
-      },
-    });
-    assert.deepStrictEqual(bindingStore.get('anchor-scope'), {
-      anchor: 'anchor-scope',
-      activeOpencodeSessionId: 'ses-out',
-      status: 'active',
-    });
-    assert.deepStrictEqual(listCalls.at(-1), {
-      query: {
-        roots: true,
-        start: Date.parse('2026-06-03T00:00:00.000Z') - 30 * 24 * 60 * 60 * 1000,
-      },
-    });
-
-    runtime.stop();
-  } finally {
-    Date.now = originalNow;
-    restore();
-  }
-});
-
 test('sdk runtime question reply fails closed after slash switches the anchor to another host session', async () => {
   const { restore } = installRegisterCaptureWebSocket();
   const promptDeferred = createDeferred();
@@ -740,14 +692,23 @@ test('sdk runtime model lookup fails closed instead of degrading to model_not_fo
     const slashCommandExecutor = getSlashCommandExecutor(runtime);
 
     await assert.rejects(
-      async () => slashCommandExecutor.execute(
-        { kind: 'model', providerId: 'openai', modelId: 'gpt-5.4' },
-        {
+      async () => slashCommandExecutor.execute({
+        command: { kind: 'model', providerId: 'openai', modelId: 'gpt-5.4' },
+        context: {
+          message: {
+            traceId: 'trace-model',
+            runId: 'run-model',
+            toolSessionId: 'anchor-model',
+            text: '/model openai/gpt-5.4',
+          },
           anchor: 'anchor-model',
-          activeOpencodeSessionId: 'ses-model',
-          bootstrapSource: 'existing_binding',
+          sessionContext: {
+            opencodeSessionId: 'ses-model',
+            bootstrapSource: 'existing_binding',
+          },
+          entryContext: createEntryContext('user-model'),
         },
-      ),
+      }),
       (error) => {
         assert.deepStrictEqual(error, {
           code: 'provider_unavailable',

@@ -9,6 +9,7 @@ import {
   createGatewayWireLegacyCreateSessionInvokeMessage,
   createPermissionReplyInvokeMessage,
   createQuestionReplyInvokeMessage,
+  createQuerySlashCommandsInvokeMessage,
   createStatusQueryMessage,
 } from '../../test-support/fixtures/index.mjs';
 import { assertWireViolationShape } from '../../test-support/assertions/index.mjs';
@@ -98,6 +99,37 @@ test('normalizeDownstream accepts the full downstream contract', () => {
       },
     ],
     [
+      'query_slash_commands',
+      createQuerySlashCommandsInvokeMessage({
+        toolSessionId: 'tool-query-slash',
+        traceId: 'trace-query-slash',
+        payload: {
+          extParameters: {
+            platformExtParam: {
+              businessSessionDomain: 'im',
+              businessSessionType: 'direct',
+              businessSessionId: 'user-a#bot-a',
+            },
+          },
+        },
+      }),
+      {
+        type: 'invoke',
+        toolSessionId: 'tool-query-slash',
+        traceId: 'trace-query-slash',
+        action: 'query_slash_commands',
+        payload: {
+          extParameters: {
+            platformExtParam: {
+              businessSessionDomain: 'im',
+              businessSessionType: 'direct',
+              businessSessionId: 'user-a#bot-a',
+            },
+          },
+        },
+      },
+    ],
+    [
       'permission_reply',
       createPermissionReplyInvokeMessage({
         welinkSessionId: 'wl-permission',
@@ -138,6 +170,9 @@ test('normalizeDownstream accepts the full downstream contract', () => {
   ];
 
   for (const [name, input, expected] of cases) {
+    if (name === 'query_slash_commands') {
+      assert.equal('welinkSessionId' in input, false);
+    }
     const result = normalizeDownstream(input);
     assert.equal(result.ok, true, name);
     assert.deepEqual(result.value, expected);
@@ -558,7 +593,7 @@ test('normalizeDownstream rejects non-json-object chat extParameters like Date',
   });
 });
 
-test('normalizeDownstream omits null platformExtParam strings', () => {
+test('normalizeDownstream preserves platformExtParam business fields without semantic normalization', () => {
   const normalized = normalizeDownstream(
     createChatInvokeMessage({
       payload: {
@@ -567,9 +602,9 @@ test('normalizeDownstream omits null platformExtParam strings', () => {
         extParameters: {
           platformExtParam: {
             businessSessionDomain: null,
-            businessSessionType: null,
-            businessSessionId: null,
-            allowedSlashCommands: ['plan'],
+            businessSessionType: '  ',
+            businessSessionId: 123,
+            allowedSlashCommands: ['plan', 1],
           },
         },
       },
@@ -583,20 +618,23 @@ test('normalizeDownstream omits null platformExtParam strings', () => {
 
   assert.deepStrictEqual(normalized.value.payload.extParameters, {
     platformExtParam: {
-      allowedSlashCommands: ['plan'],
+      businessSessionDomain: null,
+      businessSessionType: '  ',
+      businessSessionId: 123,
+      allowedSlashCommands: ['plan', 1],
     },
   });
 });
 
-test('normalizeDownstream rejects invalid allowedSlashCommands entries', () => {
+test('normalizeDownstream rejects non JSON object businessExtParam', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
       payload: {
-        toolSessionId: 'tool-chat-invalid-slash-commands',
+        toolSessionId: 'tool-chat-invalid-business-ext-param',
         text: 'hello',
         extParameters: {
-          platformExtParam: {
-            allowedSlashCommands: ['plan', 1],
+          businessExtParam: {
+            date: new Date('2026-05-19T00:00:00.000Z'),
           },
         },
       },
@@ -607,9 +645,159 @@ test('normalizeDownstream rejects invalid allowedSlashCommands entries', () => {
   assertWireViolationShape(result.error, {
     stage: 'payload',
     code: 'invalid_field_type',
-    field: 'payload.extParameters.platformExtParam.allowedSlashCommands[]',
+    field: 'payload.extParameters.businessExtParam',
     messageType: 'invoke',
     action: 'chat',
+  });
+});
+
+test('normalizeDownstream rejects non JSON object platformExtParam', () => {
+  const result = normalizeDownstream(
+    createChatInvokeMessage({
+      payload: {
+        toolSessionId: 'tool-chat-invalid-platform-ext-param',
+        text: 'hello',
+        extParameters: {
+          platformExtParam: {
+            compute: () => true,
+          },
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_type',
+    field: 'payload.extParameters.platformExtParam',
+    messageType: 'invoke',
+    action: 'chat',
+  });
+});
+
+test('normalizeDownstream rejects non object businessExtParam and platformExtParam values', () => {
+  const cases = [
+    ['businessExtParam', null],
+    ['businessExtParam', ['array']],
+    ['businessExtParam', 'primitive'],
+    ['businessExtParam', new Date('2026-05-19T00:00:00.000Z')],
+    ['platformExtParam', null],
+    ['platformExtParam', ['array']],
+    ['platformExtParam', 'primitive'],
+    ['platformExtParam', new Date('2026-05-19T00:00:00.000Z')],
+  ];
+
+  for (const [key, value] of cases) {
+    const result = normalizeDownstream(
+      createChatInvokeMessage({
+        payload: {
+          toolSessionId: `tool-chat-invalid-${key}`,
+          text: 'hello',
+          extParameters: {
+            [key]: value,
+          },
+        },
+      }),
+    );
+
+    assert.equal(result.ok, false, key);
+    assertWireViolationShape(result.error, {
+      stage: 'payload',
+      code: 'invalid_field_type',
+      field: `payload.extParameters.${key}`,
+      messageType: 'invoke',
+      action: 'chat',
+    });
+  }
+});
+
+test('normalizeDownstream preserves query_slash_commands empty extParameters object', () => {
+  const result = normalizeDownstream(
+    createQuerySlashCommandsInvokeMessage({
+      toolSessionId: 'tool-query-empty-ext',
+      traceId: 'trace-query-empty-ext',
+      payload: {
+        extParameters: {},
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value, {
+    type: 'invoke',
+    action: 'query_slash_commands',
+    toolSessionId: 'tool-query-empty-ext',
+    traceId: 'trace-query-empty-ext',
+    payload: {
+      extParameters: {},
+    },
+  });
+});
+
+test('normalizeDownstream rejects query_slash_commands without toolSessionId', () => {
+  const result = normalizeDownstream({
+    type: 'invoke',
+    action: 'query_slash_commands',
+    welinkSessionId: 'wl-query-legacy',
+    traceId: 'trace-query-legacy',
+    payload: {},
+  });
+
+  assert.equal(result.ok, false);
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'missing_required_field',
+    field: 'toolSessionId',
+    messageType: 'invoke',
+    action: 'query_slash_commands',
+  });
+});
+
+test('normalizeDownstream preserves query_slash_commands extParameters extension objects', () => {
+  const result = normalizeDownstream(
+    createQuerySlashCommandsInvokeMessage({
+      toolSessionId: 'tool-query-ext',
+      traceId: 'trace-query-ext',
+      payload: {
+        extParameters: {
+          businessExtParam: {
+            nested: {
+              enabled: true,
+            },
+          },
+          platformExtParam: {
+            businessSessionDomain: null,
+            allowedSlashCommands: ['new', 1],
+          },
+          futureField: new Date('2026-05-19T00:00:00.000Z'),
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+
+  assert.deepStrictEqual(result.value.payload, {
+    extParameters: {
+      businessExtParam: {
+        nested: {
+          enabled: true,
+        },
+      },
+      platformExtParam: {
+        businessSessionDomain: null,
+        allowedSlashCommands: ['new', 1],
+      },
+      futureField: new Date('2026-05-19T00:00:00.000Z'),
+    },
   });
 });
 
