@@ -1,0 +1,14 @@
+1. packages/bridge-runtim-sdk/src/plublic-contract.ts重复定义类型，包括gateway-schema,gateway-clent，以及模块内部自己的类型
+2. 各个模块的tsconfig.json未包含测试文件，导致测试文件类型报错
+3. 文档迁移，删除
+4. 测试用例补充，测试框架补充
+6. bridge-runtime-sdk tracid串联
+7. bridge-runtime-sdk 打印日志需要带上message-id，及 partid
+8. welinksessionId与toolSessionId定义，
+9. extParamter是必填的？当前sdk定义为可选的
+10. packages/bridge-runtime-sdk/src/adapters/gateway/GatewayDownstreamCommandAdapter.ts：kind / case 常量统一导出使用，例如 create_session -> xxxx.xxx
+11. packages/gateway-schema/src/contract/literals/downstream.ts：INVOKE_ACTIONS 声明为对象，聚合所有字段，后续外部仅消费该对象，参考 TRANSPORT_UPSTREAM_MESSAGE_TYPES
+12. packages/gateway-schema/src/adapters/validators/downstream-normalizer.ts：case 内部逻辑相似，存在大量重复逻辑
+13. packages/gateway-schema/src/adapters/validators/transport-message-validator.ts：存在大量重复逻辑
+14. packages/bridge-runtime-sdk/src/application/constants/gateway-messages.ts：bridge-runtime-sdk 没必要重复定义类型，统一从 gateway-schema 导出
+15. packages/gateway-schema/src/contract/schemas/downstream.ts：大量重复逻辑，确认类似 `(xx: xx2): {}` 的结构是否有必要

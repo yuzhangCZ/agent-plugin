@@ -73,7 +73,6 @@ function normalizeToolEventMessage(raw: PlainObject): Result<ToolEventMessage, W
       };
 }
 
-// todo: 大量重复逻辑
 export class DefaultTransportMessageValidator implements TransportMessageValidatorPort {
   validate(raw: UnknownBoundaryInput): Result<GatewayUpstreamTransportMessage, WireContractViolation> {
     if (!isRecord(raw) || !readString(raw.type)) {

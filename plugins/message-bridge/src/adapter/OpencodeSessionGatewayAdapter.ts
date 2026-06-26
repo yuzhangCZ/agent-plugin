@@ -252,6 +252,8 @@ function normalizeCommandList(result: unknown): Array<{ name: string; descriptio
     candidates = root.commands;
   } else if (Array.isArray(root?.items)) {
     candidates = root.items;
+  } else {
+    candidates = [];
   }
   return candidates
     .map((item) => {
