@@ -5,7 +5,6 @@ import test from "node:test";
 import path from "node:path";
 
 import {
-  computeNextVersion,
   createReleasePlan,
   evaluatePublishReadiness,
   executeRelease,
@@ -256,37 +255,68 @@ test("descriptor schema is complete for all release targets", () => {
 });
 
 test("parseReleaseLocalArgs accepts skill-qrcode-auth target", () => {
-  const parsed = parseReleaseLocalArgs(["--target", "skill-qrcode-auth", "--version", "0.1.0"]);
+  const parsed = parseReleaseLocalArgs(["--target", "skill-qrcode-auth", "--channel", "release", "--version", "0.1.0"]);
 
   assert.equal(parsed.target, "skill-qrcode-auth");
+  assert.equal(parsed.channel, "release");
   assert.equal(parsed.version, "0.1.0");
 });
 
 test("parseReleaseLocalArgs accepts skill-plugin-cli target", () => {
-  const parsed = parseReleaseLocalArgs(["--target", "skill-plugin-cli", "--version", "0.1.0"]);
+  const parsed = parseReleaseLocalArgs(["--target", "skill-plugin-cli", "--channel", "alpha", "--version", "0.1.0"]);
 
   assert.equal(parsed.target, "skill-plugin-cli");
+  assert.equal(parsed.channel, "alpha");
   assert.equal(parsed.version, "0.1.0");
 });
 
-test("parseReleaseLocalArgs accepts single-target bump release", () => {
-  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--bump", "patch"]);
+test("parseReleaseLocalArgs requires channel for release-local", () => {
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge"]),
+    /missing --channel/i,
+  );
+});
+
+test("parseReleaseLocalArgs rejects unknown channel", () => {
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "rc"]),
+    /invalid --channel value/i,
+  );
+});
+
+test("parseReleaseLocalArgs rejects removed release options", () => {
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "alpha", "--bump", "patch"]),
+    /unknown flag: --bump/i,
+  );
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "alpha", "--preid", "beta"]),
+    /unknown flag: --preid/i,
+  );
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "alpha", "--release", "prerelease"]),
+    /unknown flag: --release/i,
+  );
+});
+
+test("parseReleaseLocalArgs rejects dual releases", () => {
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "dual", "--channel", "release"]),
+    /unknown release target: dual/i,
+  );
+});
+
+test("parseReleaseLocalArgs accepts single-target channel release", () => {
+  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "beta"]);
 
   assert.deepEqual(parsed, {
-    allowDirty: false,
-    bridgeVersion: null,
-    bump: "patch",
+    channel: "beta",
     defaultGatewayUrl: null,
     dryRun: false,
     help: false,
     installDeps: false,
     installDepsUpdateLockfile: false,
-    openclawVersion: null,
     positionalTarget: null,
-    preid: "beta",
-    push: false,
-    release: null,
-    skipGit: false,
     skipPublish: false,
     skipVerify: false,
     target: "message-bridge",
@@ -298,6 +328,8 @@ test("parseReleaseLocalArgs accepts default gateway url", () => {
   const parsed = parseReleaseLocalArgs([
     "--target",
     "message-bridge",
+    "--channel",
+    "release",
     "--version",
     "1.2.0",
     "--default-gateway-url",
@@ -307,36 +339,40 @@ test("parseReleaseLocalArgs accepts default gateway url", () => {
   assert.equal(parsed.defaultGatewayUrl, "wss://gateway.example.com/ws/agent");
 });
 
-test("parseReleaseLocalArgs rejects version plus bump", () => {
+test("parseReleaseLocalArgs rejects prerelease version override", () => {
   assert.throws(
-    () => parseReleaseLocalArgs(["--target", "message-bridge", "--version", "1.2.0", "--bump", "patch"]),
-    /--version and --bump cannot be used together/i,
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "alpha", "--version", "1.2.0-alpha.0"]),
+    /--version must be a stable semver/i,
   );
 });
 
-test("parseReleaseLocalArgs rejects push plus skip-git", () => {
+test("parseReleaseLocalArgs rejects removed git flags", () => {
   assert.throws(
-    () => parseReleaseLocalArgs(["--target", "message-bridge", "--bump", "patch", "--push", "--skip-git"]),
-    /--push cannot be combined with --skip-git/i,
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "release", "--push"]),
+    /unknown flag: --push/i,
+  );
+  assert.throws(
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "release", "--skip-git"]),
+    /unknown flag: --skip-git/i,
   );
 });
 
-test("parseReleaseLocalArgs rejects push plus skip-publish", () => {
+test("parseReleaseLocalArgs rejects removed dirty-worktree flag", () => {
   assert.throws(
-    () => parseReleaseLocalArgs(["--target", "message-bridge", "--bump", "patch", "--push", "--skip-publish"]),
-    /--push cannot be combined with --skip-publish/i,
+    () => parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "release", "--allow-dirty"]),
+    /unknown flag: --allow-dirty/i,
   );
 });
 
 test("parseReleaseLocalArgs accepts skip-verify mode", () => {
-  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--version", "1.2.0", "--skip-verify"]);
+  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "release", "--version", "1.2.0", "--skip-verify"]);
 
   assert.equal(parsed.skipVerify, true);
   assert.equal(parsed.skipPublish, false);
 });
 
 test("parseReleaseLocalArgs accepts install-deps mode", () => {
-  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--version", "1.2.0", "--install-deps"]);
+  const parsed = parseReleaseLocalArgs(["--target", "message-bridge", "--channel", "release", "--version", "1.2.0", "--install-deps"]);
 
   assert.equal(parsed.installDeps, true);
   assert.equal(parsed.installDepsUpdateLockfile, false);
@@ -346,6 +382,8 @@ test("parseReleaseLocalArgs accepts install-deps-update-lockfile mode", () => {
   const parsed = parseReleaseLocalArgs([
     "--target",
     "message-bridge",
+    "--channel",
+    "release",
     "--version",
     "1.2.0",
     "--install-deps-update-lockfile",
@@ -361,6 +399,8 @@ test("parseReleaseLocalArgs rejects conflicting install modes", () => {
       parseReleaseLocalArgs([
         "--target",
         "message-bridge",
+        "--channel",
+        "release",
         "--version",
         "1.2.0",
         "--install-deps",
@@ -368,19 +408,6 @@ test("parseReleaseLocalArgs rejects conflicting install modes", () => {
       ]),
     /cannot be used together/i,
   );
-});
-
-test("parseReleaseLocalArgs rejects invalid dual version shape", () => {
-  assert.throws(
-    () => parseReleaseLocalArgs(["--target", "dual", "--version", "1.2.0"]),
-    /dual releases require --bridge-version and --openclaw-version/i,
-  );
-});
-
-test("computeNextVersion handles prerelease increments and preid switches", () => {
-  assert.equal(computeNextVersion("1.2.3", "prerelease", "beta"), "1.2.4-beta.0");
-  assert.equal(computeNextVersion("1.2.4-beta.0", "prerelease", "beta"), "1.2.4-beta.1");
-  assert.equal(computeNextVersion("1.2.4-beta.1", "prerelease", "rc"), "1.2.4-rc.0");
 });
 
 test("parseSemver validates versions", () => {
@@ -614,7 +641,7 @@ test("inspectManifestDependencies surfaces node execution failures", () => {
   );
 });
 
-test("createReleasePlan resolves dual releases and warns they are non-atomic", () => {
+test("createReleasePlan resolves alpha channel with Asia Shanghai timestamp", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -625,25 +652,90 @@ test("createReleasePlan resolves dual releases and warns they are non-atomic", (
 
   const plan = createReleasePlan(
     {
-      target: "dual",
-      bump: "patch",
-      preid: "beta",
-      release: null,
+      target: "message-bridge",
+      channel: "alpha",
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: false,
       version: null,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
-    { repoRoot, fs, exec },
+    { repoRoot, fs, exec, now: new Date("2026-06-26T16:05:06.000Z") },
   );
 
-  assert.equal(plan.targets[0].targetVersion, "1.0.1");
-  assert.equal(plan.targets[1].targetVersion, "0.1.1");
-  assert.match(formatReleasePlan(plan), /dual \(non-atomic\)/i);
+  assert.equal(plan.targets[0].targetVersion, "1.0.0-alpha.20260627000506");
+  assert.equal(plan.targets[0].distTag, "alpha");
+  assert.match(formatReleasePlan(plan), /channel: alpha/i);
+});
+
+test("createReleasePlan requires explicit channel for object input", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  assert.throws(
+    () =>
+      createReleasePlan(
+        {
+          target: "message-bridge",
+          dryRun: true,
+          skipPublish: true,
+        },
+        { repoRoot, fs, exec },
+      ),
+    /missing --channel/i,
+  );
+});
+
+test("createReleasePlan rejects removed object input fields", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  assert.throws(
+    () =>
+      createReleasePlan(
+        {
+          target: "message-bridge",
+          channel: "release",
+          bump: "patch",
+          dryRun: true,
+          skipPublish: true,
+        },
+        { repoRoot, fs, exec },
+      ),
+    /unsupported release plan field: bump/i,
+  );
+});
+
+test("createReleasePlan resolves beta channel from explicit base version", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const exec = createExecDouble({ repoRoot }).exec;
+
+  const plan = createReleasePlan(
+    {
+      target: "message-bridge",
+      channel: "beta",
+      dryRun: true,
+      skipPublish: false,
+      version: "1.2.4",
+    },
+    { repoRoot, fs, exec, now: new Date("2026-06-26T16:05:06.000Z") },
+  );
+
+  assert.equal(plan.targets[0].targetVersion, "1.2.4-beta.20260627000506");
+  assert.equal(plan.targets[0].distTag, "beta");
 });
 
 test("formatReleasePlan shows skip-verify in dry-run output", () => {
@@ -658,19 +750,12 @@ test("formatReleasePlan shows skip-verify in dry-run output", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: true,
       skipPublish: true,
       skipVerify: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -698,17 +783,10 @@ test("formatReleasePlan shows missing default gateway url status", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -725,23 +803,16 @@ test("createReleasePlan rejects existing tags", () => {
   });
   const execDouble = createExecDouble({
     repoRoot,
-    existingTags: new Set(["release/message-bridge/v1.0.1"]),
+    existingTags: new Set(["release/message-bridge/v1.0.0"]),
   });
 
   const plan = createReleasePlan(
     {
       target: "message-bridge",
-      bump: "patch",
-      preid: "beta",
-      release: null,
+      channel: "release",
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
       version: null,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -749,7 +820,7 @@ test("createReleasePlan rejects existing tags", () => {
   assert.match(formatReleasePlan(plan), /release tag already exists/i);
 });
 
-test("createReleasePlan ignores generated build outputs in dirty worktree checks", () => {
+test("createReleasePlan does not block on dirty worktree when git metadata is disabled", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -764,55 +835,15 @@ test("createReleasePlan ignores generated build outputs in dirty worktree checks
   const plan = createReleasePlan(
     {
       target: "message-bridge",
-      bump: "prerelease",
-      preid: "beta",
-      release: null,
+      channel: "release",
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: false,
       version: null,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
 
   assert.doesNotMatch(formatReleasePlan(plan), /working tree is not clean/i);
-});
-
-test("createReleasePlan still blocks on non-generated dirty files", () => {
-  const repoRoot = path.resolve("/repo");
-  const state = createRepoState(repoRoot);
-  const fs = new FakeFs({
-    manifests: state.manifests,
-    existingPaths: state.paths,
-  });
-  const exec = createExecDouble({
-    repoRoot,
-    status: " M README.md\n",
-  }).exec;
-
-  const plan = createReleasePlan(
-    {
-      target: "message-bridge",
-      bump: "patch",
-      preid: "beta",
-      release: null,
-      dryRun: true,
-      push: false,
-      skipGit: false,
-      skipPublish: false,
-      allowDirty: false,
-      version: null,
-      bridgeVersion: null,
-      openclawVersion: null,
-    },
-    { repoRoot, fs, exec },
-  );
-
-  assert.match(formatReleasePlan(plan), /working tree is not clean/i);
 });
 
 test("evaluatePublishReadiness returns the publish readiness contract", () => {
@@ -826,17 +857,10 @@ test("evaluatePublishReadiness returns the publish readiness contract", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge-openclaw",
+      channel: "release",
       version: "0.2.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -865,17 +889,10 @@ test("evaluatePublishReadiness supports skill-qrcode-auth dist artifacts", () =>
   const plan = createReleasePlan(
     {
       target: "skill-qrcode-auth",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -905,17 +922,10 @@ test("evaluatePublishReadiness supports skill-plugin-cli tarball artifacts", () 
   const plan = createReleasePlan(
     {
       target: "skill-plugin-cli",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -948,18 +958,11 @@ test("evaluatePublishReadiness supports bridge-runtime-sdk tarball artifacts", (
   const plan = createReleasePlan(
     {
       target: "bridge-runtime-sdk",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -984,7 +987,7 @@ test("evaluatePublishReadiness supports bridge-runtime-sdk tarball artifacts", (
   assert.equal(readiness.executedChecks.some((entry) => entry.check.includes("package/dist/index.d.ts")), true);
 });
 
-test("executeRelease skips publish and still stages git flow", () => {
+test("executeRelease skips publish without creating git metadata", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -996,18 +999,11 @@ test("executeRelease skips publish and still stages git flow", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: false,
       skipPublish: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1016,8 +1012,42 @@ test("executeRelease skips publish and still stages git flow", () => {
 
   assert.equal(result.exitCode, 0);
   assert.equal(fs.readJson(path.join(state.bridgeRoot, "package.json")).version, "1.1.0");
-  assert.ok(execDouble.calls.some((entry) => entry.command === "git" && entry.args[0] === "commit"));
+  assert.ok(!execDouble.calls.some((entry) => entry.command === "git" && ["add", "commit", "tag", "push"].includes(entry.args[0])));
   assert.ok(!execDouble.calls.some((entry) => entry.command === "npm" && entry.args[0] === "publish"));
+});
+
+test("executeRelease restores base version after successful alpha publish", () => {
+  const repoRoot = path.resolve("/repo");
+  const state = createRepoState(repoRoot);
+  const fs = new FakeFs({
+    manifests: state.manifests,
+    existingPaths: state.paths,
+  });
+  const execDouble = createExecDouble({ repoRoot });
+  const stdout = createCapture();
+  const plan = createReleasePlan(
+    {
+      target: "skill-qrcode-auth",
+      channel: "alpha",
+      dryRun: false,
+      skipPublish: false,
+    },
+    { repoRoot, fs, exec: execDouble.exec, now: new Date("2026-06-26T16:05:06.000Z") },
+  );
+
+  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(fs.readJson(path.join(state.qrcodeRoot, "package.json")).version, "0.0.0");
+  assert.ok(
+    execDouble.calls.some(
+      (entry) =>
+        entry.command === "npm" &&
+        entry.args[0] === "publish" &&
+        entry.args.includes("--tag") &&
+        entry.args.includes("alpha"),
+    ),
+  );
 });
 
 test("executeRelease skips verify and still runs build readiness and publish", () => {
@@ -1032,19 +1062,12 @@ test("executeRelease skips verify and still runs build readiness and publish", (
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1071,20 +1094,13 @@ test("executeRelease fails fast on missing packages without install flags", () =
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: false,
       installDepsUpdateLockfile: false,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1120,20 +1136,13 @@ test("executeRelease installs missing packages without a lockfile", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: true,
       installDepsUpdateLockfile: false,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1176,20 +1185,13 @@ test("executeRelease installs missing packages with legacy install alias", () =>
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: false,
       installDepsUpdateLockfile: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1232,20 +1234,13 @@ test("executeRelease installs before dependency check with legacy install alias 
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: false,
       installDepsUpdateLockfile: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1288,20 +1283,13 @@ test("executeRelease only installs once when legacy install alias still fails de
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: false,
       installDepsUpdateLockfile: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1341,20 +1329,13 @@ test("executeRelease does not install when dependency presence already passes", 
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: true,
       installDepsUpdateLockfile: false,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1383,20 +1364,13 @@ test("executeRelease stops if packages are still missing after install", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
       installDeps: true,
       installDepsUpdateLockfile: false,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1435,18 +1409,11 @@ test("executeRelease blocks publish when readiness fails", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1474,19 +1441,12 @@ test("executeRelease still blocks publish when readiness fails under skip-verify
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1501,7 +1461,7 @@ test("executeRelease still blocks publish when readiness fails under skip-verify
   assert.match(stdout.toString(), /publish readiness: blocked/i);
 });
 
-test("executeRelease restores bumped version when verify fails before publish", () => {
+test("executeRelease restores target version when verify fails before publish", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
   const fs = new FakeFs({
@@ -1516,18 +1476,11 @@ test("executeRelease restores bumped version when verify fails before publish", 
   const plan = createReleasePlan(
     {
       target: "message-bridge",
-      bump: "patch",
+      channel: "release",
       version: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1555,19 +1508,12 @@ test("executeRelease preserves existing recovery semantics when publish fails un
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1598,18 +1544,11 @@ test("executeRelease resolves scoped registry and publishes against that registr
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1646,81 +1585,6 @@ test("executeRelease resolves scoped registry and publishes against that registr
   );
 });
 
-test("executeRelease surfaces dual release non-atomic recovery on second publish failure", () => {
-  const repoRoot = path.resolve("/repo");
-  const state = createRepoState(repoRoot);
-  const fs = new FakeFs({
-    manifests: state.manifests,
-    existingPaths: state.paths,
-  });
-  const execDouble = createExecDouble({
-    repoRoot,
-    failCommands: [{ match: "npm publish --tag latest", message: "second publish failed" }],
-  });
-  const stdout = createCapture();
-  const plan = createReleasePlan(
-    {
-      target: "dual",
-      bridgeVersion: "1.1.0",
-      openclawVersion: "0.2.0",
-      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      bump: null,
-      preid: "beta",
-      release: null,
-      dryRun: false,
-      push: false,
-      skipGit: true,
-      skipPublish: false,
-      allowDirty: true,
-      version: null,
-    },
-    { repoRoot, fs, exec: execDouble.exec },
-  );
-
-  assert.throws(
-    () => executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream }),
-    /second publish failed/i,
-  );
-  assert.match(stdout.toString(), /may already be published/i);
-});
-
-test("executeRelease skips verify for both targets in dual mode", () => {
-  const repoRoot = path.resolve("/repo");
-  const state = createRepoState(repoRoot);
-  const fs = new FakeFs({
-    manifests: state.manifests,
-    existingPaths: state.paths,
-  });
-  const execDouble = createExecDouble({ repoRoot });
-  const stdout = createCapture();
-  const plan = createReleasePlan(
-    {
-      target: "dual",
-      bridgeVersion: "1.1.0",
-      openclawVersion: "0.2.0",
-      defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      bump: null,
-      preid: "beta",
-      release: null,
-      dryRun: false,
-      push: false,
-      skipGit: true,
-      skipPublish: true,
-      skipVerify: true,
-      allowDirty: true,
-      version: null,
-    },
-    { repoRoot, fs, exec: execDouble.exec },
-  );
-
-  const result = executeRelease(plan, { repoRoot, fs, exec: execDouble.exec, stdout: stdout.stream });
-
-  assert.equal(result.exitCode, 0);
-  assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("verify:release")));
-  assert.match(stdout.toString(), /Skipping verify for message-bridge \(--skip-verify\)/);
-  assert.match(stdout.toString(), /Skipping verify for message-bridge-openclaw \(--skip-verify\)/);
-});
-
 test("executeRelease fails before build when default gateway url is missing", () => {
   const repoRoot = path.resolve("/repo");
   const state = createRepoState(repoRoot);
@@ -1733,17 +1597,10 @@ test("executeRelease fails before build when default gateway url is missing", ()
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1775,18 +1632,11 @@ test("executeRelease fails before build when default gateway url is invalid", ()
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "https://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: true,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1821,18 +1671,11 @@ test("executeRelease fails before build when registry auth check fails", () => {
   const plan = createReleasePlan(
     {
       target: "message-bridge",
+      channel: "release",
       version: "1.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -1849,55 +1692,6 @@ test("executeRelease fails before build when registry auth check fails", () => {
     /auth failed/i,
   );
   assert.ok(!execDouble.calls.some((entry) => entry.command === "pnpm" && entry.args.includes("build")));
-});
-
-test("executeRelease forwards MB_DEFAULT_GATEWAY_URL to build and verify for dual releases", () => {
-  const repoRoot = path.resolve("/repo");
-  const state = createRepoState(repoRoot);
-  const fs = new FakeFs({
-    manifests: state.manifests,
-    existingPaths: state.paths,
-  });
-  const execDouble = createExecDouble({ repoRoot });
-  const stdout = createCapture();
-  const gatewayUrl = "wss://gateway.example.com/ws/agent";
-  const plan = createReleasePlan(
-    {
-      target: "dual",
-      bridgeVersion: "1.1.0",
-      openclawVersion: "0.2.0",
-      bump: null,
-      defaultGatewayUrl: gatewayUrl,
-      preid: "beta",
-      release: null,
-      dryRun: false,
-      push: false,
-      skipGit: true,
-      skipPublish: true,
-      skipVerify: false,
-      allowDirty: true,
-      version: null,
-    },
-    { repoRoot, fs, exec: execDouble.exec },
-  );
-
-  const result = executeRelease(plan, {
-    repoRoot,
-    fs,
-    exec: execDouble.exec,
-    stdout: stdout.stream,
-    inspectDependencies: () => ({ missingPackages: [], ok: true, targetId: "message-bridge" }),
-  });
-
-  assert.equal(result.exitCode, 0);
-  const buildAndVerifyCalls = execDouble.calls.filter(
-    (entry) => entry.command === "pnpm" && (entry.args.includes("build") || entry.args.includes("verify:release")),
-  );
-  assert.equal(buildAndVerifyCalls.length >= 4, true);
-  for (const call of buildAndVerifyCalls) {
-    assert.equal(call.env?.MB_DEFAULT_GATEWAY_URL, gatewayUrl);
-  }
-  assert.match(stdout.toString(), /default gateway url: wss:\/\/gateway\.example\.com\/ws\/agent/i);
 });
 
 test("main prints help output", async () => {
@@ -1922,7 +1716,7 @@ test("main prints help output", async () => {
   assert.match(stdout.toString(), /pnpm install --no-lockfile/);
   assert.doesNotMatch(stdout.toString(), /pnpm install --frozen-lockfile/);
   assert.match(stdout.toString(), /--skip-verify only skips verify:release; it does not skip build or readiness checks/i);
-  assert.match(formatHelp(), /remote push only runs with --push/i);
+  assert.match(formatHelp(), /git commit, git tag, and git push are not performed/i);
 });
 
 test("executeRelease publishes skill-qrcode-auth without gateway injection", () => {
@@ -1937,19 +1731,12 @@ test("executeRelease publishes skill-qrcode-auth without gateway injection", () 
   const plan = createReleasePlan(
     {
       target: "skill-qrcode-auth",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: null,
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -2003,17 +1790,10 @@ test("createReleasePlan accepts skill-plugin-cli without default gateway url", (
   const plan = createReleasePlan(
     {
       target: "skill-plugin-cli",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -2034,18 +1814,11 @@ test("createReleasePlan accepts bridge-runtime-sdk with default gateway url", ()
   const plan = createReleasePlan(
     {
       target: "bridge-runtime-sdk",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: "wss://gateway.example.com/ws/agent",
-      preid: "beta",
-      release: null,
       dryRun: true,
-      push: false,
-      skipGit: false,
       skipPublish: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec },
   );
@@ -2066,19 +1839,12 @@ test("executeRelease publishes skill-plugin-cli tarball without gateway injectio
   const plan = createReleasePlan(
     {
       target: "skill-plugin-cli",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: null,
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -2143,19 +1909,12 @@ test("executeRelease publishes bridge-runtime-sdk tarball with gateway injection
   const plan = createReleasePlan(
     {
       target: "bridge-runtime-sdk",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: gatewayUrl,
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );
@@ -2231,19 +1990,12 @@ test("executeRelease creates skill-plugin-cli release pack directory before tarb
   const plan = createReleasePlan(
     {
       target: "skill-plugin-cli",
+      channel: "release",
       version: "0.1.0",
-      bump: null,
       defaultGatewayUrl: null,
-      preid: "beta",
-      release: null,
       dryRun: false,
-      push: false,
-      skipGit: true,
       skipPublish: false,
       skipVerify: false,
-      allowDirty: true,
-      bridgeVersion: null,
-      openclawVersion: null,
     },
     { repoRoot, fs, exec: execDouble.exec },
   );

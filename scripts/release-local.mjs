@@ -154,10 +154,18 @@ export const releaseDescriptors = Object.freeze({
   }),
 });
 
-const validTargets = new Set([...Object.keys(releaseDescriptors), "dual"]);
-const validBumps = new Set(["patch", "minor", "major", "prerelease"]);
-const validReleaseKinds = new Set(["stable", "prerelease"]);
-const defaultPreid = "beta";
+const validTargets = new Set(Object.keys(releaseDescriptors));
+const validChannels = new Set(["alpha", "beta", "release"]);
+const removedPlanFields = Object.freeze([
+  "allowDirty",
+  "bridgeVersion",
+  "bump",
+  "openclawVersion",
+  "preid",
+  "push",
+  "release",
+  "skipGit",
+]);
 const defaultGatewayUrlFlag = "--default-gateway-url";
 
 function isObject(value) {
@@ -270,83 +278,31 @@ function isPrerelease(version) {
   return version.prerelease.length > 0;
 }
 
-function isNumericIdentifier(value) {
-  return /^\d+$/.test(value);
+function determineDistTagForChannel(channel) {
+  return channel === "release" ? "latest" : channel;
 }
 
-export function determineDistTag(version) {
-  const parsed = typeof version === "string" ? parseSemver(version) : version;
-  return parsed.prerelease[0] ?? "latest";
+function assertStableBaseVersion(version, source) {
+  const parsed = parseSemver(version);
+  if (isPrerelease(parsed)) {
+    throw new Error(`${source} must be a stable semver x.y.z: ${version}`);
+  }
+  return formatSemver(parsed);
 }
 
-export function computeNextVersion(currentVersion, bump, preid = defaultPreid) {
-  const parsed = parseSemver(currentVersion);
-
-  if (!validBumps.has(bump)) {
-    throw new Error(`unsupported bump type: ${bump}`);
-  }
-
-  if (bump === "major") {
-    return formatSemver({ major: parsed.major + 1, minor: 0, patch: 0, prerelease: [] });
-  }
-
-  if (bump === "minor") {
-    return formatSemver({ major: parsed.major, minor: parsed.minor + 1, patch: 0, prerelease: [] });
-  }
-
-  if (bump === "patch") {
-    return formatSemver({ major: parsed.major, minor: parsed.minor, patch: parsed.patch + 1, prerelease: [] });
-  }
-
-  if (!isPrerelease(parsed)) {
-    return formatSemver({
-      major: parsed.major,
-      minor: parsed.minor,
-      patch: parsed.patch + 1,
-      prerelease: [preid, "0"],
-    });
-  }
-
-  if (parsed.prerelease[0] !== preid) {
-    return formatSemver({
-      major: parsed.major,
-      minor: parsed.minor,
-      patch: parsed.patch,
-      prerelease: [preid, "0"],
-    });
-  }
-
-  const nextPrerelease = [...parsed.prerelease];
-  const lastIndex = nextPrerelease.length - 1;
-
-  if (lastIndex >= 1 && isNumericIdentifier(nextPrerelease[lastIndex])) {
-    nextPrerelease[lastIndex] = String(Number(nextPrerelease[lastIndex]) + 1);
-  } else {
-    nextPrerelease.push("0");
-  }
-
-  return formatSemver({
-    major: parsed.major,
-    minor: parsed.minor,
-    patch: parsed.patch,
-    prerelease: nextPrerelease,
-  });
-}
-
-function inferReleaseKind(version, bump, explicitRelease) {
-  if (explicitRelease) {
-    return explicitRelease;
-  }
-
-  if (typeof version === "string") {
-    return isPrerelease(parseSemver(version)) ? "prerelease" : "stable";
-  }
-
-  if (bump === "prerelease") {
-    return "prerelease";
-  }
-
-  return "stable";
+export function formatShanghaiTimestamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}${value.month}${value.day}${value.hour}${value.minute}${value.second}`;
 }
 
 function normalizeArgv(argv) {
@@ -411,20 +367,13 @@ function readOptionValue(argv, index, flag) {
 export function parseReleaseLocalArgs(argv) {
   const args = normalizeArgv(argv);
   const parsed = {
-    allowDirty: false,
-    bridgeVersion: null,
-    bump: null,
+    channel: null,
     defaultGatewayUrl: null,
     dryRun: false,
     help: false,
     installDeps: false,
     installDepsUpdateLockfile: false,
-    openclawVersion: null,
     positionalTarget: null,
-    preid: defaultPreid,
-    push: false,
-    release: null,
-    skipGit: false,
     skipPublish: false,
     skipVerify: false,
     target: null,
@@ -473,23 +422,8 @@ export function parseReleaseLocalArgs(argv) {
       continue;
     }
 
-    if (arg === "--skip-git") {
-      parsed.skipGit = true;
-      continue;
-    }
-
     if (arg === "--skip-verify") {
       parsed.skipVerify = true;
-      continue;
-    }
-
-    if (arg === "--push") {
-      parsed.push = true;
-      continue;
-    }
-
-    if (arg === "--allow-dirty") {
-      parsed.allowDirty = true;
       continue;
     }
 
@@ -514,6 +448,17 @@ export function parseReleaseLocalArgs(argv) {
       continue;
     }
 
+    if (arg === "--channel") {
+      parsed.channel = readOptionValue(args, index, "--channel");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--channel=")) {
+      parsed.channel = arg.slice("--channel=".length);
+      continue;
+    }
+
     if (arg === "--version") {
       parsed.version = readOptionValue(args, index, "--version");
       index += 1;
@@ -525,28 +470,6 @@ export function parseReleaseLocalArgs(argv) {
       continue;
     }
 
-    if (arg === "--bridge-version") {
-      parsed.bridgeVersion = readOptionValue(args, index, "--bridge-version");
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--bridge-version=")) {
-      parsed.bridgeVersion = arg.slice("--bridge-version=".length);
-      continue;
-    }
-
-    if (arg === "--openclaw-version") {
-      parsed.openclawVersion = readOptionValue(args, index, "--openclaw-version");
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--openclaw-version=")) {
-      parsed.openclawVersion = arg.slice("--openclaw-version=".length);
-      continue;
-    }
-
     if (arg === defaultGatewayUrlFlag) {
       parsed.defaultGatewayUrl = readOptionValue(args, index, defaultGatewayUrlFlag);
       index += 1;
@@ -555,39 +478,6 @@ export function parseReleaseLocalArgs(argv) {
 
     if (arg.startsWith(`${defaultGatewayUrlFlag}=`)) {
       parsed.defaultGatewayUrl = arg.slice(`${defaultGatewayUrlFlag}=`.length);
-      continue;
-    }
-
-    if (arg === "--bump") {
-      parsed.bump = readOptionValue(args, index, "--bump");
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--bump=")) {
-      parsed.bump = arg.slice("--bump=".length);
-      continue;
-    }
-
-    if (arg === "--preid") {
-      parsed.preid = readOptionValue(args, index, "--preid");
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--preid=")) {
-      parsed.preid = arg.slice("--preid=".length);
-      continue;
-    }
-
-    if (arg === "--release") {
-      parsed.release = readOptionValue(args, index, "--release");
-      index += 1;
-      continue;
-    }
-
-    if (arg.startsWith("--release=")) {
-      parsed.release = arg.slice("--release=".length);
       continue;
     }
 
@@ -614,86 +504,20 @@ export function parseReleaseLocalArgs(argv) {
     throw new Error(`unknown release target: ${target}`);
   }
 
-  if (parsed.version && parsed.bump) {
-    throw new Error("--version and --bump cannot be used together");
-  }
-
-  if (parsed.push && parsed.skipGit) {
-    throw new Error("--push cannot be combined with --skip-git");
-  }
-
-  if (parsed.push && parsed.skipPublish) {
-    throw new Error("--push cannot be combined with --skip-publish");
-  }
-
   if (parsed.installDeps && parsed.installDepsUpdateLockfile) {
     throw new Error("--install-deps and --install-deps-update-lockfile cannot be used together");
   }
 
-  if (!validReleaseKinds.has(parsed.release ?? inferReleaseKind(parsed.version, parsed.bump, null))) {
-    throw new Error(`invalid --release value: ${parsed.release}`);
+  if (!parsed.channel) {
+    throw new Error("missing --channel");
   }
 
-  if (parsed.bump && !validBumps.has(parsed.bump)) {
-    throw new Error(`invalid --bump value: ${parsed.bump}`);
-  }
-
-  if (target === "dual") {
-    if (parsed.version) {
-      throw new Error("dual releases require --bridge-version and --openclaw-version, not --version");
-    }
-
-    if (parsed.bump && (parsed.bridgeVersion || parsed.openclawVersion)) {
-      throw new Error("dual releases cannot mix --bump with explicit package versions");
-    }
-
-    if (!parsed.bump && !(parsed.bridgeVersion && parsed.openclawVersion)) {
-      throw new Error("dual releases require --bump or both --bridge-version and --openclaw-version");
-    }
-
-    if ((parsed.bridgeVersion && !parsed.openclawVersion) || (!parsed.bridgeVersion && parsed.openclawVersion)) {
-      throw new Error("dual releases require both --bridge-version and --openclaw-version");
-    }
-  } else {
-    if (parsed.bridgeVersion || parsed.openclawVersion) {
-      throw new Error("--bridge-version and --openclaw-version are valid only for --target dual");
-    }
-
-    if (!parsed.version && !parsed.bump) {
-      throw new Error("single-target releases require --version or --bump");
-    }
+  if (!validChannels.has(parsed.channel)) {
+    throw new Error(`invalid --channel value: ${parsed.channel}`);
   }
 
   if (parsed.version) {
-    const explicit = parseSemver(parsed.version);
-    const explicitKind = isPrerelease(explicit) ? "prerelease" : "stable";
-    if (parsed.release && parsed.release !== explicitKind) {
-      throw new Error(`--release ${parsed.release} conflicts with explicit version ${parsed.version}`);
-    }
-    if (parsed.preid !== defaultPreid && explicitKind === "stable") {
-      throw new Error("--preid requires a prerelease version or --bump prerelease");
-    }
-    if (explicitKind === "prerelease" && parsed.preid !== defaultPreid && explicit.prerelease[0] !== parsed.preid) {
-      throw new Error(`--preid ${parsed.preid} does not match explicit prerelease version ${parsed.version}`);
-    }
-  }
-
-  if (parsed.bridgeVersion) {
-    const bridgeKind = isPrerelease(parseSemver(parsed.bridgeVersion)) ? "prerelease" : "stable";
-    if (parsed.release && parsed.release !== bridgeKind) {
-      throw new Error(`--release ${parsed.release} conflicts with --bridge-version ${parsed.bridgeVersion}`);
-    }
-  }
-
-  if (parsed.openclawVersion) {
-    const openclawKind = isPrerelease(parseSemver(parsed.openclawVersion)) ? "prerelease" : "stable";
-    if (parsed.release && parsed.release !== openclawKind) {
-      throw new Error(`--release ${parsed.release} conflicts with --openclaw-version ${parsed.openclawVersion}`);
-    }
-  }
-
-  if (parsed.release === "prerelease" && !parsed.bump && !parsed.version && !parsed.bridgeVersion && !parsed.openclawVersion) {
-    throw new Error("--release prerelease requires a prerelease version or --bump prerelease");
+    assertStableBaseVersion(parsed.version, "--version");
   }
 
   return {
@@ -703,11 +527,12 @@ export function parseReleaseLocalArgs(argv) {
 }
 
 function resolveTargetVersion(currentVersion, options) {
-  if (options.version) {
-    return options.version;
+  const baseVersion = assertStableBaseVersion(options.version ?? currentVersion, options.version ? "--version" : "package.json version");
+  if (options.channel === "release") {
+    return baseVersion;
   }
 
-  return computeNextVersion(currentVersion, options.bump, options.preid);
+  return `${baseVersion}-${options.channel}.${options.timestamp}`;
 }
 
 function resolveReleaseTarget(target, repoRoot, fs) {
@@ -748,55 +573,6 @@ function resolveReleaseTarget(target, repoRoot, fs) {
   };
 }
 
-function normalizeRepoRelativePath(value) {
-  return value.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
-}
-
-function resolveStatusPath(statusLine) {
-  const candidate = statusLine.slice(3).trim();
-  const renameIndex = candidate.lastIndexOf(" -> ");
-  return normalizeRepoRelativePath(renameIndex >= 0 ? candidate.slice(renameIndex + 4) : candidate);
-}
-
-function createGeneratedPathPrefixes() {
-  const prefixes = new Set([".tmp", "logs"]);
-
-  for (const descriptor of Object.values(releaseDescriptors)) {
-    const packageRoot = normalizeRepoRelativePath(descriptor.packageRoot);
-    prefixes.add(`${packageRoot}/.tmp`);
-    prefixes.add(`${packageRoot}/logs`);
-    prefixes.add(`${packageRoot}/dist`);
-    prefixes.add(`${packageRoot}/release`);
-    prefixes.add(`${packageRoot}/bundle`);
-
-    if (descriptor.publish.root !== ".") {
-      prefixes.add(normalizeRepoRelativePath(path.join(descriptor.packageRoot, descriptor.publish.root)));
-    }
-  }
-
-  return [...prefixes].sort();
-}
-
-const generatedPathPrefixes = createGeneratedPathPrefixes();
-
-function isGeneratedStatusPath(relativePath) {
-  return generatedPathPrefixes.some((prefix) => relativePath === prefix || relativePath.startsWith(`${prefix}/`));
-}
-
-function filterWorkingTreeStatus(statusOutput) {
-  return statusOutput
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0)
-    .filter((line) => !isGeneratedStatusPath(resolveStatusPath(line)))
-    .join("\n");
-}
-
-function getWorkingTreeStatus(repoRoot, exec) {
-  const rawStatus = exec("git", ["status", "--short", "--untracked-files=all"], { cwd: repoRoot });
-  return filterWorkingTreeStatus(rawStatus);
-}
-
 function tagExists(repoRoot, exec, tagName) {
   try {
     exec("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tagName}`], {
@@ -807,14 +583,6 @@ function tagExists(repoRoot, exec, tagName) {
   } catch {
     return false;
   }
-}
-
-function toCommitMessage(targets) {
-  if (targets.length === 1) {
-    return `release(${targets[0].id}): v${targets[0].targetVersion}`;
-  }
-
-  return `release(dual): bridge v${targets[0].targetVersion}, openclaw v${targets[1].targetVersion}`;
 }
 
 export function evaluatePublishReadiness(targetPlan, options = {}) {
@@ -911,38 +679,35 @@ export function createReleasePlan(input = {}, overrides = {}) {
   const repoRoot = overrides.repoRoot ?? input.repoRoot ?? defaultRepoRoot;
   const { fs, exec } = createProcessPorts(overrides);
   const parsed = input.target ? input : parseReleaseLocalArgs(input.argv ?? []);
-  const targetIds = parsed.target === "dual" ? ["message-bridge", "message-bridge-openclaw"] : [parsed.target];
+  for (const field of removedPlanFields) {
+    if (Object.hasOwn(parsed, field)) {
+      throw new Error(`unsupported release plan field: ${field}`);
+    }
+  }
+  const timestamp = formatShanghaiTimestamp(overrides.now ?? new Date());
+  if (!validTargets.has(parsed.target)) {
+    throw new Error(`unknown release target: ${parsed.target}`);
+  }
+  if (!parsed.channel) {
+    throw new Error("missing --channel");
+  }
+  if (!validChannels.has(parsed.channel)) {
+    throw new Error(`invalid --channel value: ${parsed.channel}`);
+  }
+  const targetIds = [parsed.target];
   const targets = targetIds.map((targetId) => {
     const resolved = resolveReleaseTarget(targetId, repoRoot, fs);
-    const explicitVersionByTarget = {
-      "message-bridge": parsed.bridgeVersion,
-      "message-bridge-openclaw": parsed.openclawVersion,
-    };
-    const explicitVersion = explicitVersionByTarget[targetId] ?? parsed.version;
     const targetVersion = resolveTargetVersion(resolved.currentVersion, {
-      bump: parsed.bump,
-      preid: parsed.preid,
-      version: explicitVersion,
+      channel: parsed.channel,
+      timestamp,
+      version: parsed.version,
     });
-    const releaseKind = inferReleaseKind(targetVersion, parsed.bump, parsed.release);
-
-    if (releaseKind === "stable" && isPrerelease(parseSemver(targetVersion))) {
-      throw new Error(`stable releases cannot use prerelease version ${targetVersion}`);
-    }
-
-    if (releaseKind === "prerelease" && !isPrerelease(parseSemver(targetVersion))) {
-      throw new Error(`prerelease releases require a prerelease version: ${targetVersion}`);
-    }
-
-    if (targetVersion === resolved.currentVersion) {
-      throw new Error(`target version must change for ${targetId}; current version is already ${targetVersion}`);
-    }
 
     return {
       ...resolved,
-      distTag: determineDistTag(targetVersion),
+      channel: parsed.channel,
+      distTag: determineDistTagForChannel(parsed.channel),
       publishArtifactFileName: resolved.publishMode === "tarball" ? toPackFilename(resolved.packageName, targetVersion) : null,
-      releaseKind,
       repoRoot,
       tagName: `${resolved.tagPrefix}${targetVersion}`,
       targetVersion,
@@ -960,21 +725,11 @@ export function createReleasePlan(input = {}, overrides = {}) {
 
   const blockers = [];
   const warnings = [];
-  const workingTreeStatus = parsed.skipGit ? "" : getWorkingTreeStatus(repoRoot, exec);
-  if (!parsed.skipGit && !parsed.allowDirty && workingTreeStatus.trim().length > 0) {
-    blockers.push("working tree is not clean; rerun with --allow-dirty only if you intend to keep unrelated local changes");
-  }
-
-  if (!parsed.skipGit) {
-    for (const target of targets) {
-      if (tagExists(repoRoot, exec, target.tagName)) {
-        blockers.push(`release tag already exists: ${target.tagName}`);
-      }
+  const workingTreeStatus = "";
+  for (const target of targets) {
+    if (tagExists(repoRoot, exec, target.tagName)) {
+      blockers.push(`release tag already exists: ${target.tagName}`);
     }
-  }
-
-  if (targets.length > 1) {
-    warnings.push("dual releases are non-atomic; the first package may already be published if the second one fails.");
   }
 
   if (parsed.skipVerify) {
@@ -983,14 +738,9 @@ export function createReleasePlan(input = {}, overrides = {}) {
     );
   }
 
-  warnings.push("npm publish and git commit/tag are non-atomic; publish can succeed even if later git steps fail.");
-
   return {
     actions: {
-      commit: !parsed.skipGit,
       publish: !parsed.skipPublish,
-      push: !parsed.skipGit && parsed.push,
-      tag: !parsed.skipGit,
     },
     blockers,
     dryRun: parsed.dryRun,
@@ -1009,7 +759,7 @@ function formatTargetPlan(target, options = {}) {
     `- ${target.id}: ${target.packageName}`,
     `  current version: ${target.currentVersion}`,
     `  target version: ${target.targetVersion}`,
-    `  release kind: ${target.releaseKind}`,
+    `  channel: ${target.channel}`,
     `  dist-tag: ${target.distTag}`,
     `  publish root: ${target.publishSourceRelative}`,
     `  tag: ${target.tagName}`,
@@ -1024,12 +774,10 @@ export function formatReleasePlan(plan) {
   const lines = [
     "Local Release Plan",
     `repo root: ${plan.repoRoot}`,
-    `mode: ${plan.targets.length > 1 ? "dual (non-atomic)" : "single-target"}`,
+    `mode: single-target`,
     `dry run: ${plan.dryRun ? "yes" : "no"}`,
     `publish: ${plan.actions.publish ? "yes" : "no"}`,
     `verify: ${skipVerify ? "no" : "yes"}`,
-    `git commit/tag: ${plan.actions.commit ? "yes" : "no"}`,
-    `push remote: ${plan.actions.push ? "yes" : "no"}`,
     `default gateway url: ${defaultGatewayUrl ?? "missing"}`,
     "",
     "Targets:",
@@ -1078,41 +826,32 @@ function formatReadiness(readiness) {
 export function formatHelp() {
   return `
 Usage:
-  pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
-  pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> [options]
+  pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk> --channel <alpha|beta|release> [options]
+  pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk> --channel <alpha|beta|release> [options]
 
 Required version input:
-  Single target:
-    --version <semver>
-    --bump <patch|minor|major|prerelease>
-  Dual target:
-    --bump <patch|minor|major|prerelease>
-    --bridge-version <semver> --openclaw-version <semver>
+  --channel <alpha|beta|release>
+    alpha   publishes x.y.z-alpha.<yyyyMMddHHmmss> with dist-tag alpha
+    beta    publishes x.y.z-beta.<yyyyMMddHHmmss> with dist-tag beta
+    release publishes x.y.z with dist-tag latest
+  --version <semver> is optional and must be a stable base version.
+  Without --version, the target package.json version is used as the stable base version.
 
 Options:
-  --target <name>                 Release target or "dual"
-  --version <semver>              Explicit version for single-target release
-  --bridge-version <semver>       Explicit message-bridge version for dual release
-  --openclaw-version <semver>     Explicit message-bridge-openclaw version for dual release
+  --target <name>                 Single release target
+  --channel <name>                alpha | beta | release
+  --version <semver>              Optional stable base version override
   --default-gateway-url <url>     WebSocket gateway url injected into official release builds
-  --bump <type>                   patch | minor | major | prerelease
-  --preid <name>                  Prerelease identifier, default: beta
-  --release <stable|prerelease>   Explicit release kind
-  --dry-run                       Print the release plan without mutating npm or git
+  --dry-run                       Print the release plan without publishing
   --skip-publish                  Build and verify by default, but skip npm publish
   --skip-verify                   Build and evaluate readiness, but skip verify:release
-  --skip-git                      Publish without local commit/tag
-  --push                          Push branch and new tags after local commit/tag
   --install-deps                  Auto-install packages for the dependency presence sanity check with pnpm install --no-lockfile
   --install-deps-update-lockfile  Legacy alias for --install-deps; no pnpm lockfile is written
-  --allow-dirty                   Allow running from a dirty worktree
   --help, -h                      Print this help
 
 Defaults:
   - npm publish runs by default
-  - git commit and tag are local by default
-  - remote push only runs with --push
-  - --skip-publish cannot be combined with --push
+  - git commit, git tag, and git push are not performed
   - dependency presence sanity checks run before any build or verify step
   - the presence sanity check only looks for clearly missing packages before build
   - builds run by default; verify also runs by default unless --skip-verify is used
@@ -1126,22 +865,18 @@ Defaults:
   - message-bridge publishes from plugins/message-bridge
   - message-bridge-openclaw publishes from plugins/message-bridge-openclaw/bundle
   - bridge-runtime-sdk publishes from packages/bridge-runtime-sdk/.tmp/release-pack/<package-version>.tgz
-  - dual releases are non-atomic
 
 Examples:
-  pnpm release:plan -- --target skill-qrcode-auth --bump patch
-  pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
-  pnpm release:plan -- --target skill-plugin-cli --bump patch
-  pnpm release:local -- --target skill-plugin-cli --version 0.1.0
-  pnpm release:plan -- --target bridge-runtime-sdk --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
-  pnpm release:plan -- --target message-bridge --bump patch
-  pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
-  pnpm release:local -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
-  pnpm release:local -- --target message-bridge --version 1.2.0 --install-deps
-  pnpm release:local -- --target message-bridge --bump prerelease --preid beta
-  pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --skip-publish --default-gateway-url wss://gateway.example.com/ws/agent
-  pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
-  pnpm release:local -- --target message-bridge --bump patch --push --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:plan -- --target skill-qrcode-auth --channel alpha
+  pnpm release:local -- --target skill-qrcode-auth --channel release --version 0.1.0
+  pnpm release:plan -- --target skill-plugin-cli --channel beta
+  pnpm release:local -- --target skill-plugin-cli --channel release --version 0.1.0
+  pnpm release:plan -- --target bridge-runtime-sdk --channel alpha --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:plan -- --target message-bridge --channel beta
+  pnpm release:local -- --target bridge-runtime-sdk --channel release --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:local -- --target message-bridge --channel release --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
+  pnpm release:local -- --target message-bridge --channel alpha --version 1.2.0 --install-deps
+  pnpm release:local -- --target message-bridge-openclaw --channel beta --skip-publish --default-gateway-url wss://gateway.example.com/ws/agent
 `.trimStart();
 }
 
@@ -1398,19 +1133,6 @@ function printRuntimeHeader(stdout, plan, registry, whoami) {
   stdout.write("\n");
 }
 
-function getCurrentBranch(exec, repoRoot) {
-  const branch = exec("git", ["branch", "--show-current"], {
-    cwd: repoRoot,
-    stdio: "pipe",
-  });
-
-  if (!branch) {
-    throw new Error("cannot push from a detached HEAD");
-  }
-
-  return branch;
-}
-
 function printPublishedFact(stdout, target) {
   stdout.write(
     `[published] ${target.id} ${target.targetVersion} -> ${target.packageName} (${target.distTag}) from ${target.publishSourceRelative}\n`,
@@ -1616,20 +1338,10 @@ export function executeRelease(plan, overrides = {}) {
       }
     }
 
-    if (plan.actions.commit) {
-      const stagedFiles = plan.targets.map((target) => target.versionSourceRelative);
-      runCommand(exec, ["git", "add", "--", ...stagedFiles], plan.repoRoot);
-      runCommand(exec, ["git", "commit", "-m", toCommitMessage(plan.targets)], plan.repoRoot);
-
-      for (const target of plan.targets) {
-        runCommand(exec, ["git", "tag", target.tagName], plan.repoRoot);
+    for (const target of mutatedTargets) {
+      if (isPrerelease(parseSemver(target.targetVersion))) {
+        restoreManifestVersion(fs, target.versionSourceAbsolute, target.currentVersion);
       }
-    }
-
-    if (plan.actions.push) {
-      const branch = getCurrentBranch(exec, plan.repoRoot);
-      runCommand(exec, ["git", "push", "origin", branch], plan.repoRoot);
-      runCommand(exec, ["git", "push", "origin", ...plan.targets.map((target) => target.tagName)], plan.repoRoot);
     }
 
     return {

@@ -354,33 +354,23 @@ function assert(condition, message) {
   }
 }
 
-function assertTagExists(tagName) {
-  run("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tagName}`], { cwd: sourceCopyDir });
-}
-
-function assertRemoteRefExists(refName) {
-  run("git", ["--git-dir", remotePath, "rev-parse", "--verify", "--quiet", refName]);
-}
-
 async function installDependencies() {
   run("pnpm", ["install"], { cwd: sourceCopyDir, stdio: "inherit" });
 }
 
-async function recreateIsolatedWorkspace({ resetRemote = false } = {}) {
-  await rm(sourceCopyDir, { recursive: true, force: true });
-  if (resetRemote) {
-    await rm(remotePath, { recursive: true, force: true });
-  }
-  await copyWorkspace();
-  await initWorkspaceGit();
-  await installDependencies();
-}
-
 async function verifyBridgeStable() {
   logStep("bridge stable release");
-  runRelease(["--target", "message-bridge", "--version", "1.0.1", "--default-gateway-url", releaseDefaultGatewayUrl]);
+  runRelease([
+    "--target",
+    "message-bridge",
+    "--channel",
+    "release",
+    "--version",
+    "1.0.1",
+    "--default-gateway-url",
+    releaseDefaultGatewayUrl,
+  ]);
   assert(npmView("@wecode/skill-opencode-plugin@1.0.1", "version") === "1.0.1", "bridge stable version not found");
-  assertTagExists("release/message-bridge/v1.0.1");
   const tgz = await packFromRegistry("@wecode/skill-opencode-plugin@1.0.1", path.join(consumerDir, "bridge-stable"));
   const entries = tarEntries(tgz);
   assert(entries.includes("package/release/message-bridge.plugin.js"), "bridge tarball missing runtime entry");
@@ -395,6 +385,8 @@ async function verifyOpenClawStable() {
   runRelease([
     "--target",
     "message-bridge-openclaw",
+    "--channel",
+    "release",
     "--version",
     "0.2.0",
     "--default-gateway-url",
@@ -404,7 +396,6 @@ async function verifyOpenClawStable() {
     npmView("@wecode/skill-openclaw-plugin@0.2.0", "version") === "0.2.0",
     "openclaw stable version not found",
   );
-  assertTagExists("release/message-bridge-openclaw/v0.2.0");
   const tgz = await packFromRegistry("@wecode/skill-openclaw-plugin@0.2.0", path.join(consumerDir, "openclaw-stable"));
   const entries = tarEntries(tgz);
   const runtimeEntry = await readPackedFile(tgz, "index.js");
@@ -422,106 +413,64 @@ async function verifyOpenClawStable() {
   assert(runtimeEntry.includes(releaseDefaultGatewayUrl), "openclaw tarball missing injected default gateway url");
 }
 
-async function verifyPrerelease() {
-  logStep("bridge prerelease");
+async function verifyBetaChannel() {
+  logStep("bridge beta release");
   runRelease([
     "--target",
     "message-bridge",
-    "--bump",
-    "prerelease",
-    "--preid",
+    "--channel",
     "beta",
+    "--version",
+    "1.0.2",
     "--default-gateway-url",
     releaseDefaultGatewayUrl,
   ]);
   const betaTag = npmView("@wecode/skill-opencode-plugin", "dist-tags.beta");
   const latestTag = npmView("@wecode/skill-opencode-plugin", "dist-tags.latest");
-  assert(betaTag === "1.0.2-beta.0", "bridge prerelease dist-tag beta not updated");
-  assert(latestTag === "1.0.1", "bridge prerelease should not overwrite latest");
+  assert(/^1\.0\.2-beta\.\d{14}$/.test(betaTag), "bridge beta dist-tag not updated with timestamp version");
+  assert(latestTag === "1.0.1", "bridge beta release should not overwrite latest");
 }
 
-async function verifyDualSuccess() {
-  logStep("dual success release");
-  runRelease([
-    "--target",
-    "dual",
-    "--bridge-version",
-    "1.1.0",
-    "--openclaw-version",
-    "0.3.0",
-    "--default-gateway-url",
-    releaseDefaultGatewayUrl,
-  ]);
-  assert(npmView("@wecode/skill-opencode-plugin@1.1.0", "version") === "1.1.0", "dual bridge version missing");
-  assert(npmView("@wecode/skill-openclaw-plugin@0.3.0", "version") === "0.3.0", "dual openclaw version missing");
-}
-
-async function verifyDualFailure() {
-  logStep("dual failure injection");
+async function verifyPublishAttemptFailureRecovery() {
+  logStep("publish attempt failure recovery");
   const result = tryRunRelease(
     [
       "--target",
-      "dual",
-      "--bridge-version",
+      "message-bridge",
+      "--channel",
+      "release",
+      "--version",
       "1.1.1",
-      "--openclaw-version",
-      "0.3.1",
       "--default-gateway-url",
       releaseDefaultGatewayUrl,
     ],
     {
-      RELEASE_LOCAL_FAIL_STAGE: "before-publish",
-      RELEASE_LOCAL_FAIL_TARGET: "message-bridge-openclaw",
+      RELEASE_LOCAL_FAIL_STAGE: "after-publish",
+      RELEASE_LOCAL_FAIL_TARGET: "message-bridge",
     },
   );
 
-  assert(result.code !== 0, "dual failure injection should fail");
+  assert(result.code !== 0, "post-publish failure injection should fail");
   assert(
     npmView("@wecode/skill-opencode-plugin@1.1.1", "version") === "1.1.1",
-    "bridge version should already be published in dual failure scenario",
+    "bridge version should already be published after post-publish failure",
   );
-
-  const missingOpenClaw = spawnSync(
-    "npm",
-    ["view", "@wecode/skill-openclaw-plugin@0.3.1", "version", "--registry", registryUrl],
-    {
-      cwd: tempRoot,
-      encoding: "utf8",
-      env: releaseEnv(),
-      stdio: "pipe",
-    },
-  );
-  assert(missingOpenClaw.status !== 0, "openclaw second publish should not succeed in injected failure scenario");
   const combinedOutput = `${result.stdout}\n${result.stderr}`;
-  assert(/may already be published|already published/i.test(combinedOutput), "dual failure recovery hint missing");
-}
-
-async function verifyPush() {
-  logStep("push to isolated bare remote");
-  await recreateIsolatedWorkspace({ resetRemote: true });
-  runRelease([
-    "--target",
-    "message-bridge-openclaw",
-    "--version",
-    "0.4.0",
-    "--push",
-    "--default-gateway-url",
-    releaseDefaultGatewayUrl,
-  ]);
-  assertRemoteRefExists("refs/heads/main");
-  assertRemoteRefExists("refs/tags/release/message-bridge-openclaw/v0.4.0");
+  assert(/may already be published|already published/i.test(combinedOutput), "post-publish recovery hint missing");
 }
 
 async function verifyDefaultGatewayUrlValidation() {
   logStep("default gateway url validation");
 
-  const missing = tryRunRelease(["--target", "message-bridge", "--version", "1.0.1"]);
+  const missing = tryRunRelease(["--target", "message-bridge", "--channel", "release", "--version", "1.0.1"]);
   assert(missing.code !== 0, "release without --default-gateway-url should fail");
   assert(/default gateway url/i.test(`${missing.stdout}\n${missing.stderr}`), "missing default gateway url error not reported");
 
   const invalid = tryRunRelease([
     "--target",
     "message-bridge",
+    "--channel",
+    "release",
     "--version",
     "1.0.1",
     "--default-gateway-url",
@@ -573,10 +522,8 @@ async function main() {
     await verifyDefaultGatewayUrlValidation();
     await verifyBridgeStable();
     await verifyOpenClawStable();
-    await verifyPrerelease();
-    await verifyDualSuccess();
-    await verifyDualFailure();
-    await verifyPush();
+    await verifyBetaChannel();
+    await verifyPublishAttemptFailureRecovery();
 
     process.stdout.write(`\n[e2e] PASS\n[e2e] tempRoot=${tempRoot}\n[e2e] registry=${registryUrl}\n`);
   } finally {

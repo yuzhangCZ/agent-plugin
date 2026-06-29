@@ -7,7 +7,7 @@
 **Related:** `../../package.json`, `../../README.md`, `./release-checklist.md`
 
 > Local release CLI docs: [../../../../docs/operations/local-release-cli.md](../../../../docs/operations/local-release-cli.md)
-> Maintainer default: use `pnpm release:local -- --target message-bridge ... --default-gateway-url <ws://...|wss://...>` or `pnpm release:plan -- --target message-bridge ... --default-gateway-url <ws://...|wss://...>` instead of hand-running the individual publish commands below。
+> Maintainer default: use `pnpm release:local -- --target message-bridge --channel <alpha|beta|release> ... --default-gateway-url <ws://...|wss://...>` or `pnpm release:plan -- --target message-bridge --channel <alpha|beta|release> ... --default-gateway-url <ws://...|wss://...>` instead of hand-running the individual publish commands below。
 
 `@wecode/skill-opencode-plugin` 的标准发布手册，覆盖稳定版、beta 版以及私仓切换。
 
