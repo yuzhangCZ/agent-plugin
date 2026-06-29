@@ -17,6 +17,9 @@ import type {
 } from '@wecode/bridge-runtime-sdk';
 import { asJsonObject, asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
 import type {
+  SessionErrorEvent,
+} from '../../contracts/upstream-events.js';
+import type {
   RawEventTranslation,
   TranslationContext,
 } from './OpenCodeProviderAdapter.types.js';
@@ -38,6 +41,23 @@ function buildSyntheticPartId(): string {
 
 function resolveGeneratedPartId(properties: Record<string, unknown> | undefined): string | undefined {
   return asTrimmedString(properties?.partID);
+}
+
+function resolveSessionError(error: SessionErrorEvent['properties']['error']): SessionErrorFact['error'] | undefined {
+  if (!asRecord(error)) {
+    return;
+  }
+
+  const code = asTrimmedString(error?.name) ?? 'UnknownError';
+  let message = `${code}. ${asTrimmedString(error?.data?.message)}`;
+  if (error?.name === 'APIError' && error?.data.statusCode) {
+    message += ` statusCode=${error.data.statusCode}`;
+  }
+
+  return {
+    code: 'internal_error',
+    message,
+  };
 }
 
 function buildFactRoutingFields(
@@ -78,8 +98,8 @@ function rejectFactWithoutOpenMessage(
   };
 }
 
-interface EventTranslator {
-  translate(context: TranslationContext): RawEventTranslation;
+interface EventTranslator<TEvent extends TranslationContext['event'] = TranslationContext['event']> {
+  translate(context: TranslationContext<TEvent>): RawEventTranslation;
 }
 
 /**
@@ -590,12 +610,11 @@ export class PermissionRepliedTranslator implements EventTranslator {
  * active run 优先消费；无 active run 时由 coordinator 走 outbound fallback。
  */
 export class SessionErrorTranslator implements EventTranslator {
-  translate(context: TranslationContext): RawEventTranslation {
-    const properties = asObject(context.event.properties);
-    const errorObject = asObject(properties?.error);
-    const errorText = asTrimmedString(properties?.error) ?? asTrimmedString(errorObject?.message);
-    const rawSessionId = asTrimmedString(properties?.sessionID);
-    if (!rawSessionId || !errorText) {
+  translate(context: TranslationContext<SessionErrorEvent>): RawEventTranslation {
+    const { properties } = context.event;
+    const resolvedError = resolveSessionError(properties.error);
+    const rawSessionId = asTrimmedString(properties.sessionID);
+    if (!rawSessionId || !resolvedError) {
       return { recognized: true, facts: [] };
     }
 
@@ -604,8 +623,8 @@ export class SessionErrorTranslator implements EventTranslator {
       type: 'session.error',
       ...factRoutingFields,
       error: {
-        code: 'internal_error',
-        message: errorText,
+        code: resolvedError.code,
+        message: resolvedError.message,
       },
       raw: properties,
     };

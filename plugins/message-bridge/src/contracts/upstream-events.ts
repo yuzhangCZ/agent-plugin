@@ -2,14 +2,11 @@ import type {
   EventMessagePartRemoved,
   EventMessagePartUpdated,
   EventMessageUpdated,
-  EventPermissionUpdated,
   EventSessionCreated,
   EventSessionError,
   EventSessionIdle,
   EventSessionStatus,
   EventSessionUpdated,
-} from '@opencode-ai/sdk' with { 'resolution-mode': 'import' };
-import type {
   EventMessagePartDelta,
   EventPermissionAsked,
   EventPermissionReplied,
@@ -43,7 +40,6 @@ export type SessionStatusEvent = EventSessionStatus;
 export type SessionIdleEvent = EventSessionIdle;
 export type SessionUpdatedEvent = EventSessionUpdated;
 export type SessionErrorEvent = EventSessionError;
-export type PermissionUpdatedEvent = EventPermissionUpdated;
 export type PermissionAskedEvent = EventPermissionAsked;
 export type PermissionRepliedEvent = EventPermissionReplied;
 export type QuestionAskedEvent = EventQuestionAsked;
@@ -58,7 +54,6 @@ export type SupportedUpstreamEvent =
   | EventSessionIdle
   | EventSessionUpdated
   | EventSessionError
-  | EventPermissionUpdated
   | EventPermissionAsked
   | EventPermissionReplied
   | EventQuestionAsked;

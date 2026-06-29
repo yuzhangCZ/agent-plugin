@@ -326,7 +326,7 @@ function buildPromptTerminalErrorDetails(error: PromptSessionAssistantError): Re
 
 function formatPromptTerminalError(error: PromptSessionAssistantError): string {
   const base = error.message
-    ? `${error.name}: ${error.message}`
+    ? `${error.name}. ${error.message}`
     : error.name;
 
   const statusCode = readNumber(error.details?.statusCode);

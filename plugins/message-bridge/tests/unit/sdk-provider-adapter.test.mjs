@@ -2682,7 +2682,7 @@ test('provider adapter maps native command assistant error to failed terminal re
     outcome: 'failed',
     error: {
       code: 'internal_error',
-      message: 'APIError: provider failed statusCode=429',
+      message: 'APIError. provider failed statusCode=429',
       details: {
         name: 'APIError',
         message: 'provider failed',
@@ -4683,7 +4683,15 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
     type: 'session.error',
     properties: {
       sessionID: 'tool-failed',
-      error: 'model backend failed',
+      error: {
+        name: 'APIError',
+        data: {
+          message: 'model backend failed',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: 'Too many requests',
+        },
+      },
     },
   });
 
@@ -4706,18 +4714,26 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
     type: 'session.error',
     error: {
       code: 'internal_error',
-      message: 'model backend failed',
+      message: 'APIError. model backend failed statusCode=429',
     },
     raw: {
       sessionID: 'tool-failed',
-      error: 'model backend failed',
+      error: {
+        name: 'APIError',
+        data: {
+          message: 'model backend failed',
+          statusCode: 429,
+          isRetryable: true,
+          responseBody: 'Too many requests',
+        },
+      },
     },
   }]);
   assert.deepEqual(await run.result(), {
     outcome: 'failed',
     error: {
       code: 'internal_error',
-      message: 'APIError: model backend failed statusCode=429',
+      message: 'APIError. model backend failed statusCode=429',
       details: {
         name: 'APIError',
         message: 'model backend failed',
@@ -4727,6 +4743,55 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
       },
     },
   });
+});
+
+test('provider adapter maps session.error object name without message to fact code and message', async () => {
+  const promptDeferred = createDeferred();
+  const adapter = createAdapter({
+    bindings: [['tool-output-length', 'tool-output-length']],
+    session: {
+      prompt: async () => promptDeferred.promise,
+    },
+  });
+  const run = await adapter.runMessage({
+    traceId: 'trace-output-length',
+    runId: 'run-output-length',
+    toolSessionId: 'tool-output-length',
+    text: 'hello',
+  });
+
+  await adapter.handleEvent({
+    type: 'session.error',
+    properties: {
+      sessionID: 'tool-output-length',
+      error: {
+        name: 'MessageOutputLengthError',
+        data: {
+          limit: 120_000,
+        },
+      },
+    },
+  });
+
+  promptDeferred.resolve(createPromptResponse());
+
+  const facts = await collect(run.facts);
+  assert.deepEqual(facts, [{
+    type: 'session.error',
+    error: {
+      code: 'internal_error',
+      message: 'MessageOutputLengthError. undefined',
+    },
+    raw: {
+      sessionID: 'tool-output-length',
+      error: {
+        name: 'MessageOutputLengthError',
+        data: {
+          limit: 120_000,
+        },
+      },
+    },
+  }]);
 });
 
 test('provider adapter keeps legacy top-level assistant error fields compatible', async () => {
@@ -4764,22 +4829,12 @@ test('provider adapter keeps legacy top-level assistant error fields compatible'
   }));
 
   const facts = await collect(run.facts);
-  assert.deepEqual(facts, [{
-    type: 'session.error',
-    error: {
-      code: 'internal_error',
-      message: 'legacy backend failed',
-    },
-    raw: {
-      sessionID: 'tool-failed-legacy',
-      error: 'legacy backend failed',
-    },
-  }]);
+  assert.deepEqual(facts, []);
   assert.deepEqual(await run.result(), {
     outcome: 'failed',
     error: {
       code: 'internal_error',
-      message: 'APIError: legacy backend failed statusCode=429',
+      message: 'APIError. legacy backend failed statusCode=429',
       details: {
         name: 'APIError',
         message: 'legacy backend failed',
