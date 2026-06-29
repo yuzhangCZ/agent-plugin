@@ -605,40 +605,6 @@ export class PermissionRepliedTranslator implements EventTranslator {
 }
 
 /**
- * 翻译 `session.error` 为 provider session error fact。
- * @remarks
- * active run 优先消费；无 active run 时由 coordinator 走 outbound fallback。
- */
-export class SessionErrorTranslator implements EventTranslator {
-  translate(context: TranslationContext<SessionErrorEvent>): RawEventTranslation {
-    const { properties } = context.event;
-    const resolvedError = resolveSessionError(properties.error);
-    const rawSessionId = asTrimmedString(properties.sessionID);
-    if (!rawSessionId || !resolvedError) {
-      return { recognized: true, facts: [] };
-    }
-
-    const factRoutingFields = buildFactRoutingFields(context);
-    const fact: SessionErrorFact = {
-      type: 'session.error',
-      ...factRoutingFields,
-      error: {
-        code: resolvedError.code,
-        message: resolvedError.message,
-      },
-      raw: properties,
-    };
-
-    return {
-      recognized: true,
-      toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: buildDeterministicEnvelopeMessageId('session-error', rawSessionId),
-      facts: [fact],
-    };
-  }
-}
-
-/**
  * 翻译 `session.updated` 标题变更。
  * @remarks
  * 只有进入 active run 的 session.updated 才会产出 `session.title`；detached metadata 由 coordinator drop。
@@ -666,6 +632,40 @@ export class SessionUpdatedTranslator implements EventTranslator {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
       envelopeMessageId: buildDeterministicEnvelopeMessageId('session-title', rawSessionId),
+      facts: [fact],
+    };
+  }
+}
+
+/**
+ * 翻译 detached `session.error` 为 outbound session error fact。
+ * @remarks
+ * 该事件不进入 active run，避免和 prompt terminal `info.error` 对同源错误重复记账。
+ */
+export class SessionErrorTranslator implements EventTranslator {
+  translate(context: TranslationContext<SessionErrorEvent>): RawEventTranslation {
+    const { properties } = context.event;
+    const resolvedError = resolveSessionError(properties.error);
+    const rawSessionId = asTrimmedString(properties.sessionID);
+    if (!rawSessionId || !resolvedError) {
+      return { recognized: true, facts: [] };
+    }
+
+    const factRoutingFields = buildFactRoutingFields(context);
+    const fact: SessionErrorFact = {
+      type: 'session.error',
+      ...factRoutingFields,
+      error: {
+        code: resolvedError.code,
+        message: resolvedError.message,
+      },
+      raw: properties,
+    };
+
+    return {
+      recognized: true,
+      toolSessionId: context.factSessionContext.anchorSessionId,
+      envelopeMessageId: buildDeterministicEnvelopeMessageId('session-error', rawSessionId),
       facts: [fact],
     };
   }

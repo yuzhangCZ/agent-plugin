@@ -172,7 +172,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       .register('question.asked', new QuestionAskedTranslator(true))
       .register('permission.asked', new PermissionAskedTranslator())
       .register('permission.replied', new PermissionRepliedTranslator())
-      .register('session.error', new SessionErrorTranslator())
       .register('session.updated', new SessionUpdatedTranslator());
     const outboundTranslatorRegistry = new EventTranslatorRegistry()
       .register('message.updated', new AssistantMessageEventTranslator())

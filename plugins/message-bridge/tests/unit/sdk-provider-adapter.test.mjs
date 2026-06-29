@@ -1749,72 +1749,9 @@ test('provider adapter drops assistant streaming event when no active host run e
   }), false);
 });
 
-test('provider adapter routes session.error to outbound run when no active host run exists', async () => {
+test('provider adapter routes session.error to outbound instead of active run facts', async () => {
   const outboundRuns = [];
   const outboundRunCollected = createDeferred();
-  const adapter = createAdapter({
-    bindings: [['conversation-a', 'host-a']],
-  });
-  await adapter.initialize({
-    outbound: {
-      emitOutboundMessage: async () => {
-        throw new Error('unexpected outbound message call');
-      },
-      emitOutboundRun: async (input) => {
-        const facts = await collect(input.facts);
-        outboundRuns.push({
-          toolSessionId: input.toolSessionId,
-          runId: input.runId,
-          facts,
-        });
-        outboundRunCollected.resolve();
-        return { applied: true };
-      },
-    },
-  });
-
-  assert.equal(await adapter.handleEvent({
-    type: 'session.error',
-    properties: {
-      sessionID: 'host-a',
-      error: { message: 'boom' },
-    },
-  }), true);
-  await withTimeout(outboundRunCollected.promise, 'expected session.error outbound run to close');
-  assert.equal(outboundRuns[0].toolSessionId, 'conversation-a');
-  assert.deepEqual(outboundRuns[0].facts.map((fact) => fact.type), ['session.error']);
-});
-
-test('provider adapter routes session.error to legacy outbound message when outbound run is unavailable', async () => {
-  const outboundCalls = [];
-  const adapter = createAdapter({
-    bindings: [['conversation-a', 'host-a']],
-  });
-  await adapter.initialize({
-    outbound: {
-      emitOutboundMessage: async (input) => {
-        outboundCalls.push({
-          toolSessionId: input.toolSessionId,
-          messageId: input.messageId,
-          facts: await collect(input.facts),
-        });
-      },
-    },
-  });
-
-  assert.equal(await adapter.handleEvent({
-    type: 'session.error',
-    properties: {
-      sessionID: 'host-a',
-      error: { message: 'boom' },
-    },
-  }), true);
-  assert.equal(outboundCalls[0].toolSessionId, 'conversation-a');
-  assert.deepEqual(outboundCalls[0].facts.map((fact) => fact.type), ['session.error']);
-});
-
-test('provider adapter routes session.error to active host run before outbound fallback', async () => {
-  const outboundCalls = [];
   const prompt = createDeferred();
   const adapter = createAdapter({
     bindings: [['conversation-a', 'host-a']],
@@ -1824,7 +1761,18 @@ test('provider adapter routes session.error to active host run before outbound f
   });
   await adapter.initialize({
     outbound: {
-      emitOutboundMessage: async (input) => outboundCalls.push(input),
+      emitOutboundMessage: async () => {
+        throw new Error('unexpected outbound message call');
+      },
+      emitOutboundRun: async (input) => {
+        outboundRuns.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts: await collect(input.facts),
+        });
+        outboundRunCollected.resolve();
+        return { applied: true };
+      },
     },
   });
   const run = await adapter.runMessage({
@@ -1834,18 +1782,31 @@ test('provider adapter routes session.error to active host run before outbound f
     text: 'hello',
   });
 
-  await adapter.handleEvent({
+  const handled = await adapter.handleEvent({
     type: 'session.error',
     properties: {
       sessionID: 'host-a',
-      error: { message: 'boom' },
+      error: { name: 'UnknownError', data: { message: 'boom' } },
     },
   });
   prompt.resolve(createPromptResponse());
+  await withTimeout(outboundRunCollected.promise, 'expected session.error outbound run to close');
 
   const facts = await collect(run.facts);
-  assert.equal(facts.some((fact) => fact.type === 'session.error'), true);
-  assert.deepEqual(outboundCalls, []);
+  assert.equal(handled, true);
+  assert.deepEqual(facts, []);
+  assert.equal(outboundRuns[0].toolSessionId, 'conversation-a');
+  assert.deepEqual(outboundRuns[0].facts, [{
+    type: 'session.error',
+    error: {
+      code: 'internal_error',
+      message: 'UnknownError. boom',
+    },
+    raw: {
+      sessionID: 'host-a',
+      error: { name: 'UnknownError', data: { message: 'boom' } },
+    },
+  }]);
 });
 
 test('provider adapter aborts all host runs when prompt terminal is aborted', async () => {
@@ -4664,7 +4625,7 @@ test('provider adapter drops orphan text part facts and records protocol diagnos
   ]);
 });
 
-test('provider adapter maps assistant info.error prompt terminal to failed result while keeping session.error fact visible', async () => {
+test('provider adapter maps assistant info.error prompt terminal to failed result without session.error fact forwarding', async () => {
   const promptDeferred = createDeferred();
   const adapter = createAdapter({
     bindings: [['tool-failed', 'tool-failed']],
@@ -4677,22 +4638,6 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
     runId: 'run-failed',
     toolSessionId: 'tool-failed',
     text: 'hello',
-  });
-
-  await adapter.handleEvent({
-    type: 'session.error',
-    properties: {
-      sessionID: 'tool-failed',
-      error: {
-        name: 'APIError',
-        data: {
-          message: 'model backend failed',
-          statusCode: 429,
-          isRetryable: true,
-          responseBody: 'Too many requests',
-        },
-      },
-    },
   });
 
   promptDeferred.resolve(createPromptResponse({
@@ -4710,25 +4655,7 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
   }));
 
   const facts = await collect(run.facts);
-  assert.deepEqual(facts, [{
-    type: 'session.error',
-    error: {
-      code: 'internal_error',
-      message: 'APIError. model backend failed statusCode=429',
-    },
-    raw: {
-      sessionID: 'tool-failed',
-      error: {
-        name: 'APIError',
-        data: {
-          message: 'model backend failed',
-          statusCode: 429,
-          isRetryable: true,
-          responseBody: 'Too many requests',
-        },
-      },
-    },
-  }]);
+  assert.deepEqual(facts, []);
   assert.deepEqual(await run.result(), {
     outcome: 'failed',
     error: {
@@ -4743,55 +4670,6 @@ test('provider adapter maps assistant info.error prompt terminal to failed resul
       },
     },
   });
-});
-
-test('provider adapter maps session.error object name without message to fact code and message', async () => {
-  const promptDeferred = createDeferred();
-  const adapter = createAdapter({
-    bindings: [['tool-output-length', 'tool-output-length']],
-    session: {
-      prompt: async () => promptDeferred.promise,
-    },
-  });
-  const run = await adapter.runMessage({
-    traceId: 'trace-output-length',
-    runId: 'run-output-length',
-    toolSessionId: 'tool-output-length',
-    text: 'hello',
-  });
-
-  await adapter.handleEvent({
-    type: 'session.error',
-    properties: {
-      sessionID: 'tool-output-length',
-      error: {
-        name: 'MessageOutputLengthError',
-        data: {
-          limit: 120_000,
-        },
-      },
-    },
-  });
-
-  promptDeferred.resolve(createPromptResponse());
-
-  const facts = await collect(run.facts);
-  assert.deepEqual(facts, [{
-    type: 'session.error',
-    error: {
-      code: 'internal_error',
-      message: 'MessageOutputLengthError. undefined',
-    },
-    raw: {
-      sessionID: 'tool-output-length',
-      error: {
-        name: 'MessageOutputLengthError',
-        data: {
-          limit: 120_000,
-        },
-      },
-    },
-  }]);
 });
 
 test('provider adapter keeps legacy top-level assistant error fields compatible', async () => {
