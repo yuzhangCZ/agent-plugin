@@ -50,7 +50,7 @@ function resolveSessionError(error: SessionErrorEvent['properties']['error']): S
 
   const code = asTrimmedString(error?.name) ?? 'UnknownError';
   let message = `${code}. ${asTrimmedString(error?.data?.message)}`;
-  if (error?.name === 'APIError' && error?.data.statusCode) {
+  if (error?.name === 'APIError' && error?.data?.statusCode) {
     message += ` statusCode=${error.data.statusCode}`;
   }
 
