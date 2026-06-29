@@ -50,7 +50,7 @@ flowchart TD
     D --> F["OpenCode command.list"]
     E --> G["合并 command/mcp/skill 三类命令"]
     F --> G
-    G --> H["SDK 归一化、去重、截断"]
+    G --> H["SDK trim 描述并过滤非法 command"]
     H --> I["Gateway 上行 slash_commands_result"]
 ```
 
@@ -206,7 +206,7 @@ command.list
 - 优先级：本地 slash command > OpenCode command.list 返回项。
 - OpenCode 内部已处理 command、mcp、skill 的同名覆盖关系，插件侧只需要与本地 slash command 去重。
 - 按最终 `command` 字段去重。
-- `description` trim 后超过 50 字符由 SDK 截断。
+- `description` 由 SDK trim 后透传，不做长度截断。
 - 非法 command 过滤并记录诊断日志。
 
 ### 4.4 接口接入

@@ -4,7 +4,6 @@ import type {
 } from '../../domain/provider.ts';
 
 const SLASH_COMMAND_PATTERN = /^\/[^\s/]+$/u;
-const MAX_SLASH_COMMAND_DESCRIPTION_LENGTH = 50;
 
 /**
  * Provider 返回结果进入 SDK 内部前的契约校验器。
@@ -26,9 +25,7 @@ export class ProviderResultValidator {
       const description = slashCommand.description.trim();
       validated.push({
         command: slashCommand.command,
-        description: description.length > MAX_SLASH_COMMAND_DESCRIPTION_LENGTH
-          ? description.slice(0, MAX_SLASH_COMMAND_DESCRIPTION_LENGTH)
-          : description,
+        description,
       });
     }
     return validated;
