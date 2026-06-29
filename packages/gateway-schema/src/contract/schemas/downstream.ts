@@ -40,22 +40,20 @@ export type StatusQueryMessage = z.output<typeof statusQueryMessageSchema>;
 
 /**
  * gateway 下行业务扩展透传容器。
- * @remarks gateway-schema 只校验顶层容器和约定扩展块的 JSON object 可序列化性；
- * `platformExtParam` 内部业务字段不在这里解释，`PlatformExtParam` 类型仅为 public type 兼容保留。
+ * @remarks gateway-schema 不校验 `businessExtParam`，只校验 `platformExtParam` 的 JSON object 可序列化性；
+ * `platformExtParam` 内部业务字段不在这里解释。
  */
 export const extParametersSchema: z.ZodType<ExtParameters> = z
   .custom<Record<string, unknown>>(isPlainObject, {
     message: 'Expected plain object',
   })
   .superRefine((extParameters, context) => {
-    for (const key of ['businessExtParam', 'platformExtParam'] as const) {
-      if (extParameters[key] !== undefined && !isJsonObject(extParameters[key])) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${key} must be a JSON object`,
-          path: [key],
-        });
-      }
+    if (extParameters.platformExtParam !== undefined && !isJsonObject(extParameters.platformExtParam)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'platformExtParam must be a JSON object',
+        path: ['platformExtParam'],
+      });
     }
   })
   .transform((extParameters) => extParameters as ExtParameters);

@@ -626,29 +626,40 @@ test('normalizeDownstream preserves platformExtParam business fields without sem
   });
 });
 
-test('normalizeDownstream rejects non JSON object businessExtParam', () => {
-  const result = normalizeDownstream(
-    createChatInvokeMessage({
-      payload: {
-        toolSessionId: 'tool-chat-invalid-business-ext-param',
-        text: 'hello',
-        extParameters: {
-          businessExtParam: {
-            date: new Date('2026-05-19T00:00:00.000Z'),
+test('normalizeDownstream preserves arbitrary businessExtParam values', () => {
+  const cases = [
+    null,
+    ['array'],
+    'plain-string',
+    '{invalid-json',
+    '["array"]',
+    '"primitive"',
+    new Date('2026-05-19T00:00:00.000Z'),
+    {
+      date: new Date('2026-05-19T00:00:00.000Z'),
+      compute: () => true,
+    },
+  ];
+
+  for (const businessExtParam of cases) {
+    const result = normalizeDownstream(
+      createChatInvokeMessage({
+        payload: {
+          toolSessionId: 'tool-chat-invalid-business-ext-param',
+          text: 'hello',
+          extParameters: {
+            businessExtParam,
           },
         },
-      },
-    }),
-  );
+      }),
+    );
 
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'invalid_field_type',
-    field: 'payload.extParameters.businessExtParam',
-    messageType: 'invoke',
-    action: 'chat',
-  });
+    assert.equal(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+    assert.equal(result.value.payload.extParameters?.businessExtParam, businessExtParam);
+  }
 });
 
 test('normalizeDownstream rejects non JSON object platformExtParam', () => {
@@ -676,12 +687,8 @@ test('normalizeDownstream rejects non JSON object platformExtParam', () => {
   });
 });
 
-test('normalizeDownstream rejects non object businessExtParam and platformExtParam values', () => {
+test('normalizeDownstream rejects non object platformExtParam values', () => {
   const cases = [
-    ['businessExtParam', null],
-    ['businessExtParam', ['array']],
-    ['businessExtParam', 'primitive'],
-    ['businessExtParam', new Date('2026-05-19T00:00:00.000Z')],
     ['platformExtParam', null],
     ['platformExtParam', ['array']],
     ['platformExtParam', 'primitive'],
