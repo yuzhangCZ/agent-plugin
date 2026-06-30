@@ -26,6 +26,7 @@ type ActiveProviderRunHandleOptions = {
   }) => void;
   hostSessionId?: string;
   finalIdleTimeoutMs?: number;
+  canFinalIdleTimeout?: () => boolean;
 };
 
 type ForceAbortReason = 'abort_session' | 'prompt_terminal_aborted' | 'superseded_run';
@@ -202,7 +203,8 @@ export class ActiveProviderRunHandle {
       runId: options.runId,
       queue: this.queue,
       logger: options.logger,
-      ...(options.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: options.finalIdleTimeoutMs } : {}),
+      finalIdleTimeoutMs: options.finalIdleTimeoutMs,
+      canFinalIdleTimeout: options.canFinalIdleTimeout,
       onFinalIdleTimeout: () => {
         this.forceTimeoutAndClose();
       },
@@ -342,6 +344,17 @@ export class ActiveProviderRunHandle {
     return this.forceClosed;
   }
 
+  /**
+   * pending question/permission 状态变化后恢复 final idle 计时。
+   * @remarks registry 是 pending 事实源；当前 run 只负责在 gate 放行后重新 arm 本地 watchdog。
+   */
+  onPendingInteractionChanged(): void {
+    if (!this.promptStarted || this.forceClosed || this.promptSettled || this.factsClosed) {
+      return;
+    }
+    this.factDrainTracker.startFinalIdleWatchdog({ reset: true });
+  }
+
   private settleRunIfReady(): void {
     if (!this.promptSettled || !this.factsClosed || !this.terminalResult) {
       return;
@@ -393,6 +406,7 @@ export class ActiveRunRegistry {
       trackingSessionIds: ReadonlySet<string>;
     }) => void;
     finalIdleTimeoutMs?: number;
+    canFinalIdleTimeout: (input: { hostSessionId: string; runId: string }) => boolean;
   }): ActiveProviderRunHandle {
     const hostSessionId = options.hostSessionId ?? options.initialTrackingSessionId;
     const previous = this.handles.get(options.anchorSessionId);
@@ -403,6 +417,7 @@ export class ActiveRunRegistry {
       logger: options.logger,
       onCleanup: options.onCleanup,
       hostSessionId,
+      canFinalIdleTimeout: () => options.canFinalIdleTimeout({ hostSessionId, runId: options.runId }),
       ...(options.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: options.finalIdleTimeoutMs } : {}),
     });
     this.handles.set(options.anchorSessionId, handle);
@@ -441,6 +456,12 @@ export class ActiveRunRegistry {
 
   getHeadByHostSession(hostSessionId: string): ActiveProviderRunHandle | undefined {
     return this.hostQueues.get(hostSessionId)?.[0];
+  }
+
+  notifyRunPendingChanged(input: { hostSessionId: string; runId: string }): void {
+    const handle = (this.hostQueues.get(input.hostSessionId) ?? [])
+      .find((queued) => queued.runId === input.runId);
+    handle?.onPendingInteractionChanged();
   }
 
   abortAllByHostSession(

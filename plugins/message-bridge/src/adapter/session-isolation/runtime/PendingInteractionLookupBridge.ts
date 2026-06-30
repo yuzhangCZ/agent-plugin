@@ -3,13 +3,7 @@ import type {
   InteractionLookupBridge,
 } from '../../../port/session-isolation/index.js';
 import type { InteractionLookupResult } from '../../../port/session-isolation/dto/results/index.js';
-
-type PendingInteractionRecord = {
-  toolSessionId: string;
-  hostSessionId: string;
-  kind: 'question' | 'permission';
-  tokenId: string;
-};
+import type { PendingInteractionRecord } from '../../../runtime/sdk/session-isolation/RuntimePendingInteractionRegistry.js';
 
 type PendingInteractionLookupRegistry = {
   peek(input: { kind: 'question' | 'permission'; tokenId: string }): PendingInteractionRecord | undefined;

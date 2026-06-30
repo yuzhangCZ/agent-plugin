@@ -30,6 +30,7 @@ import {
   BusinessEntryContextResolver,
   DefaultBusinessEntryKeyResolver,
   DefaultBusinessEntryPolicyResolver,
+  RuntimePendingInteractionRegistry,
 } from '../../src/runtime/sdk/session-isolation/index.ts';
 
 function createDeferred() {
@@ -427,11 +428,32 @@ function createAdapter(overrides = {}) {
   });
 }
 
+function createAdapterWithPendingInteractionRegistry(overrides = {}) {
+  let adapter;
+  const pendingInteractionRegistry = new RuntimePendingInteractionRegistry({
+    onRunPendingChanged: (input) => {
+      adapter?.notifyRunPendingChanged(input);
+    },
+  });
+  adapter = createAdapter({
+    ...overrides,
+    pendingInteractionRecorder: pendingInteractionRegistry,
+  });
+  return { adapter, pendingInteractionRegistry };
+}
+
+function createActiveRun(registry, options) {
+  return registry.create({
+    canFinalIdleTimeout: () => true,
+    ...options,
+  });
+}
+
 test('ActiveRunRegistry returns host session head in FIFO order and ignores stale cleanup', () => {
   const logger = createLogger();
   const cleanups = [];
   const registry = new ActiveRunRegistry();
-  const first = registry.create({
+  const first = createActiveRun(registry, {
     anchorSessionId: 'conversation-a',
     hostSessionId: 'host-shared',
     runId: 'run-a',
@@ -439,7 +461,7 @@ test('ActiveRunRegistry returns host session head in FIFO order and ignores stal
     logger,
     onCleanup: (input) => cleanups.push(input),
   });
-  const second = registry.create({
+  const second = createActiveRun(registry, {
     anchorSessionId: 'conversation-b',
     hostSessionId: 'host-shared',
     runId: 'run-b',
@@ -469,7 +491,7 @@ test('ActiveProviderRunHandle forceAbortAndClose is idempotent and ignores later
   const logger = createLogger();
   const cleanups = [];
   const registry = new ActiveRunRegistry();
-  const run = registry.create({
+  const run = createActiveRun(registry, {
     anchorSessionId: 'conversation-a',
     hostSessionId: 'host-a',
     runId: 'run-a',
@@ -526,7 +548,7 @@ test('FactDrainTracker does not repeatedly rearm timers while close gate is fals
 test('ActiveRunRegistry aborts superseded run when same anchor creates a new run', async () => {
   const logger = createLogger();
   const registry = new ActiveRunRegistry();
-  const first = registry.create({
+  const first = createActiveRun(registry, {
     anchorSessionId: 'conversation-a',
     hostSessionId: 'host-a',
     runId: 'run-a',
@@ -534,7 +556,7 @@ test('ActiveRunRegistry aborts superseded run when same anchor creates a new run
     logger,
     onCleanup: () => undefined,
   });
-  const second = registry.create({
+  const second = createActiveRun(registry, {
     anchorSessionId: 'conversation-a',
     hostSessionId: 'host-a',
     runId: 'run-b',
@@ -547,6 +569,51 @@ test('ActiveRunRegistry aborts superseded run when same anchor creates a new run
   assert.equal(registry.getHeadByHostSession('host-a'), second);
   assert.deepEqual(await withTimeout(first.result(), 'superseded run did not settle'), { outcome: 'aborted' });
   assert.deepEqual(await collect(first.queue), []);
+});
+
+test('ActiveRunRegistry final idle gate blocks timeout until pending state changes', async () => {
+  const logger = createLogger();
+  const registry = new ActiveRunRegistry();
+  let allowFinalIdleTimeout = false;
+  const run = createActiveRun(registry, {
+    anchorSessionId: 'conversation-final-idle-gate',
+    hostSessionId: 'host-final-idle-gate',
+    runId: 'run-final-idle-gate',
+    initialTrackingSessionId: 'host-final-idle-gate',
+    logger,
+    finalIdleTimeoutMs: 20,
+    canFinalIdleTimeout: (input) => {
+      assert.deepEqual(input, {
+        hostSessionId: 'host-final-idle-gate',
+        runId: 'run-final-idle-gate',
+      });
+      return allowFinalIdleTimeout;
+    },
+    onCleanup: () => undefined,
+  });
+
+  assert.equal(run.tryStartPrompt(), true);
+  const pendingMarker = Symbol('pending');
+  const pendingResult = await Promise.race([
+    run.result(),
+    new Promise((resolve) => setTimeout(() => resolve(pendingMarker), 50)),
+  ]);
+  assert.equal(pendingResult, pendingMarker);
+
+  allowFinalIdleTimeout = true;
+  registry.notifyRunPendingChanged({
+    hostSessionId: 'host-final-idle-gate',
+    runId: 'run-final-idle-gate',
+  });
+
+  assert.deepEqual(await withTimeout(run.result(), 'expected run to timeout after final idle gate opens'), {
+    outcome: 'failed',
+    error: {
+      code: 'timeout',
+      message: 'provider_run_final_idle_timeout',
+      retryable: true,
+    },
+  });
 });
 
 test('provider adapter records host run queue scheduling diagnostics', async () => {
@@ -639,7 +706,7 @@ test('provider adapter records host run queue scheduling diagnostics', async () 
 test('HostSessionRunCoordinator logs scheduler work failure and fails run closed', async () => {
   const logs = [];
   const registry = new ActiveRunRegistry();
-  const run = registry.create({
+  const run = createActiveRun(registry, {
     anchorSessionId: 'tool-run-queue-failed',
     hostSessionId: 'host-run-queue-failed',
     runId: 'run-queue-failed',
@@ -3707,9 +3774,11 @@ test('provider adapter records subagent pending interactions against parent host
   assert.equal(facts.some((fact) => fact.type === 'permission.ask'), true);
   assert.deepEqual(pendingInteractions, [{
     kind: 'permission',
+    source: 'active_run',
     tokenId: 'perm-child-pending-1',
     toolSessionId: 'ses-parent-pending-1',
     hostSessionId: 'ses-parent-pending-1',
+    runId: 'run-subagent-pending',
   }]);
 });
 
@@ -4214,51 +4283,67 @@ test('provider adapter maps permission.asked permission field and legacy type fa
   assert.deepEqual(pendingInteractions, [
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-1',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-2',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-3',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-4',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-5',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-6',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-7',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
     {
       kind: 'permission',
+      source: 'active_run',
       tokenId: 'perm-8',
       toolSessionId: 'tool-permission',
       hostSessionId: 'tool-permission',
+      runId: 'run-permission',
     },
   ]);
 });
@@ -4417,9 +4502,11 @@ test('provider adapter maps question.asked multiple to question.ask multiSelect'
   ]);
   assert.deepEqual(pendingInteractions, [{
     kind: 'question',
+    source: 'active_run',
     tokenId: 'question-1',
     toolSessionId: 'tool-question',
     hostSessionId: 'tool-question',
+    runId: 'run-question',
   }]);
 });
 
@@ -5155,6 +5242,152 @@ test('provider adapter times out active run after final idle when prompt never s
   assert.deepEqual(await secondRun.result(), { outcome: 'completed' });
 });
 
+test('provider adapter keeps active run open while permission is pending', async () => {
+  const promptDeferred = createDeferred();
+  const { adapter } = createAdapterWithPendingInteractionRegistry({
+    finalIdleTimeoutMs: 40,
+    bindings: [['tool-active-permission-pending', 'host-active-permission-pending']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => promptDeferred.promise;
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-active-permission-pending',
+    runId: 'run-active-permission-pending',
+    toolSessionId: 'tool-active-permission-pending',
+    text: 'needs permission',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-active-permission-pending',
+      id: 'permission-active-pending-1',
+      permission: 'shell',
+    },
+  });
+
+  const factIterator = run.facts[Symbol.asyncIterator]();
+  assert.equal(
+    (await withTimeout(factIterator.next(), 'expected permission.ask fact')).value.type,
+    'permission.ask',
+  );
+
+  const pendingMarker = Symbol('pending');
+  const result = await Promise.race([
+    run.result(),
+    new Promise((resolve) => setTimeout(() => resolve(pendingMarker), 90)),
+  ]);
+  assert.equal(result, pendingMarker);
+
+  await adapter.abortSession({ toolSessionId: 'tool-active-permission-pending' });
+});
+
+test('provider adapter keeps active run open while question is pending', async () => {
+  const promptDeferred = createDeferred();
+  const { adapter } = createAdapterWithPendingInteractionRegistry({
+    finalIdleTimeoutMs: 40,
+    bindings: [['tool-active-question-pending', 'host-active-question-pending']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => promptDeferred.promise;
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-active-question-pending',
+    runId: 'run-active-question-pending',
+    toolSessionId: 'tool-active-question-pending',
+    text: 'needs answer',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await adapter.handleEvent({
+    type: 'message.updated',
+    properties: {
+      info: {
+        sessionID: 'host-active-question-pending',
+        id: 'msg-active-question-pending',
+        role: 'assistant',
+        time: { created: '2026-05-22T12:00:00.000Z' },
+      },
+    },
+  });
+  await adapter.handleEvent({
+    type: 'question.asked',
+    properties: {
+      sessionID: 'host-active-question-pending',
+      id: 'question-active-pending-1',
+      tool: { messageID: 'msg-active-question-pending' },
+      questions: [{ question: 'Continue?', options: [{ label: 'Yes' }] }],
+    },
+  });
+
+  const factIterator = run.facts[Symbol.asyncIterator]();
+  assert.equal(
+    (await withTimeout(factIterator.next(), 'expected message.start fact')).value.type,
+    'message.start',
+  );
+  assert.equal(
+    (await withTimeout(factIterator.next(), 'expected question.ask fact')).value.type,
+    'question.ask',
+  );
+
+  const pendingMarker = Symbol('pending');
+  const result = await Promise.race([
+    run.result(),
+    new Promise((resolve) => setTimeout(() => resolve(pendingMarker), 90)),
+  ]);
+  assert.equal(result, pendingMarker);
+
+  await adapter.abortSession({ toolSessionId: 'tool-active-question-pending' });
+});
+
+test('provider adapter resumes active run final idle after pending permission is consumed', async () => {
+  const promptDeferred = createDeferred();
+  const { adapter, pendingInteractionRegistry } = createAdapterWithPendingInteractionRegistry({
+    finalIdleTimeoutMs: 40,
+    bindings: [['tool-active-permission-consumed', 'host-active-permission-consumed']],
+  });
+  adapter.opencodeSessionGatewayAdapter.promptSession = async () => promptDeferred.promise;
+
+  const run = await adapter.runMessage({
+    traceId: 'trace-active-permission-consumed',
+    runId: 'run-active-permission-consumed',
+    toolSessionId: 'tool-active-permission-consumed',
+    text: 'needs permission',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await adapter.handleEvent({
+    type: 'permission.asked',
+    properties: {
+      sessionID: 'host-active-permission-consumed',
+      id: 'permission-active-consumed-1',
+      permission: 'shell',
+    },
+  });
+
+  const factIterator = run.facts[Symbol.asyncIterator]();
+  assert.equal(
+    (await withTimeout(factIterator.next(), 'expected permission.ask fact')).value.type,
+    'permission.ask',
+  );
+
+  const record = pendingInteractionRegistry.peek({
+    kind: 'permission',
+    tokenId: 'permission-active-consumed-1',
+  });
+  assert.ok(record);
+  pendingInteractionRegistry.consumeIfMatch(record);
+
+  assert.deepEqual(await withTimeout(run.result(), 'expected active run to timeout after pending is consumed'), {
+    outcome: 'failed',
+    error: {
+      code: 'timeout',
+      message: 'provider_run_final_idle_timeout',
+      retryable: true,
+    },
+  });
+});
+
 test('provider adapter aborts superseded run without deleting the newer active run', async () => {
   const firstPrompt = createDeferred();
   const secondPrompt = createDeferred();
@@ -5743,12 +5976,14 @@ test('provider adapter routes detached TUI assistant messages through outbound r
   assert.deepEqual(pendingRecords, [
     {
       kind: 'question',
+      source: 'outbound',
       tokenId: 'question-tui-1',
       toolSessionId: 'tool-tui-outbound',
       hostSessionId: 'host-tui-outbound',
     },
     {
       kind: 'permission',
+      source: 'outbound',
       tokenId: 'permission-tui-1',
       toolSessionId: 'tool-tui-outbound',
       hostSessionId: 'host-tui-outbound',
@@ -6073,6 +6308,7 @@ test('provider adapter records queued interaction with accepted anchor while han
   ]);
   assert.deepEqual(pendingRecords, [{
     kind: 'permission',
+    source: 'outbound',
     tokenId: 'permission-handoff-b-joins-a',
     toolSessionId: 'tool-tui-handoff-a',
     hostSessionId: 'host-tui-handoff-anchor',
@@ -6218,6 +6454,7 @@ test('provider adapter records queued interaction with next owner after handoff 
   ]);
   assert.deepEqual(pendingRecords, [{
     kind: 'permission',
+    source: 'outbound',
     tokenId: 'permission-handoff-b-new-run',
     toolSessionId: 'tool-tui-handoff-b-closed',
     hostSessionId: 'host-tui-handoff-anchor-closed',
@@ -6701,6 +6938,7 @@ test('provider adapter keeps outbound run anchor locked after attached owner cha
     && fact.messageId === 'msg-anchor-lock-2'), true);
   assert.deepEqual(pendingRecords, [{
     kind: 'permission',
+    source: 'outbound',
     tokenId: 'permission-anchor-lock-1',
     toolSessionId: 'tool-tui-anchor-a',
     hostSessionId: 'host-tui-anchor-lock',
