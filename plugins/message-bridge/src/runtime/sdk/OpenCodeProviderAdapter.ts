@@ -492,6 +492,14 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     return Boolean(this.activeRuns.getHeadByHostSession(hostSessionId));
   }
 
+  /**
+   * registry pending 状态变化通知入口。
+   * @remarks 只用于恢复 active run final idle gate，不承载通用事件分发语义。
+   */
+  notifyRunPendingChanged(input: { hostSessionId: string; runId: string }): void {
+    this.activeRuns.notifyRunPendingChanged(input);
+  }
+
   private createActiveRunHandle(
     anchorSessionId: string,
     runId: string,
@@ -504,6 +512,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       initialTrackingSessionId: hostSessionId,
       logger: this.logger,
       ...(this.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: this.finalIdleTimeoutMs } : {}),
+      canFinalIdleTimeout: (input) => !this.pendingInteractionRecorder?.hasPendingForRun?.(input),
       onCleanup: (cleanup) => {
         this.cleanupActiveRunState(cleanup);
       },
@@ -567,6 +576,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       if (fact.type === 'question.ask') {
         recorder.record({
           kind: 'question',
+          source: 'outbound',
           tokenId: fact.questionId,
           toolSessionId: factSessionContext.anchorSessionId,
           hostSessionId,
@@ -575,6 +585,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       if (fact.type === 'permission.ask') {
         recorder.record({
           kind: 'permission',
+          source: 'outbound',
           tokenId: fact.permissionId,
           toolSessionId: factSessionContext.anchorSessionId,
           hostSessionId,

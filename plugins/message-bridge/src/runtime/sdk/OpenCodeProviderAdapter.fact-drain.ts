@@ -17,6 +17,7 @@ type FactDrainTrackerOptions = {
   logger: BridgeLogger;
   onClosed: () => void;
   canCloseFacts?: () => boolean;
+  canFinalIdleTimeout?: () => boolean;
   onFinalIdleTimeout?: () => void;
   quietPeriodMs?: number;
   drainTimeoutMs?: number;
@@ -176,6 +177,9 @@ export class FactDrainTracker {
     }
     this.finalIdleTimer = setTimeout(() => {
       this.finalIdleTimer = null;
+      if (!this.canFinalIdleTimeoutNow()) {
+        return;
+      }
       this.options.logger.warn('provider_adapter.protocol_diagnostic', {
         toolSessionId: this.options.anchorSessionId,
         runId: this.options.runId,
@@ -197,6 +201,10 @@ export class FactDrainTracker {
 
   private canCloseFactsNow(): boolean {
     return this.options.canCloseFacts?.() ?? true;
+  }
+
+  private canFinalIdleTimeoutNow(): boolean {
+    return this.options.canFinalIdleTimeout?.() ?? true;
   }
 
   private closeTimers(): void {

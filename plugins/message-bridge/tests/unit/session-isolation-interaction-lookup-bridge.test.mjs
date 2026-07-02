@@ -12,15 +12,6 @@ class MemoryPendingInteractionRegistry {
     return { ok: true };
   }
 
-  consume(input) {
-    const key = `${input.kind}:${input.tokenId}`;
-    const record = this.records.get(key);
-    if (record) {
-      this.records.delete(key);
-    }
-    return record;
-  }
-
   peek(input) {
     return this.records.get(`${input.kind}:${input.tokenId}`);
   }
@@ -107,6 +98,7 @@ describe('PendingInteractionLookupBridge', () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-1',
       toolSessionId: 'tool-1',
       hostSessionId: 'ses-1',
@@ -128,6 +120,7 @@ describe('PendingInteractionLookupBridge', () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'permission',
+      source: 'outbound',
       tokenId: 'p-1',
       toolSessionId: 'tool-1',
       hostSessionId: 'ses-1',
@@ -166,6 +159,7 @@ describe('PendingInteractionLookupBridge', () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-without-binding',
       toolSessionId: 'tool-missing-binding',
       hostSessionId: 'ses-missing-binding',
@@ -189,6 +183,7 @@ describe('PendingInteractionLookupBridge', () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository } = createBridge();
     pendingInteractionRegistry.register({
       kind: 'permission',
+      source: 'outbound',
       tokenId: 'p-switched',
       toolSessionId: 'tool-switched',
       hostSessionId: 'ses-original',
@@ -216,6 +211,7 @@ describe('PendingInteractionLookupBridge', () => {
     const { bridge, pendingInteractionRegistry, anchorBindingRepository, listCalls } = createBridgeWithUnusedLegacyQuestionList();
     pendingInteractionRegistry.register({
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-switched',
       toolSessionId: 'tool-switched',
       hostSessionId: 'ses-original',
@@ -244,6 +240,7 @@ describe('PendingInteractionLookupBridge', () => {
     });
     pendingInteractionRegistry.register({
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-once',
       toolSessionId: 'tool-once',
       hostSessionId: 'ses-once',
@@ -265,6 +262,7 @@ describe('PendingInteractionLookupBridge', () => {
   test('returns missing when pending record changes between peek and consumeIfMatch', async () => {
     const original = {
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-race',
       toolSessionId: 'tool-race-original',
       hostSessionId: 'ses-race-original',
@@ -301,6 +299,7 @@ describe('PendingInteractionLookupBridge', () => {
     const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
     const original = {
       kind: 'question',
+      source: 'outbound',
       tokenId: 'q-match',
       toolSessionId: 'tool-original',
       hostSessionId: 'ses-original',

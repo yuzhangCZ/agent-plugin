@@ -542,6 +542,7 @@ export class ProviderEventCoordinator {
       translation.facts,
       routingState.factSessionContext,
       routingState.resolution.hostSessionId,
+      routingState.activeRun.runId,
     );
     routingState.activeRun.pushFacts(translation);
     this.dependencies.logger.debug?.('provider_adapter.event.routed_to_active_run', {
@@ -666,6 +667,7 @@ export class ProviderEventCoordinator {
     facts: { type: string }[],
     factSessionContext: FactSessionContext,
     hostSessionId: string,
+    runId: string,
   ): void {
     const recorder = this.dependencies.pendingInteractionRecorder;
     if (!recorder) {
@@ -677,9 +679,11 @@ export class ProviderEventCoordinator {
         if (typeof questionId === 'string' && questionId.trim().length > 0) {
           recorder.record({
             kind: 'question',
+            source: 'active_run',
             tokenId: questionId,
             toolSessionId: factSessionContext.anchorSessionId,
             hostSessionId,
+            runId,
           });
         }
       }
@@ -688,9 +692,11 @@ export class ProviderEventCoordinator {
         if (typeof permissionId === 'string' && permissionId.trim().length > 0) {
           recorder.record({
             kind: 'permission',
+            source: 'active_run',
             tokenId: permissionId,
             toolSessionId: factSessionContext.anchorSessionId,
             hostSessionId,
+            runId,
           });
         }
       }

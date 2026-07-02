@@ -213,7 +213,11 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       filePath: sessionIsolationStorePath,
       diagnostics: sessionIsolationDiagnostics,
     });
-    const pendingInteractionRegistry = new RuntimePendingInteractionRegistry();
+    const pendingInteractionRegistry = new RuntimePendingInteractionRegistry({
+      onRunPendingChanged: (input) => {
+        this.providerAdapter?.notifyRunPendingChanged(input);
+      },
+    });
     const sessionIsolationControlPlane = createSessionIsolationControlPlane({
       akScopeKey: config.auth.ak,
       bindingStore,

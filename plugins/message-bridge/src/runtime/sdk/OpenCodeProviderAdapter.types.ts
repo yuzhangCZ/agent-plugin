@@ -131,15 +131,27 @@ export interface TranslationObservationPort {
 /**
  * 待用户交互记录端口。
  * @remarks
- * question/permission fact 成功路由到 active run 后记录 reply token 与宿主会话的关系。
+ * question/permission fact 成功路由后记录 reply token 与宿主会话的关系；active run 记录必须携带 runId 供 timeout gate 查询。
  */
+type PendingInteractionRecordBase = {
+  kind: 'question' | 'permission';
+  tokenId: string;
+  toolSessionId: string;
+  hostSessionId: string;
+};
+
+export type PendingInteractionRecorderInput =
+  | (PendingInteractionRecordBase & {
+      source: 'active_run';
+      runId: string;
+    })
+  | (PendingInteractionRecordBase & {
+      source: 'outbound';
+    });
+
 export interface PendingInteractionRecorderPort {
-  record(input: {
-    kind: 'question' | 'permission';
-    tokenId: string;
-    toolSessionId: string;
-    hostSessionId: string;
-  }): void;
+  record(input: PendingInteractionRecorderInput): void;
+  hasPendingForRun?(input: { hostSessionId: string; runId: string }): boolean;
 }
 
 /**
