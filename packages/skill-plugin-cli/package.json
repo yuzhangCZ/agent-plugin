@@ -1,6 +1,6 @@
 {
   "name": "@wecode/skill-plugin-cli",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "skill-plugin-cli": "./dist/cli.js"
