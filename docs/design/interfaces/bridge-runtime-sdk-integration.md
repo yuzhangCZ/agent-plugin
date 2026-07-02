@@ -40,46 +40,49 @@ npm install @wecode/bridge-runtime-sdk
 
 ## 2.1 Changelog
 
-### 2026-06-22
+changelog 条目统一使用 `feat:`、`fix:`、`docs:` 前缀；真实 public contract 破坏性变更使用 `!` 标记。
 
-- `QrCodeAuthSnapshot` 的 `confirmed` 事件新增 `assistantInfo` 字段，携带助理 `name`、`nameEn`、`desc`、`descEn` 基础信息；服务端字段缺失时 SDK 统一补为空字符串。
+### 2026-07-02 (1.0.4-beta)
+
+- feat: 补充 slash command 查询/上报接口说明，明确 Provider 通过 `listSlashCommands(input)` 返回当前可用命令列表。
+- feat: `QrCodeAuthSnapshot` 的 `confirmed` 事件新增 `assistantInfo` 字段，携带助理 `name`、`nameEn`、`desc`、`descEn` 基础信息；服务端字段缺失时 SDK 统一补为空字符串。
 
 ### 2026-06-16 （1.0.3-beta）
 
-- 所有 Provider fact 类型移除 `toolSessionId` 字段；该字段由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
-- 所有 Provider fact 类型新增 `subagentSessionId?` 和 `subagentName?` 可选字段（继承自 `ProviderFactBase`）。
-- `BridgeRuntimeStatusSnapshot` 新增 `error?: BridgeRuntimeError` 字段。
-- 新增 `BridgeRuntimeError` 和 `BridgeRuntimeErrorCode` 类型说明。
-- `ProviderRunMessageInput.context` 移除 `imGroupId` 字段；SDK 不向 Provider 透传该字段。
-- 修正所有 `toolSessionId` 字段说明：明确其代表 welink 会话标识，不代表宿主 agent session ID。
-- 新增 8.10 小节：`toolSessionId` 与 agent session 映射约束说明。
-- 8.5 标识符约束：补充 `toolSessionId`、`messageId`、`partId` 格式建议（`ses_`、`msg_`、`prt_` 前缀 + UUID）。
-- 5.4 和第 7 节时序图：体现一轮 run 可返回多个 message，每个 message 拥有独立 `messageId`。
-- 修正 8.4、9.1、9.2、9.3 示例代码：移除 fact 中多余的 `toolSessionId` 字段，示例 ID 改用前缀 + UUID 格式。
-- 5.4 时序图补充契约约束：`result()` 必须在 facts 流结束后 resolve。
-- 5.8 新增中断时序图：体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
-- 重写 9.1 最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
-- 9.4 常见错误用法：补充 `result()` 提前 resolve 和中断后未 resolve 两条。
-- 8.5 标识符语义：补充 `messageId` 与 `partId` 的层级关系和区别说明。
-- 5.3 `createSession`：补充触发时机和映射说明。
+- fix!: 所有 Provider fact 类型移除 `toolSessionId` 字段；该字段由 runtime 从 run 上下文注入，不属于 Provider 构造 fact 时的输入。
+- feat: 所有 Provider fact 类型新增 `subagentSessionId?` 和 `subagentName?` 可选字段（继承自 `ProviderFactBase`）。
+- feat: `BridgeRuntimeStatusSnapshot` 新增 `error?: BridgeRuntimeError` 字段。
+- docs: 新增 `BridgeRuntimeError` 和 `BridgeRuntimeErrorCode` 类型说明。
+- fix!: `ProviderRunMessageInput.context` 移除 `imGroupId` 字段；SDK 不向 Provider 透传该字段。
+- fix: 修正所有 `toolSessionId` 字段说明：明确其代表 welink 会话标识，不代表宿主 agent session ID。
+- docs: 新增 `toolSessionId` 与 agent session 映射约束说明。
+- docs: 补充标识符约束：`toolSessionId`、`messageId`、`partId` 格式建议（`ses_`、`msg_`、`prt_` 前缀 + UUID）。
+- docs: 补充 request run 时序图，体现一轮 run 可返回多个 message，每个 message 拥有独立 `messageId`。
+- fix: 修正文本流规则和示例代码：移除 fact 中多余的 `toolSessionId` 字段，示例 ID 改用前缀 + UUID 格式。
+- docs: 补充 request run 时序约束：`result()` 必须在 facts 流结束后 resolve。
+- docs: 新增中断时序图，体现 `abortSession` 后 Provider 必须手动 resolve `result()` 为 `aborted`。
+- docs: 重写最小 Provider 示例：使用 deferred Promise 模式，体现 `result()` 收口和中止时手动 resolve。
+- docs: 常见错误用法补充 `result()` 提前 resolve 和中断后未 resolve 两条。
+- docs: 补充标识符语义：`messageId` 与 `partId` 的层级关系和区别说明。
+- docs: 补充 `createSession` 触发时机和映射说明。
 
 ### 2026-06-15
 
-- `RuntimeOutboundEmitter` 新增方法 `emitOutboundRun(input)`，用于发送带 run 标识的主动 facts 流。
-- 新增 `EmitOutboundRunInput` 入参类型，字段包含 `toolSessionId`、`runId`、`trigger`、`facts`。
-- `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
-- Breaking change: `ToolUpdateFact.input` 从 `string` 改为 `Record<string, unknown>`；集成方必须传入 JSON 对象，不能传字符串、数组、`null`、数字或布尔值。
+- feat: `RuntimeOutboundEmitter` 新增方法 `emitOutboundRun(input)`，用于发送带 run 标识的主动 facts 流。
+- feat: 新增 `EmitOutboundRunInput` 入参类型，字段包含 `toolSessionId`、`runId`、`trigger`、`facts`。
+- docs: `RuntimeOutboundEmitter.emitOutboundMessage(input)` 标记为废弃；新接入应使用 `emitOutboundRun(input)`。
+- fix!: `ToolUpdateFact.input` 从 `string` 改为 `Record<string, unknown>`；集成方必须传入 JSON 对象，不能传字符串、数组、`null`、数字或布尔值。
 
 ### 2026-06-02 （1.0.2-beta）
 
-- Breaking change: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
-- 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
+- fix!: `BridgeGatewayHostConfig.register.toolType` 改为 `BridgeGatewayHostConfig.register.channel`，表示接入方声明的业务渠道标识。
+- fix!: 不保留 `register.toolType` 兼容入口；集成方必须改用 `register.channel`。
 
 ### 2026-06-01 （1.0.1-beta）
 
-- `PermissionAskFact`: `permissionType?: string` -> `permType: string`
-- `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
-- `PermissionReplyFact`: `messageId, partId` 移除
+- fix!: `PermissionAskFact`: `permissionType?: string` -> `permType: string`
+- fix!: `PermissionReplyFact`: `permissionType?: string` -> `permType?: string`
+- fix!: `PermissionReplyFact`: `messageId, partId` 移除
 
 ## 3. 稳定导出概览
 
@@ -383,7 +386,49 @@ async createSession() {
 
 - `toolSessionId` 不等同于 agent session ID，Provider 需自行维护映射（见 8.10）。
 
-### 5.4 `runMessage(input)`
+### 5.4 `listSlashCommands(input)`
+
+用于查询 Provider 当前可用的 slash command 列表。
+
+| 项目 | 说明 |
+|---|---|
+| 接口名 | `ThirdPartyAgentProvider.listSlashCommands` |
+| 入参 | `ProviderListSlashCommandsInput` |
+| 出参 | `Promise<ProviderListSlashCommandsResult>` |
+| 说明 | 返回可用于 slash command 查询的命令列表。 |
+
+#### 入参类型：`ProviderListSlashCommandsInput`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `traceId` | `string` | 是 | 本次调用 traceId。 |
+| `extParameters` | `ExtParameters` | 否 | 扩展参数；与 `runMessage` 复用同一扩展参数契约。SDK 仅透传，不解释业务语义。 |
+
+#### 出参类型：`ProviderListSlashCommandsResult`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `slashCommands` | `ProviderSlashCommand[]` | 是 | 当前可用的 slash command 列表。 |
+
+#### 嵌套类型：`ProviderSlashCommand`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `command` | `string` | 是 | slash command 命令文本。 |
+| `description` | `string` | 是 | slash command 展示说明。 |
+
+```ts
+async listSlashCommands() {
+  return {
+    slashCommands: [
+      { command: '/new', description: '新建会话' },
+      { command: '/model', description: '切换模型' },
+    ],
+  };
+}
+```
+
+### 5.5 `runMessage(input)`
 
 用于启动一次 request run。
 
@@ -497,7 +542,7 @@ async runMessage(input: ProviderRunMessageInput) {
 }
 ```
 
-### 5.5 `replyQuestion(input)`
+### 5.6 `replyQuestion(input)`
 
 用于应用一次问题回复。
 
@@ -518,7 +563,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示回复已真实应用到底层宿主。
 
-### 5.6 `replyPermission(input)`
+### 5.7 `replyPermission(input)`
 
 用于应用一次权限回复。
 
@@ -539,7 +584,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示回复已真实应用到底层宿主。
 
-### 5.7 `closeSession(input)`
+### 5.8 `closeSession(input)`
 
 用于关闭指定会话。
 
@@ -559,7 +604,7 @@ async runMessage(input: ProviderRunMessageInput) {
 
 - 返回 `{ applied: true }` 时，表示关闭操作已真实应用到底层宿主。
 
-### 5.8 `abortSession(input)`
+### 5.9 `abortSession(input)`
 
 用于中止指定执行或会话。
 
@@ -606,7 +651,7 @@ sequenceDiagram
 - Provider 收到 `abortSession()` 后，必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
 - `abortSession()` 返回 `{ applied: true }` 只表示中断请求已接收，不代表 `result()` 已 resolve；终态仍以 `result()` 为准。
 
-### 5.9 `dispose()`
+### 5.10 `dispose()`
 
 用于在 Runtime 停止时执行清理。
 
@@ -619,7 +664,7 @@ sequenceDiagram
 
 - 该接口为可选实现。
 
-### 5.10 `RuntimeOutboundEmitter`
+### 5.11 `RuntimeOutboundEmitter`
 
 Runtime 注入到 Provider 的主动发送出口。
 
@@ -642,7 +687,7 @@ export interface RuntimeOutboundEmitter {
 - outbound 只用于 request run 之外的主动消息。
 - 集成方不得用 outbound 代替 `runMessage()` 的正常回复路径。
 
-### 5.11 `emitOutboundMessage(input)`
+### 5.12 `emitOutboundMessage(input)`
 
 用于发送 outbound 事实流。
 
@@ -678,7 +723,7 @@ await context.outbound.emitOutboundMessage({
 });
 ```
 
-### 5.12 `emitOutboundRun(input)`
+### 5.13 `emitOutboundRun(input)`
 
 用于发送一轮带 run 标识的主动 facts 流。
 
@@ -1136,6 +1181,10 @@ export class DemoProvider implements ThirdPartyAgentProvider {
 
   async createSession() {
     return { toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000' };
+  }
+
+  async listSlashCommands() {
+    return { slashCommands: [] };
   }
 
   async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
