@@ -482,7 +482,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(commandResult.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'APIError: provider failed statusCode=429',
+      errorMessage: 'APIError. provider failed statusCode=429',
       errorDetails: {
         name: 'APIError',
         message: 'provider failed',
@@ -987,7 +987,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(result.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'APIError: model backend failed statusCode=429',
+      errorMessage: 'APIError. model backend failed statusCode=429',
       errorDetails: {
         name: 'APIError',
         message: 'model backend failed',
@@ -1038,7 +1038,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(result.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'APIError: legacy backend failed statusCode=429',
+      errorMessage: 'APIError. legacy backend failed statusCode=429',
       errorDetails: {
         name: 'APIError',
         message: 'legacy backend failed',
@@ -1089,7 +1089,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(result.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'StructuredOutputError: json schema validation failed',
+      errorMessage: 'StructuredOutputError. json schema validation failed',
       errorDetails: {
         name: 'StructuredOutputError',
         message: 'json schema validation failed',
@@ -1137,7 +1137,7 @@ describe('OpencodeSessionGatewayAdapter.promptSession', () => {
     assert.deepStrictEqual(result.data.terminal, {
       kind: 'failed',
       errorCode: 'internal_error',
-      errorMessage: 'UnknownError: temporary failure',
+      errorMessage: 'UnknownError. temporary failure',
       errorDetails: {
         name: 'UnknownError',
         message: 'temporary failure',

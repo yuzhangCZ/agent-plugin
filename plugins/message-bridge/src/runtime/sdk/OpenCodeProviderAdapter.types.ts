@@ -177,8 +177,8 @@ export interface PartKindStorePort {
 /**
  * 单次 raw event 翻译所需的上下文。
  */
-export type TranslationContext = {
-  event: BridgeEvent;
+export type TranslationContext<TEvent extends BridgeEvent = BridgeEvent> = {
+  event: TEvent;
   factSessionContext: FactSessionContext;
   assistantMessageState: AssistantMessageStateStorePort;
   partKindState: PartKindStorePort;
