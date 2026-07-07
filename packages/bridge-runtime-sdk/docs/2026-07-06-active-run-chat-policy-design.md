@@ -506,7 +506,40 @@ const runtime = await createBridgeRuntime({
 });
 ```
 
-### 3.6 实现清单
+### 3.6 宿主接入策略
+
+第一阶段不建议所有宿主统一开启 `providerManaged`。`activeRunChatMode` 应由宿主装配层按 provider adapter 的真实调度能力选择。
+
+| 宿主 | 策略 | 选择原因 | 影响与要求 |
+|---|---|---|---|
+| OpenCode / `plugins/message-bridge` | 显式配置 `providerManaged` | OpenCode adapter 已有 opencode session 级 run queue、superseded run 收口和 abort 协调，能承接同会话多次 `runMessage`。 | 新 chat 可在 active run 期间进入 provider；宿主侧继续负责排队、替换、abort 和输出可消费性 |
+| OpenClaw / `plugins/message-bridge-openclaw` | 保持默认 `reject`，或显式配置 `reject` | OpenClaw adapter 当前按 `sessionKey` 维护单 active run；放开并发会让新 run 覆盖旧 run 输出边界。 | 不放开 active run 期间新 chat，避免旧 run 输出归属、abort 定位和 terminal 收口被覆盖 |
+
+OpenCode 的装配层应在调用 `createBridgeRuntime` 时显式传入：
+
+```ts
+requestRunPolicy: {
+  activeRunChatMode: 'providerManaged',
+}
+```
+
+OpenClaw 第一阶段不需要传 `requestRunPolicy`，依赖 SDK 默认 `reject` 即可。若为了配置可读性选择显式传入，也应使用：
+
+```ts
+requestRunPolicy: {
+  activeRunChatMode: 'reject',
+}
+```
+
+如果后续希望 OpenClaw 开启 `providerManaged`，需要先支持同一 `sessionKey` 下多个 active run 的输出边界，并明确 `abortSession(runIds)` 的中止范围。
+
+选择逻辑总结：
+
+1. `providerManaged` 是 provider adapter 能力开关，不是宿主类型开关。
+2. OpenCode 已有运行中输入调度能力，适合开启。
+3. OpenClaw 仍是单 active run 输出边界，第一阶段保持 `reject`。
+
+### 3.7 实现清单
 
 | 模块/目录/文件 | 改动类型 | 职责 | 关键说明 |
 |---|---|---|---|
@@ -516,14 +549,19 @@ const runtime = await createBridgeRuntime({
 | `src/infrastructure/registries/InMemorySessionRuntimeRegistry.ts` | 修改 | 内存状态实现 | per-`toolSessionId` 维护 active run set |
 | `src/application/usecases/StartRequestRunUseCase.ts` | 修改 | request run 启动策略 | 根据 policy 决定 reject 或 provider managed |
 | `src/application/usecases/AbortExecutionUseCase.ts` | 修改 | abort 语义 | 根据 active run set 生成 `runIds: string[]` |
+| `plugins/message-bridge/src/runtime/SdkBridgeRuntime.ts` | 修改 | OpenCode 装配策略 | 显式配置 `requestRunPolicy.activeRunChatMode = 'providerManaged'` |
+| `plugins/message-bridge-openclaw/src/OpenClawGatewayBridge.ts` | 不改或显式配置 | OpenClaw 装配策略 | 第一阶段保持默认 `reject`；如显式配置也只能配置为 `reject` |
 | `tests/runtime-sdk.test.ts` | 修改 | runtime 行为测试 | 覆盖默认、providerManaged、多 run settle、abort |
 | `tests/public-api-contract.test.ts` | 修改 | public API contract | 覆盖新增配置类型和非法配置值拒绝 |
+| `plugins/message-bridge/tests/unit/*` | 修改 | OpenCode 接入测试 | 覆盖 OpenCode runtime options 显式传入 `providerManaged` |
+| `plugins/message-bridge-openclaw/tests/unit/*` | 修改 | OpenClaw 接入测试 | 覆盖 OpenClaw runtime options 未开启或显式保持 `reject` |
 
-### 3.7 未确认项
+### 3.8 未确认项
 
 | 未确认项 | 影响范围 | 当前默认假设 | 需要谁确认 |
 |---|---|---|---|
-| provider 是否能保证同会话输出可消费性 | `providerManaged` 接入风险 | 开启方自行确认，SDK 只通过 contract 和 diagnostics 提醒 | 宿主插件维护者 |
+| OpenCode 输出可消费性是否满足产品验收 | `providerManaged` 接入风险 | 基于现有 host session FIFO 和 superseded run 收口能力，第一阶段建议开启 | `plugins/message-bridge` 维护者 |
+| OpenClaw 何时支持多 active run | OpenClaw 后续是否能开启 `providerManaged` | 第一阶段不支持，保持 `reject` | `plugins/message-bridge-openclaw` 维护者 |
 
 ## 4. 性能
 
@@ -564,7 +602,8 @@ const runtime = await createBridgeRuntime({
 
 | 对象 | 影响说明 | 风险 | 应对策略 |
 |---|---|---|---|
-| OpenCode/OpenClaw provider adapter | 可选择开启 `providerManaged` | 宿主输出不可消费时影响前端 | 开启前确认 provider contract |
+| OpenCode provider adapter | 第一阶段建议开启 `providerManaged` | 宿主输出不可消费时影响前端 | 依赖现有 host session FIFO、superseded run 收口和 abort 能力，并补接入测试 |
+| OpenClaw provider adapter | 第一阶段保持 `reject` | 若误开 `providerManaged`，同 `sessionKey` 多 run 会覆盖本地 active run 索引 | 不传 `requestRunPolicy` 或显式配置 `reject`；待 adapter 支持多 active run 后再评估开启 |
 | provider `abortSession` 实现方 | 若读取过单个 `runId`，需要改为读取 `runIds` | 接口升级后 abort 范围解释不一致 | contract 测试覆盖 `runIds`；迁移文档说明 0/1/多 active run 映射 |
 | gateway/前端 | 可能观察到同会话多 run 输出 | 下游无法区分交错输出 | 第一阶段默认不改变，opt-in 方承担责任 |
 | SDK 文档和发布说明 | 需要说明默认行为和 opt-in 风险 | 接入方误用 | public contract 文档明确适用条件 |
@@ -617,13 +656,14 @@ const runtime = await createBridgeRuntime({
 
 ### 8.3 功能测试（手工验证）
 
-功能测试面向测试人员和宿主插件维护者，用真实或近真实 OpenCode/OpenClaw 环境验证业务体验。
+功能测试面向测试人员，用已配置好的 OpenCode/OpenClaw 环境验证业务体验。这里只描述用户操作、可见结果和验收观察；接口、状态和日志字段等工程断言放在单元测试和集成测试中覆盖。
 
 | 场景 | 操作 | 预期体验 | 观察方式 |
 |---|---|---|---|
-| 默认模式兼容 | 未开启 `providerManaged`，连续发送两条消息 | 第二条被拒绝，第一条继续运行 | 前端提示、gateway 日志、provider 调用次数 |
-| 连续输入可达 | 开启 `providerManaged`，第一轮生成中发送第二条消息 | 第二条消息到达宿主 | 宿主日志、provider adapter 日志 |
-| 生成中纠偏 | 第一轮输出中发送“不是这个方向，改成...” | 宿主按自身队列、打断或合并策略处理 | 前端表现、宿主调度日志 |
-| 宿主自治调度 | 在 OpenCode/OpenClaw 验证排队、打断、合并或取消前序 run | 行为符合宿主预期策略 | 宿主运行日志、用户可见输出 |
-| 多 run 输出可消费 | 制造同会话多 active run 输出 | 前端没有不可理解的输出交错 | 前端展示、gateway uplink 日志 |
-| abort 手工验证 | 0、1、多个 active run 下触发 `abort_session` | provider 收到正确 `runIds`，宿主中止范围符合预期 | provider adapter 日志、宿主运行状态 |
+| 默认模式兼容 | 默认环境下连续发送两条消息 | 第二条提示当前会话忙或被拒绝，第一条继续完成 | 前端提示、用户可见消息流、测试记录 |
+| 连续输入可达 | 支持运行中输入的环境下，第一轮生成中发送第二条消息 | 第二条被系统接收，并进入后续处理 | 前端提示、用户可见消息流、宿主运行日志 |
+| 生成中纠偏 | 第一轮输出中发送“不是这个方向，改成...” | 后续输出体现纠偏结果，或系统给出明确处理结果 | 前端展示、测试记录截图或录屏 |
+| OpenCode 运行中输入体验 | 在 OpenCode 环境连续输入、纠偏、停止并换方向 | 行为符合 OpenCode 产品预期，消息流可理解 | 前端展示、用户可见完成态、宿主运行日志 |
+| OpenClaw 默认拒绝体验 | 在 OpenClaw 环境生成中连续发送第二条消息 | 第二条被明确拒绝，或提示稍后重试 | 前端提示、用户可见消息流 |
+| 多轮输出可消费 | 支持运行中输入的环境下连续触发多轮输出 | 消息顺序、内容归属和完成态对用户可理解 | 前端展示、gateway 消息流记录 |
+| 停止行为验证 | 在无生成、单轮生成、运行中连续输入场景下触发停止 | 输出停止或进入明确终态，不出现悬挂中的会话表现 | 前端完成态、宿主运行日志、测试记录 |
