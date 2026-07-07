@@ -96,6 +96,88 @@ function getPayloadDeltaText(payload: Record<string, unknown>): string {
   return "";
 }
 
+function getOrCreateToolState(state: ActiveRunState, toolCallId: string, toolName: string): ActiveToolState {
+  const existing = state.toolStates.get(toolCallId);
+  if (existing) {
+    return existing;
+  }
+
+  // 同一个 toolCallId 可能多次 update/result；本地状态用于合并 input、output、error。
+  const created: ActiveToolState = {
+    toolCallId,
+    toolName,
+    partId: `tool_${randomUUID()}`,
+    status: "pending",
+  };
+  state.toolStates.set(toolCallId, created);
+  return created;
+}
+
+function getToolTitle(payload: Record<string, unknown>, toolName: string): string {
+  return asTrimmedString(payload.title) ?? asTrimmedString(asRecord(payload.meta)?.summary) ?? toolName;
+}
+
+function mergeToolInput(toolState: ActiveToolState, payload: Record<string, unknown>): void {
+  const directInput = pickToolPayload(payload, ["input", "args"]);
+  if (directInput !== undefined) {
+    toolState.input = directInput;
+  }
+}
+
+function applyToolResultPhase(
+  state: ActiveRunState,
+  toolState: ActiveToolState,
+  toolCallId: string,
+  toolName: string,
+  payload: Record<string, unknown>,
+): void {
+  const isError = payload.isError === true;
+  const directOutput = pickToolPayload(payload, ["output", "result"]);
+  const directError = pickToolPayload(payload, ["error", "result"]);
+
+  toolState.status = isError ? "error" : "completed";
+  toolState.output = !isError && directOutput !== undefined ? directOutput : toolState.output;
+  toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
+  // 后续 dispatcher tool 文本会补到这个 tool call 上。
+  state.pendingToolResultTarget = toolCallId;
+}
+
+function applyToolPhase(context: {
+  state: ActiveRunState,
+  toolState: ActiveToolState,
+  toolCallId: string,
+  toolName: string,
+  phase: string,
+  payload: Record<string, unknown>,
+}): void {
+  const { state, toolState, toolCallId, toolName, phase, payload } = context;
+  if (phase === "result") {
+    applyToolResultPhase(state, toolState, toolCallId, toolName, payload);
+    return;
+  }
+
+  toolState.status = "running";
+}
+
+function enqueueToolUpdateFact(
+  state: ActiveRunState,
+  toolState: ActiveToolState,
+  payload: Record<string, unknown>,
+): void {
+  state.queue.push(buildToolUpdateFact({
+    messageId: state.messageId,
+    partId: toolState.partId,
+    toolCallId: toolState.toolCallId,
+    toolName: toolState.toolName,
+    status: toolState.status,
+    title: toolState.title,
+    ...(toolState.input !== undefined ? { input: toolState.input } : {}),
+    ...(toolState.output !== undefined ? { output: toolState.output } : {}),
+    ...(toolState.error ? { error: toolState.error } : {}),
+    raw: payload,
+  }));
+}
+
 /**
  * OpenClaw 宿主能力到 SDK Provider SPI 的适配层。
  * @remarks
@@ -877,52 +959,19 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     const toolCallId = asTrimmedString(payload.toolCallId) ?? `tool_${randomUUID()}`;
     const toolName = asTrimmedString(payload.name) ?? "tool";
     const phase = asTrimmedString(payload.phase) ?? "update";
-    let toolState = state.toolStates.get(toolCallId);
-    if (!toolState) {
-      // 同一个 toolCallId 可能多次 update/result；本地状态用于合并 input、output、error。
-      toolState = {
-        toolCallId,
-        toolName,
-        partId: `tool_${randomUUID()}`,
-        status: "pending",
-      };
-      state.toolStates.set(toolCallId, toolState);
-    }
-
+    const toolState = getOrCreateToolState(state, toolCallId, toolName);
     toolState.toolName = toolName;
-    toolState.title = asTrimmedString(payload.title) ?? asTrimmedString(asRecord(payload.meta)?.summary) ?? toolName;
-    const directInput = pickToolPayload(payload, ["input", "args"]);
-    if (directInput !== undefined) {
-      toolState.input = directInput;
-    }
-
-    if (phase === "start" || phase === "update") {
-      toolState.status = "running";
-    } else if (phase === "result") {
-      const isError = payload.isError === true;
-      toolState.status = isError ? "error" : "completed";
-      const directOutput = pickToolPayload(payload, ["output", "result"]);
-      const directError = pickToolPayload(payload, ["error", "result"]);
-      toolState.output = !isError && directOutput !== undefined ? directOutput : toolState.output;
-      toolState.error = isError ? (directError ?? `tool_${toolName}_failed`) : undefined;
-      // 后续 dispatcher tool 文本会补到这个 tool call 上。
-      state.pendingToolResultTarget = toolCallId;
-    } else {
-      toolState.status = "running";
-    }
-
-    state.queue.push(buildToolUpdateFact({
-      messageId: state.messageId,
-      partId: toolState.partId,
+    toolState.title = getToolTitle(payload, toolName);
+    mergeToolInput(toolState, payload);
+    applyToolPhase({
+      state,
+      toolState,
       toolCallId,
       toolName,
-      status: toolState.status,
-      title: toolState.title,
-      ...(toolState.input !== undefined ? { input: toolState.input } : {}),
-      ...(toolState.output !== undefined ? { output: toolState.output } : {}),
-      ...(toolState.error ? { error: toolState.error } : {}),
-      raw: payload,
-    }));
+      phase,
+      payload,
+    });
+    enqueueToolUpdateFact(state, toolState, payload);
   }
 
   private handleAssistantAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {

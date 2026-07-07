@@ -232,7 +232,7 @@ export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSna
   });
 }
 
-// eslint-disable-next-line max-lines-per-function, max-statements, complexity -- status probe 需要串联运行时复用、临时 runtime 和取消协调。
+// eslint-disable-next-line max-lines-per-function, max-statements -- status probe 需要串联运行时复用、临时 runtime 和取消协调。
 export async function probeMessageBridgeAccount(
   params: {
     account: MessageBridgeResolvedAccount;

@@ -23,104 +23,148 @@ interface ResolveEffectiveReplyConfigResult {
   malformedConfigPaths: string[];
 }
 
-export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffectiveReplyConfigResult {
+interface ReplyConfigShape {
+  root: Record<string, unknown>;
+  agents: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  channels: Record<string, unknown>;
+  messageBridge: Record<string, unknown>;
+  malformedConfigPaths: string[];
+}
+
+interface StreamingResolution {
+  streamingEnabled: boolean;
+  streamingSource: StreamingSource;
+}
+
+interface StreamDefaultsInjectionPlan {
+  blockStreamingDefault: boolean;
+  blockStreamingBreak: boolean;
+  blockStreamingChunk: boolean;
+  blockStreamingCoalesce: boolean;
+}
+
+function readOptionalRecord(value: unknown, path: string, malformedConfigPaths: string[]): Record<string, unknown> {
+  const record = asRecord(value);
+  if (value !== undefined && !record) {
+    malformedConfigPaths.push(path);
+  }
+  return record ?? {};
+}
+
+function readReplyConfigShape(config: OpenClawConfig): ReplyConfigShape {
   const malformedConfigPaths: string[] = [];
   const root: Record<string, unknown> = asRecord(config) ?? {};
+  const agents = readOptionalRecord(root.agents, "agents", malformedConfigPaths);
+  const defaults = readOptionalRecord(agents.defaults, "agents.defaults", malformedConfigPaths);
+  const channels = readOptionalRecord(root.channels, "channels", malformedConfigPaths);
+  const messageBridge = readOptionalRecord(channels["message-bridge"], "channels.message-bridge", malformedConfigPaths);
 
-  const agentsRaw = root.agents;
-  if (agentsRaw !== undefined && !asRecord(agentsRaw)) {
-    malformedConfigPaths.push("agents");
-  }
-  const agents: Record<string, unknown> = asRecord(agentsRaw) ?? {};
+  return {
+    root,
+    agents,
+    defaults,
+    channels,
+    messageBridge,
+    malformedConfigPaths,
+  };
+}
 
-  const defaultsRaw = agents.defaults;
-  if (defaultsRaw !== undefined && !asRecord(defaultsRaw)) {
-    malformedConfigPaths.push("agents.defaults");
-  }
-  const defaults: Record<string, unknown> = asRecord(defaultsRaw) ?? {};
-
-  const channelsRaw = root.channels;
-  if (channelsRaw !== undefined && !asRecord(channelsRaw)) {
-    malformedConfigPaths.push("channels");
-  }
-  const channels: Record<string, unknown> = asRecord(channelsRaw) ?? {};
-
-  const messageBridgeRaw = channels["message-bridge"];
-  if (messageBridgeRaw !== undefined && !asRecord(messageBridgeRaw)) {
-    malformedConfigPaths.push("channels.message-bridge");
-  }
-  const messageBridge: Record<string, unknown> = asRecord(messageBridgeRaw) ?? {};
-
+function resolveStreamingConfig(
+  messageBridge: Record<string, unknown>,
+  malformedConfigPaths: string[],
+): StreamingResolution {
   const streamingRaw = messageBridge.streaming;
-  let streamingEnabled = true;
-  let streamingSource: StreamingSource = "default_on";
   if (streamingRaw === true) {
-    streamingEnabled = true;
-    streamingSource = "explicit_on";
-  } else if (streamingRaw === false) {
-    streamingEnabled = false;
-    streamingSource = "explicit_off";
-  } else if (streamingRaw !== undefined) {
+    return {
+      streamingEnabled: true,
+      streamingSource: "explicit_on",
+    };
+  }
+  if (streamingRaw === false) {
+    return {
+      streamingEnabled: false,
+      streamingSource: "explicit_off",
+    };
+  }
+  if (streamingRaw !== undefined) {
     malformedConfigPaths.push("channels.message-bridge.streaming");
-  } else {
-    // eslint ignore elseif-without-else
   }
 
+  return {
+    streamingEnabled: true,
+    streamingSource: "default_on",
+  };
+}
+
+function planStreamDefaultsInjection(defaults: Record<string, unknown>): StreamDefaultsInjectionPlan {
+  return {
+    blockStreamingDefault: defaults.blockStreamingDefault === undefined,
+    blockStreamingBreak: defaults.blockStreamingBreak === undefined,
+    blockStreamingChunk: defaults.blockStreamingChunk === undefined,
+    blockStreamingCoalesce: defaults.blockStreamingCoalesce === undefined,
+  };
+}
+
+function hasStreamDefaultsInjection(plan: StreamDefaultsInjectionPlan): boolean {
+  return plan.blockStreamingDefault
+    || plan.blockStreamingBreak
+    || plan.blockStreamingChunk
+    || plan.blockStreamingCoalesce;
+}
+
+function injectStreamDefaults(shape: ReplyConfigShape, plan: StreamDefaultsInjectionPlan): OpenClawConfig {
+  return {
+    ...shape.root,
+    agents: {
+      ...shape.agents,
+      defaults: {
+        ...shape.defaults,
+        ...(plan.blockStreamingDefault ? { blockStreamingDefault: "on" } : {}),
+        ...(plan.blockStreamingBreak ? { blockStreamingBreak: "text_end" } : {}),
+        ...(plan.blockStreamingChunk ? { blockStreamingChunk: { ...DEFAULT_BLOCK_STREAMING_CHUNK } } : {}),
+        ...(plan.blockStreamingCoalesce ? { blockStreamingCoalesce: { ...DEFAULT_BLOCK_STREAMING_COALESCE } } : {}),
+      },
+    },
+    channels: {
+      ...shape.channels,
+      "message-bridge": {
+        ...shape.messageBridge,
+      },
+    },
+  } as OpenClawConfig;
+}
+
+export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffectiveReplyConfigResult {
+  const shape = readReplyConfigShape(config);
+  const { streamingEnabled, streamingSource } = resolveStreamingConfig(shape.messageBridge, shape.malformedConfigPaths);
   if (!streamingEnabled) {
     return {
       streamingEnabled,
       streamingSource,
       effectiveConfig: config,
       streamDefaultsInjected: false,
-      malformedConfigPaths,
+      malformedConfigPaths: shape.malformedConfigPaths,
     };
   }
 
-  const injectBlockStreamingDefault = defaults.blockStreamingDefault === undefined;
-  const injectBlockStreamingBreak = defaults.blockStreamingBreak === undefined;
-  const injectBlockStreamingChunk = defaults.blockStreamingChunk === undefined;
-  const injectBlockStreamingCoalesce = defaults.blockStreamingCoalesce === undefined;
-  const streamDefaultsInjected =
-    injectBlockStreamingDefault ||
-    injectBlockStreamingBreak ||
-    injectBlockStreamingChunk ||
-    injectBlockStreamingCoalesce;
-
+  const injectionPlan = planStreamDefaultsInjection(shape.defaults);
+  const streamDefaultsInjected = hasStreamDefaultsInjection(injectionPlan);
   if (!streamDefaultsInjected) {
     return {
       streamingEnabled,
       streamingSource,
       effectiveConfig: config,
       streamDefaultsInjected: false,
-      malformedConfigPaths,
+      malformedConfigPaths: shape.malformedConfigPaths,
     };
   }
-
-  const effectiveConfig = {
-    ...root,
-    agents: {
-      ...agents,
-      defaults: {
-        ...defaults,
-        ...(injectBlockStreamingDefault ? { blockStreamingDefault: "on" } : {}),
-        ...(injectBlockStreamingBreak ? { blockStreamingBreak: "text_end" } : {}),
-        ...(injectBlockStreamingChunk ? { blockStreamingChunk: { ...DEFAULT_BLOCK_STREAMING_CHUNK } } : {}),
-        ...(injectBlockStreamingCoalesce ? { blockStreamingCoalesce: { ...DEFAULT_BLOCK_STREAMING_COALESCE } } : {}),
-      },
-    },
-    channels: {
-      ...channels,
-      "message-bridge": {
-        ...messageBridge,
-      },
-    },
-  } as OpenClawConfig;
 
   return {
     streamingEnabled,
     streamingSource,
-    effectiveConfig,
+    effectiveConfig: injectStreamDefaults(shape, injectionPlan),
     streamDefaultsInjected: true,
-    malformedConfigPaths,
+    malformedConfigPaths: shape.malformedConfigPaths,
   };
 }

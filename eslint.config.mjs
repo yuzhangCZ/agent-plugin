@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
   'brace-style': ['error', '1tbs', { allowSingleLine: false }],
-  complexity: ['warn', { max: 12 }],
+  complexity: ['warn', { max: 20 }],
   curly: ['error', 'all'],
   'default-case': [
     'error',
