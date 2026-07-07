@@ -212,6 +212,191 @@ function isRuntimeHealthy(
   return nowAt - runtime.lastHeartbeatAt <= GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS * 2 + HEARTBEAT_GRACE_MS;
 }
 
+function toProbeResult(probeResult: Awaited<ReturnType<BridgeRuntime["probe"]>>): MessageBridgeProbeResult {
+  return {
+    ok: probeResult.state === "ready",
+    state: probeResult.state,
+    latencyMs: probeResult.latencyMs,
+    reason: probeResult.reason,
+  };
+}
+
+function createReadyProbeResult(startedAt: number, now: () => number, reason: string): MessageBridgeProbeResult {
+  return {
+    ok: true,
+    state: "ready",
+    latencyMs: elapsedMs(startedAt, now),
+    reason,
+  };
+}
+
+function createCancelledProbeResult(startedAt: number, now: () => number): MessageBridgeProbeResult {
+  return {
+    ok: false,
+    state: "cancelled",
+    latencyMs: elapsedMs(startedAt, now),
+    reason: PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE,
+  };
+}
+
+function logReadyProbeShortCircuit(
+  logger: BridgeLogger,
+  params: {
+    accountId: string;
+    gatewayUrl: string;
+    result: MessageBridgeProbeResult;
+  },
+): void {
+  logger.info("probe.short_circuit.runtime_ready", {
+    accountId: params.accountId,
+    gatewayUrl: params.gatewayUrl,
+    latencyMs: params.result.latencyMs,
+    reason: params.result.reason,
+  });
+}
+
+async function stopProbeRuntime(
+  probeRuntime: BridgeRuntime,
+  logger: BridgeLogger,
+  params: {
+    accountId: string;
+    gatewayUrl: string;
+  },
+): Promise<void> {
+  await probeRuntime.stop().catch((error) => {
+    logger.warn("probe.cancel_teardown_failed", {
+      accountId: params.accountId,
+      gatewayUrl: params.gatewayUrl,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+function resolveRuntimeProbeShortCircuit(params: {
+  activeRuntime?: Pick<BridgeRuntime, "probe">;
+  runtime?: MessageBridgeStatusSnapshot;
+  resourceKey: string;
+  accountId: string;
+  gatewayUrl: string;
+  timeoutMs: number;
+  startedAt: number;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  logger: BridgeLogger;
+}): MessageBridgeProbeResult | Promise<MessageBridgeProbeResult> | null {
+  if (params.activeRuntime) {
+    return params.activeRuntime.probe({ timeoutMs: params.timeoutMs }).then(toProbeResult);
+  }
+
+  const runtimeCoord = getConnectionCoord(params.resourceKey);
+  if (runtimeCoord.runtimePhase === "ready") {
+    const result = createReadyProbeResult(params.startedAt, params.now, "runtime_coord_ready");
+    logReadyProbeShortCircuit(params.logger, { ...params, result });
+    return result;
+  }
+
+  if (runtimeCoord.runtimePhase === "connecting") {
+    return waitForConnectingRuntime(params);
+  }
+
+  if (isRuntimeHealthy(params.runtime, params.startedAt)) {
+    const result = createReadyProbeResult(params.startedAt, params.now, "runtime_snapshot_healthy");
+    logReadyProbeShortCircuit(params.logger, { ...params, result });
+    return result;
+  }
+
+  return null;
+}
+
+async function waitForConnectingRuntime(params: {
+  resourceKey: string;
+  accountId: string;
+  gatewayUrl: string;
+  timeoutMs: number;
+  startedAt: number;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  logger: BridgeLogger;
+}): Promise<MessageBridgeProbeResult> {
+  const waitMs = Math.min(params.timeoutMs, PROBE_RUNTIME_WAIT_CAP_MS);
+  params.logger.info("probe.wait_runtime.started", {
+    accountId: params.accountId,
+    gatewayUrl: params.gatewayUrl,
+    waitMs,
+  });
+  await params.sleep(waitMs);
+  const afterWaitCoord = getConnectionCoord(params.resourceKey);
+  params.logger.info("probe.wait_runtime.completed", {
+    accountId: params.accountId,
+    gatewayUrl: params.gatewayUrl,
+    waitMs,
+    runtimePhase: afterWaitCoord.runtimePhase,
+  });
+  if (afterWaitCoord.runtimePhase === "ready") {
+    const result = createReadyProbeResult(params.startedAt, params.now, "runtime_connected_after_wait");
+    logReadyProbeShortCircuit(params.logger, { ...params, result });
+    return result;
+  }
+
+  const result = {
+    ok: false,
+    state: "connecting",
+    latencyMs: elapsedMs(params.startedAt, params.now),
+    reason: "runtime_connecting_probe_skipped",
+  } satisfies MessageBridgeProbeResult;
+  params.logger.warn("probe.short_circuit.runtime_connecting", {
+    accountId: params.accountId,
+    gatewayUrl: params.gatewayUrl,
+    latencyMs: result.latencyMs,
+    reason: result.reason,
+  });
+  return result;
+}
+
+async function probeWithTemporaryRuntime(params: {
+  account: MessageBridgeResolvedAccount;
+  accountId: string;
+  gatewayUrl: string;
+  resourceKey: string;
+  timeoutMs: number;
+  startedAt: number;
+  now: () => number;
+  logger: BridgeLogger;
+  createRuntime: ProbeRuntimeFactory;
+  connectionFactory?: ProbeConnectionFactory;
+  registerMetadata: RegisterMetadata;
+}): Promise<MessageBridgeProbeResult> {
+  const { abortController } = beginProbeConnect(params.resourceKey, params.now);
+  let probeRuntime: BridgeRuntime | null = null;
+  // runtime 正在启动时会取消临时 probe；取消到达后必须停止已创建的临时 runtime，避免并发连接残留。
+  const abortProbe = () => {
+    if (!probeRuntime) {
+      return;
+    }
+    void stopProbeRuntime(probeRuntime, params.logger, params);
+  };
+
+  abortController.signal.addEventListener("abort", abortProbe, { once: true });
+  try {
+    const runtimeOptions = withOptionalConnectionFactory({
+      provider: probeProvider,
+      gatewayHost: buildBridgeGatewayHostConfig(params.account, params.registerMetadata),
+      logger: params.logger,
+      debug: params.account.debug,
+    }, params.connectionFactory);
+    probeRuntime = await params.createRuntime(runtimeOptions as Parameters<typeof params.createRuntime>[0]);
+    if (abortController.signal.aborted) {
+      await stopProbeRuntime(probeRuntime, params.logger, params);
+      return createCancelledProbeResult(params.startedAt, params.now);
+    }
+
+    return toProbeResult(await probeRuntime.probe({ timeoutMs: params.timeoutMs }));
+  } finally {
+    abortController.signal.removeEventListener("abort", abortProbe);
+    finishProbeConnect(params.resourceKey, abortController);
+  }
+}
+
 export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSnapshot {
   return createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID, {
     connected: false,
@@ -232,7 +417,11 @@ export function createDefaultMessageBridgeRuntimeState(): MessageBridgeStatusSna
   });
 }
 
-// eslint-disable-next-line max-lines-per-function, max-statements -- status probe 需要串联运行时复用、临时 runtime 和取消协调。
+/**
+ * 探测 message-bridge 账号当前是否可连接。
+ * @remarks
+ * 优先复用正在运行的 runtime 或协调器快照；只有没有可信运行态时才创建临时 runtime，避免 probe 与正式启动抢同一条连接。
+ */
 export async function probeMessageBridgeAccount(
   params: {
     account: MessageBridgeResolvedAccount;
@@ -257,158 +446,48 @@ export async function probeMessageBridgeAccount(
   const accountId = params.account.accountId;
   const gatewayUrl = params.account.gateway.url;
   const resourceKey = buildMessageBridgeResourceKey(params.account);
-  const runtimeCoord = getConnectionCoord(resourceKey);
   logger.info("probe.requested", {
     accountId,
     gatewayUrl,
     timeoutMs: params.timeoutMs,
-    runtimePhase: runtimeCoord.runtimePhase,
+    runtimePhase: getConnectionCoord(resourceKey).runtimePhase,
     runtimeConnected: runtime?.connected ?? false,
     lastReadyAt: runtime?.lastReadyAt ?? null,
     lastHeartbeatAt: runtime?.lastHeartbeatAt ?? null,
   });
 
-  if (params.activeRuntime) {
-    const probeResult = await params.activeRuntime.probe({ timeoutMs: params.timeoutMs });
-    return {
-      ok: probeResult.state === "ready",
-      state: probeResult.state,
-      latencyMs: probeResult.latencyMs,
-      reason: probeResult.reason,
-    };
-  }
-
-  if (runtimeCoord.runtimePhase === "ready") {
-    const result = {
-      ok: true,
-      state: "ready",
-      latencyMs: elapsedMs(startedAt, now),
-      reason: "runtime_coord_ready",
-    } satisfies MessageBridgeProbeResult;
-    logger.info("probe.short_circuit.runtime_ready", {
-      accountId,
-      gatewayUrl,
-      latencyMs: result.latencyMs,
-      reason: result.reason,
-    });
-    return result;
-  }
-
-  if (runtimeCoord.runtimePhase === "connecting") {
-    const waitMs = Math.min(params.timeoutMs, PROBE_RUNTIME_WAIT_CAP_MS);
-    logger.info("probe.wait_runtime.started", {
-      accountId,
-      gatewayUrl,
-      waitMs,
-    });
-    await sleep(waitMs);
-    const afterWaitCoord = getConnectionCoord(resourceKey);
-    logger.info("probe.wait_runtime.completed", {
-      accountId,
-      gatewayUrl,
-      waitMs,
-      runtimePhase: afterWaitCoord.runtimePhase,
-    });
-    if (afterWaitCoord.runtimePhase === "ready") {
-      const result = {
-        ok: true,
-        state: "ready",
-        latencyMs: elapsedMs(startedAt, now),
-        reason: "runtime_connected_after_wait",
-      } satisfies MessageBridgeProbeResult;
-      logger.info("probe.short_circuit.runtime_ready", {
-        accountId,
-        gatewayUrl,
-        latencyMs: result.latencyMs,
-        reason: result.reason,
-      });
-      return result;
-    }
-
-    const result = {
-      ok: false,
-      state: "connecting",
-      latencyMs: elapsedMs(startedAt, now),
-      reason: "runtime_connecting_probe_skipped",
-    } satisfies MessageBridgeProbeResult;
-    logger.warn("probe.short_circuit.runtime_connecting", {
-      accountId,
-      gatewayUrl,
-      latencyMs: result.latencyMs,
-      reason: result.reason,
-    });
-    return result;
-  }
-
-  if (isRuntimeHealthy(runtime, startedAt)) {
-    const result = {
-      ok: true,
-      state: "ready",
-      latencyMs: elapsedMs(startedAt, now),
-      reason: "runtime_snapshot_healthy",
-    } satisfies MessageBridgeProbeResult;
-    logger.info("probe.short_circuit.runtime_ready", {
-      accountId,
-      gatewayUrl,
-      latencyMs: result.latencyMs,
-      reason: result.reason,
-    });
-    return result;
+  // 可信运行态可以直接给出 probe 结果；临时 runtime 只作为最后兜底。
+  const shortCircuitResult = resolveRuntimeProbeShortCircuit({
+    activeRuntime: params.activeRuntime,
+    runtime,
+    resourceKey,
+    accountId,
+    gatewayUrl,
+    timeoutMs: params.timeoutMs,
+    startedAt,
+    now,
+    sleep,
+    logger,
+  });
+  if (shortCircuitResult) {
+    return await shortCircuitResult;
   }
 
   const registerMetadata = resolveRegisterMetadata(logger);
   warnUnknownToolType(logger, registerMetadata.toolType, accountId);
-  const { abortController } = beginProbeConnect(resourceKey, now);
-  let probeRuntime: BridgeRuntime | null = null;
-  const buildCancelledResult = (): MessageBridgeProbeResult => ({
-    ok: false,
-    state: "cancelled",
-    latencyMs: elapsedMs(startedAt, now),
-    reason: PROBE_CANCELLED_FOR_RUNTIME_LIFECYCLE,
+  return await probeWithTemporaryRuntime({
+    account: params.account,
+    accountId,
+    gatewayUrl,
+    resourceKey,
+    timeoutMs: params.timeoutMs,
+    startedAt,
+    now,
+    logger,
+    createRuntime,
+    connectionFactory: deps.connectionFactory,
+    registerMetadata,
   });
-  const abortProbe = () => {
-    if (!probeRuntime) {
-      return;
-    }
-    void probeRuntime.stop().catch((error) => {
-      logger.warn("probe.cancel_teardown_failed", {
-        accountId,
-        gatewayUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  };
-  abortController.signal.addEventListener("abort", abortProbe, { once: true });
-  try {
-    const runtimeOptions = withOptionalConnectionFactory({
-      provider: probeProvider,
-      gatewayHost: buildBridgeGatewayHostConfig(params.account, registerMetadata),
-      logger,
-      debug: params.account.debug,
-    }, deps.connectionFactory);
-    probeRuntime = await createRuntime(runtimeOptions as Parameters<typeof createRuntime>[0]);
-    if (abortController.signal.aborted) {
-      await probeRuntime.stop().catch((error) => {
-        logger.warn("probe.cancel_teardown_failed", {
-          accountId,
-          gatewayUrl,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-      return buildCancelledResult();
-    }
-
-    const probeResult = await probeRuntime.probe({ timeoutMs: params.timeoutMs });
-    return {
-      ok: probeResult.state === "ready",
-      state: probeResult.state,
-      latencyMs: probeResult.latencyMs,
-      reason: probeResult.reason,
-    };
-  } finally {
-    abortController.signal.removeEventListener("abort", abortProbe);
-    finishProbeConnect(resourceKey, abortController);
-  }
 }
 
 // eslint-disable-next-line complexity -- status snapshot 需要兼容 OpenClaw channel account 的多种运行时输入形态。
