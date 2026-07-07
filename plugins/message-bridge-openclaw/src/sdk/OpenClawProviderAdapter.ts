@@ -96,6 +96,7 @@ function getPayloadDeltaText(payload: Record<string, unknown>): string {
   return "";
 }
 
+// tool 事件是增量到达的；这里按 toolCallId 保留跨事件累计态，保证 update/result 可以合并成同一个 part。
 function getOrCreateToolState(state: ActiveRunState, toolCallId: string, toolName: string): ActiveToolState {
   const existing = state.toolStates.get(toolCallId);
   if (existing) {
@@ -117,6 +118,7 @@ function getToolTitle(payload: Record<string, unknown>, toolName: string): strin
   return asTrimmedString(payload.title) ?? asTrimmedString(asRecord(payload.meta)?.summary) ?? toolName;
 }
 
+// 宿主可能用 input 或 args 表达工具入参；只在本次事件提供有效载荷时刷新累计态。
 function mergeToolInput(toolState: ActiveToolState, payload: Record<string, unknown>): void {
   const directInput = pickToolPayload(payload, ["input", "args"]);
   if (directInput !== undefined) {
@@ -142,6 +144,7 @@ function applyToolResultPhase(
   state.pendingToolResultTarget = toolCallId;
 }
 
+// 未识别 phase 仍按 running 处理，保持对宿主新增中间态的兼容。
 function applyToolPhase(context: {
   state: ActiveRunState,
   toolState: ActiveToolState,
@@ -159,6 +162,7 @@ function applyToolPhase(context: {
   toolState.status = "running";
 }
 
+// ProviderFact 是 SDK 边界；入队前统一在这里把累计态投影成标准 tool.update。
 function enqueueToolUpdateFact(
   state: ActiveRunState,
   toolState: ActiveToolState,

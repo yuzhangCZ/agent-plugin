@@ -5,6 +5,7 @@ import tseslint from 'typescript-eslint';
 
 const cleanCodeRules = {
   'brace-style': ['error', '1tbs', { allowSingleLine: false }],
+  // 主源码先以 warning 推进复杂度治理；20 以下允许兼容必要的协议分支。
   complexity: ['warn', { max: 20 }],
   curly: ['error', 'all'],
   'default-case': [

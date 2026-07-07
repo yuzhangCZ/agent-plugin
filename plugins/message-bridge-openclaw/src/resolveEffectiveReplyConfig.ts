@@ -44,6 +44,7 @@ interface StreamDefaultsInjectionPlan {
   blockStreamingCoalesce: boolean;
 }
 
+// OpenClaw 配置来自用户文件，边界上只接受对象；异常形态记录路径后按空对象继续 fail-closed 注入默认值。
 function readOptionalRecord(value: unknown, path: string, malformedConfigPaths: string[]): Record<string, unknown> {
   const record = asRecord(value);
   if (value !== undefined && !record) {
@@ -52,6 +53,7 @@ function readOptionalRecord(value: unknown, path: string, malformedConfigPaths: 
   return record ?? {};
 }
 
+// 将散落在 agents/channels 下的 reply 相关配置收敛成稳定 shape，后续逻辑不再重复做对象收窄。
 function readReplyConfigShape(config: OpenClawConfig): ReplyConfigShape {
   const malformedConfigPaths: string[] = [];
   const root: Record<string, unknown> = asRecord(config) ?? {};
@@ -91,6 +93,7 @@ function resolveStreamingConfig(
     malformedConfigPaths.push("channels.message-bridge.streaming");
   }
 
+  // streaming 字段缺失或格式异常时维持默认开启，避免配置拼写问题直接关闭 reply runtime 流式能力。
   return {
     streamingEnabled: true,
     streamingSource: "default_on",
@@ -113,6 +116,7 @@ function hasStreamDefaultsInjection(plan: StreamDefaultsInjectionPlan): boolean 
     || plan.blockStreamingCoalesce;
 }
 
+// 只补缺失字段，不覆盖用户已显式配置的 block streaming profile。
 function injectStreamDefaults(shape: ReplyConfigShape, plan: StreamDefaultsInjectionPlan): OpenClawConfig {
   return {
     ...shape.root,
@@ -135,6 +139,11 @@ function injectStreamDefaults(shape: ReplyConfigShape, plan: StreamDefaultsInjec
   } as OpenClawConfig;
 }
 
+/**
+ * 解析 OpenClaw reply runtime 的有效配置，并在需要时注入 block streaming 默认值。
+ * @remarks
+ * 该函数是宿主配置进入 runtime reply 路径前的统一边界：既要报告 malformed 路径，也要保证下游拿到可工作的默认配置。
+ */
 export function resolveEffectiveReplyConfig(config: OpenClawConfig): ResolveEffectiveReplyConfigResult {
   const shape = readReplyConfigShape(config);
   const { streamingEnabled, streamingSource } = resolveStreamingConfig(shape.messageBridge, shape.malformedConfigPaths);
