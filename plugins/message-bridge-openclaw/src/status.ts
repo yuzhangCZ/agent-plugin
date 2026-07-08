@@ -212,6 +212,9 @@ function isRuntimeHealthy(
   return nowAt - runtime.lastHeartbeatAt <= GATEWAY_CLIENT_DEFAULT_HEARTBEAT_INTERVAL_MS * 2 + HEARTBEAT_GRACE_MS;
 }
 
+/**
+ * 将 bridge-runtime-sdk 的 probe 返回值转换成 OpenClaw status 层对外暴露的统一结果。
+ */
 function toProbeResult(probeResult: Awaited<ReturnType<BridgeRuntime["probe"]>>): MessageBridgeProbeResult {
   return {
     ok: probeResult.state === "ready",
@@ -221,6 +224,9 @@ function toProbeResult(probeResult: Awaited<ReturnType<BridgeRuntime["probe"]>>)
   };
 }
 
+/**
+ * 构造无需真实连接的新建结果，用于 runtime 已经 ready 的短路路径。
+ */
 function createReadyProbeResult(startedAt: number, now: () => number, reason: string): MessageBridgeProbeResult {
   return {
     ok: true,
@@ -230,6 +236,9 @@ function createReadyProbeResult(startedAt: number, now: () => number, reason: st
   };
 }
 
+/**
+ * 构造被 runtime 生命周期取消的结果，确保所有取消路径使用同一 reason。
+ */
 function createCancelledProbeResult(startedAt: number, now: () => number): MessageBridgeProbeResult {
   return {
     ok: false,
@@ -239,6 +248,9 @@ function createCancelledProbeResult(startedAt: number, now: () => number): Messa
   };
 }
 
+/**
+ * 统一记录 ready 短路日志，避免多个运行态来源产生不同日志形态。
+ */
 function logReadyProbeShortCircuit(
   logger: BridgeLogger,
   params: {
@@ -255,6 +267,11 @@ function logReadyProbeShortCircuit(
   });
 }
 
+/**
+ * 停止临时 probe runtime，并把清理失败降级为诊断日志。
+ * @remarks
+ * probe 是状态检查，不应因为清理失败覆盖原本的 probe 结果。
+ */
 async function stopProbeRuntime(
   probeRuntime: BridgeRuntime,
   logger: BridgeLogger,
@@ -272,6 +289,11 @@ async function stopProbeRuntime(
   });
 }
 
+/**
+ * 尝试用已有运行态回答 probe 请求。
+ * @remarks
+ * 未命中时必须同步返回 null，不能先 await；否则调用方来不及登记临时 probe 的取消句柄。
+ */
 function resolveRuntimeProbeShortCircuit(params: {
   activeRuntime?: Pick<BridgeRuntime, "probe">;
   runtime?: MessageBridgeStatusSnapshot;
@@ -308,6 +330,11 @@ function resolveRuntimeProbeShortCircuit(params: {
   return null;
 }
 
+/**
+ * runtime 正在连接时短暂等待正式连接完成。
+ * @remarks
+ * 等待时间有上限，避免 status probe 长时间占住调用方；等待后仍未 ready 时返回 connecting。
+ */
 async function waitForConnectingRuntime(params: {
   resourceKey: string;
   accountId: string;
@@ -353,6 +380,11 @@ async function waitForConnectingRuntime(params: {
   return result;
 }
 
+/**
+ * 在没有可信运行态时创建临时 runtime 做真实连接探测。
+ * @remarks
+ * 该路径会登记 ConnectionCoordinator，正式 runtime 启动时可以取消临时 probe，避免同账号并发连接互相干扰。
+ */
 async function probeWithTemporaryRuntime(params: {
   account: MessageBridgeResolvedAccount;
   accountId: string;
