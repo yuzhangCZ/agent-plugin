@@ -35,23 +35,23 @@
 ```mermaid
 flowchart LR
     App["SDK 集成应用"] --> SDK["bridge-runtime-sdk public runtime"]
-    SDK --> Protocol["SDK 协议子模块 gateway-schema"]
-    SDK --> Client["SDK 连接子模块 gateway-client"]
+    SDK --> Protocol["SDK 子模块 gateway-schema"]
+    SDK --> Client["SDK 子模块 gateway-client"]
     Client --> Gateway["服务端 Gateway"]
     Gateway --> Platform["服务平台订阅/版本策略"]
 ```
 
 | 对象 | 负责 | 不负责 |
 |---|---|---|
-| `bridge-runtime-sdk` | 暴露 `register.appId` 配置、自动解析 `sdkVersion`、把握手拒绝映射为 SDK 稳定错误 | 不定义平台订阅业务码 |
-| SDK 协议子模块 | 定义 register 与 `register_rejected` 协议真源 | 不承载 SDK public runtime API |
-| SDK 连接子模块 | 组装 register 报文、处理握手成功/拒绝状态 | 不判断订阅权限 |
-| 服务端 Gateway | 基于平台策略校验 `appId + sdkVersion` 并返回拒绝错误 | 不决定 SDK 本地错误模型 |
-| SDK 集成应用 | 提供平台应用 `appId`，处理 SDK 抛出的错误 | 不传入或覆盖 `sdkVersion` |
+| `bridge-runtime-sdk` | 暴露 `register.appId` 配置、自动解析 `sdkVersion`、把握手拒绝映射为 SDK 稳定错误 | 定义服务端失败异常信息 |
+| 协议子模块 gateway-schema | 定义 register 与 `register_rejected` 协议 | 承载 SDK public runtime API |
+| 连接子模块 gateway-client | 组装 register 报文、处理握手成功/拒绝状态 | 判断订阅权限 |
+| 服务端 Gateway | 基于平台策略校验 `appId + sdkVersion` 并返回拒绝错误 | SDK 本地错误模型 |
+| SDK 集成应用 | 提供平台应用 `appId`，处理 SDK 抛出的错误 | 传入`sdkVersion` |
 
 边界说明：
 
-1. `sdkVersion` 必须由 SDK 自证，集成方不能通过配置覆盖。
+1. `sdkVersion` 集成方不能通过配置覆盖，由sdk内部通过构建打包时注入。
 2. `message-bridge` / `message-bridge-openclaw` 是仓库内特殊宿主，分别在 `register.appId` 写死 `opencode` / `openclaw`；其他集成方按平台应用传入自己的 `appId`。
 3. 服务端业务 `code` 不进入 `BridgeRuntimeError` public contract；SDK 只用 `BridgeRuntimeError.code` 表达稳定错误分类。
 4. `register.appId` 在 public config 中属于 register 握手字段，但语义仍是平台应用身份，不是 `channel`、`toolVersion` 这类宿主元数据。
