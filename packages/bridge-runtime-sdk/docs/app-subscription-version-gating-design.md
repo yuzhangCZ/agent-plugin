@@ -97,9 +97,9 @@ sequenceDiagram
 7. 旧协议只返回 `reason` 时，SDK 仍使用 `reason` 作为错误文案。
 8. 本方案不新增埋码或观测能力；错误信息仅通过现有错误传递路径暴露给应用。
 
-### 3.2 sdkVersion 解析与版本自证
+### 3.2 sdkVersion 解析
 
-`sdkVersion` 是 SDK 自证版本，不开放给集成方配置，也不由插件版本替代。SDK 运行时只读取 `globalThis.__MB_SDK_PACKAGE_VERSION__`，不在运行时直接读取 `package.json`。
+`sdkVersion` 是运行时只读取 `globalThis.__MB_SDK_PACKAGE_VERSION__`，不在运行时直接读取 `package.json`。
 
 ```mermaid
 flowchart TD
@@ -109,19 +109,14 @@ flowchart TD
     PluginBuild --> PluginArtifact["插件发布产物<br/>打包 workspace SDK 源码"]
     SdkArtifact --> Injected["globalThis.__MB_SDK_PACKAGE_VERSION__"]
     PluginArtifact --> Injected
-    Source["源码 / workspace 直接运行<br/>未经过构建注入"] --> Missing["sdkVersion 不可稳定自证"]
-    Injected --> Runtime["SDK runtime 读取注入常量"]
-    Runtime --> Register["register(appId, sdkVersion, ...)"]
-    Missing --> Reject["本地拒绝连接<br/>gateway_connect_parameter_invalid"]
 ```
 
 图示说明：
 
 1. `packages/bridge-runtime-sdk` 自身构建产物由 SDK build 读取 SDK 自身 `package.json.version`，并注入 `globalThis.__MB_SDK_PACKAGE_VERSION__`。
 2. `message-bridge` / `message-bridge-openclaw` 继续通过 workspace 源码依赖 SDK；插件发布构建需要读取 SDK 自身 `package.json.version`，并在插件产物中注入同一个 `globalThis.__MB_SDK_PACKAGE_VERSION__` 常量。
-3. 插件不需要改为引用 SDK dist；插件构建会打包 SDK 源码，版本自证由插件构建注入保证。
-4. 未经过构建注入的源码/workspace 直接运行不属于稳定交付形态，不保证能自证 `sdkVersion`。
-5. 若运行时无法解析 `sdkVersion`，SDK 按本地参数错误 fail-closed，不发起 gateway 连接。
+3. 插件不需要改为引用 SDK dist；插件构建会打包 SDK 源码。
+4. 若运行时无法解析 `sdkVersion`，SDK 按本地参数错误 fail-closed，不发起 gateway 连接。
 
 ### 3.3 接口定义
 
@@ -215,9 +210,6 @@ type RegisterRejectedMessage = {
 |---|---|---|---|
 | 服务端上下行协议改动核对 | 上行 register 字段（含 `appId`、`sdkVersion`、既有工具/设备字段）与下行 `register_ok` / `register_rejected` 结构 | SDK 侧先按本方案统一定义上下行协议变更，落地前需与服务端对齐字段语义、必填性、兼容策略和灰度顺序 | 服务端 Gateway |
 | `opencode` / `openclaw` 应用身份确认 | 仓库内 `message-bridge` / `message-bridge-openclaw` 的固定 `register.appId` | 暂按 `opencode` / `openclaw` 上报，落地前需确认是否为服务平台订阅体系中的正式应用身份 | 服务平台 |
-| 服务端业务 code 命名 | 平台文档和服务端错误响应 | SDK 不枚举，服务端业务 code 不作为 SDK public error contract | 服务平台 |
-| 服务端拒绝响应文案字段必填性 | `register_rejected.message` / 旧 `reason` | SDK 当前保留 `message ?? reason ?? 'gateway_register_rejected'` 兜底；是否要求服务端至少返回一个非空文案需核对后确认 | 服务端 Gateway |
-| 普通集成方 appId 获取方式 | 接入文档 | 由服务平台分配 | 服务平台 |
 
 ## 4. 性能
 
@@ -257,7 +249,6 @@ type RegisterRejectedMessage = {
 |---|---|---|---|
 | 普通 SDK 集成方 | 需要传入平台应用 appId | 升级后缺字段启动失败 | 发布说明和迁移文档 |
 | 服务端 Gateway | 需要支持新 register 字段 | 旧服务端不接受新增 `appId` 或新 `sdkVersion` 必填语义 | 服务端协议先兼容，再灰度发布 SDK |
-| 插件装配测试 | 需要更新测试 fixture | 测试失败 | 同步补齐 appId 与构建注入版本断言 |
 
 ### 7.3 不影响
 
@@ -294,14 +285,13 @@ type RegisterRejectedMessage = {
 
 | 场景 | 操作 | 预期体验 | 观察方式 |
 |---|---|---|---|
-| 已订阅应用连接 | 使用有效应用启动 SDK | 连接成功，功能可用 | 运行记录 |
-| 未订阅应用连接 | 使用未授权 appId 启动 SDK | 连接失败，应用拿到服务端错误文案 | 错误展示或日志 |
-| 下线版本连接 | 使用被平台下线的 SDK 版本启动 | 连接失败，提示版本无效 | 错误展示或日志 |
+| appId已订阅sdk，sdk版本有效| 启动 SDK连接 | 连接成功，功能可用 | 运行记录 |
+| appId已订阅sdk，sdk版本无效/不存在 | 启动sdk连接 | 连接失败，提示版本无效 | 错误展示或日志 |
+| appId未订阅sdk，sdk版本有效 | 启动 SDK连接 | 连接失败，应用拿到服务端错误文案 | 错误展示或日志 |
+| appId未订阅sdk，sdk版本无效 | 启动 SDK连接 | 连接失败，应用拿到服务端错误文案 | 错误展示或日志 |
+｜opencode ｜ 启动连接｜ 连接成功，功能可用｜运行记录|
+｜openclaw ｜ 启动连接｜ 连接成功，功能可用｜运行记录|
 
 ### 8.4 兼容测试
 
-| 测试项 | 兼容维度 | 覆盖来源 | 输入/动作 | 预期结果 |
-|---|---|---|---|---|
-| 旧拒绝协议 | 服务端灰度 | 兼容策略 | 返回 `reason` | SDK message 可读 |
-| source/workspace 引入 | 开发环境 | 版本自证 | 无构建注入 | 不承诺自动解析 `sdkVersion`；需要测试显式注入或走发布构建链路 |
-| 特殊宿主 | 仓库内插件 | 迁移策略 | message-bridge/openclaw 启动 | 分别上报 `opencode/openclaw` |
+无
