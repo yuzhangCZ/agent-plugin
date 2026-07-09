@@ -2,7 +2,7 @@
 
 - 方案日期：`2026-07-06`
 - 目标工程：`packages/bridge-runtime-sdk`
-- 参考文档：`docs/template/design_template.md`、`packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`
+- 参考文档：`docs/template/design_template.md`、`packages/bridge-runtime-sdk/docs/architecture/bridge-runtime-sdk-architecture.md`
 - 方案类型：`SDK runtime 行为变更设计`
 
 ## 1. 背景
