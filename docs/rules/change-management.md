@@ -1,20 +1,31 @@
 # 变更治理规则
 
-**Version:** 1.0
-**Date:** 2026-06-18
+**Version:** 1.1
+**Date:** 2026-07-09
 **Status:** Active
 **Owner:** agent-plugin maintainers
-**Related:** `../../AGENTS.md`, `../operations/pull-request-process.md`, `../operations/local-release-cli.md`, `./documentation.md`, `./testing.md`
 
-本文定义 `agent-plugin` 仓库的长期变更治理规则。PR、发布等详细流程继续由 `docs/operations/` 下的专项文档维护。
+本文定义 `agent-plugin` 仓库的长期变更治理规则。PR、Issue 和兼容性要求以本文为准；发布操作细节继续由 `docs/operations/` 下的专项文档维护。
 
 ## 分支与 PR
 
-1. 当前仓库默认向 `main` 提 PR；本仓库未使用 `canary` 作为日常开发基线。
-2. 提 PR 时必须使用 `.github/PULL_REQUEST_TEMPLATE.md`。
-3. PR 详细流程、字段要求、检查项统一维护在 `docs/operations/pull-request-process.md`。
-4. PR 描述必须写明当前行为、改后行为、变化点、未变化边界、验证证据和剩余风险。
-5. 只暂存本次改动，避免混入无关文件或用户未提交改动。
+1. 从 `main` 切出聚焦分支，建议使用 `codex/<topic>`；本仓库未使用 `canary` 作为日常开发基线。
+2. 只暂存本次改动，避免混入无关文件或用户未提交改动。
+3. 提交前至少运行受影响包测试；涉及 `plugins/`、`packages/` 或 `scripts/` 下的 JS/TS 文件时，还必须运行 `pnpm lint:changed`。
+4. commit 信息必须明确变更范围和目的。
+5. 推送分支后向 `main` 提 PR，并使用 `.github/PULL_REQUEST_TEMPLATE.md`。
+6. PR 描述必须写明当前行为、改后行为、变化点、未变化边界、验证证据和剩余风险。
+7. 主要行为变化必须逐项对应验证证据；未执行的验证必须说明原因。
+
+## PR 预检
+
+创建 PR 前必须确认：
+
+- 变更范围符合仓库边界，未混入无关工作区修改。
+- 受影响测试和 lint 结果可复现。
+- PR 模板字段、行为变化、验证证据和实际 diff 一致。
+- 默认值、兼容性、迁移和回滚影响已显式声明。
+- PR 目标分支为 `main`，或已明确说明例外原因。
 
 ## Issue
 
@@ -45,6 +56,7 @@
 出现以下任一情况时，停止自动执行并先确认：
 
 1. 通用规则与仓库事实冲突。
-2. 找不到模板、脚本或专项流程文档。
-3. 改动涉及默认行为、兼容性、迁移或发布影响，但影响范围不清楚。
-4. 需要在速度和规范完整性之间做取舍。
+2. 找不到模板、脚本或专项流程文档，或模板与现有流程不一致。
+3. 目标分支与默认 `main` 不一致且原因不明确。
+4. 改动涉及默认行为、兼容性、迁移或发布影响，但影响范围或回滚方式不清楚。
+5. 需要在速度和规范完整性之间做取舍。

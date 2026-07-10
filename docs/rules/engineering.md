@@ -1,10 +1,9 @@
 # 代码治理规则
 
-**Version:** 1.0
-**Date:** 2026-06-18
+**Version:** 1.5
+**Date:** 2026-07-09
 **Status:** Active
 **Owner:** agent-plugin maintainers
-**Related:** `../../AGENTS.md`, `./testing.md`, `./change-management.md`
 
 本文定义 `agent-plugin` 仓库的长期代码治理规则。子目录 `AGENTS.md` 可在其作用域内补充更严格规则。
 
@@ -31,14 +30,8 @@
 
 ## 注释规则
 
-1. TypeScript 导出接口、导出类、导出函数默认使用 TSDoc 注释块 `/** ... */`。
-2. 关键流程接口、跨层边界入口、统一发送出口必须补充简洁中文注释，说明职责边界、输入输出语义或 fail-closed 约束。
-3. 优先注释 `facade`、`port`、`validator`、runtime 协作对象、统一发送/校验入口。
-4. 不要求为简单 getter、纯数据字段或显而易见的实现细节补注释。
-5. 注释应解释“为什么这里存在”“边界是什么”“为什么这样做”，避免重复代码字面含义。
-6. 关键分支允许使用 1-2 行中文行注释 `//`，用于说明非直观决策、兼容约束、重连、状态机或 READY gating 等关键行为。
-7. 推荐使用精简 TSDoc 标签：`@remarks`、`@param`、`@returns`、`@throws`、`@deprecated`。
-8. 禁止空洞或翻译式注释，例如“设置变量”“发送消息”“判断状态”。
+设计、实现或评审 TypeScript API 注释时，应参考
+[`tsdoc-comments` skill](../../.agents/skills/tsdoc-comments/SKILL.md) 中的 TSDoc 结构、标签和示例写法。
 
 ## 类型与协议边界
 
@@ -47,12 +40,57 @@
 3. 如果所在包缺少对应 helper，应先补充包内共享工具，再在业务逻辑中引用。
 4. 跨包不要为了复用 type guard 引入反向依赖；各包可保留自己的边界工具，但同一包内必须收敛到一处。
 
+### 外部输入校验
+
+Truthy 判断只能判断 JavaScript 真值，不能证明值是 plain object；字符串、数组和函数等 truthy
+值仍会被放行。用于字段映射时，truthy 判断还会把 `''`、`0`、`false` 与字段缺失混为一谈。
+
+反例：
+
+```ts
+const payload = input.payload ? input.payload : {};
+const record = input.payload as Record<string, unknown>;
+const options =
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+```
+
+正例：
+
+```ts
+// asRecord 代表所在包已有的共享 helper，实际名称以包内实现为准。
+const payload = asRecord(input.payload) ?? {};
+```
+
+需要严格拒绝非法输入时，应使用所在包的 schema 或 validator 返回失败，不得用 `{}` 静默伪装为合法值。
+
+### 可选字段映射
+
+目标契约已将字段声明为可选时，直接传递字段值，不要仅为省略 `undefined` 增加条件对象展开。
+
+反例：
+
+```ts
+const request = {
+  ...(input.assistantId ? { agent: input.assistantId } : {}),
+};
+```
+
+正例：
+
+```ts
+const request = {
+  agent: input.assistantId,
+};
+```
+
+仅当下游明确区分“字段缺失”和“字段值为 `undefined`”，或字段是否存在取决于真实业务条件时，才允许条件展开；
+条件必须表达该语义，不能只做 truthy 判断。
+
 ## 错误处理与 fail-closed
 
-1. 协议边界、provider fact、gateway 状态和 public 输入非法时，默认 fail-closed，不继续投影正常业务消息。
-2. 对外错误要提供稳定分类；diagnostics 可保留排障所需的原始 code/message。
-3. 查询型健康检查或状态查询不应写入失败诊断，除非它表示 runtime 失败事件。
-4. 错误处理不得吞掉可操作上下文；也不得向用户或日志暴露敏感字段原文。
+设计、实现或评审 TypeScript/JavaScript 错误处理时，应参考
+[`error-handling` skill](../../.agents/skills/error-handling/SKILL.md) 中的类型化错误、重试、
+错误边界和用户提示等模式。
 
 ## 日志与脱敏
 

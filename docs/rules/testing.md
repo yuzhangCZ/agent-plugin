@@ -1,12 +1,11 @@
 # 测试治理规则
 
-**Version:** 1.0
-**Date:** 2026-06-18
+**Version:** 1.1
+**Date:** 2026-07-09
 **Status:** Active
 **Owner:** agent-plugin maintainers
-**Related:** `../../AGENTS.md`, `../testing/test-layering.md`, `./engineering.md`
 
-本文定义 `agent-plugin` 仓库的长期测试治理规则。测试分层背景见 `docs/testing/test-layering.md`。
+本文定义 `agent-plugin` 仓库的长期测试治理规则。
 
 ## 基本原则
 
@@ -22,6 +21,8 @@
 | unit | schema、normalizer、状态聚合、session state、纯逻辑 | 真实 host 进程、真实 bundle、真实网络、真实安装目录 |
 | integration | 插件内部协作、fake runtime、fake connection、共享协议 fixture | 真实 OpenClaw 进程、真实安装目录、外部服务栈 |
 | runtime-smoke | bundle 加载、注册、初始化、最小消息流 | 真实安装目录、完整 Redis/MariaDB/ai-gateway 栈 |
+
+runtime-smoke 可使用临时 HOME/workspace、共享 mock gateway、bundle 产物和 OpenClaw CLI，但不得依赖真实安装目录或完整外部服务栈。
 
 `packages/test-support` 只作为内部测试支持包；生产代码不得导入它。
 
