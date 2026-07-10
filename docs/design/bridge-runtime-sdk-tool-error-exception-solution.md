@@ -304,25 +304,72 @@ export type ToolErrorDisplayDecision =
 5. `status_query`、`initialize()`、`dispose()` 不走 `tool_error`，因为它们不属于用户某个 tool session 的命令执行结果。
 6. `listSlashCommands()` 当前失败返回空列表，属于已有产品降级策略；如要变更为 `tool_error` 需单独确认前端展示交互。
 
-### 4.4 Provider API `tool_error` 汇总表
+### 4.4 `tool_error` 场景汇总与缺口
 
-| Provider API / SDK 入口 | 触发来源 | 当前 tool_error 现状 | 现状分类 | 本轮动作 | 新增/改造场景 |
+#### 4.4.1 当前已经结构化为 `tool_error` 的场景
+
+| 场景 | 触发条件 | 当前上报位置 | 当前文案来源 | 是否需要用户感知 | 现状是否合理 | 测试阶段能否验证 |
+|---|---|---|---|---|---|---|
+| invalid invoke | gateway-client 将下行 `invoke` 判为 invalid，且存在 `toolSessionId` 或 `welinkSessionId`，gateway ready | `GatewayInboundPolicy.handle()` 直接构造 `tool_error` | `gateway_invalid_invoke:${code}` | 需要。用户动作无法被 SDK 正常执行 | 基本合理，但不走 command failure 统一 normalizer | 可验证。已有 invalid downstream 行为测试覆盖 diagnostics；建议补充 `tool_error` snapshot |
+| `runMessage()` 返回 `ProviderRun` 前失败 | `invoke.chat` 进入 `StartRequestRunUseCase`，Provider `runMessage()` 抛错 | `attachRuntimeDriverHandlers()` catch -> `CommandFailureToolErrorProjector` | 当前直出 `Error.message` | 需要。用户发送消息后必须知道失败 | 需改造。应映射为 catalog 文案 | 可验证。已有 `request-level command failures stay ready...`，需更新断言 |
+| `createSession()` 失败 | `invoke.create_session` 调用 Provider `createSession()` 抛错 | `attachRuntimeDriverHandlers()` catch -> `CommandFailureToolErrorProjector` | 当前直出 `Error.message`，且不带 `welinkSessionId` | 需要。用户新建会话失败需要感知 | 需改造。文案应规范化；是否回显 `welinkSessionId` 需遵循 schema/前端契约 | 可验证。已有 `create_session command failure...`，需更新断言 |
+| pending question 不存在 | `invoke.question_reply` 找不到 pending question | `InteractionCoordinator` 抛 `RuntimeContractError` -> `CommandFailureToolErrorProjector` | `ToolErrorMessageCatalog.pending_interaction_not_found` | 需要。用户点击的交互已失效 | 合理，已有 catalog 文案 | 可验证。已有 runtime-sdk 测试 |
+| pending permission 不存在 | `invoke.permission_reply` 找不到 pending permission | `InteractionCoordinator` 抛 `RuntimeContractError` -> `CommandFailureToolErrorProjector` | `ToolErrorMessageCatalog.pending_interaction_not_found` | 需要。用户点击的权限确认已失效 | 合理，已有 catalog 文案 | 可验证。已有 runtime-sdk 测试 |
+| 同会话重复 chat | 已有 active request run 时再次 `invoke.chat` | `StartRequestRunUseCase` 抛 `RuntimeContractError('run_already_active')` -> `CommandFailureToolErrorProjector` | `ToolErrorMessageCatalog.run_already_active` | 需要。用户需要知道当前会话忙 | 合理，已有 catalog 文案 | 可验证。已有 runtime-sdk 测试 |
+| request run facts 生命周期失败 | `ProviderRun.facts` 违反顺序或 pending interaction 冲突 | `RequestRunCoordinator` -> `RequestRunFailureToolErrorProjector` | `ToolErrorMessageCatalog.request_run_failed` | 需要。当前请求已失败 | 基本合理，但只处理部分 lifecycle 错误；文案较泛 | 可验证。已有 pending interaction conflict 等测试 |
+| request run terminal failed | `ProviderRun.result()` 返回 `{ outcome: 'failed', error }` | `DefaultRunTerminalSignalProjector` | 当前使用 `ProviderError.message` 或 `provider_run_failed` | 需要。agent 执行失败必须让用户感知 | 需改造。应复用 catalog/normalizer，避免 provider message 直出 | 可验证。已有 terminal `tool_error` 测试 |
+| terminal `session_not_found` reason | `ProviderRun.result().error.code === 'session_not_found'` | `DefaultRunTerminalSignalProjector` | `ProviderError.message` + `reason: session_not_found` | 需要。前端可能据此引导重建会话 | 部分合理；reason 合理，文案仍需规范化 | 可验证。已有 `terminal tool_error carries session_not_found reason...` |
+| outbound run facts 失败 | Provider 调用 `emitOutboundRun()`，facts 生命周期校验失败 | `OutboundCoordinator.emitOutboundRunFailed()` -> `DefaultRunTerminalSignalProjector` | 当前使用原始 error message | 需要。主动消息发送失败需要前端感知或至少终态收口 | 需改造。应走统一 terminal/catalog 文案 | 可验证。已有 `emitOutboundRun emits tool_error...` |
+| outbound pending interaction 冲突 | outbound facts 注册 question/permission 与已有 pending token 冲突 | request/outbound coordinator 触发 lifecycle failure projector | `ToolErrorMessageCatalog.request_run_failed` | 需要。该 outbound/run 已失败 | 基本合理，但文案较泛 | 可验证。已有 question/permission conflict 测试 |
+| outbound validation failure | provider facts 字段非法，例如 `tool.update.output` 非 string | coordinator / validator 记录失败并投影 `tool_error` | `ToolErrorMessageCatalog.request_run_failed` 或原始错误，取决于路径 | 需要。消息生成失败用户应感知 | 需收敛。当前路径和文案不完全统一 | 可验证。已有 runtime-sdk 测试 |
+
+#### 4.4.2 仍缺失或需要改造的场景
+
+| Provider API / SDK 入口 | 缺口 | 是否需要用户感知 | 建议动作 | 新增/改造场景 | 测试阶段能否验证 |
 |---|---|---|---|---|---|
-| `initialize(context)` | `BridgeRuntime.start()` | 无，启动失败通过 `start()` reject / status / diagnostics 暴露 | 不应新增 | 不新增 | 不涉及 |
-| `health(input)` | `status_query` | 无，异常只记录 observation/diagnostics | 不应新增 | 不新增 | 如需前端感知，应新增 `status_error` 类响应，不复用 `tool_error` |
-| `createSession(input)` | `invoke.create_session` | 已有：外层 catch 后生成无 `toolSessionId` 的 `tool_error`，但会直出 `Error.message` | 已有但需改造 | 改造 | provider 抛 `ProviderCommandError` / 普通 `Error` 时回 catalog 文案 |
-| `listSlashCommands(input)` | `invoke.query_slash_commands` | 无 `tool_error`；当前 catch 后回空 `slash_commands_result` | 不应新增 | 不新增 | 不涉及；产品要求 toast 时另议 |
-| `runMessage(input)` 返回前 | `invoke.chat` | 已有：外层 catch 后生成 `tool_error`，但会直出 `Error.message` | 已有但需改造 | 改造 | provider 初始化 run 失败、底层 agent 不可用、入参拒绝 |
-| `ProviderRun.result()` | `runMessage` 返回后 | 已有：`outcome: failed` 投影 terminal `tool_error` | 已有且保留 | 保留，后续可统一文案 | provider 执行期失败，`error.code === session_not_found` 已携带 reason |
-| `replyQuestion(input)` | `invoke.question_reply` | 已有：pending 不存在回 catalog；provider 抛错会直出 message | 已有但需改造 | 改造 | pending 已失效、provider 应用答案失败 |
-| `replyPermission(input)` | `invoke.permission_reply` | 已有：pending 不存在回 catalog；provider 抛错会直出 message | 已有但需改造 | 改造 | pending 已失效、provider 应用权限失败 |
-| `closeSession(input)` | `invoke.close_session` | 已有：外层 catch 后生成 `tool_error`，但会直出 `Error.message` | 已有但需改造 | 改造 | provider 关闭失败、目标 session 不存在 |
-| `abortSession(input)` | `invoke.abort_session` | 已有：外层 catch 后生成 `tool_error`，但会直出 `Error.message` | 已有但需改造 | 改造 | provider 中止失败、目标 run/session 不存在 |
-| `dispose()` | `BridgeRuntime.stop()` | 无，停止失败通过 `stop()` reject / diagnostics 暴露 | 不应新增 | 不新增 | 不涉及 |
-| `emitOutboundMessage(input)` | Provider 主动 outbound | 已有 outbound lifecycle / validation failure `tool_error` 或 diagnostics | 已有且保留 | 保留 | facts 非法、outbound 生命周期冲突 |
-| `emitOutboundRun(input)` | Provider 主动 outbound | 已有 outbound lifecycle / validation failure `tool_error` 或 diagnostics | 已有且保留 | 保留 | facts 非法、outbound 生命周期冲突 |
+| `createSession(input)` | 已有 `tool_error`，但普通 `Error.message` 直出；未识别 `ProviderCommandError` | 需要 | 改造 | Provider 抛 `ProviderCommandError('provider_unavailable' / 'invalid_input' / 'not_found')` 时映射 catalog 文案 | 可验证，新增结构化错误测试 |
+| `runMessage(input)` 返回前 | 已有 `tool_error`，但普通 `Error.message` 直出；未识别 `ProviderCommandError` | 需要 | 改造 | agent runtime 不可用、初始化 run 失败、Provider 拒绝输入 | 可验证，更新已有 `run_failed` 测试 |
+| `replyQuestion(input)` | pending 不存在已有文案；pending 存在但 Provider 抛错时仍会直出 message | 需要 | 改造 | Provider 应用答案失败、底层 agent 拒绝答案 | 可验证，需构造 pending question 后让 provider 抛错 |
+| `replyPermission(input)` | pending 不存在已有文案；pending 存在但 Provider 抛错时仍会直出 message | 需要 | 改造 | Provider 应用权限失败、权限状态过期 | 可验证，需构造 pending permission 后让 provider 抛错 |
+| `closeSession(input)` | 已有 `tool_error`，但文案直出；未识别 `ProviderCommandError` | 需要 | 改造 | 目标 session 不存在、provider 关闭失败 | 可验证，新增 provider 抛错测试 |
+| `abortSession(input)` | 已有 `tool_error`，但文案直出；未识别 `ProviderCommandError` | 需要 | 改造 | 目标 run/session 不存在、provider 中止失败 | 可验证，新增 provider 抛错测试 |
+| `ProviderRun.result()` | 已有 terminal `tool_error`，但 `ProviderError.message` 直出 | 需要 | 改造但保持 terminal 归属 | `ProviderError.code` 映射 catalog 文案，保留 `reason: session_not_found` | 可验证，更新 terminal failed 测试 |
+| `emitOutboundRun(input)` | 已有 `tool_error`，但 `emitOutboundRunFailed()` 会把原始异常 message 塞入 `ProviderTerminalResult.error.message` | 需要 | 改造 | outbound facts 生命周期失败统一映射 catalog 文案 | 可验证，更新 outbound run failed 测试 |
+| `emitOutboundMessage(input)` | `emitOutboundMessage()` 生命周期失败主要 reject 给 Provider，不一定上报 `tool_error` | 不一定。该 API 已废弃，且不是用户即时请求 | 不默认新增 | 若产品要求主动消息失败也前端感知，应迁移到 `emitOutboundRun()` | 可验证，但建议只保留 diagnostics/reject |
+| `listSlashCommands(input)` | 当前失败返回空列表，不回 `tool_error` | 通常不需要。slash 命令列表失败可降级为空 | 不新增 | 产品要求用户 toast 时再变更 | 可验证，保留空列表测试 |
+| `health(input)` | 当前失败只 diagnostics，不回 `tool_error` | 不需要。健康查询不是用户 tool session 执行结果 | 不新增 | 如需展示，应新增 `status_error` 而不是 `tool_error` | 可验证，新增 no tool_error 测试 |
+| `initialize(context)` / `dispose()` | lifecycle 失败不回 `tool_error` | 不需要。调用方通过 `start/stop` reject、status、diagnostics 感知 | 不新增 | 不涉及 | 可验证 start/stop reject 与 diagnostics |
 
-本轮不新增新的 Provider 侧 `tool_error` 接口；“新增”主要体现在 SDK 内部新增 `CommandFailureErrorNormalizer` 和 provider error type guard，用于改造已有 command failure `tool_error` 的文案和错误码归一化。
+#### 4.4.3 用户感知必要性判断
+
+| 分类 | 是否应上报 `tool_error` | 判断依据 |
+|---|---|---|
+| 用户显式触发的会话/消息/交互命令失败 | 应上报 | 用户正在等待该动作结果，不回显会表现为无响应 |
+| request run 已开始后的执行失败 | 应上报 | 当前消息生成失败，需要 terminal `tool_error` 收口 |
+| provider 主动 outbound run 失败 | 通常应上报 | 已经面向前端产生主动消息执行边界，需要终态收口 |
+| 查询型能力失败，如 `listSlashCommands()` | 默认不上报 | 有可接受降级形态，空列表比错误 toast 更稳定 |
+| 健康检查和 lifecycle 失败 | 默认不上报 | 不属于某个 `toolSessionId` 下的用户命令，应通过 status/diagnostics 暴露 |
+| SDK 内部无法路由或 unsupported action | 有 envelope 时可上报，否则 diagnostics | 如果能关联会话，用户应看到请求不可执行；无法关联时只能记录 |
+
+#### 4.4.4 统一上报收敛分析
+
+当前 `tool_error` 并没有完全收敛为统一上报，代码里至少有以下分散入口：
+
+| 当前入口 | 负责场景 | 是否统一 | 问题 |
+|---|---|---|---|
+| `GatewayInboundPolicy.handle()` | invalid invoke | 否 | 直接构造 `ToolErrorMessage`，文案是 `gateway_invalid_invoke:${code}` |
+| `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | downstream command failure | 部分统一 | 是命令失败统一入口，但文案直接来自 `Error.message` 或少量 catalog |
+| `RequestRunFailureToolErrorProjector` | request run lifecycle failure | 否 | 只输出通用 `request_run_failed` |
+| `DefaultRunTerminalSignalProjector` | request/outbound terminal failed | 否 | 直接使用 `ProviderError.message`，未走 catalog |
+| `OutboundCoordinator.emitOutboundRunFailed()` | outbound run facts 失败 | 否 | 先把原始异常包装成 `ProviderTerminalResult`，再由 terminal projector 上报 |
+| `GatewayOutboundSinkAdapter.send()` | 所有上行消息最终校验发送 | 发送统一，但不负责错误语义 | 这里只做 schema 校验和发送，不做错误归一化 |
+
+推荐收敛方式：
+
+1. 保留 `GatewayOutboundSinkAdapter` 作为统一发送出口，只负责 validate + send。
+2. 新增统一的 `ToolErrorDisplayNormalizer` 或扩展 `CommandFailureErrorNormalizer` 为更通用的 `ToolErrorNormalizer`，统一把 `RuntimeContractError`、`ProviderCommandError`、`ProviderError`、普通错误归一成 `{ messageKey, reason, diagnosticCode, source }`。
+3. 让 `CommandFailureToolErrorProjector`、`RequestRunFailureToolErrorProjector`、`DefaultRunTerminalSignalProjector`、`GatewayInboundPolicy` 复用同一个 normalizer/catalog，但仍保留不同 projector 的生命周期归属，避免 command failure 和 terminal failure 混为同一个终态。
+4. 不建议把所有场景合成一个“大一统发送函数”直接散落调用；应统一“错误归一化和文案”，保留“命令失败 / request terminal / inbound invalid / outbound terminal”的 projector 边界。
 
 ### 4.5 文档需要同步修改的内容
 
