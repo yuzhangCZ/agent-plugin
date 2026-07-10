@@ -1,0 +1,62 @@
+# Message Bridge 配置说明
+
+**Version:** 1.0
+**Date:** 2026-06-18
+**Status:** Active
+**Owner:** message-bridge-openclaw maintainers
+**Related:** `../README.md`, `./usage.md`, `./configuration-en.md`
+
+本文档定义 `message-bridge-openclaw` 插件当前支持的配置字段、可配置位置与生效优先级。
+
+## 1. 支持的配置字段
+
+插件读取 `channels.message-bridge` 下的配置：
+
+- `enabled`（`boolean`，可选，默认 `true`）
+- `debug`（`boolean`，可选，默认 `false`；开启后打印 WebSocket 原始报文日志）
+- `name`（`string`，可选）
+- `gateway.url`（`string`，必填，必须以 `ws://` 或 `wss://` 开头）
+- `auth.ak`（`string`，必填）
+- `auth.sk`（`string`，必填）
+- `agentIdPrefix`（`string`，可选，默认 `"message-bridge"`）
+- `runTimeoutMs`（`integer`，可选，默认 `300000`）
+
+不支持作为用户配置的字段：
+
+- `GatewayUrl` / `gatewayUrl`（非标准别名，忽略）
+- `gateway.heartbeatIntervalMs` / `gateway.reconnect.*`（连接策略使用 gateway-client 默认值）
+- 注册元数据字段：`toolType`、`toolVersion`、`deviceName`、`macAddress`
+- 运行时默认 `toolType` 为 `openx`
+- 已知 `toolType` 列表为 `["openx"]`；注入未知值时只记录 `runtime.register.tool_type.unknown` 警告日志，不阻断启动
+
+## 2. 可以在什么地方配置
+
+你可以通过以下方式配置这些字段：
+
+1. 命令行非交互配置：
+   `openclaw channels add --channel message-bridge [--url <gateway-url>] --token <ak> --password <sk> [--name <name>]`
+2. guided setup / onboarding 交互流程（依赖插件包内的 `setupEntry` + `setupWizard`）：
+   - `openclaw onboard`
+   - `openclaw channels add` 的向导路径
+3. 手工编辑 OpenClaw 配置文件：
+   - 默认 profile：`~/.openclaw/openclaw.json`
+   - dev profile（`--dev`）：`~/.openclaw-dev/openclaw.json`
+   - 设置了 `OPENCLAW_CONFIG_PATH` 时，使用该路径
+
+## 3. 生效优先级
+
+对本插件字段，生效值按以下顺序解析：
+
+1. 当前生效 `openclaw.json` 中 `channels.message-bridge` 的显式值
+2. 插件默认值（只用于缺失的可选字段）
+
+补充说明：
+
+- `channels add` / guided setup / onboarding 只会写规范字段，不会写 `GatewayUrl` 别名。
+- 未传 `--url` 时，优先复用当前 `channels.message-bridge.gateway.url`；若缺失则回退到插件 bundle 默认值链。
+- guided setup 当前只写 `name`、`gateway.url`、`auth.ak`、`auth.sk`。
+- 本插件没有单独的 `MESSAGE_BRIDGE_*` 环境变量优先级层。
+- 如果需要环境变量驱动，可在 `openclaw.json` 里使用 `${VAR_NAME}` 替换。
+  详见 OpenClaw 环境变量文档：
+  - `plugins/openclaw/docs/help/environment.md`
+  - `plugins/openclaw/docs/zh-CN/help/environment.md`
