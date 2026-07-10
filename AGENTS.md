@@ -1,74 +1,44 @@
-# AGENTS.md
+# Repository Guidelines（仓库指南）
 
-## 项目概览
+## 目录结构说明
 
-`agent-plugin` 是 `message-bridge` 和 `message-bridge-openclaw` 的主开发仓库。`integration/opencode-cui` 只是联调夹具 submodule，不是主开发位置。
+- `plugins/`：宿主插件。
+  - `message-bridge/`：OpenCode 消息桥接插件。
+  - `message-bridge-openclaw/`：OpenClaw 适配插件。
+- `packages/`：共享能力。
+  - `bridge-runtime-sdk/`：消息桥接 runtime SDK。
+  - `gateway-client/`：gateway 连接客户端。
+  - `gateway-schema/`：gateway 协议与 schema 校验。
+  - `skill-plugin-cli/`：插件安装 CLI。
+  - `skill-qrcode-auth/`：二维码认证能力。
+  - `test-support/`：共享测试支持。
+- `docs/`：仓库级规则、架构和协作流程。
+- `scripts/`：仓库级构建、验证和发布脚本。
+- `integration/`：外部集成夹具；非明确任务不要修改其内容或 submodule 指针。
+- `.github/`：CI 工作流及 Issue、PR 模板。
 
-## 仓库结构
+各工作区通常使用 `src/` 存放生产代码、`tests/` 存放测试、`docs/` 存放模块文档。
 
-- `plugins/message-bridge`：OpenCode 侧主插件
-- `plugins/message-bridge-openclaw`：OpenClaw 侧适配插件
-- `packages/test-support`：共享测试支持
-- `integration/opencode-cui`：集成夹具 submodule
+## 构建、测试与开发命令
 
-## 常用命令
+使用 Node.js 24+ 和 pnpm 9.15+。
 
-只保留稳定的根入口命令；更细的脚本以根级和包内 `package.json` 为准。
+- `pnpm build`：构建所有可发布的包和插件。
+- `pnpm test`：运行完整工作区测试。
+- `pnpm lint`：使用 ESLint 检查 JavaScript 和 TypeScript；提交聚焦变更前运行
+  `pnpm lint:changed`。
+- `pnpm verify:workspace`：运行 CI 使用的主要构建、测试、bundle 和边界检查。
+- `pnpm verify:integration:fixture`：验证集成夹具。
+- `pnpm --dir packages/bridge-runtime-sdk test`：运行指定工作区测试；按需替换目录。
 
-- `pnpm build`
-- `pnpm test`
-- `pnpm verify:workspace`
-- `pnpm verify:integration:fixture`
-- `pnpm run test:openclaw:runtime`
+## 规则入口与执行约束
 
-## 工作边界
+开始任务前按改动范围阅读对应事实源：
 
-- 默认只在 `plugins/` 和 `packages/` 下做主开发
-- 非专门任务不要修改 `integration/opencode-cui` 的内容或 submodule 指针
-- 当前仓库默认向 `main` 提 PR；本仓库未使用 `canary` 作为日常开发基线
-- 根规则只覆盖全仓库通用约束，不覆盖子目录专用规范
-- 涉及 `plugins/message-bridge/docs/` 时，优先遵守该目录下的更细规则
+- [代码治理规则](docs/rules/engineering.md)：工作边界、依赖方向、public contract、错误处理和日志脱敏。
+- [测试治理规则](docs/rules/testing.md)：测试分层、最低验证范围和证据要求。
+- [文档治理规则](docs/rules/documentation.md)：文档归属、状态、命名、归档和引用规则。
+- [变更治理规则](docs/rules/change-management.md)：PR、Issue、发布、兼容性和迁移要求。
 
-## 测试与验证
-
-- 纯文档改动：先校验路径、命令和作用域是否与现有仓库一致
-- 代码改动：至少运行受影响包的测试
-- 跨插件边界改动：优先运行 `pnpm verify:workspace`
-- 仅修改集成夹具或其指针：至少运行 `pnpm verify:integration:fixture`
-
-## 文档规则
-
-- `plugins/message-bridge/docs/` 由该目录下的 `AGENTS.md` 统一治理
-- 根文件只写仓库级通用规则，不复制子目录文档规范
-- 详细背景继续放在各自 `README.md` 或子目录文档中
-- 提 PR 时必须使用 `.github/PULL_REQUEST_TEMPLATE.md`，并遵循 `docs/operations/pull-request-process.md` 中的流程、字段要求与检查项
-- 提 Issue 时使用 `.github/ISSUE_TEMPLATE/` 下对应表单
-- PR 详细流程、字段要求、检查项统一维护在 `docs/operations/pull-request-process.md`
-
-## 注释规则
-
-- TypeScript 导出接口、导出类、导出函数默认使用 TSDoc 注释块 `/** ... */`
-- 关键流程接口、跨层边界入口、统一发送出口必须补充简洁中文注释，说明职责边界、输入输出语义或 fail-closed 约束
-- 优先注释 `facade`、`port`、`validator`、runtime 协作对象、统一发送/校验入口，不要求为简单 getter、纯数据字段或显而易见的实现细节补注释
-- 注释应优先解释“为什么这里存在”“边界是什么”“为什么这样做”，避免重复代码字面含义
-- 关键分支允许使用 1-2 行中文行注释 `//`，用于说明非直观决策、兼容约束、重连/状态机/READY gating 等关键行为
-- 推荐使用精简 TSDoc 标签：`@remarks`、`@param`、`@returns`、`@throws`、`@deprecated`
-- 禁止空洞或翻译式注释，例如“设置变量”“发送消息”“判断状态”
-
-## 类型收窄规则
-
-- JSON 对象、plain object、数组、字符串等协议边界判断必须优先使用所在包内共享 type guard 或 schema helper。
-- 禁止在业务文件中重复散落 `value !== null && typeof value === 'object' && !Array.isArray(value)` 这类对象判断。
-- 如果所在包缺少对应 helper，应先补充包内共享工具，再在业务逻辑中引用。
-- 跨包不要为了复用 type guard 引入反向依赖；各包可保留自己的边界工具，但同一包内必须收敛到一处。
-
-## 语言规则
-
-- 用户可见输出、仓库文档、注释默认使用简体中文
-- 代码标识符、命令、配置键、协议字段保持英文
-
-## 规则优先级
-
-- 更深层目录下的 `AGENTS.md` 优先于根规则
-- 如果子目录规则与根规则冲突，以子目录规则为准
-- 本文件是仓库默认规则入口，其他目录可在自己的作用域内进一步收紧约束
+更深层目录中的 `AGENTS.md` 在其作用域内优先。保留无关工作区变更；完成前记录实际验证命令和结果。
+规则与仓库事实冲突、专项流程缺失，或兼容性和发布影响不清楚时，停止扩大改动并先确认。
