@@ -87,6 +87,31 @@ test('AbortExecutionUseCase forwards empty run id set when no active run exists'
   assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: [] }]);
 });
 
+test('AbortExecutionUseCase forwards all active run ids', async () => {
+  const abortCalls: unknown[] = [];
+  const useCase = new AbortExecutionUseCase(
+    {
+      async abortExecution(input: unknown) {
+        abortCalls.push(input);
+        return { applied: true as const };
+      },
+    } as never,
+    {
+      getRequestRunState() {
+        return { activeRunIds: ['run-1', 'run-2'] };
+      },
+    } as never,
+    {
+      clearSession() {},
+    } as never,
+    new RecordingObservation() as never,
+  );
+
+  await useCase.execute(createCommand());
+
+  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-1', 'run-2'] }]);
+});
+
 test('AbortExecutionUseCase records failed observation and does not swallow provider failure', async () => {
   const observation = new RecordingObservation();
   const useCase = new AbortExecutionUseCase(

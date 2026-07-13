@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 import type {
   ProviderFact,
+  ProviderAbortSessionInput,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRuntimeContext,
@@ -277,14 +278,14 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
    * @remarks 本地先关闭 fact 流，再 best-effort 调宿主 abort/cancel；
    * 这样即使宿主取消失败，也不会继续向 SDK 投影晚到增量。
    */
-  async abortSession(input: { traceId: string; toolSessionId: string; runId?: string }): Promise<{ applied: true }> {
+  async abortSession(input: ProviderAbortSessionInput): Promise<{ applied: true }> {
     const record = this.options.sessionRegistry.get(input.toolSessionId);
     if (!record) {
       throw new Error("unknown_tool_session");
     }
 
     const activeRun = this.activeRunsBySessionKey.get(record.sessionKey);
-    const abortRunId = activeRun?.runId ?? input.runId;
+    const abortRunId = activeRun?.runId ?? input.runIds[0];
     if (activeRun) {
       this.abortActiveRun(activeRun);
     }
