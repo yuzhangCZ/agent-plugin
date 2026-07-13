@@ -31,7 +31,17 @@ function run(command, args, options = {}) {
 
 async function main() {
   await prepareWorkspaceDeps();
-  await run(process.execPath, ['--experimental-strip-types', '--test', 'tests/**/*.test.ts'], { cwd: packageDir });
+  const testGlobs = process.argv.slice(2);
+  const nodeArgs = [
+    '--import',
+    './scripts/register-test-alias-loader.mjs',
+    '--experimental-strip-types',
+    ...(process.env.BRIDGE_RUNTIME_SDK_TEST_COVERAGE === '1' ? ['--experimental-test-coverage'] : []),
+    '--test',
+    ...(testGlobs.length > 0 ? testGlobs : ['tests/**/*.test.ts']),
+  ];
+
+  await run(process.execPath, nodeArgs, { cwd: packageDir });
 }
 
 main().catch((error) => {

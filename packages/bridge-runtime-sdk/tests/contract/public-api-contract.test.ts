@@ -6,10 +6,10 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as runtimeSdk from '../src/index.ts';
+import * as runtimeSdk from '@/index.ts';
 
 const execFileAsync = promisify(execFile);
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function assertTypeFixturePasses(tsconfigPath: string): Promise<void> {
   try {
@@ -32,8 +32,8 @@ test('stable entry exports executable runtime factory and public contracts', () 
 });
 
 test('public contract keeps qrcode auth types owned by skill-qrcode-auth', async () => {
-  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
-  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
   assert.match(publicContractSource, /export \{ qrcodeAuth \} from '@wecode\/skill-qrcode-auth';/);
   assert.match(publicContractSource, /QrCodeAssistantInfo/);
@@ -57,16 +57,16 @@ test('public api positive type fixture locks BridgeRuntime status snapshot shape
 });
 
 test('runtime error public contract uses reason-oriented class-first codes', async () => {
-  const source = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
-  const runtimeErrorSource = await readFile(new URL('../src/application/runtime-error.ts', import.meta.url), 'utf8');
-  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
-  const runtimeSource = await readFile(new URL('../src/application/runtime.ts', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const runtimeErrorSource = await readFile(new URL('../../src/application/runtime-error.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
+  const runtimeSource = await readFile(new URL('../../src/application/runtime.ts', import.meta.url), 'utf8');
   const lifecycleSource = await readFile(
-    new URL('../src/application/lifecycle/RuntimeLifecycleService.ts', import.meta.url),
+    new URL('../../src/application/lifecycle/RuntimeLifecycleService.ts', import.meta.url),
     'utf8',
   );
   const probeSource = await readFile(
-    new URL('../src/application/lifecycle/RuntimeProbeService.ts', import.meta.url),
+    new URL('../../src/application/lifecycle/RuntimeProbeService.ts', import.meta.url),
     'utf8',
   );
 
@@ -124,7 +124,7 @@ test('public api negative type fixture rejects gateway-only runtime status state
 });
 
 test('stable entry source does not re-export gateway connection internals', async () => {
-  const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
   assert.equal(source.includes('BridgeGatewayHostConnection'), false);
   assert.equal(source.includes('BridgeGatewayHostState'), false);
@@ -134,7 +134,7 @@ test('stable entry source does not re-export gateway connection internals', asyn
 });
 
 test('stable entry source exports updated interaction and fact contracts', async () => {
-  const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
   assert.equal(source.includes('PermissionReplyFact'), true);
   assert.equal(source.includes('SessionTitleFact'), true);
@@ -144,8 +144,8 @@ test('stable entry source exports updated interaction and fact contracts', async
 });
 
 test('public contract source locks interaction ids and tool.update boundaries', async () => {
-  const source = await readFile(new URL('../src/domain/provider-contract.ts', import.meta.url), 'utf8');
-  const exportedProviderSource = await readFile(new URL('../src/domain/provider.ts', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../src/domain/provider-contract.ts', import.meta.url), 'utf8');
+  const exportedProviderSource = await readFile(new URL('../../src/domain/provider.ts', import.meta.url), 'utf8');
   const factBaseBlock = source.match(/export interface ProviderFactBase \{[\s\S]*?\n\}/)?.[0] ?? '';
   const permissionAskBlock = source.match(/export interface PermissionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const permissionReplyBlock = source.match(/export interface PermissionReplyFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -155,7 +155,7 @@ test('public contract source locks interaction ids and tool.update boundaries', 
   const questionAskBlock = source.match(/export interface QuestionAskFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
   const questionReplyBlock = source.match(/export interface ProviderQuestionReplyInput \{[\s\S]*?\n\}/)?.[0] ?? '';
   const toolUpdateBlock = source.match(/export interface ToolUpdateFact[^{]*\{[\s\S]*?\n\}/)?.[0] ?? '';
-  const errorSource = await readFile(new URL('../src/domain/errors.ts', import.meta.url), 'utf8');
+  const errorSource = await readFile(new URL('../../src/domain/errors.ts', import.meta.url), 'utf8');
 
   assert.equal(factBaseBlock.includes('subagentSessionId?: string;'), true);
   assert.equal(factBaseBlock.includes('subagentName?: string;'), true);
@@ -193,18 +193,18 @@ test('public contract source locks interaction ids and tool.update boundaries', 
 });
 
 test('application ports own runtime orchestration contracts without duplicate local interfaces', async () => {
-  const runtimeUsecaseSource = await readFile(new URL('../src/application/ports/runtime-usecase.ts', import.meta.url), 'utf8');
-  const usecasesSource = await readFile(new URL('../src/application/usecases/index.ts', import.meta.url), 'utf8');
-  const dispatcherSource = await readFile(new URL('../src/application/RuntimeCommandDispatcher.ts', import.meta.url), 'utf8');
+  const runtimeUsecaseSource = await readFile(new URL('../../src/application/ports/runtime-usecase.ts', import.meta.url), 'utf8');
+  const usecasesSource = await readFile(new URL('../../src/application/usecases/index.ts', import.meta.url), 'utf8');
+  const dispatcherSource = await readFile(new URL('../../src/application/RuntimeCommandDispatcher.ts', import.meta.url), 'utf8');
   const pendingRegistrySource = await readFile(
-    new URL('../src/application/ports/pending-interaction-registry.ts', import.meta.url),
+    new URL('../../src/application/ports/pending-interaction-registry.ts', import.meta.url),
     'utf8',
   );
   const sessionRegistrySource = await readFile(
-    new URL('../src/application/ports/session-runtime-registry.ts', import.meta.url),
+    new URL('../../src/application/ports/session-runtime-registry.ts', import.meta.url),
     'utf8',
   );
-  const infrastructureIndexSource = await readFile(new URL('../src/infrastructure/index.ts', import.meta.url), 'utf8');
+  const infrastructureIndexSource = await readFile(new URL('../../src/infrastructure/index.ts', import.meta.url), 'utf8');
 
   assert.equal(runtimeUsecaseSource.includes('ProviderHealthResult'), false);
   assert.equal(runtimeUsecaseSource.includes('ProviderRun'), false);
@@ -222,15 +222,15 @@ test('application ports own runtime orchestration contracts without duplicate lo
 });
 
 test('runtime trace interaction contract does not expose session-level clearing', async () => {
-  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
 
   assert.equal(publicContractSource.includes("action: 'register' | 'consume' | 'clear';"), false);
   assert.equal(publicContractSource.includes("action: 'register' | 'consume';"), true);
 });
 
 test('gateway host config contract is declared once in public contract', async () => {
-  const publicContractSource = await readFile(new URL('../src/public-contract.ts', import.meta.url), 'utf8');
-  const gatewayHostSource = await readFile(new URL('../src/infrastructure/gateway/gateway-host.ts', import.meta.url), 'utf8');
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const gatewayHostSource = await readFile(new URL('../../src/infrastructure/gateway/gateway-host.ts', import.meta.url), 'utf8');
 
   assert.match(publicContractSource, /export interface BridgeGatewayHostConfig \{/);
   assert.doesNotMatch(gatewayHostSource, /export interface BridgeGatewayHostConfig \{/);
@@ -238,7 +238,7 @@ test('gateway host config contract is declared once in public contract', async (
 });
 
 test('package publish contract keeps gateway-client internal to the SDK facade', async () => {
-  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const pkg = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
 
   assert.equal(pkg.exports['./gateway-client'], undefined);
   assert.equal('@agent-plugin/gateway-client' in (pkg.dependencies ?? {}), false);

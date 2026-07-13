@@ -7,7 +7,7 @@ import { normalizeDownstream } from '@agent-plugin/gateway-schema';
 import {
   BridgeRuntimeError,
   createBridgeRuntime,
-} from '../src/index.ts';
+} from '@/index.ts';
 import type {
   BridgeGatewayHostConfig,
   BridgeGatewayLogger,
@@ -17,22 +17,22 @@ import type {
   ProviderRuntimeContext,
   ProviderTerminalResult,
   ThirdPartyAgentProvider,
-} from '../src/index.ts';
+} from '@/index.ts';
 import type {
   BridgeGatewayHostConnection,
-} from '../src/infrastructure/gateway/gateway-host.ts';
-import { BridgeGatewayLoggerObservationAdapter } from '../src/adapters/observation/runtime-logger-observation.ts';
-import { GatewayProbeDriver } from '../src/adapters/gateway/GatewayProbeDriver.ts';
-import { GatewayRuntimeDriver } from '../src/adapters/gateway/GatewayRuntimeDriver.ts';
-import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
-import type { RuntimeObservationEvent } from '../src/application/runtime-observation/index.ts';
+} from '@/infrastructure/gateway/gateway-host.ts';
+import { BridgeGatewayLoggerObservationAdapter } from '@/adapters/observation/runtime-logger-observation.ts';
+import { GatewayProbeDriver } from '@/adapters/gateway/GatewayProbeDriver.ts';
+import { GatewayRuntimeDriver } from '@/adapters/gateway/GatewayRuntimeDriver.ts';
+import { DefaultRuntimeObservation } from '@/application/runtime-observation/index.ts';
+import type { RuntimeObservationEvent } from '@/application/runtime-observation/index.ts';
 import {
   fromGatewayClosedFailure,
   fromGatewayConnectFailure,
   fromProbeFailure,
   fromProviderStartFailure,
   fromRuntimeInternalFailure,
-} from '../src/application/runtime-error-classifier.ts';
+} from '@/application/runtime-error-classifier.ts';
 
 function assertBridgeRuntimeError(
   error: unknown,
@@ -169,7 +169,13 @@ class FakeGatewayClient extends EventEmitter implements BridgeGatewayHostConnect
   state: 'DISCONNECTED' | 'CONNECTING' | 'READY' = 'DISCONNECTED';
   connectError: Error | null = null;
   reconnecting = false;
-  closedCode: 'GATEWAY_CLOSED_MANUAL' | 'GATEWAY_CONNECT_ABORTED' | 'GATEWAY_AUTH_REJECTED' | 'GATEWAY_TRANSPORT_ERROR' | 'GATEWAY_RECONNECT_EXHAUSTED' | null = null;
+  closedCode:
+    | 'GATEWAY_AUTH_REJECTED'
+    | 'GATEWAY_CLOSED_MANUAL'
+    | 'GATEWAY_CONNECT_ABORTED'
+    | 'GATEWAY_RECONNECT_EXHAUSTED'
+    | 'GATEWAY_TRANSPORT_ERROR'
+    | null = null;
 
   async connect(): Promise<void> {
     this.reconnecting = false;

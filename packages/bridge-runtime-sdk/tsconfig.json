@@ -3,11 +3,16 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "allowImportingTsExtensions": true,
     "strict": false,
     "strictNullChecks": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "ignoreDeprecations": "5.0",
     "types": [
       "node"
     ]

@@ -23,6 +23,8 @@
     "prepublishOnly": "pnpm run verify:release",
     "postpack": "node ./scripts/restore-publish-manifest.mjs",
     "test": "node ./scripts/test.mjs",
+    "test:unit": "node ./scripts/test.mjs \"tests/unit/**/*.test.ts\"",
+    "coverage:unit": "BRIDGE_RUNTIME_SDK_TEST_COVERAGE=1 node ./scripts/test.mjs \"tests/unit/**/*.test.ts\"",
     "verify:core": "pnpm run build && pnpm run typecheck && pnpm test && pnpm run pack:check -- --skip-build",
     "verify:release": "pnpm run verify:core"
   },
