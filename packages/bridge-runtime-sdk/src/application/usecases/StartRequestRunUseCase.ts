@@ -52,6 +52,16 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       this.observation.usecaseConflict('start_request_run', command.traceId, error, error.code, context);
       throw error;
     }
+    if (activeRunState.activeRunIds.length > 0 && this.requestRunPolicy.activeRunChatPolicy === 'forwardToProvider') {
+      const activeRunIds = [...activeRunState.activeRunIds];
+      this.observation.concurrentRequestRunsDetected({
+        toolSessionId,
+        newRunId: runId,
+        activeRunIds,
+        activeRunCount: activeRunIds.length,
+        policy: 'forwardToProvider',
+      });
+    }
     this.sessionRegistry.registerRequestRun(toolSessionId, runId);
 
     const sessionRecord = this.sessionRegistry.ensure({

@@ -1,5 +1,6 @@
 import type {
   FailureRecordedObservationEvent,
+  RequestRunPolicyObservationEvent,
   RuntimeObservationCommand,
   RuntimeObservationCommandContext,
   RuntimeObservationEvent,
@@ -126,6 +127,7 @@ export interface RuntimeObservation {
     tokenId: string,
     conflictingToolSessionId: string,
   ): void;
+  concurrentRequestRunsDetected(input: Omit<RequestRunPolicyObservationEvent, 'type' | 'action'>): void;
   terminalReceived(toolSessionId: string, result: ProviderTerminalResult, context?: RuntimeObservationTerminalContext): void;
   terminalProjected(
     toolSessionId: string,

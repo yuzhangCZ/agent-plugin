@@ -198,6 +198,19 @@ export type InteractionChangedObservationEvent = {
 };
 
 /**
+ * request run 策略观测事件。
+ */
+export type RequestRunPolicyObservationEvent = {
+  type: 'request_run_policy';
+  action: 'concurrent_request_runs_detected';
+  toolSessionId: string;
+  newRunId: string;
+  activeRunIds: readonly string[];
+  activeRunCount: number;
+  policy: 'forwardToProvider';
+};
+
+/**
  * uplink 生命周期观测事件。
  */
 export type UplinkObservationEvent =
@@ -255,6 +268,7 @@ export type RuntimeObservationEvent =
   | ProviderCallObservationEvent
   | FactProcessedObservationEvent
   | InteractionChangedObservationEvent
+  | RequestRunPolicyObservationEvent
   | UplinkObservationEvent
   | TerminalObservationEvent
   | FailureRecordedObservationEvent;

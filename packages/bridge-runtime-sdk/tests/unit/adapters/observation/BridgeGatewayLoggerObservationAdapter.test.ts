@@ -132,3 +132,34 @@ test('logger observation adapter projects gateway probe events', () => {
     },
   ]);
 });
+
+test('logger observation adapter logs concurrent request run policy without sensitive fields', () => {
+  const logger = new RecordingLogger();
+  const adapter = new BridgeGatewayLoggerObservationAdapter(logger);
+
+  adapter.record({
+    type: 'request_run_policy',
+    action: 'concurrent_request_runs_detected',
+    toolSessionId: 'tool-1',
+    newRunId: 'run-2',
+    activeRunIds: ['run-1'],
+    activeRunCount: 1,
+    policy: 'forwardToProvider',
+  });
+
+  assert.deepEqual(logger.logs, [{
+    level: 'warn',
+    message: 'runtime_sdk.request_run.concurrent_request_runs_detected',
+    meta: {
+      toolSessionId: 'tool-1',
+      newRunId: 'run-2',
+      activeRunCount: 1,
+      policy: 'forwardToProvider',
+    },
+  }]);
+  const meta = logger.logs[0]?.meta ?? {};
+  assert.equal('activeRunIds' in meta, false);
+  assert.equal('text' in meta, false);
+  assert.equal('content' in meta, false);
+  assert.equal('answers' in meta, false);
+});

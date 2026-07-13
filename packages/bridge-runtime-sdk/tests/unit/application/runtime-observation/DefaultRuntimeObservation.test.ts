@@ -100,3 +100,26 @@ test('default runtime observation maps gateway probe events', () => {
     },
   ]);
 });
+
+test('observation records concurrent request run policy event', () => {
+  const port = new RecordingObservationPort();
+  const observation = new DefaultRuntimeObservation(port);
+
+  observation.concurrentRequestRunsDetected({
+    toolSessionId: 'tool-1',
+    newRunId: 'run-2',
+    activeRunIds: ['run-1'],
+    activeRunCount: 1,
+    policy: 'forwardToProvider',
+  });
+
+  assert.deepEqual(port.events, [{
+    type: 'request_run_policy',
+    action: 'concurrent_request_runs_detected',
+    toolSessionId: 'tool-1',
+    newRunId: 'run-2',
+    activeRunIds: ['run-1'],
+    activeRunCount: 1,
+    policy: 'forwardToProvider',
+  }]);
+});

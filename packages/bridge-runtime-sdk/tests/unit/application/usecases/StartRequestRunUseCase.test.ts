@@ -25,6 +25,10 @@ class RecordingObservation {
   usecaseConflict(...args: unknown[]): void {
     this.events.push({ method: 'usecaseConflict', args });
   }
+
+  concurrentRequestRunsDetected(...args: unknown[]): void {
+    this.events.push({ method: 'concurrentRequestRunsDetected', args });
+  }
 }
 
 function createCommand(overrides: Record<string, unknown> = {}) {
@@ -244,6 +248,16 @@ test('StartRequestRunUseCase forwards active run to provider when policy allows 
     run: providerRun,
   }]);
   assert.deepEqual(released, [{ toolSessionId: 'tool-1', runId: providerInput.runId }]);
+  assert.deepEqual(observation.events.find((event) => event.method === 'concurrentRequestRunsDetected'), {
+    method: 'concurrentRequestRunsDetected',
+    args: [{
+      toolSessionId: 'tool-1',
+      newRunId: providerInput.runId,
+      activeRunIds: ['run-active'],
+      activeRunCount: 1,
+      policy: 'forwardToProvider',
+    }],
+  });
 });
 
 test('StartRequestRunUseCase releases request run when provider throws', async () => {

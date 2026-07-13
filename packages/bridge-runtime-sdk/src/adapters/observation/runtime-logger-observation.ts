@@ -262,6 +262,14 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
           },
         );
         return;
+      case 'request_run_policy':
+        write(this.logger, 'warn', `runtime_sdk.request_run.${event.action}`, {
+          toolSessionId: event.toolSessionId,
+          newRunId: event.newRunId,
+          activeRunCount: event.activeRunCount,
+          policy: event.policy,
+        });
+        return;
       case 'uplink_emitted':
         return;
       case 'uplink_validation':
