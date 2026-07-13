@@ -11,6 +11,13 @@ test('request run policy defaults only when config or field is absent', () => {
 
 test('request run policy rejects explicit invalid dynamic values', () => {
   assert.throws(
+    () => resolveRequestRunPolicy(null as never),
+    {
+      name: 'TypeError',
+      message: 'Invalid requestRunPolicy: null',
+    },
+  );
+  assert.throws(
     () => resolveRequestRunPolicy({ activeRunChatPolicy: null as never }),
     {
       name: 'TypeError',

@@ -8,6 +8,7 @@ import type {
   BridgeRuntimeStatus,
   BridgeRuntimeStatusSnapshot,
   OutboundFact,
+  ProviderAbortSessionInput,
   RequestRunPolicyOptions,
   RuntimeOutboundEmitter,
   ThirdPartyAgentProvider,
@@ -30,6 +31,11 @@ const runtimeOptionsWithPolicy: BridgeRuntimeOptions = {
   provider,
   gatewayHost,
   requestRunPolicy,
+};
+const providerAbortSessionInput: ProviderAbortSessionInput = {
+  traceId: 'trace-1',
+  toolSessionId: 'tool-session-1',
+  runIds: ['run-1'],
 };
 
 const explicitSnapshot: BridgeRuntimeStatusSnapshot = {
@@ -63,5 +69,6 @@ void failureReason;
 void statusError;
 void gatewayTransportErrorCode;
 void runtimeOptionsWithPolicy;
+void providerAbortSessionInput;
 void explicitSnapshot;
 void idleSnapshot;
