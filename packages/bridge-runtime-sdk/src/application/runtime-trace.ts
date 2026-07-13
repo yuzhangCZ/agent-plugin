@@ -18,6 +18,7 @@ export interface RuntimeTraceProviderCall {
     | 'abortExecution';
   toolSessionId?: string;
   runId?: string;
+  runIds?: string[];
 }
 
 export interface RuntimeTraceFact {

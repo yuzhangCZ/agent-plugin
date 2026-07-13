@@ -151,6 +151,7 @@ export type ProviderCallObservationEvent = {
   traceId?: string;
   toolSessionId?: string;
   runId?: string;
+  runIds?: string[];
   slashCommandCount?: number;
   slashCommands?: ProviderSlashCommand[];
   error?: string;
@@ -293,6 +294,7 @@ export type RuntimeObservationUsecaseContext = RuntimeObservationCommandContext 
 export type RuntimeObservationProviderContext = {
   toolSessionId?: string;
   runId?: string;
+  runIds?: string[];
   welinkSessionId?: string;
   slashCommandCount?: number;
   slashCommands?: ProviderSlashCommand[];

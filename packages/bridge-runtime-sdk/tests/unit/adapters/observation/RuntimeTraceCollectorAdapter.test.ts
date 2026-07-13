@@ -25,6 +25,13 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     toolSessionId: 'tool-1',
   });
   observation.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds: ['run-1', 'run-2'],
+  });
+  observation.record({
     type: 'fact_processed',
     phase: 'received',
     toolSessionId: 'tool-1',
@@ -62,6 +69,11 @@ test('trace observation adapter keeps diagnostics in sync with observation event
   assert.deepEqual(diagnostics.providerCalls[0], {
     command: 'createSession',
     toolSessionId: 'tool-1',
+  });
+  assert.deepEqual(diagnostics.providerCalls[1], {
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds: ['run-1', 'run-2'],
   });
   assert.deepEqual(diagnostics.facts[0], {
     type: 'message.start',

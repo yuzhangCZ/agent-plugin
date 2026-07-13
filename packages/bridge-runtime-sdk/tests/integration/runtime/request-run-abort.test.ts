@@ -88,6 +88,11 @@ test('abort_session forwards active run ids and sends tool_done when run resolve
     toolSessionId: 'tool-1',
     runIds: [capturedRunId],
   });
+  assert.deepEqual(runtime.getDiagnostics().providerCalls.find((call) => call.command === 'abortExecution'), {
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds: [capturedRunId],
+  });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
     toolSessionId: 'tool-1',
@@ -303,6 +308,11 @@ test('abort_session forwards all active request run ids when active chats are fo
 
   assert.ok(capturedAbortInput);
   assert.deepEqual(capturedAbortInput.runIds, runIds);
+  assert.deepEqual(runtime.getDiagnostics().providerCalls.find((call) => call.command === 'abortExecution'), {
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds,
+  });
   assert.equal(Array.isArray(capturedAbortInput.runIds) && new Set(capturedAbortInput.runIds).size, 2);
 
   firstRunResult.resolve({ outcome: 'aborted' });

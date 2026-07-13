@@ -19,6 +19,7 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
             command: event.command,
             ...(event.toolSessionId ? { toolSessionId: event.toolSessionId } : {}),
             ...(event.runId ? { runId: event.runId } : {}),
+            ...(event.runIds ? { runIds: [...event.runIds] } : {}),
           });
         }
         return;
