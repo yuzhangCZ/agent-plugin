@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- SDK runtime composition root 集中装配 OpenCode 宿主策略、SDK runtime 和状态同步，后续拆分单独处理。 */
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -96,6 +97,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     this.sessionIsolationDataDir = options.sessionIsolationDataDir;
   }
 
+  // eslint-disable-next-line max-lines-per-function, max-statements, complexity -- start 是插件 runtime composition root，集中串联配置、宿主端口和 SDK lifecycle。
   async start(options: ManagedRuntimeStartOptions = {}): Promise<void> {
     const pluginVersion = resolvePluginVersion();
     this.logger.info('runtime.start.requested', {
@@ -427,6 +429,7 @@ export class SdkBridgeRuntime implements ManagedRuntime {
     };
   }
 
+  // eslint-disable-next-line complexity -- OpenCode session 列表需要兼容多版本 SDK 响应形态和过滤条件。
   private async listHostSessions(
     client: BridgeSdkClient,
     query: HostSessionListQuery,
