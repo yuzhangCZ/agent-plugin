@@ -29,14 +29,17 @@ test('package exposes unit-only test scripts', async () => {
     await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
   ) as { scripts?: Record<string, string> };
 
+  assert.equal(packageJson.scripts?.['test:file'], undefined);
+  assert.match(packageJson.scripts?.['test:case'] ?? '', /--test-name-pattern/);
   assert.match(packageJson.scripts?.['test:unit'] ?? '', /tests\/unit\/\*\*\/\*\.test\.ts/);
   assert.match(packageJson.scripts?.['coverage:unit'] ?? '', /BRIDGE_RUNTIME_SDK_TEST_COVERAGE=1/);
 });
 
-test('test runner accepts explicit test globs and optional coverage flag', async () => {
+test('test runner accepts explicit test globs, test name pattern, and optional coverage flag', async () => {
   const testScript = await readFile(new URL('../../scripts/test.mjs', import.meta.url), 'utf8');
 
   assert.match(testScript, /process\.argv\.slice\(2\)/);
+  assert.match(testScript, /--test-name-pattern/);
   assert.match(testScript, /BRIDGE_RUNTIME_SDK_TEST_COVERAGE/);
 });
 

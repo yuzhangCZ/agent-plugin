@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "bridge-runtime-sdk: test current file",
+      "type": "process",
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "packages/bridge-runtime-sdk",
+        "test",
+        "--",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "bridge-runtime-sdk: test selected case",
+      "type": "process",
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "packages/bridge-runtime-sdk",
+        "test",
+        "--",
+        "--test-name-pattern",
+        "${selectedText}",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}
