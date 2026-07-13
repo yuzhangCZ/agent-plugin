@@ -246,12 +246,56 @@ async function recoverRuntimeIfNeeded(runtime: BridgeRuntime): Promise<void> {
 2. 如果失败原因是鉴权拒绝、注册拒绝、手动 stop 或配置错误，调用方不应盲目循环重启。
 3. 如果业务需要覆盖长期 `reconnecting`，调用方应记录进入 `reconnecting` 的时间，超过阈值后再恢复，避免和 SDK 自身 40 分钟窗口互相抢占。
 
-### 4.6 文档需要同步修改的内容
+### 4.6 备选方案对比：完全放开窗口限制
+
+除“40 分钟窗口 + 调用方兜底恢复”外，另一个可选方案是完全放开重连窗口限制，即 `maxElapsedMs` 不再耗尽。该方案的含义是：只要不是 `4403 / 4409`、鉴权拒绝、手动断开、abort 等 terminal 场景，SDK 会一直按退避策略重连。
+
+实现方式：
+
+1. 允许 `GatewayReconnectConfig.maxElapsedMs = null` 或 `0` 表示不限制总重连时间。
+2. `DefaultReconnectPolicy.scheduleNextAttempt()` 在无限窗口模式下不再因为 elapsed 超过阈值返回 exhausted。
+3. 继续保留 `baseMs`、`maxMs`、`exponential`、`jitter`，避免高频重试。
+4. terminal close code 和手动终止仍保持 fail-closed，不进入无限重连。
+
+优势：
+
+1. 隔夜休眠、长时间断网、gateway 长时间维护后，只要网络和服务恢复，SDK 可自然回到 READY。
+2. 调用方不需要额外监听 `runtime.getStatus()`，也不需要自行编排 `runtime.stop()` / `runtime.start()`。
+3. 实现路径直接，主要是调整 `maxElapsedMs` 语义和耗尽判断。
+
+风险：
+
+1. 失去 SDK 内部重连窗口止损边界，长期不可达时会持续后台重试。
+2. 配置错误、gateway 地址错误、服务端长期不可达时，问题可能长期停留在 `reconnecting`，不如 `failed` 明确。
+3. 大规模客户端同时长期不可达时，会形成持续背景连接流量。
+4. 对笔记本电池和弱网环境，比 40 分钟止损方案更不受控。
+
+两种方案对比如下：
+
+| 维度 | 完全放开窗口限制 | 40 分钟窗口 + 调用方兜底恢复 |
+|---|---|---|
+| 隔夜休眠自动恢复 | SDK 可自然恢复 | 40 分钟后依赖调用方 `stop()` / `start()` |
+| 调用方接入成本 | 低 | 中，需要状态监听、冷却和恢复编排 |
+| SDK 行为边界 | 弱，长期 `reconnecting` | 强，40 分钟后进入 `failed` |
+| 服务端压力 | 更持续 | 更可控 |
+| 故障可见性 | 较弱，容易长期重试 | 较强，能通过 `failed` 暴露 |
+| 配置错误暴露 | 可能被长期重试掩盖 | 更容易被 `failed` 暴露 |
+| 用户体验 | 最自动 | 需要调用方兜底才能覆盖长时间断开 |
+| 功耗控制 | 较弱 | 较好 |
+
+评审建议：
+
+1. 如果产品目标是“非 terminal 场景永远自恢复”，并且 gateway 可接受长期低频重连流量，可以选择完全放开窗口限制。
+2. 如果更看重服务端压力、故障可见性和可控边界，建议保留 40 分钟窗口，并由调用方基于 `runtime.getStatus()` 做兜底恢复。
+3. 折中方式是默认 40 分钟，同时支持调用方显式配置无限窗口；本次默认方案仍推荐 40 分钟窗口 + 调用方兜底恢复。
+
+### 4.7 文档需要同步修改的内容
 
 1. `packages/gateway-client/docs/reconnect-strategy-design.md`
    - 将默认 `maxElapsedMs` 从 10 分钟更新为 40 分钟。
    - 同步 retryable / terminal close code 表述。
    - 补充超过 40 分钟后调用方可通过 `runtime.getStatus()` + `runtime.stop()` + `runtime.start()` 进行兜底恢复。
+   - 如评审选择支持无限窗口配置，需要补充 `maxElapsedMs = null / 0` 的语义。
 2. 插件配置文档
    - 如文档写到默认重连窗口，需要同步为 40 分钟。
 3. 日志文档
@@ -271,6 +315,8 @@ async function recoverRuntimeIfNeeded(runtime: BridgeRuntime): Promise<void> {
 
 结论：从单机性能看可接受；从服务端容量看，需要确认 gateway 能接受每个断线客户端最多额外约 60 次低频连接尝试。若担心集中重连尖峰，可后续评估将默认 jitter 调整为 full jitter，但这不属于本次方案范围。
 
+如果完全放开窗口限制，单个 agent 在长期不可达期间会一直保持约每 30 秒一次的 reconnect attempt。单机 CPU 和内存仍然较低，但服务端会长期承受背景连接尝试；故障持续时间越长，累计连接尝试越多。相比之下，40 分钟窗口 + 调用方兜底恢复可以在默认路径保留止损边界，把是否继续恢复交给调用方策略。
+
 ## 6. 功耗
 
 本方案不新增轮询、不新增后台任务，只延长已有 reconnect scheduler 的存活时间。
@@ -283,6 +329,8 @@ async function recoverRuntimeIfNeeded(runtime: BridgeRuntime): Promise<void> {
 4. 对笔记本电池场景会比当前多一些网络唤醒，但频率较低，且 40 分钟后仍会停止。
 
 结论：功耗影响可控，优于无限重试方案。
+
+如果完全放开窗口限制，长期不可达时会持续保留后台定时器和网络尝试。对桌面常驻进程通常仍可接受，但对笔记本电池、弱网或频繁休眠环境不如 40 分钟窗口可控。
 
 ## 7. 埋码
 
@@ -431,7 +479,7 @@ async function recoverRuntimeIfNeeded(runtime: BridgeRuntime): Promise<void> {
 
 ## 10. 最终建议
 
-最终结论：推荐将默认重连耗尽时间从 10 分钟调整为 40 分钟，即 `maxElapsedMs = 2400000`。同时建议调用方增加基于 `runtime.getStatus()` 的兜底恢复：当 runtime 进入 `failed`，或长期停留在 `reconnecting` 且业务判断需要恢复时，调用方执行 `runtime.stop()` 后再执行 `runtime.start()`，主动启动新连接。
+最终结论：默认方案推荐将重连耗尽时间从 10 分钟调整为 40 分钟，即 `maxElapsedMs = 2400000`。同时建议调用方增加基于 `runtime.getStatus()` 的兜底恢复：当 runtime 进入 `failed`，或长期停留在 `reconnecting` 且业务判断需要恢复时，调用方执行 `runtime.stop()` 后再执行 `runtime.start()`，主动启动新连接。
 
 取舍原因：
 
@@ -439,6 +487,7 @@ async function recoverRuntimeIfNeeded(runtime: BridgeRuntime): Promise<void> {
 2. 相比去除耗尽限制，40 分钟仍保留止损边界，性能和功耗更可控。
 3. 对用户常见的短中时长休眠、网络切换、gateway 短时维护，40 分钟窗口能显著降低需要重启 agent 的概率。
 4. 对超过 40 分钟的隔夜休眠场景，调用方兜底恢复可以补齐 SDK 内部窗口耗尽后的恢复路径。
+5. 完全放开窗口限制的自动恢复体验更强，但会弱化故障可见性和服务端压力边界，建议作为显式配置或后续评审项，而不是默认行为。
 
 后续动作：
 
