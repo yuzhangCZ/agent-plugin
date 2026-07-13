@@ -1,6 +1,6 @@
 # `bridge-runtime-sdk Provider API tool_error 异常感知缺口评审方案`
 
-- 方案日期：`2026-07-10`
+- 方案日期：`2026-07-13`
 - 目标工程：`agent-plugin / packages/bridge-runtime-sdk`
 - 参考文档：`docs/design/interfaces/bridge-runtime-sdk-integration.md`、`docs/design/interfaces/third-party-agent-provider-v1.md`、`packages/bridge-runtime-sdk/src/application/runtime-assembly/downstream.ts`、`packages/bridge-runtime-sdk/src/adapters/gateway/GatewayInboundPolicy.ts`、`packages/bridge-runtime-sdk/src/application/projectors/*`、`packages/bridge-runtime-sdk/src/application/coordinators/*`、`packages/bridge-runtime-sdk/src/application/usecases/*`
 - 方案类型：`SDK/API 异常处理评审方案`
@@ -59,6 +59,8 @@ flowchart TD
 
 以“用户动作是否已经进入可感知执行边界”为判断标准：进入 `invoke.chat`、`create_session`、`reply*`、`abort/close` 或 `emitOutboundRun` 后，失败必须有 `tool_error` 或等价 terminal；查询和 lifecycle 不强行复用 `tool_error`，但必须验证有明确响应或 diagnostics。
 
+上报形态建议统一为“阶段边界判定失败 + `ToolErrorReporter` 统一投影和发送”：各阶段仍负责判断失败是否属于 command failure、request lifecycle、terminal failed 或 inbound invalid；`ToolErrorReporter` 统一处理 `tool_error` 文案、路由字段、级别、observation 和 `sink.send()`。不建议把所有流程都改成“过程中一律抛异常到最外层统一 catch”，因为 terminal failed 和 inbound invalid 不是普通异常语义。
+
 ## 3. 时序图
 
 ### 3.1 `invoke` 命令失败收口
@@ -70,6 +72,7 @@ sequenceDiagram
     participant SDK as bridge-runtime-sdk
     participant P as ThirdPartyAgentProvider
     participant CF as CommandFailureToolErrorProjector
+    participant TER as ToolErrorReporter
 
     FE->>GW: invoke.*
     GW->>SDK: GatewayDownstreamBusinessRequest
@@ -77,13 +80,26 @@ sequenceDiagram
     alt unsupported action
         SDK-->>SDK: throw Unsupported downstream action
         SDK->>CF: 当前: unsupported action 返回 null
-        SDK-->>GW: 建议: 可路由时补 tool_error
+        rect rgb(255, 227, 227)
+        SDK->>TER: 新增 P0: 可路由时上报 unsupported invoke
+        TER-->>GW: tool_error
+        end
         GW-->>FE: 展示“不支持当前操作”
-    else Provider API apply 失败
-        SDK->>P: createSession/runMessage/reply/close/abort
+    else createSession apply 失败
+        SDK->>P: createSession(input)
         P-->>SDK: throw Error / ProviderCommandError
         SDK->>CF: project(summary, error)
-        SDK-->>GW: tool_error
+        rect rgb(255, 227, 227)
+        CF->>TER: 补齐 P0: tool_error 携带 welinkSessionId
+        TER-->>GW: tool_error
+        end
+        GW-->>FE: 展示创建会话失败
+    else 其他 Provider API apply 失败
+        SDK->>P: runMessage/reply/close/abort
+        P-->>SDK: throw Error / ProviderCommandError
+        SDK->>CF: project(summary, error)
+        CF->>TER: 已有 P0: command failure tool_error
+        TER-->>GW: tool_error
         GW-->>FE: 展示失败
     end
 ```
@@ -98,6 +114,7 @@ sequenceDiagram
     participant P as ThirdPartyAgentProvider
     participant RF as RequestRunFailureToolErrorProjector
     participant TF as DefaultRunTerminalSignalProjector
+    participant TER as ToolErrorReporter
 
     FE->>GW: invoke.chat
     GW->>SDK: chat command
@@ -107,10 +124,14 @@ sequenceDiagram
         P-->>SDK: ProviderFact
         alt fact sequence invalid
             SDK->>RF: project()
-            SDK-->>GW: request_run_failed tool_error
+            RF->>TER: 已有 P0: request_run_failed
+            TER-->>GW: tool_error
         else fact enrich failed
             SDK-->>SDK: 当前: failureRecorded 后 continue
-            SDK-->>GW: 建议: request_run_failed tool_error 并终止
+            rect rgb(255, 227, 227)
+            SDK->>TER: 新增 P1: request_run_failed 并终止
+            TER-->>GW: tool_error
+            end
         else fact ok
             SDK-->>GW: tool_event
         end
@@ -118,7 +139,8 @@ sequenceDiagram
     alt result failed
         P-->>SDK: outcome=failed
         SDK->>TF: project()
-        SDK-->>GW: terminal tool_error
+        TF->>TER: 已有 P0: terminal tool_error
+        TER-->>GW: tool_error
     else result completed
         SDK-->>GW: tool_done
     end
@@ -131,18 +153,23 @@ sequenceDiagram
     participant P as ThirdPartyAgentProvider
     participant SDK as bridge-runtime-sdk
     participant TF as DefaultRunTerminalSignalProjector
+    participant TER as ToolErrorReporter
     participant GW as Gateway
     participant FE as 前端
 
     P->>SDK: context.outbound.emitOutboundRun({ toolSessionId, runId, facts })
     alt facts 生命周期非法
         SDK->>TF: emitOutboundRunFailed() 包装 failed terminal
-        SDK-->>GW: tool_error
+        TF->>TER: 已有 P0: outbound terminal tool_error
+        TER-->>GW: tool_error
         GW-->>FE: 展示主动消息失败
     else fact enrich failed
         SDK-->>SDK: 当前: failureRecorded 后 continue
-        SDK->>TF: 建议: failed terminal
-        SDK-->>GW: tool_error
+        rect rgb(255, 227, 227)
+        SDK->>TF: 新增 P1: 包装 failed terminal
+        TF->>TER: 新增 P1: outbound terminal tool_error
+        TER-->>GW: tool_error
+        end
     else 正常
         SDK-->>GW: tool_event...tool_done
         GW-->>FE: 展示主动消息
@@ -153,27 +180,79 @@ sequenceDiagram
 
 ### 4.1 调整点
 
-1. `CommandFailureToolErrorProjector` 补齐可路由失败：unsupported `invoke`、`create_session` 失败只有 `welinkSessionId` 的场景。
-2. `RequestRunCoordinator` 将 `ProviderFactEnricher.enrich()` 失败从“记录后继续”升级为 request run 失败终态，避免关键 permission 事件静默丢失后仍发 `tool_done`。
-3. `OutboundCoordinator.emitOutboundRun()` 将 enrich 失败走 failed terminal，避免主动消息部分事件丢失。
-4. `status_query` 的 Provider `health()` 失败不建议使用 `tool_error`，但需要单独确认是否补 `status_response` 失败态，避免状态查询调用方等待。
-5. 保持 `ListSlashCommandsUseCase` 的空列表降级，不新增 `tool_error`。
+1. 新增统一 `ToolErrorReporter`，收敛 `tool_error` 的构造、路由字段、级别、observation 和发送。
+2. `CommandFailureToolErrorProjector` 补齐可路由失败：unsupported `invoke`、`create_session` 失败只有 `welinkSessionId` 的场景。
+3. `RequestRunCoordinator` 将 `ProviderFactEnricher.enrich()` 失败从“记录后继续”升级为 request run 失败终态，避免关键 permission 事件静默丢失后仍发 `tool_done`。
+4. `OutboundCoordinator.emitOutboundRun()` 将 enrich 失败走 failed terminal，避免主动消息部分事件丢失。
+5. `status_query` 的 Provider `health()` 失败不建议使用 `tool_error`，但需要单独确认是否补 `status_response` 失败态，避免状态查询调用方等待。
+6. 保持 `ListSlashCommandsUseCase` 的空列表降级，不新增 `tool_error`。
 
 ### 4.2 核心实现方式
 
+当前 SDK 里 `tool_error` 上报分散在 5 类节点：
+
+这 5 类节点不是 5 个新接口，而是 `tool_error` 发生位置的阶段划分，便于判断异常应该由谁负责收口：
+
+| 阶段 | 中文理解 | 发生时机 | 典型异常 | 理解方式 |
+|---|---|---|---|---|
+| `inbound_invalid` | 入站请求非法 | gateway 消息刚进入 SDK，还没转换成 runtime command | 下行 `invoke` 字段不合法、缺必要字段、协议校验失败 | 请求在门口验票失败，业务还没开始 |
+| `command_failure` | 命令应用失败 | SDK 已识别出命令，正在调用 Provider API | `createSession()`、`runMessage()`、`reply*()`、`closeSession()`、`abortSession()` 抛错 | 命令接住了，但调用 Provider 失败 |
+| `request_lifecycle` | chat run 事件流生命周期失败 | `runMessage()` 已返回 `ProviderRun`，SDK 正在消费 `facts` | facts 顺序非法、`permission.reply` 找不到展示上下文、pending interaction 冲突 | 消息已经开始跑，但中途事件流坏了 |
+| `request_terminal` | chat run 最终失败 | `ProviderRun.result()` 返回最终结果 | `outcome: "failed"`、`session_not_found`、agent 执行失败 | 消息跑完了，终态明确失败 |
+| `outbound_terminal` | Provider 主动 outbound run 最终失败 | Provider 调用 `context.outbound.emitOutboundRun()` 主动发送消息 | outbound facts 非法、主动消息发送过程失败 | 不是用户 chat，而是 Provider 主动推送失败 |
+
+| 序号 | 上报节点 | 当前入口 | 是否已有上报 | 级别 | 是否建议统一到 `ToolErrorReporter` |
+|---|---|---|---|---|---|
+| 1 | 入站 invalid invoke | `GatewayInboundPolicy.handle()` | 已有 | P0 | 是。保留入站判定，统一 reporter 构造和发送 |
+| 2 | command failure | `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | 已有，`create_session` 路由字段需补齐 | P0 | 是。保留 command catch，统一 reporter 处理文案、路由和发送 |
+| 3 | request run lifecycle failure | `RequestRunCoordinator` + `RequestRunFailureToolErrorProjector` | 已有 | P0 | 是。保留 coordinator 判定，统一 reporter 发送 |
+| 4 | request run terminal failed | `DefaultRunTerminalSignalProjector` | 已有 | P0 | 是。terminal projector 仍负责 terminal 语义，reporter 负责发送 |
+| 5 | outbound run terminal failed | `OutboundCoordinator.emitOutboundRunFailed()` + `DefaultRunTerminalSignalProjector` | 已有 | P0 | 是。outbound coordinator 负责包装 failed terminal，reporter 负责发送 |
+
+统一处理建议：
+
+1. 新增应用层 `ToolErrorReporter`，统一 `tool_error` 的路由字段补齐、文案选择、级别记录、`observation.uplinkEmitted()` 和 `sink.send()`。
+2. 各阶段不直接 `sink.send(tool_error)`，而是调用 `ToolErrorReporter.report(input)`。
+3. 各阶段仍保留失败判定边界：inbound invalid、command failure、request lifecycle、request terminal、outbound terminal 不合并成一个大 catch。
+4. 可以通过抛异常传递到阶段边界的场景：Provider API apply 失败、unsupported invoke、facts lifecycle/enrich failure。
+5. 不建议通过抛异常统一处理的场景：`ProviderRun.result()` 返回 `outcome: "failed"`，它是 terminal 真源；gateway invalid frame 也不是 runtime command 异常。
+
+推荐的上报输入模型如下：
+
+```ts
+type ToolErrorReportInput = {
+  stage:
+    | 'inbound_invalid'
+    | 'command_failure'
+    | 'request_lifecycle'
+    | 'request_terminal'
+    | 'outbound_terminal';
+  level: 'P0' | 'P1' | 'P2' | 'P3';
+  toolSessionId?: string;
+  welinkSessionId?: string;
+  reason?: 'session_not_found';
+  messageKey?: string;
+  fallbackError?: unknown;
+};
+```
+
 建议最小实现范围如下：
 
-1. 修改 `packages/bridge-runtime-sdk/src/application/projectors/CommandFailureToolErrorProjector.ts`
+1. 新增 `packages/bridge-runtime-sdk/src/application/reporters/ToolErrorReporter.ts`
+   - 输入 `ToolErrorReportInput`，输出并发送合法 `ToolErrorMessage`。
+   - 内部复用 `ToolErrorMessageCatalog`，并统一补充 `toolSessionId` / `welinkSessionId`。
+   - 统一调用 `observation.uplinkEmitted()` 与 `sink.send()`。
+2. 修改 `packages/bridge-runtime-sdk/src/application/projectors/CommandFailureToolErrorProjector.ts`
    - unsupported `invoke` 只要 `summary.toolSessionId` 或 `summary.welinkSessionId` 存在，就生成 `tool_error`。
    - `tool_error` 输出同时支持 `toolSessionId` 与 `welinkSessionId`；`create_session` 失败时至少携带 `welinkSessionId`。
    - `fact_sequence_invalid`、`pending_interaction_conflict` 仍交给 request lifecycle 路径，避免重复上报。
-2. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
+3. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
    - `enriched.ok === false` 时记录 observation 后抛出 `RuntimeContractError('fact_sequence_invalid', ...)` 或引入更精确的 runtime code。
    - 复用现有 `RequestRunFailureToolErrorProjector` 发送 `request_run_failed`。
-3. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
+4. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
    - outbound run 的 enrich failure 抛出后由既有 `emitOutboundRunFailed()` 包装 failed terminal。
    - 已废弃 `emitOutboundMessage()` 不强行补 terminal 语义，保持 Promise reject / diagnostics。
-4. 补充 focused tests
+5. 补充 focused tests
    - `command-failure-tool-error-projector.test.ts` 覆盖 unsupported action 与 welink-only create_session。
    - `runtime-sdk.test.ts` 覆盖 request run enrich failure、outbound run enrich failure。
 
@@ -249,11 +328,12 @@ sequenceDiagram
 
 ### 8.1 直接影响
 
-1. `packages/bridge-runtime-sdk/src/application/projectors/CommandFailureToolErrorProjector.ts`
-2. `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
-3. `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
-4. `packages/bridge-runtime-sdk/tests/command-failure-tool-error-projector.test.ts`
-5. `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts`
+1. `packages/bridge-runtime-sdk/src/application/reporters/ToolErrorReporter.ts`
+2. `packages/bridge-runtime-sdk/src/application/projectors/CommandFailureToolErrorProjector.ts`
+3. `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
+4. `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
+5. `packages/bridge-runtime-sdk/tests/command-failure-tool-error-projector.test.ts`
+6. `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts`
 
 ### 8.2 间接影响
 
