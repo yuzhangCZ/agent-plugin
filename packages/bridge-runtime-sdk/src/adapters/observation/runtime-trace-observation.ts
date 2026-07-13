@@ -11,17 +11,11 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
     this.trace = trace;
   }
 
+  // eslint-disable-next-line complexity -- trace observation adapter 按事件类型集中分派 diagnostics 投影，保持诊断写入入口单一。
   record(event: RuntimeObservationEvent): void {
     switch (event.type) {
       case 'provider_call':
-        if (event.phase === 'started') {
-          this.trace.recordProviderCall({
-            command: event.command,
-            ...(event.toolSessionId ? { toolSessionId: event.toolSessionId } : {}),
-            ...(event.runId ? { runId: event.runId } : {}),
-            ...(event.runIds ? { runIds: [...event.runIds] } : {}),
-          });
-        }
+        this.recordProviderCall(event);
         return;
       case 'fact_processed':
         if (event.phase === 'received') {
@@ -78,6 +72,19 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
       default:
         return;
     }
+  }
+
+  private recordProviderCall(event: Extract<RuntimeObservationEvent, { type: 'provider_call' }>): void {
+    if (event.phase !== 'started') {
+      return;
+    }
+
+    this.trace.recordProviderCall({
+      command: event.command,
+      ...(event.toolSessionId ? { toolSessionId: event.toolSessionId } : {}),
+      ...(event.runId ? { runId: event.runId } : {}),
+      ...(event.runIds ? { runIds: event.runIds } : {}),
+    });
   }
 
   snapshot(): RuntimeDiagnostics {

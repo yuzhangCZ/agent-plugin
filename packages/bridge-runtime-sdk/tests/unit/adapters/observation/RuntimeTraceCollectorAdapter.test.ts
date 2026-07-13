@@ -101,3 +101,23 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     code: undefined,
   });
 });
+
+test('trace diagnostics snapshots do not expose mutable provider run id arrays', () => {
+  const trace = new RuntimeTraceCollectorAdapter();
+
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds: ['run-1'],
+  });
+
+  trace.snapshot().providerCalls[0]?.runIds?.push('mutated');
+
+  assert.deepEqual(trace.snapshot().providerCalls[0], {
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+    runIds: ['run-1'],
+  });
+});

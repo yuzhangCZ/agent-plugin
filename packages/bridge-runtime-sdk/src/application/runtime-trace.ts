@@ -81,7 +81,10 @@ export class RuntimeTraceCollector {
   };
 
   recordProviderCall(call: RuntimeTraceProviderCall): void {
-    this.diagnostics.providerCalls.push(call);
+    this.diagnostics.providerCalls.push({
+      ...call,
+      ...(call.runIds ? { runIds: [...call.runIds] } : {}),
+    });
   }
 
   recordFact(toolSessionId: string, fact: ProviderFact): void {
@@ -148,7 +151,10 @@ export class RuntimeTraceCollector {
       lastInboundAt: this.diagnostics.lastInboundAt,
       lastOutboundAt: this.diagnostics.lastOutboundAt,
       lastHeartbeatAt: this.diagnostics.lastHeartbeatAt,
-      providerCalls: [...this.diagnostics.providerCalls],
+      providerCalls: this.diagnostics.providerCalls.map((call) => ({
+        ...call,
+        ...(call.runIds ? { runIds: [...call.runIds] } : {}),
+      })),
       facts: [...this.diagnostics.facts],
       uplinks: [...this.diagnostics.uplinks],
       terminals: [...this.diagnostics.terminals],
