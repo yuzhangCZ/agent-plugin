@@ -49,7 +49,7 @@ test('public contract exposes active run chat policy and abort run id set', asyn
   assert.match(publicContractSource, /export type ActiveRunChatPolicy = 'reject' \| 'forwardToProvider';/);
   assert.match(publicContractSource, /export interface RequestRunPolicyOptions \{/);
   assert.match(publicContractSource, /requestRunPolicy\?: RequestRunPolicyOptions;/);
-  assert.match(publicContractSource, /runIds: string\[];/);
+  assert.match(publicContractSource, /ProviderAbortSessionInput/);
   assert.doesNotMatch(publicContractSource, /runId\?: string;/);
   assert.match(providerSource, /runIds: string\[];/);
   assert.doesNotMatch(providerSource, /runId\?: string;/);
