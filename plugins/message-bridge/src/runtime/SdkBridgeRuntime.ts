@@ -307,6 +307,9 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       traceIdFactory: () => randomUUID(),
       logger: this.logger,
       onTelemetryUpdated: () => this.syncSdkStatus(),
+      requestRunPolicy: {
+        activeRunChatPolicy: 'forwardToProvider',
+      },
     });
 
     let abortListener: (() => void) | undefined;

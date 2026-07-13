@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -212,6 +213,15 @@ function createEntryContext(businessSessionId = 'user-runtime') {
     },
   };
 }
+
+test('sdk runtime opts active-run chat requests into provider forwarding', async () => {
+  const source = await readFile(new URL('../../src/runtime/SdkBridgeRuntime.ts', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /createBridgeRuntime\(\{[\s\S]*requestRunPolicy:\s*\{\s*activeRunChatPolicy:\s*'forwardToProvider',?\s*\}[\s\S]*\}\)/u,
+  );
+});
 
 test('sdk runtime telemetry refresh does not republish READY when public status is already ready', () => {
   __resetMessageBridgeStatusForTests();
