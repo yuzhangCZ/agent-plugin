@@ -52,6 +52,27 @@ test('session runtime registry delete only clears local coordination cache', () 
   assert.deepEqual(recreated.outbound, { status: 'idle' });
 });
 
+test('session runtime registry returns request run snapshots that cannot mutate internal state', () => {
+  const registry = new InMemorySessionRuntimeRegistry();
+
+  const registered = registry.registerRequestRun('tool-1', 'run-1') as { activeRunIds: string[] };
+  registered.activeRunIds.push('run-mutated');
+
+  assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
+
+  const current = registry.getRequestRunState('tool-1') as { activeRunIds: string[] };
+  current.activeRunIds.push('run-mutated-again');
+
+  assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
+});
+
+test('session runtime registry release on missing session returns empty snapshot without creating record', () => {
+  const registry = new InMemorySessionRuntimeRegistry();
+
+  assert.deepEqual(registry.releaseRequestRun('missing-tool', 'run-x'), { activeRunIds: [] });
+  assert.equal(registry.get('missing-tool'), undefined);
+});
+
 test('session runtime registry preserves seeded welinkSessionId across later ensures without the field', () => {
   const registry = new InMemorySessionRuntimeRegistry();
 

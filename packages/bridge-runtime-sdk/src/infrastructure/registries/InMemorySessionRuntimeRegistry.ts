@@ -10,6 +10,10 @@ import type {
 export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
   private readonly records = new Map<string, SessionRuntimeRecord>();
 
+  private snapshotRequestRunState(state: RequestRunState): RequestRunState {
+    return { activeRunIds: [...state.activeRunIds] };
+  }
+
   ensure(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord {
     const existing = this.records.get(input.toolSessionId);
     if (existing) {
@@ -42,24 +46,24 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     if (!record.requestRun.activeRunIds.includes(runId)) {
       record.requestRun = { activeRunIds: [...record.requestRun.activeRunIds, runId] };
     }
-    return record.requestRun;
+    return this.snapshotRequestRunState(record.requestRun);
   }
 
   releaseRequestRun(toolSessionId: string, runId: string): RequestRunState {
     const record = this.records.get(toolSessionId);
     if (!record) {
-      return { activeRunIds: [] };
+      return this.snapshotRequestRunState({ activeRunIds: [] });
     }
     if (record.requestRun.activeRunIds.includes(runId)) {
       record.requestRun = {
         activeRunIds: record.requestRun.activeRunIds.filter((activeRunId) => activeRunId !== runId),
       };
     }
-    return record.requestRun;
+    return this.snapshotRequestRunState(record.requestRun);
   }
 
   getRequestRunState(toolSessionId: string): RequestRunState {
-    return this.records.get(toolSessionId)?.requestRun ?? { activeRunIds: [] };
+    return this.snapshotRequestRunState(this.records.get(toolSessionId)?.requestRun ?? { activeRunIds: [] });
   }
 
   hasActiveRequestRun(toolSessionId: string): boolean {
