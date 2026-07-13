@@ -4,16 +4,16 @@ import assert from 'node:assert/strict';
 
 import { GatewayClientError, GatewayClientStatus } from '@agent-plugin/gateway-client';
 import type { GatewayUplinkBusinessMessage } from '@agent-plugin/gateway-schema';
-import type { BridgeGatewayHostConfig, BridgeRuntimeOptions, ThirdPartyAgentProvider } from '../src/index.ts';
-import { createBridgeRuntime } from '../src/index.ts';
-import { GatewayOutboundSinkAdapter } from '../src/adapters/gateway/GatewayOutboundSinkAdapter.ts';
-import { BridgeGatewayLoggerObservationAdapter } from '../src/adapters/observation/runtime-logger-observation.ts';
-import type { GatewayRuntimeDriver } from '../src/application/ports/gateway-runtime-driver.ts';
-import { DefaultRuntimeObservation } from '../src/application/runtime-observation/index.ts';
+import type { BridgeGatewayHostConfig, BridgeRuntimeOptions, ThirdPartyAgentProvider } from '@/index.ts';
+import { createBridgeRuntime } from '@/index.ts';
+import { GatewayOutboundSinkAdapter } from '@/adapters/gateway/GatewayOutboundSinkAdapter.ts';
+import { BridgeGatewayLoggerObservationAdapter } from '@/adapters/observation/runtime-logger-observation.ts';
+import type { GatewayRuntimeDriver } from '@/application/ports/gateway-runtime-driver.ts';
+import { DefaultRuntimeObservation } from '@/application/runtime-observation/index.ts';
 import type {
   BridgeGatewayHostConnection,
   BridgeGatewayLogger,
-} from '../src/infrastructure/gateway/gateway-host.ts';
+} from '@/infrastructure/gateway/gateway-host.ts';
 
 type RecordedLog = {
   level: 'debug' | 'info' | 'warn' | 'error';

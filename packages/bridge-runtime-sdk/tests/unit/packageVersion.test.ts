@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolvePackageVersion } from '../src/index.ts';
+import { resolvePackageVersion } from '@/index.ts';
 
 const ORIGINAL_PACKAGE_VERSION = globalThis.__MB_SDK_PACKAGE_VERSION__;
 

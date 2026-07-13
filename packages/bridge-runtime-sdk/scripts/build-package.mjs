@@ -10,7 +10,7 @@ import { build } from 'esbuild';
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = path.join(packageDir, 'dist');
 const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || 'ws://localhost:8081/ws/agent';
-const forbiddenSpecifiers = ['@agent-plugin/gateway-client', '@agent-plugin/gateway-schema'];
+const forbiddenDeclarationFragments = ['@agent-plugin/gateway-client', '@agent-plugin/gateway-schema', '@/'];
 const shouldMinify = !['0', 'false', 'no', 'off'].includes((process.env.BRIDGE_RUNTIME_SDK_MINIFY ?? '1').trim().toLowerCase());
 
 async function main() {
@@ -61,9 +61,9 @@ async function main() {
   );
 
   const declarations = await readFile(path.join(distDir, 'index.d.ts'), 'utf8');
-  for (const specifier of forbiddenSpecifiers) {
-    if (declarations.includes(specifier)) {
-      throw new Error(`declaration bundle still references forbidden package specifier: ${specifier}`);
+  for (const fragment of forbiddenDeclarationFragments) {
+    if (declarations.includes(fragment)) {
+      throw new Error(`declaration bundle still references forbidden fragment: ${fragment}`);
     }
   }
 

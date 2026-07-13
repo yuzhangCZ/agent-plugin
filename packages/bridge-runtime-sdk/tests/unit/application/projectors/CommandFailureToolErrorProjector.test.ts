@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { RuntimeContractError } from '../src/domain/errors.ts';
+import { RuntimeContractError } from '@/domain/errors.ts';
 import {
   CommandFailureToolErrorProjector,
   ToolErrorMessageCatalog,
-} from '../src/application/projectors/index.ts';
+} from '@/application/projectors/index.ts';
 
 test('command failure projector maps run_already_active to catalog message', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());

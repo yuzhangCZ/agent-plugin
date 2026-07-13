@@ -1,0 +1,42 @@
+{
+  "nodejs-testing.include": [
+    "./packages/bridge-runtime-sdk/tests"
+  ],
+  "nodejs-testing.exclude": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**"
+  ],
+  "nodejs-testing.pretest": [
+    "node",
+    "packages/bridge-runtime-sdk/scripts/prepare-workspace-deps.mjs"
+  ],
+  "nodejs-testing.extensions": [
+    {
+      "extensions": [
+        "mjs",
+        "cjs",
+        "js"
+      ],
+      "parameters": []
+    },
+    {
+      "extensions": [
+        "ts"
+      ],
+      "filePatterns": [
+        "**/*.test.ts"
+      ],
+      "parameters": [
+        "--import",
+        "${workspaceFolder}/packages/bridge-runtime-sdk/scripts/register-test-alias-loader.mjs",
+        "--experimental-strip-types"
+      ]
+    }
+  ],
+  "nodejs-testing.debugOptions": {
+    "skipFiles": [
+      "<node_internals>/**"
+    ]
+  }
+}

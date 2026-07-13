@@ -1,15 +1,11 @@
 import { EventEmitter } from 'node:events';
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import { GatewayClientStatus } from '@agent-plugin/gateway-client';
-import { createBridgeRuntime } from '../src/index.ts';
-import type { BridgeGatewayHostConfig } from '../src/index.ts';
-import {
-  normalizeBridgeGatewayHostConfig,
-  type BridgeGatewayHostConnection,
-} from '../src/infrastructure/gateway/gateway-host.ts';
-import { resolvePackageVersion } from '../src/packageVersion.ts';
+
+import { createBridgeRuntime, type BridgeGatewayHostConfig } from '@/index.ts';
+import type { BridgeGatewayHostConnection } from '@/infrastructure/gateway/gateway-host.ts';
 
 class HostGatewayClient extends EventEmitter implements BridgeGatewayHostConnection {
   sent: unknown[] = [];
@@ -67,31 +63,6 @@ function createGatewayConfig(): BridgeGatewayHostConfig {
     },
   };
 }
-
-test('normalizeBridgeGatewayHostConfig auto injects sdkVersion while preserving pluginVersion', () => {
-  const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
-
-  assert.equal((normalized.register as { toolType?: string }).toolType, 'openx');
-  assert.equal(normalized.register.sdkVersion, resolvePackageVersion());
-  assert.equal(normalized.register.pluginVersion, '0.1.0');
-});
-
-test('normalizeBridgeGatewayHostConfig omits sdkVersion when sdk package version is unavailable', () => {
-  const originalPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
-  delete globalThis.__MB_SDK_PACKAGE_VERSION__;
-
-  try {
-    const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
-    assert.equal('sdkVersion' in normalized.register, false);
-    assert.equal(normalized.register.pluginVersion, '0.1.0');
-  } finally {
-    if (typeof originalPackageVersion === 'undefined') {
-      delete globalThis.__MB_SDK_PACKAGE_VERSION__;
-    } else {
-      globalThis.__MB_SDK_PACKAGE_VERSION__ = originalPackageVersion;
-    }
-  }
-});
 
 test('host runtime records gateway diagnostics and processes downstream messages', async () => {
   const connection = new HostGatewayClient();

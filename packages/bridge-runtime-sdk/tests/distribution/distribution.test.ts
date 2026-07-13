@@ -3,8 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const packageRoot = path.resolve('.');
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const qrcodeDistRoot = path.resolve(packageRoot, '../skill-qrcode-auth/dist');
 
 function runScript(script: string, env: NodeJS.ProcessEnv = {}): void {

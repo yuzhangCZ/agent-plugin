@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ProviderFactEnricher } from '../src/application/ProviderFactEnricher.ts';
-import { InMemoryPermissionPresentationRegistry } from '../src/infrastructure/registries/InMemoryPermissionPresentationRegistry.ts';
+import { ProviderFactEnricher } from '@/application/ProviderFactEnricher.ts';
+import { InMemoryPermissionPresentationRegistry } from '@/infrastructure/registries/InMemoryPermissionPresentationRegistry.ts';
 
 test('permission.ask registers presentation context and permission.reply restores partId/messageId', () => {
   const enricher = new ProviderFactEnricher(new InMemoryPermissionPresentationRegistry());

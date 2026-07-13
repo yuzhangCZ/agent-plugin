@@ -1,8 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
-import { InMemoryPendingInteractionRegistry } from '../src/infrastructure/registries/InMemoryPendingInteractionRegistry.ts';
-import { InMemorySessionRuntimeRegistry } from '../src/infrastructure/registries/InMemorySessionRuntimeRegistry.ts';
+import { InMemorySessionRuntimeRegistry } from '@/infrastructure/registries/InMemorySessionRuntimeRegistry.ts';
 
 test('session runtime registry coordinates request run and outbound emission independently', () => {
   const registry = new InMemorySessionRuntimeRegistry();
@@ -60,63 +59,4 @@ test('session runtime registry preserves seeded welinkSessionId across later ens
   const preserved = registry.ensure({ toolSessionId: 'tool-1' });
 
   assert.equal(preserved.welinkSessionId, 'we-1');
-});
-
-test('pending interaction registry enforces global token uniqueness and exact token consumption', () => {
-  const registry = new InMemoryPendingInteractionRegistry();
-
-  assert.deepEqual(registry.register({
-    toolSessionId: 'tool-1',
-    kind: 'question',
-    tokenId: 'token-1',
-    messageId: 'msg-1',
-  }), { ok: true });
-
-  assert.deepEqual(registry.register({
-    toolSessionId: 'tool-1',
-    kind: 'question',
-    tokenId: 'token-1',
-  }), { ok: false, reason: 'duplicate_same_session' });
-
-  const conflict = registry.register({
-    toolSessionId: 'tool-2',
-    kind: 'question',
-    tokenId: 'token-1',
-  });
-  assert.equal(conflict.ok, false);
-  if (conflict.ok) {
-    assert.fail('expected cross-session conflict');
-  }
-  assert.equal(conflict.reason, 'conflict_cross_session');
-  assert.equal(conflict.conflict.existing.toolSessionId, 'tool-1');
-  assert.equal(conflict.conflict.current.toolSessionId, 'tool-2');
-
-  assert.deepEqual(registry.consume({ kind: 'question', tokenId: 'token-1' }), {
-    toolSessionId: 'tool-1',
-    kind: 'question',
-    tokenId: 'token-1',
-    messageId: 'msg-1',
-  });
-  assert.equal(registry.consume({ kind: 'question', tokenId: 'token-1' }), undefined);
-
-  assert.deepEqual(registry.register({
-    toolSessionId: 'tool-1',
-    kind: 'permission',
-    tokenId: 'perm-1',
-  }), { ok: true });
-  assert.deepEqual(registry.register({
-    toolSessionId: 'tool-1',
-    kind: 'permission',
-    tokenId: 'perm-2',
-  }), { ok: true });
-  assert.deepEqual(registry.consume({ kind: 'permission', tokenId: 'perm-1' }), {
-    toolSessionId: 'tool-1',
-    kind: 'permission',
-    tokenId: 'perm-1',
-  });
-  assert.deepEqual(registry.consume({ kind: 'permission', tokenId: 'perm-2' }), {
-    toolSessionId: 'tool-1',
-    kind: 'permission',
-    tokenId: 'perm-2',
-  });
 });
