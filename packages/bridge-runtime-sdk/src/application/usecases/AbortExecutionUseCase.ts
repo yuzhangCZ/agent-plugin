@@ -24,11 +24,11 @@ export class AbortExecutionUseCase implements AbortExecutionUseCasePort {
   }
 
   async execute(command: Extract<RuntimeCommand, { kind: 'abort_execution' }>): Promise<void> {
-    const runId = this.sessionRegistry.getActiveRequestRunId(command.source.payload.toolSessionId);
-    const runIds = runId ? [runId] : [];
+    const requestRun = this.sessionRegistry.getRequestRunState(command.source.payload.toolSessionId);
+    const runIds = [...requestRun.activeRunIds];
     const context = {
       toolSessionId: command.source.payload.toolSessionId,
-      runId,
+      runIds,
     };
     this.observation.usecaseStarted('abort_execution', command.traceId, context);
     try {

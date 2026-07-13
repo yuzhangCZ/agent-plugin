@@ -67,22 +67,17 @@ test('StartRequestRunUseCase acquires request run, calls provider, delegates run
       },
     } as never,
     {
-      acquireRequestRun(toolSessionId: string, runId: string) {
-        return {
-          ok: true as const,
-          record: {
-            toolSessionId,
-            welinkSessionId: 'we-1',
-            requestRun: { status: 'running' as const, runId },
-            outbound: { status: 'idle' as const },
-          },
-        };
+      hasActiveRequestRun() {
+        return false;
+      },
+      registerRequestRun() {
+        return { activeRunIds: ['run-active'] };
       },
       ensure(input: { toolSessionId: string; welinkSessionId?: string }) {
         return {
           toolSessionId: input.toolSessionId,
           welinkSessionId: input.welinkSessionId,
-          requestRun: { status: 'running' as const, runId: 'active' },
+          requestRun: { activeRunIds: ['active'] },
           outbound: { status: 'idle' as const },
         };
       },
@@ -144,8 +139,8 @@ test('StartRequestRunUseCase rejects active run conflict before provider call', 
       },
     } as never,
     {
-      acquireRequestRun() {
-        return { ok: false as const };
+      hasActiveRequestRun() {
+        return true;
       },
     } as never,
     {
@@ -176,21 +171,17 @@ test('StartRequestRunUseCase releases request run when provider throws', async (
       },
     } as never,
     {
-      acquireRequestRun(toolSessionId: string, runId: string) {
-        return {
-          ok: true as const,
-          record: {
-            toolSessionId,
-            requestRun: { status: 'running' as const, runId },
-            outbound: { status: 'idle' as const },
-          },
-        };
+      hasActiveRequestRun() {
+        return false;
+      },
+      registerRequestRun() {
+        return { activeRunIds: ['run-active'] };
       },
       ensure(input: { toolSessionId: string; welinkSessionId?: string }) {
         return {
           toolSessionId: input.toolSessionId,
           welinkSessionId: input.welinkSessionId,
-          requestRun: { status: 'running' as const, runId: 'active' },
+          requestRun: { activeRunIds: ['active'] },
           outbound: { status: 'idle' as const },
         };
       },

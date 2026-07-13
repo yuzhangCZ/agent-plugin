@@ -43,8 +43,8 @@ test('AbortExecutionUseCase forwards active run id and clears permission present
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return 'run-active';
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
       },
     } as never,
     {
@@ -72,8 +72,8 @@ test('AbortExecutionUseCase forwards empty run id set when no active run exists'
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return undefined;
+      getRequestRunState() {
+        return { activeRunIds: [] };
       },
     } as never,
     {
@@ -96,8 +96,8 @@ test('AbortExecutionUseCase records failed observation and does not swallow prov
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return 'run-active';
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
       },
     } as never,
     {

@@ -1,4 +1,5 @@
 import type {
+  RequestRunState,
   SessionRuntimeRecord,
   SessionRuntimeRegistry,
 } from '../../application/ports/session-runtime-registry.ts';
@@ -21,7 +22,7 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     const created: SessionRuntimeRecord = {
       toolSessionId: input.toolSessionId,
       ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
-      requestRun: { status: 'idle' },
+      requestRun: { activeRunIds: [] },
       outbound: { status: 'idle' },
     };
     this.records.set(input.toolSessionId, created);
@@ -36,29 +37,33 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     this.records.delete(toolSessionId);
   }
 
-  acquireRequestRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
+  registerRequestRun(toolSessionId: string, runId: string): RequestRunState {
     const record = this.ensure({ toolSessionId });
-    if (record.requestRun.status !== 'idle') {
-      return { ok: false };
+    if (!record.requestRun.activeRunIds.includes(runId)) {
+      record.requestRun = { activeRunIds: [...record.requestRun.activeRunIds, runId] };
     }
-    record.requestRun = { status: 'running', runId };
-    return { ok: true, record };
+    return record.requestRun;
   }
 
-  releaseRequestRun(toolSessionId: string, runId: string): void {
+  releaseRequestRun(toolSessionId: string, runId: string): RequestRunState {
     const record = this.records.get(toolSessionId);
-    if (record?.requestRun.status === 'running' && record.requestRun.runId === runId) {
-      record.requestRun = { status: 'idle' };
+    if (!record) {
+      return { activeRunIds: [] };
     }
+    if (record.requestRun.activeRunIds.includes(runId)) {
+      record.requestRun = {
+        activeRunIds: record.requestRun.activeRunIds.filter((activeRunId) => activeRunId !== runId),
+      };
+    }
+    return record.requestRun;
   }
 
-  getRequestRunState(toolSessionId: string) {
-    return this.records.get(toolSessionId)?.requestRun ?? { status: 'idle' };
+  getRequestRunState(toolSessionId: string): RequestRunState {
+    return this.records.get(toolSessionId)?.requestRun ?? { activeRunIds: [] };
   }
 
-  getActiveRequestRunId(toolSessionId: string): string | undefined {
-    const requestRun = this.getRequestRunState(toolSessionId);
-    return requestRun.status === 'running' ? requestRun.runId : undefined;
+  hasActiveRequestRun(toolSessionId: string): boolean {
+    return this.getRequestRunState(toolSessionId).activeRunIds.length > 0;
   }
 
   acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {

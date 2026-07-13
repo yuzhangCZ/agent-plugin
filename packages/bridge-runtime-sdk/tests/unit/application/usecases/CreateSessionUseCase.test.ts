@@ -62,7 +62,7 @@ test('CreateSessionUseCase sends projected session_created response and preserve
         return {
           toolSessionId: 'tool-1',
           welinkSessionId: 'we-1',
-          requestRun: { status: 'idle' as const },
+          requestRun: { activeRunIds: [] },
           outbound: { status: 'idle' as const },
         };
       },

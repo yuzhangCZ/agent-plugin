@@ -15,7 +15,7 @@ function createCoordinator(input: {
           ok: true as const,
           record: {
             toolSessionId,
-            requestRun: { status: 'idle' as const },
+            requestRun: { activeRunIds: [] },
             outbound: { status: 'emitting' as const, messageId },
           },
         };

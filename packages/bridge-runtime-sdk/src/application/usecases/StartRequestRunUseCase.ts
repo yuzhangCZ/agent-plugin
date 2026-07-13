@@ -35,8 +35,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       runId,
     };
     this.observation.usecaseStarted('start_request_run', command.traceId, context);
-    const acquired = this.sessionRegistry.acquireRequestRun(toolSessionId, runId);
-    if (!acquired.ok) {
+    if (this.sessionRegistry.hasActiveRequestRun(toolSessionId)) {
       const error = new RuntimeContractError(
         'run_already_active',
         `toolSessionId already has an active request run: ${toolSessionId}`,
@@ -45,6 +44,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       this.observation.usecaseConflict('start_request_run', command.traceId, error, error.code, context);
       throw error;
     }
+    this.sessionRegistry.registerRequestRun(toolSessionId, runId);
 
     const sessionRecord = this.sessionRegistry.ensure({
       toolSessionId,

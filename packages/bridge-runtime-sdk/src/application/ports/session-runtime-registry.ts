@@ -1,6 +1,6 @@
-export type RequestRunState =
-  | { status: 'idle' }
-  | { status: 'running'; runId: string };
+export interface RequestRunState {
+  activeRunIds: readonly string[];
+}
 
 export type OutboundEmissionState =
   | { status: 'idle' }
@@ -25,10 +25,10 @@ export interface SessionRuntimeRegistry {
   ensure(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord;
   get(toolSessionId: string): SessionRuntimeRecord | undefined;
   delete(toolSessionId: string): void;
-  acquireRequestRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false };
-  releaseRequestRun(toolSessionId: string, runId: string): void;
+  registerRequestRun(toolSessionId: string, runId: string): RequestRunState;
+  releaseRequestRun(toolSessionId: string, runId: string): RequestRunState;
   getRequestRunState(toolSessionId: string): RequestRunState;
-  getActiveRequestRunId(toolSessionId: string): string | undefined;
+  hasActiveRequestRun(toolSessionId: string): boolean;
   acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false };
   releaseOutboundEmission(toolSessionId: string, messageId: string): void;
   getOutboundEmissionState(toolSessionId: string): OutboundEmissionState;
