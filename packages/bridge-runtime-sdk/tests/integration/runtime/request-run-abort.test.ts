@@ -12,7 +12,7 @@ import {
   flushEvents,
 } from '../support/runtime-harness.ts';
 
-test('abort_session forwards active run id and sends tool_done when run resolves aborted', async () => {
+test('abort_session forwards active run ids and sends tool_done when run resolves aborted', async () => {
   const connection = new FakeGatewayClient();
   let finishFacts: (() => void) | undefined;
   let resolveTerminal: ((result: ProviderTerminalResult) => void) | undefined;
@@ -86,7 +86,7 @@ test('abort_session forwards active run id and sends tool_done when run resolves
   assert.deepEqual(capturedAbortInput, {
     traceId: 'trace-fixed',
     toolSessionId: 'tool-1',
-    runId: capturedRunId,
+    runIds: [capturedRunId],
   });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_done',
@@ -94,7 +94,7 @@ test('abort_session forwards active run id and sends tool_done when run resolves
   });
 });
 
-test('abort_session without active request run passes undefined runId and keeps toolSessionId reusable', async () => {
+test('abort_session without active request run passes empty runIds and keeps toolSessionId reusable', async () => {
   const connection = new FakeGatewayClient();
   let capturedAbortInput: Record<string, unknown> | undefined;
   let runCount = 0;
@@ -145,7 +145,7 @@ test('abort_session without active request run passes undefined runId and keeps 
   await flushEvents();
 
   assert.ok(capturedAbortInput);
-  assert.equal(capturedAbortInput.runId, undefined);
+  assert.deepEqual(capturedAbortInput.runIds, []);
   assert.equal(runCount, 2);
   assert.equal(
     connection.sent.filter((message) =>
@@ -164,6 +164,7 @@ test('abort_session keeps active request run occupied until aborted run settles'
   const connection = new FakeGatewayClient();
   const firstRunResult = createDeferred<ProviderTerminalResult>();
   let capturedAbortInput: Record<string, unknown> | undefined;
+  let capturedRunId: string | undefined;
   let runCount = 0;
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -172,6 +173,7 @@ test('abort_session keeps active request run occupied until aborted run settles'
         async runMessage(input) {
           runCount += 1;
           if (runCount === 1) {
+            capturedRunId = input.runId;
             return {
               runId: input.runId,
               facts: createAsyncFacts([]),
@@ -219,7 +221,7 @@ test('abort_session keeps active request run occupied until aborted run settles'
   await flushEvents();
 
   assert.equal(runCount, 1);
-  assert.ok(capturedAbortInput?.runId);
+  assert.deepEqual(capturedAbortInput?.runIds, [capturedRunId]);
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
@@ -243,9 +245,75 @@ test('abort_session keeps active request run occupied until aborted run settles'
   });
 });
 
+test('abort_session forwards all active request run ids when active chats are forwarded to provider', async () => {
+  const connection = new FakeGatewayClient();
+  const firstRunResult = createDeferred<ProviderTerminalResult>();
+  const secondRunResult = createDeferred<ProviderTerminalResult>();
+  const runIds: string[] = [];
+  let capturedAbortInput: Record<string, unknown> | undefined;
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        ...createProvider(),
+        async runMessage(input) {
+          const result = runIds.length === 0 ? firstRunResult : secondRunResult;
+          runIds.push(input.runId);
+          return {
+            runId: input.runId,
+            facts: createAsyncFacts([]),
+            result: async () => result.promise,
+          };
+        },
+        async abortSession(input) {
+          capturedAbortInput = input as unknown as Record<string, unknown>;
+          return { applied: true };
+        },
+      },
+      connection,
+      { requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' } },
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await flushEvents();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-2',
+    payload: { toolSessionId: 'tool-1', text: 'second' },
+  });
+  await flushEvents();
+
+  assert.equal(runIds.length, 2);
+  assert.notEqual(runIds[0], runIds[1]);
+
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'abort_session',
+    welinkSessionId: 'welink-3',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await flushEvents();
+
+  assert.ok(capturedAbortInput);
+  assert.deepEqual(capturedAbortInput.runIds, runIds);
+  assert.equal(Array.isArray(capturedAbortInput.runIds) && new Set(capturedAbortInput.runIds).size, 2);
+
+  firstRunResult.resolve({ outcome: 'aborted' });
+  secondRunResult.resolve({ outcome: 'aborted' });
+  await flushEvents();
+});
+
 test('run_already_active projects routable tool_error while preserving active request run lock', async () => {
   const connection = new FakeGatewayClient();
   const firstRunResult = createDeferred<ProviderTerminalResult>();
+  let runCount = 0;
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
       {
@@ -256,6 +324,7 @@ test('run_already_active projects routable tool_error while preserving active re
           return { toolSessionId: 'tool-1' };
         },
         async runMessage() {
+          runCount += 1;
           return {
             runId: 'run-hanging-1',
             facts: createAsyncFacts([]),
@@ -300,6 +369,7 @@ test('run_already_active projects routable tool_error while preserving active re
     toolSessionId: 'tool-1',
     error: '当前会话正在处理中，请稍后再试',
   });
+  assert.equal(runCount, 1);
   firstRunResult.resolve({ outcome: 'completed' });
   await flushEvents();
 });
