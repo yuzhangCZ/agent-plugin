@@ -37,6 +37,7 @@ import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
 import type { BridgeRuntimeInternalOptions } from './runtime-options.types.ts';
 import { DEFAULT_TOOL_DONE_COMPAT_DELAY_MS } from '../constants/runtime.ts';
+import { resolveRequestRunPolicy } from '../request-run-policy.ts';
 
 // eslint-disable-next-line max-lines-per-function -- composition root 需要集中表达 runtime 依赖装配关系。
 export function createApplicationRuntimeSide(
@@ -51,6 +52,7 @@ export function createApplicationRuntimeSide(
   const sessionRegistry = new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry = new InMemoryPendingInteractionRegistry();
   const permissionPresentationRegistry = new InMemoryPermissionPresentationRegistry();
+  const requestRunPolicy = resolveRequestRunPolicy(options.requestRunPolicy);
   const factEnricher = new ProviderFactEnricher(permissionPresentationRegistry);
   const factProjector = new DefaultFactToSkillEventProjector();
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
@@ -113,6 +115,7 @@ export function createApplicationRuntimeSide(
       sessionRegistry,
       requestRunCoordinator,
       observation,
+      requestRunPolicy,
     ),
     reply_question: new ReplyQuestionUseCase(providerHandlers, interactionCoordinator, observation),
     reply_permission: new ReplyPermissionUseCase(providerHandlers, interactionCoordinator, observation),

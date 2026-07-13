@@ -4,6 +4,9 @@ import test from 'node:test';
 import { RuntimeContractError } from '@/domain/errors.ts';
 import { StartRequestRunUseCase } from '@/application/usecases/index.ts';
 
+const rejectPolicy = { activeRunChatPolicy: 'reject' as const };
+const forwardToProviderPolicy = { activeRunChatPolicy: 'forwardToProvider' as const };
+
 class RecordingObservation {
   readonly events: Array<{ method: string; args: unknown[] }> = [];
 
@@ -67,6 +70,9 @@ test('StartRequestRunUseCase acquires request run, calls provider, delegates run
       },
     } as never,
     {
+      getRequestRunState() {
+        return { activeRunIds: [] };
+      },
       hasActiveRequestRun() {
         return false;
       },
@@ -91,6 +97,7 @@ test('StartRequestRunUseCase acquires request run, calls provider, delegates run
       },
     } as never,
     observation as never,
+    rejectPolicy,
   );
 
   await useCase.execute(createCommand());
@@ -130,6 +137,7 @@ test('StartRequestRunUseCase acquires request run, calls provider, delegates run
 test('StartRequestRunUseCase rejects active run conflict before provider call', async () => {
   const observation = new RecordingObservation();
   let providerCalled = false;
+  let registerCalled = false;
 
   const useCase = new StartRequestRunUseCase(
     {
@@ -139,8 +147,12 @@ test('StartRequestRunUseCase rejects active run conflict before provider call', 
       },
     } as never,
     {
-      hasActiveRequestRun() {
-        return true;
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
+      },
+      registerRequestRun() {
+        registerCalled = true;
+        throw new Error('unexpected');
       },
     } as never,
     {
@@ -149,6 +161,7 @@ test('StartRequestRunUseCase rejects active run conflict before provider call', 
       },
     } as never,
     observation as never,
+    rejectPolicy,
   );
 
   await assert.rejects(
@@ -157,7 +170,80 @@ test('StartRequestRunUseCase rejects active run conflict before provider call', 
   );
 
   assert.equal(providerCalled, false);
+  assert.equal(registerCalled, false);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseConflict']);
+});
+
+test('StartRequestRunUseCase forwards active run to provider when policy allows concurrency', async () => {
+  const observation = new RecordingObservation();
+  const providerCalls: unknown[] = [];
+  const coordinatorCalls: unknown[] = [];
+  const released: Array<{ toolSessionId: string; runId: string }> = [];
+  const registered: Array<{ toolSessionId: string; runId: string }> = [];
+  const providerRun = {
+    runId: 'provider-run',
+    facts: (async function* () {})(),
+    async result() {
+      return { outcome: 'completed' as const };
+    },
+  };
+
+  const useCase = new StartRequestRunUseCase(
+    {
+      async startRequestRun(input: unknown) {
+        providerCalls.push(input);
+        return providerRun;
+      },
+    } as never,
+    {
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
+      },
+      registerRequestRun(toolSessionId: string, runId: string) {
+        registered.push({ toolSessionId, runId });
+        return { activeRunIds: ['run-active', runId] };
+      },
+      ensure(input: { toolSessionId: string; welinkSessionId?: string }) {
+        return {
+          toolSessionId: input.toolSessionId,
+          welinkSessionId: input.welinkSessionId,
+          requestRun: { activeRunIds: ['run-active', registered[0]?.runId] },
+          outbound: { status: 'idle' as const },
+        };
+      },
+      releaseRequestRun(toolSessionId: string, runId: string) {
+        released.push({ toolSessionId, runId });
+        return { activeRunIds: ['run-active'] };
+      },
+    } as never,
+    {
+      async executeRun(input: unknown) {
+        coordinatorCalls.push(input);
+      },
+    } as never,
+    observation as never,
+    forwardToProviderPolicy,
+  );
+
+  await useCase.execute(createCommand());
+
+  assert.equal(providerCalls.length, 1);
+  const providerInput = providerCalls[0] as {
+    runId: string;
+    toolSessionId: string;
+    text: string;
+  };
+  assert.equal(providerInput.toolSessionId, 'tool-1');
+  assert.equal(providerInput.text, 'hello');
+  assert.match(providerInput.runId, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(registered, [{ toolSessionId: 'tool-1', runId: providerInput.runId }]);
+  assert.deepEqual(coordinatorCalls, [{
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'we-1',
+    runId: providerInput.runId,
+    run: providerRun,
+  }]);
+  assert.deepEqual(released, [{ toolSessionId: 'tool-1', runId: providerInput.runId }]);
 });
 
 test('StartRequestRunUseCase releases request run when provider throws', async () => {
@@ -171,6 +257,9 @@ test('StartRequestRunUseCase releases request run when provider throws', async (
       },
     } as never,
     {
+      getRequestRunState() {
+        return { activeRunIds: [] };
+      },
       hasActiveRequestRun() {
         return false;
       },
@@ -195,6 +284,7 @@ test('StartRequestRunUseCase releases request run when provider throws', async (
       },
     } as never,
     observation as never,
+    rejectPolicy,
   );
 
   await assert.rejects(() => useCase.execute(createCommand()), /provider_down/);

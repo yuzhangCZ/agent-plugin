@@ -2,31 +2,38 @@ import { randomUUID } from 'node:crypto';
 
 import type { ProviderCommandHandlers } from '../../adapters/provider/provider-api-adapter.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
+import type { ProviderRunMessageInput } from '../../domain/provider.ts';
 import type { RuntimeCommand } from '../../domain/runtime-command.ts';
 import type { RequestRunCoordinator } from '../coordinators/index.ts';
 import type { StartRequestRunUseCase as StartRequestRunUseCasePort } from '../ports/runtime-usecase.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
+import type { ResolvedRequestRunPolicy } from '../request-run-policy.ts';
 import type { RuntimeObservation } from '../runtime-observation/index.ts';
+
+type StartRequestRunCommand = Extract<RuntimeCommand, { kind: 'start_request_run' }>;
 
 export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
   private readonly handlers: ProviderCommandHandlers;
   private readonly sessionRegistry: SessionRuntimeRegistry;
   private readonly coordinator: RequestRunCoordinator;
   private readonly observation: RuntimeObservation;
+  private readonly requestRunPolicy: ResolvedRequestRunPolicy;
 
   constructor(
     handlers: ProviderCommandHandlers,
     sessionRegistry: SessionRuntimeRegistry,
     coordinator: RequestRunCoordinator,
     observation: RuntimeObservation,
+    requestRunPolicy: ResolvedRequestRunPolicy,
   ) {
     this.handlers = handlers;
     this.sessionRegistry = sessionRegistry;
     this.coordinator = coordinator;
     this.observation = observation;
+    this.requestRunPolicy = requestRunPolicy;
   }
 
-  async execute(command: Extract<RuntimeCommand, { kind: 'start_request_run' }>): Promise<void> {
+  async execute(command: StartRequestRunCommand): Promise<void> {
     const runId = randomUUID();
     const toolSessionId = command.source.payload.toolSessionId;
     const context = {
@@ -35,7 +42,8 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       runId,
     };
     this.observation.usecaseStarted('start_request_run', command.traceId, context);
-    if (this.sessionRegistry.hasActiveRequestRun(toolSessionId)) {
+    const activeRunState = this.sessionRegistry.getRequestRunState(toolSessionId);
+    if (activeRunState.activeRunIds.length > 0 && this.requestRunPolicy.activeRunChatPolicy === 'reject') {
       const error = new RuntimeContractError(
         'run_already_active',
         `toolSessionId already has an active request run: ${toolSessionId}`,
@@ -52,20 +60,7 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
     });
 
     try {
-      const providerContext = {
-        ...(command.source.payload.assistantAccount ? { assistantAccount: command.source.payload.assistantAccount } : {}),
-        ...(command.source.payload.sendUserAccount ? { sendUserAccount: command.source.payload.sendUserAccount } : {}),
-        ...(command.source.suppressReply !== undefined ? { suppressReply: command.source.suppressReply } : {}),
-      };
-      const run = await this.handlers.startRequestRun({
-        traceId: command.traceId,
-        runId,
-        toolSessionId,
-        text: command.source.payload.text,
-        ...(command.source.payload.assistantId ? { assistantId: command.source.payload.assistantId } : {}),
-        ...(command.source.payload.extParameters !== undefined ? { extParameters: command.source.payload.extParameters } : {}),
-        ...(Object.keys(providerContext).length > 0 ? { context: providerContext } : {}),
-      });
+      const run = await this.handlers.startRequestRun(createProviderRunMessageInput(command, runId, toolSessionId));
       await this.coordinator.executeRun({
         toolSessionId,
         welinkSessionId: command.source.welinkSessionId ?? sessionRecord.welinkSessionId,
@@ -94,4 +89,25 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       this.sessionRegistry.releaseRequestRun(toolSessionId, runId);
     }
   }
+}
+
+function createProviderRunMessageInput(
+  command: StartRequestRunCommand,
+  runId: string,
+  toolSessionId: string,
+): ProviderRunMessageInput {
+  const providerContext = {
+    ...(command.source.payload.assistantAccount ? { assistantAccount: command.source.payload.assistantAccount } : {}),
+    ...(command.source.payload.sendUserAccount ? { sendUserAccount: command.source.payload.sendUserAccount } : {}),
+    ...(command.source.suppressReply !== undefined ? { suppressReply: command.source.suppressReply } : {}),
+  };
+  return {
+    traceId: command.traceId,
+    runId,
+    toolSessionId,
+    text: command.source.payload.text,
+    ...(command.source.payload.assistantId ? { assistantId: command.source.payload.assistantId } : {}),
+    ...(command.source.payload.extParameters !== undefined ? { extParameters: command.source.payload.extParameters } : {}),
+    ...(Object.keys(providerContext).length > 0 ? { context: providerContext } : {}),
+  };
 }
