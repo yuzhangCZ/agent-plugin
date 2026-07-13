@@ -34,47 +34,25 @@
 
 ```mermaid
 flowchart TD
-    A["Gateway 下行 / Provider 主动 outbound"] --> B{"SDK 关键节点"}
-    B --> C["入站协议校验"]
-    B --> D["Runtime command 路由"]
-    B --> E["Provider API apply"]
-    B --> F["Request run facts 消费"]
-    B --> G["Request run terminal"]
-    B --> H["Provider outbound facts"]
-    B --> I["查询 / lifecycle"]
+    A["入口<br/>Gateway 下行 / Provider outbound"] --> B["入站校验<br/>已有: invalid invoke"]
+    B --> C["命令路由<br/>缺口: unsupported invoke"]
+    C --> D["Provider API apply<br/>已有: run/reply/close/abort<br/>补齐: createSession 路由"]
+    D --> E{"执行边界"}
+    E --> F["request run facts<br/>已有: 生命周期失败<br/>缺口: enrich 失败"]
+    F --> G["request terminal<br/>已有: failed -> tool_error"]
+    E --> H["outbound run facts<br/>已有: 生命周期失败<br/>缺口: enrich 失败"]
+    G --> Z["前端收到失败<br/>或明确降级"]
+    H --> Z
 
-    C --> C1["已有: invalid invoke -> tool_error"]
-    D --> D1["缺口: unsupported invoke 当前可能无 tool_error"]
-    E --> E1["已有: runMessage/reply/abort/close 失败 -> tool_error"]
-    E --> E2["补齐: createSession 失败需带 welinkSessionId"]
-    F --> F1["已有: facts 生命周期非法 -> request_run_failed"]
-    F --> F2["缺口: fact enrich 失败只记录后 continue"]
-    G --> G1["已有: failed terminal -> tool_error"]
-    H --> H1["已有: emitOutboundRun 生命周期非法 -> terminal tool_error"]
-    H --> H2["缺口: outbound enrich 失败只记录后 continue"]
-    I --> I1["保留: slash command 查询失败 -> 空列表"]
-    I --> I2["待确认: health 失败是否需要 status_response 失败态"]
-    I --> I3["保留: initialize/dispose -> status/diagnostics"]
-
-    C1 --> Z["前端收到失败或明确降级"]
-    D1 --> Z
-    E1 --> Z
-    E2 --> Z
-    F1 --> Z
-    F2 --> Z
-    G1 --> Z
-    H1 --> Z
-    H2 --> Z
-    I1 --> Z
-    I2 --> Z
-    I3 --> Z
+    C -. 查询 / lifecycle .-> I["旁路能力<br/>slash 空列表降级<br/>health 失败态待确认<br/>init/dispose 走 diagnostics"]
+    I -.-> Z
 
     classDef existing fill:#eef2ff,stroke:#4c6ef5,color:#1f1f1f;
     classDef missing fill:#ffe3e3,stroke:#e03131,stroke-width:2px,color:#1f1f1f;
     classDef noToolError fill:#e9ecef,stroke:#868e96,color:#1f1f1f;
-    class C1,E1,F1,G1,H1,Z existing;
-    class D1,E2,F2,H2 missing;
-    class I1,I2,I3 noToolError;
+    class A,B,D,G,Z existing;
+    class C,F,H missing;
+    class I noToolError;
 ```
 
 ### 2.2 方案核心
