@@ -146,19 +146,39 @@ export interface BridgeGatewayProbeResult {
   reason?: string;
 }
 
-export interface RuntimeTraceProviderCall {
-  command:
-    | 'queryStatus'
-    | 'createSession'
-    | 'listSlashCommands'
-    | 'startRequestRun'
-    | 'replyQuestion'
-    | 'replyPermission'
-    | 'closeSession'
-    | 'abortExecution';
-  toolSessionId?: string;
-  runIds?: string[];
-}
+/**
+ * Provider 调用的公开诊断 trace；标识字段由 command 决定。
+ */
+export type RuntimeTraceProviderCall =
+  | {
+      command: 'startRequestRun';
+      toolSessionId: string;
+      runId: string;
+      runIds?: never;
+    }
+  | {
+      command: 'abortExecution';
+      toolSessionId: string;
+      runId?: never;
+      runIds: string[];
+    }
+  | {
+      command: 'closeSession';
+      toolSessionId: string;
+      runId?: never;
+      runIds?: never;
+    }
+  | {
+      command:
+        | 'queryStatus'
+        | 'createSession'
+        | 'listSlashCommands'
+        | 'replyQuestion'
+        | 'replyPermission';
+      toolSessionId?: never;
+      runId?: never;
+      runIds?: never;
+    };
 
 export interface RuntimeTraceFact {
   type: ProviderFact['type'];

@@ -79,12 +79,39 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
       return;
     }
 
-    this.trace.recordProviderCall({
-      command: event.command,
-      ...(event.toolSessionId ? { toolSessionId: event.toolSessionId } : {}),
-      ...(event.runId ? { runId: event.runId } : {}),
-      ...(event.runIds ? { runIds: event.runIds } : {}),
-    });
+    switch (event.command) {
+      case 'startRequestRun':
+        if (!event.toolSessionId || !event.runId) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+          runId: event.runId,
+        });
+        return;
+      case 'abortExecution':
+        if (!event.toolSessionId || !event.runIds) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+          runIds: event.runIds,
+        });
+        return;
+      case 'closeSession':
+        if (!event.toolSessionId) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+        });
+        return;
+      default:
+        this.trace.recordProviderCall({ command: event.command });
+    }
   }
 
   snapshot(): RuntimeDiagnostics {

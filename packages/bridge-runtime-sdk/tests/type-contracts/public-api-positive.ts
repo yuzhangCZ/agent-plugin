@@ -11,6 +11,7 @@ import type {
   ProviderAbortSessionInput,
   RequestRunPolicyOptions,
   RuntimeOutboundEmitter,
+  RuntimeTraceProviderCall,
   ThirdPartyAgentProvider,
 } from '../../src/index.ts';
 
@@ -34,6 +35,16 @@ const runtimeOptionsWithPolicy: BridgeRuntimeOptions = {
 };
 const providerAbortSessionInput: ProviderAbortSessionInput = {
   traceId: 'trace-1',
+  toolSessionId: 'tool-session-1',
+  runIds: ['run-1'],
+};
+const startRequestRunTrace: RuntimeTraceProviderCall = {
+  command: 'startRequestRun',
+  toolSessionId: 'tool-session-1',
+  runId: 'run-1',
+};
+const abortExecutionTrace: RuntimeTraceProviderCall = {
+  command: 'abortExecution',
   toolSessionId: 'tool-session-1',
   runIds: ['run-1'],
 };
@@ -70,5 +81,7 @@ void statusError;
 void gatewayTransportErrorCode;
 void runtimeOptionsWithPolicy;
 void providerAbortSessionInput;
+void startRequestRunTrace;
+void abortExecutionTrace;
 void explicitSnapshot;
 void idleSnapshot;

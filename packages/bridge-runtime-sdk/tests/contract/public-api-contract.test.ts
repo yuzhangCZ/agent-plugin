@@ -50,7 +50,6 @@ test('public contract exposes active run chat policy and abort run id set', asyn
   assert.match(publicContractSource, /export interface RequestRunPolicyOptions \{/);
   assert.match(publicContractSource, /requestRunPolicy\?: RequestRunPolicyOptions;/);
   assert.match(publicContractSource, /ProviderAbortSessionInput/);
-  assert.doesNotMatch(publicContractSource, /runId\?: string;/);
   assert.match(providerSource, /runIds: string\[];/);
   assert.doesNotMatch(providerSource, /runId\?: string;/);
   assert.match(providerContractSource, /runIds: string\[];/);
@@ -70,6 +69,22 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
 
 test('public api positive type fixture locks BridgeRuntime status snapshot shape', async () => {
   await assertTypeFixturePasses('tests/type-contracts/tsconfig.positive.json');
+});
+
+test('public api negative type fixture requires abort execution trace run ids', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-abort-trace-run-ids.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('runIds') && output.includes('abortExecution');
+    },
+  );
 });
 
 test('runtime error public contract uses reason-oriented class-first codes', async () => {

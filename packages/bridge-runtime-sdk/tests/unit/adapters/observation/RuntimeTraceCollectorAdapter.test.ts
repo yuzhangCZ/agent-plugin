@@ -68,7 +68,6 @@ test('trace observation adapter keeps diagnostics in sync with observation event
   assert.equal(diagnostics.lastInboundAt, 456);
   assert.deepEqual(diagnostics.providerCalls[0], {
     command: 'createSession',
-    toolSessionId: 'tool-1',
   });
   assert.deepEqual(diagnostics.providerCalls[1], {
     command: 'abortExecution',
@@ -100,6 +99,69 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     message: 'provider failed',
     code: undefined,
   });
+});
+
+test('trace observation adapter records only complete command-specific provider calls', () => {
+  const trace = new RuntimeTraceCollectorAdapter();
+
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'startRequestRun',
+    toolSessionId: 'tool-1',
+    runId: 'run-1',
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'startRequestRun',
+    toolSessionId: 'tool-1',
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'abortExecution',
+    toolSessionId: 'tool-1',
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'closeSession',
+    toolSessionId: 'tool-1',
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'closeSession',
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'started',
+    command: 'queryStatus',
+    toolSessionId: 'ignored-tool-session',
+    runId: 'ignored-run',
+    runIds: ['ignored-run'],
+  });
+  trace.record({
+    type: 'provider_call',
+    phase: 'succeeded',
+    command: 'startRequestRun',
+    toolSessionId: 'ignored-tool-session',
+    runId: 'ignored-run',
+  });
+
+  assert.deepEqual(trace.snapshot().providerCalls, [
+    {
+      command: 'startRequestRun',
+      toolSessionId: 'tool-1',
+      runId: 'run-1',
+    },
+    {
+      command: 'closeSession',
+      toolSessionId: 'tool-1',
+    },
+    { command: 'queryStatus' },
+  ]);
 });
 
 test('trace diagnostics snapshots do not expose mutable provider run id arrays', () => {

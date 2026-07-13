@@ -5,20 +5,17 @@ import type {
 
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './constants/runtime.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
+import type { RuntimeTraceProviderCall } from '../public-contract.ts';
 
-export interface RuntimeTraceProviderCall {
-  command:
-    | 'queryStatus'
-    | 'createSession'
-    | 'listSlashCommands'
-    | 'startRequestRun'
-    | 'replyQuestion'
-    | 'replyPermission'
-    | 'closeSession'
-    | 'abortExecution';
-  toolSessionId?: string;
-  runId?: string;
-  runIds?: string[];
+function cloneProviderCall(call: RuntimeTraceProviderCall): RuntimeTraceProviderCall {
+  if (call.command === 'abortExecution') {
+    return {
+      ...call,
+      runIds: [...call.runIds],
+    };
+  }
+
+  return { ...call };
 }
 
 export interface RuntimeTraceFact {
@@ -81,10 +78,7 @@ export class RuntimeTraceCollector {
   };
 
   recordProviderCall(call: RuntimeTraceProviderCall): void {
-    this.diagnostics.providerCalls.push({
-      ...call,
-      ...(call.runIds ? { runIds: [...call.runIds] } : {}),
-    });
+    this.diagnostics.providerCalls.push(cloneProviderCall(call));
   }
 
   recordFact(toolSessionId: string, fact: ProviderFact): void {
@@ -151,10 +145,7 @@ export class RuntimeTraceCollector {
       lastInboundAt: this.diagnostics.lastInboundAt,
       lastOutboundAt: this.diagnostics.lastOutboundAt,
       lastHeartbeatAt: this.diagnostics.lastHeartbeatAt,
-      providerCalls: this.diagnostics.providerCalls.map((call) => ({
-        ...call,
-        ...(call.runIds ? { runIds: [...call.runIds] } : {}),
-      })),
+      providerCalls: this.diagnostics.providerCalls.map(cloneProviderCall),
       facts: [...this.diagnostics.facts],
       uplinks: [...this.diagnostics.uplinks],
       terminals: [...this.diagnostics.terminals],
