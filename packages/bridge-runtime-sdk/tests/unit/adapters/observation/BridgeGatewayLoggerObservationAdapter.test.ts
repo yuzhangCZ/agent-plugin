@@ -81,3 +81,54 @@ test('logger observation adapter projects observation events into runtime_sdk lo
   assert.equal(slashLog?.meta?.slashCommandCount, 1);
   assert.equal(hasLog(logger.logs, 'runtime_sdk.fact.received', 'debug'), true);
 });
+
+test('logger observation adapter projects gateway probe events', () => {
+  const records: Array<{ level: string; message: string; meta: Record<string, unknown> }> = [];
+  const adapter = new BridgeGatewayLoggerObservationAdapter({
+    info(message, meta) {
+      records.push({ level: 'info', message, meta: meta ?? {} });
+    },
+    warn(message, meta) {
+      records.push({ level: 'warn', message, meta: meta ?? {} });
+    },
+    error(message, meta) {
+      records.push({ level: 'error', message, meta: meta ?? {} });
+    },
+  });
+
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'requested',
+    gatewayUrl: 'ws://gateway.local',
+    timeoutMs: 50,
+  });
+  adapter.record({
+    type: 'gateway_probe',
+    phase: 'completed',
+    gatewayUrl: 'ws://gateway.local',
+    state: 'connect_error',
+    latencyMs: 12,
+    reason: 'gateway_not_connected',
+  });
+
+  assert.deepEqual(records, [
+    {
+      level: 'info',
+      message: 'runtime_sdk.gateway_probe.requested',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        timeoutMs: 50,
+      },
+    },
+    {
+      level: 'error',
+      message: 'runtime_sdk.gateway_probe.completed',
+      meta: {
+        gatewayUrl: 'ws://gateway.local',
+        state: 'connect_error',
+        latencyMs: 12,
+        reason: 'gateway_not_connected',
+      },
+    },
+  ]);
+});

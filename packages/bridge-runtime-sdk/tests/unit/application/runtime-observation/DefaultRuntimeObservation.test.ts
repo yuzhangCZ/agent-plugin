@@ -75,3 +75,28 @@ test('default runtime observation maps semantic methods into standard events', (
     },
   ]);
 });
+
+test('default runtime observation maps gateway probe events', () => {
+  const port = new RecordingObservationPort();
+  const observation = new DefaultRuntimeObservation(port);
+
+  observation.gatewayProbeRequested('ws://gateway.local', 50);
+  observation.gatewayProbeCompleted('ws://gateway.local', 'connect_error', 12, 'gateway_not_connected');
+
+  assert.deepEqual(port.events, [
+    {
+      type: 'gateway_probe',
+      phase: 'requested',
+      gatewayUrl: 'ws://gateway.local',
+      timeoutMs: 50,
+    },
+    {
+      type: 'gateway_probe',
+      phase: 'completed',
+      gatewayUrl: 'ws://gateway.local',
+      state: 'connect_error',
+      latencyMs: 12,
+      reason: 'gateway_not_connected',
+    },
+  ]);
+});
