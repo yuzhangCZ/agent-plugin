@@ -66,6 +66,27 @@ test('session runtime registry returns request run snapshots that cannot mutate 
   assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
 });
 
+test('session runtime registry ensure returns records that cannot mutate internal request run state', () => {
+  const registry = new InMemorySessionRuntimeRegistry();
+
+  registry.registerRequestRun('tool-1', 'run-1');
+  const ensured = registry.ensure({ toolSessionId: 'tool-1' });
+  (ensured.requestRun.activeRunIds as string[]).push('run-mutated');
+
+  assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
+});
+
+test('session runtime registry get returns records that cannot mutate internal request run state', () => {
+  const registry = new InMemorySessionRuntimeRegistry();
+
+  registry.registerRequestRun('tool-1', 'run-1');
+  const existing = registry.get('tool-1');
+  assert.notEqual(existing, undefined);
+  (existing.requestRun.activeRunIds as string[]).push('run-mutated');
+
+  assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
+});
+
 test('session runtime registry release on missing session returns empty snapshot without creating record', () => {
   const registry = new InMemorySessionRuntimeRegistry();
 
