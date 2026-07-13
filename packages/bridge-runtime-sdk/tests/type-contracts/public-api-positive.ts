@@ -1,15 +1,22 @@
 import type {
+  ActiveRunChatPolicy,
+  BridgeGatewayHostConfig,
   BridgeRuntime,
   BridgeRuntimeError,
   BridgeRuntimeErrorCode,
+  BridgeRuntimeOptions,
   BridgeRuntimeStatus,
   BridgeRuntimeStatusSnapshot,
   OutboundFact,
+  RequestRunPolicyOptions,
   RuntimeOutboundEmitter,
+  ThirdPartyAgentProvider,
 } from '../../src/index.ts';
 
 declare const runtime: BridgeRuntime;
 declare const outboundFacts: AsyncIterable<OutboundFact>;
+declare const provider: ThirdPartyAgentProvider;
+declare const gatewayHost: BridgeGatewayHostConfig;
 
 const status = runtime.getStatus();
 const snapshot: BridgeRuntimeStatusSnapshot = status;
@@ -17,6 +24,13 @@ const state: BridgeRuntimeStatus = status.state;
 const failureReason: string | null = status.failureReason;
 const statusError: BridgeRuntimeError | undefined = status.error;
 const gatewayTransportErrorCode: BridgeRuntimeErrorCode = 'gateway_transport_error';
+const activeRunChatPolicy: ActiveRunChatPolicy = 'forwardToProvider';
+const requestRunPolicy: RequestRunPolicyOptions = { activeRunChatPolicy };
+const runtimeOptionsWithPolicy: BridgeRuntimeOptions = {
+  provider,
+  gatewayHost,
+  requestRunPolicy,
+};
 
 const explicitSnapshot: BridgeRuntimeStatusSnapshot = {
   state: 'failed',
@@ -48,5 +62,6 @@ void state;
 void failureReason;
 void statusError;
 void gatewayTransportErrorCode;
+void runtimeOptionsWithPolicy;
 void explicitSnapshot;
 void idleSnapshot;

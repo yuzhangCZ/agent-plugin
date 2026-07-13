@@ -1,4 +1,5 @@
 export type {
+  ActiveRunChatPolicy,
   EmitOutboundMessageInput,
   EmitOutboundRunInput,
   BridgeGatewayChannel,
@@ -45,6 +46,7 @@ export type {
   QrCodeAuthServiceError,
   QrCodeAuthSnapshot,
   QrCodeDisplayData,
+  RequestRunPolicyOptions,
   RuntimeOutboundEmitter,
   RuntimeDiagnostics,
   RuntimeTraceFailure,

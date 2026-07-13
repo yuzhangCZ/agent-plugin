@@ -41,6 +41,22 @@ test('public contract keeps qrcode auth types owned by skill-qrcode-auth', async
   assert.equal(indexSource.includes("from './public-contract.ts';"), true);
 });
 
+test('public contract exposes active run chat policy and abort run id set', async () => {
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const providerSource = await readFile(new URL('../../src/domain/provider.ts', import.meta.url), 'utf8');
+  const providerContractSource = await readFile(new URL('../../src/domain/provider-contract.ts', import.meta.url), 'utf8');
+
+  assert.match(publicContractSource, /export type ActiveRunChatPolicy = 'reject' \| 'forwardToProvider';/);
+  assert.match(publicContractSource, /export interface RequestRunPolicyOptions \{/);
+  assert.match(publicContractSource, /requestRunPolicy\?: RequestRunPolicyOptions;/);
+  assert.match(publicContractSource, /runIds: string\[];/);
+  assert.doesNotMatch(publicContractSource, /runId\?: string;/);
+  assert.match(providerSource, /runIds: string\[];/);
+  assert.doesNotMatch(providerSource, /runId\?: string;/);
+  assert.match(providerContractSource, /runIds: string\[];/);
+  assert.doesNotMatch(providerContractSource, /runId\?: string;/);
+});
+
 test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('BridgeRuntimeFacade' in runtimeSdk, false);
   assert.equal('DefaultRuntimeCommandDispatcher' in runtimeSdk, false);

@@ -8,7 +8,6 @@ import type {
   OutboundFact,
   PermissionAskFact,
   PermissionReplyFact,
-  ProviderAbortSessionInput,
   ProviderCloseSessionInput,
   ProviderCreateSessionInput,
   ProviderCreateSessionResult,
@@ -47,7 +46,6 @@ export type {
   OutboundFact,
   PermissionAskFact,
   PermissionReplyFact,
-  ProviderAbortSessionInput,
   ProviderCloseSessionInput,
   ProviderCommandError,
   ProviderCreateSessionInput,
@@ -79,6 +77,18 @@ export type {
   ThirdPartyAgentProvider,
   ToolUpdateFact,
 };
+
+export type ActiveRunChatPolicy = 'reject' | 'forwardToProvider';
+
+export interface RequestRunPolicyOptions {
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+}
+
+export interface ProviderAbortSessionInput {
+  traceId: string;
+  toolSessionId: string;
+  runIds: string[];
+}
 
 export { qrcodeAuth } from '@wecode/skill-qrcode-auth';
 export type {
@@ -151,7 +161,7 @@ export interface RuntimeTraceProviderCall {
     | 'closeSession'
     | 'abortExecution';
   toolSessionId?: string;
-  runId?: string;
+  runIds?: string[];
 }
 
 export interface RuntimeTraceFact {
@@ -247,6 +257,7 @@ export interface BridgeRuntime {
 export interface BridgeRuntimeOptions {
   provider: ThirdPartyAgentProvider;
   gatewayHost: BridgeGatewayHostConfig;
+  requestRunPolicy?: RequestRunPolicyOptions;
   logger?: BridgeGatewayLogger;
   debug?: boolean;
   traceIdFactory?: () => string;
