@@ -18,6 +18,20 @@ test('request run policy rejects explicit invalid dynamic values', () => {
     },
   );
   assert.throws(
+    () => resolveRequestRunPolicy([] as never),
+    {
+      name: 'TypeError',
+      message: 'Invalid requestRunPolicy: ',
+    },
+  );
+  assert.throws(
+    () => resolveRequestRunPolicy(Object.create({}) as never),
+    {
+      name: 'TypeError',
+      message: 'Invalid requestRunPolicy: [object Object]',
+    },
+  );
+  assert.throws(
     () => resolveRequestRunPolicy({ activeRunChatPolicy: null as never }),
     {
       name: 'TypeError',

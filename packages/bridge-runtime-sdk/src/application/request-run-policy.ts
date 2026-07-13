@@ -1,4 +1,5 @@
 import type { ActiveRunChatPolicy, RequestRunPolicyOptions } from '../public-contract.ts';
+import { isJsonObject } from '../shared/type-guards.ts';
 
 export interface ResolvedRequestRunPolicy {
   activeRunChatPolicy: ActiveRunChatPolicy;
@@ -7,7 +8,7 @@ export interface ResolvedRequestRunPolicy {
 export const DEFAULT_ACTIVE_RUN_CHAT_POLICY: ActiveRunChatPolicy = 'reject';
 
 export function resolveRequestRunPolicy(options?: RequestRunPolicyOptions): ResolvedRequestRunPolicy {
-  if (options !== undefined && (options === null || typeof options !== 'object')) {
+  if (options !== undefined && !isJsonObject(options)) {
     throw new TypeError(`Invalid requestRunPolicy: ${String(options)}`);
   }
 
