@@ -526,7 +526,7 @@ test('active run chat policy forwardToProvider sends concurrent chat to provider
   await flushEvents();
 });
 
-test('provider failure releases only its concurrent request run before abort_session', async () => {
+test('provider failure releases only its concurrent request run before abort_session', async (t) => {
   const connection = new FakeGatewayClient();
   const firstRunResult = createDeferred<ProviderTerminalResult>();
   const runIds: string[] = [];
@@ -550,6 +550,11 @@ test('provider failure releases only its concurrent request run before abort_ses
   const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
     requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' },
   }));
+  t.after(async () => {
+    firstRunResult.resolve({ outcome: 'aborted' });
+    await flushEvents();
+    await runtime.stop();
+  });
 
   await runtime.start();
   connection.emitMessage({
@@ -571,6 +576,8 @@ test('provider failure releases only its concurrent request run before abort_ses
       && message !== null
       && 'type' in message
       && message.type === 'tool_error'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-1'
       && 'error' in message
       && message.error === 'provider_down'
     )),

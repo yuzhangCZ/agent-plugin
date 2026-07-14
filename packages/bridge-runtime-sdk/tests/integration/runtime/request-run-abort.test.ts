@@ -330,7 +330,7 @@ test('abort_session forwards all active request run ids when active chats are fo
   await flushEvents();
 });
 
-test('abort_session only forwards the independently active run after a concurrent run settles', async () => {
+test('abort_session only forwards the independently active run after a concurrent run settles', async (t) => {
   const connection = new FakeGatewayClient();
   const firstRunResult = createDeferred<ProviderTerminalResult>();
   const secondRunResult = createDeferred<ProviderTerminalResult>();
@@ -357,6 +357,12 @@ test('abort_session only forwards the independently active run after a concurren
   const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
     requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' },
   }));
+  t.after(async () => {
+    firstRunResult.resolve({ outcome: 'completed' });
+    secondRunResult.resolve({ outcome: 'aborted' });
+    await flushEvents();
+    await runtime.stop();
+  });
 
   await runtime.start();
   connection.emitMessage({
@@ -416,10 +422,21 @@ test('abort_session only forwards the independently active run after a concurren
   );
   await flushEvents();
 
+  capturedAbortInput = undefined;
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'abort_session',
+    welinkSessionId: 'welink-4',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await waitFor(() => capturedAbortInput !== undefined, 'second abort_session did not reach the provider');
+
+  assert.deepEqual(capturedAbortInput?.runIds, []);
+
   connection.emitMessage({
     type: 'invoke',
     action: 'chat',
-    welinkSessionId: 'welink-4',
+    welinkSessionId: 'welink-5',
     payload: { toolSessionId: 'tool-1', text: 'third' },
   });
   await waitFor(() => runIds.length === 3, 'third request run did not reach the provider');
