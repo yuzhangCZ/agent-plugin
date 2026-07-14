@@ -12,7 +12,6 @@ export type {
   GatewayStateChangedObservationEvent,
   InteractionChangedObservationEvent,
   ProviderCallObservationEvent,
-  RequestRunPolicyObservationEvent,
   RuntimeLifecycleObservationEvent,
   RuntimeObservationCommand,
   RuntimeObservationCommandContext,

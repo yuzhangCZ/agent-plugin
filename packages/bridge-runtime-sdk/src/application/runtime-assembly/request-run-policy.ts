@@ -1,5 +1,5 @@
-import type { ActiveRunChatPolicy, RequestRunPolicyOptions } from '../public-contract.ts';
-import { isJsonObject } from '../shared/type-guards.ts';
+import type { ActiveRunChatPolicy, RequestRunPolicyOptions } from '../../public-contract.ts';
+import { isJsonObject } from '../../shared/type-guards.ts';
 
 /**
  * Runtime 使用的已归一化 request run 策略。

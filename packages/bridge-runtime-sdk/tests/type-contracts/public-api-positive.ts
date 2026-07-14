@@ -13,7 +13,6 @@ import type {
   RuntimeDiagnostics,
   RuntimeOutboundEmitter,
   RuntimeTraceProviderCall,
-  RuntimeTraceRequestRunPolicy,
   ThirdPartyAgentProvider,
 } from '../../src/index.ts';
 
@@ -30,15 +29,7 @@ const statusError: BridgeRuntimeError | undefined = status.error;
 const gatewayTransportErrorCode: BridgeRuntimeErrorCode = 'gateway_transport_error';
 const activeRunChatPolicy: ActiveRunChatPolicy = 'forwardToProvider';
 const requestRunPolicy: RequestRunPolicyOptions = { activeRunChatPolicy };
-const requestRunPolicyTrace: RuntimeTraceRequestRunPolicy = {
-  action: 'concurrent_request_runs_detected',
-  toolSessionId: 'tool-session-1',
-  newRunId: 'run-2',
-  activeRunCount: 1,
-  policy: 'forwardToProvider',
-};
 const runtimeDiagnostics: RuntimeDiagnostics = runtime.getDiagnostics();
-const requestRunPolicies: RuntimeTraceRequestRunPolicy[] = runtimeDiagnostics.requestRunPolicies;
 const runtimeOptionsWithPolicy: BridgeRuntimeOptions = {
   provider,
   gatewayHost,
@@ -90,8 +81,7 @@ void state;
 void failureReason;
 void statusError;
 void gatewayTransportErrorCode;
-void requestRunPolicyTrace;
-void requestRunPolicies;
+void runtimeDiagnostics;
 void runtimeOptionsWithPolicy;
 void providerAbortSessionInput;
 void startRequestRunTrace;

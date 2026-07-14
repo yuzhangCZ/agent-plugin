@@ -5,7 +5,6 @@ import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
 import type { RuntimeObservation, RuntimeObservationPort } from './runtime-observation.port.ts';
 import type {
   FailureRecordedObservationEvent,
-  RequestRunPolicyObservationEvent,
   RuntimeObservationCommand,
   RuntimeObservationCommandContext,
   RuntimeObservationMessageSummary,
@@ -297,14 +296,6 @@ export class DefaultRuntimeObservation implements RuntimeObservation {
       toolSessionId,
       tokenId,
       conflictingToolSessionId,
-    });
-  }
-
-  concurrentRequestRunsDetected(input: Omit<RequestRunPolicyObservationEvent, 'type' | 'action'>): void {
-    this.port.record({
-      type: 'request_run_policy',
-      action: 'concurrent_request_runs_detected',
-      ...input,
     });
   }
 

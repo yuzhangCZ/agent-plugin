@@ -520,16 +520,6 @@ test('active run chat policy forwardToProvider sends concurrent chat to provider
   assert.equal(runMessageInputs.length, 2);
   assert.notEqual(runMessageInputs[0]?.runId, runMessageInputs[1]?.runId);
   assert.deepEqual(runMessageInputs.map((input) => input.text), ['first', 'second']);
-  assert.deepEqual(runtime.getDiagnostics().requestRunPolicies, [
-    {
-      action: 'concurrent_request_runs_detected',
-      toolSessionId: 'tool-1',
-      newRunId: runMessageInputs[1]?.runId,
-      activeRunCount: 1,
-      policy: 'forwardToProvider',
-    },
-  ]);
-
   firstRunResult.resolve({ outcome: 'completed' });
   secondRunResult.resolve({ outcome: 'completed' });
   await flushEvents();

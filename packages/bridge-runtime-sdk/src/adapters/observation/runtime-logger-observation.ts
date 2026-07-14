@@ -219,6 +219,8 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
             toolSessionId: event.toolSessionId,
             welinkSessionId: event.welinkSessionId,
             runId: event.runId,
+            activeRunChatPolicy: event.activeRunChatPolicy,
+            activeRunIds: event.activeRunIds,
             outcome: event.outcome,
             error: event.error,
             code: event.code,
@@ -261,14 +263,6 @@ export class BridgeGatewayLoggerObservationAdapter implements RuntimeObservation
             conflictingToolSessionId: event.conflictingToolSessionId,
           },
         );
-        return;
-      case 'request_run_policy':
-        write(this.logger, 'warn', `runtime_sdk.request_run.${event.action}`, {
-          toolSessionId: event.toolSessionId,
-          newRunId: event.newRunId,
-          activeRunCount: event.activeRunCount,
-          policy: event.policy,
-        });
         return;
       case 'uplink_emitted':
         return;

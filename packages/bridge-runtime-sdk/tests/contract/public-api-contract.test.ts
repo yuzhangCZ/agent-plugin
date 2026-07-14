@@ -56,6 +56,15 @@ test('public contract exposes active run chat policy and abort run id set', asyn
   assert.doesNotMatch(providerContractSource, /runId\?: string;/);
 });
 
+test('public diagnostics does not expose request run policy history', async () => {
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(publicContractSource, /RuntimeTraceRequestRunPolicy/);
+  assert.doesNotMatch(publicContractSource, /requestRunPolicies/);
+  assert.doesNotMatch(indexSource, /RuntimeTraceRequestRunPolicy/);
+});
+
 test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('BridgeRuntimeFacade' in runtimeSdk, false);
   assert.equal('DefaultRuntimeCommandDispatcher' in runtimeSdk, false);

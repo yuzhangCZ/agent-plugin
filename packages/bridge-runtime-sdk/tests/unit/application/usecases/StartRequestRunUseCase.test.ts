@@ -25,10 +25,6 @@ class RecordingObservation {
   usecaseConflict(...args: unknown[]): void {
     this.events.push({ method: 'usecaseConflict', args });
   }
-
-  concurrentRequestRunsDetected(...args: unknown[]): void {
-    this.events.push({ method: 'concurrentRequestRunsDetected', args });
-  }
 }
 
 function createCommand(overrides: Record<string, unknown> = {}) {
@@ -245,15 +241,57 @@ test('StartRequestRunUseCase forwards active run to provider when policy allows 
     run: providerRun,
   }]);
   assert.deepEqual(released, [{ toolSessionId: 'tool-1', runId: providerInput.runId }]);
-  assert.deepEqual(observation.events.find((event) => event.method === 'concurrentRequestRunsDetected'), {
-    method: 'concurrentRequestRunsDetected',
-    args: [{
+  assert.deepEqual(observation.events.find((event) => event.method === 'usecaseStarted'), {
+    method: 'usecaseStarted',
+    args: [
+      'start_request_run',
+      'trace-run',
+      {
+        toolSessionId: 'tool-1',
+        welinkSessionId: 'we-1',
+        runId: providerInput.runId,
+        activeRunChatPolicy: 'forwardToProvider',
+        activeRunIds: ['run-active'],
+      },
+    ],
+  });
+});
+
+test('StartRequestRunUseCase records reject policy and active run ids in started context before rejecting', async () => {
+  const observation = new RecordingObservation();
+  const useCase = new StartRequestRunUseCase(
+    {
+      async startRequestRun() {
+        throw new Error('provider should not be called');
+      },
+    } as never,
+    {
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
+      },
+    } as never,
+    {
+      async executeRun() {},
+    } as never,
+    observation as never,
+    rejectPolicy,
+  );
+
+  await assert.rejects(() => useCase.execute(createCommand()), RuntimeContractError);
+
+  assert.deepEqual(observation.events[0], {
+    method: 'usecaseStarted',
+    args: [
+      'start_request_run',
+      'trace-run',
+      {
       toolSessionId: 'tool-1',
-      newRunId: providerInput.runId,
+      welinkSessionId: 'we-1',
+      runId: (observation.events[0]?.args[2] as { runId?: string }).runId,
+      activeRunChatPolicy: 'reject',
       activeRunIds: ['run-active'],
-      activeRunCount: 1,
-      policy: 'forwardToProvider',
-    }],
+      },
+    ],
   });
 });
 

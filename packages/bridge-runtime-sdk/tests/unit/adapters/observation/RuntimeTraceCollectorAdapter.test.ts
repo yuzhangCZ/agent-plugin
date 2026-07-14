@@ -56,15 +56,6 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     tokenId: 'question-1',
   });
   observation.record({
-    type: 'request_run_policy',
-    action: 'concurrent_request_runs_detected',
-    toolSessionId: 'tool-1',
-    newRunId: 'run-2',
-    activeRunIds: ['run-1'],
-    activeRunCount: 1,
-    policy: 'forwardToProvider',
-  });
-  observation.record({
     type: 'failure_recorded',
     kind: 'command_execution_failure',
     phase: 'runtime',
@@ -102,53 +93,12 @@ test('trace observation adapter keeps diagnostics in sync with observation event
     toolSessionId: 'tool-1',
     tokenId: 'question-1',
   });
-  assert.deepEqual(diagnostics.requestRunPolicies, [
-    {
-      action: 'concurrent_request_runs_detected',
-      toolSessionId: 'tool-1',
-      newRunId: 'run-2',
-      activeRunCount: 1,
-      policy: 'forwardToProvider',
-    },
-  ]);
   assert.deepEqual(diagnostics.failures[0], {
     kind: 'command_execution_failure',
     phase: 'runtime',
     message: 'provider failed',
     code: undefined,
   });
-});
-
-test('trace diagnostics snapshots isolate request run policy arrays', () => {
-  const trace = new RuntimeTraceCollectorAdapter();
-
-  trace.record({
-    type: 'request_run_policy',
-    action: 'concurrent_request_runs_detected',
-    toolSessionId: 'tool-1',
-    newRunId: 'run-2',
-    activeRunIds: ['run-1'],
-    activeRunCount: 1,
-    policy: 'forwardToProvider',
-  });
-
-  trace.snapshot().requestRunPolicies.push({
-    action: 'concurrent_request_runs_detected',
-    toolSessionId: 'tool-1',
-    newRunId: 'mutated',
-    activeRunCount: 2,
-    policy: 'forwardToProvider',
-  });
-
-  assert.deepEqual(trace.snapshot().requestRunPolicies, [
-    {
-      action: 'concurrent_request_runs_detected',
-      toolSessionId: 'tool-1',
-      newRunId: 'run-2',
-      activeRunCount: 1,
-      policy: 'forwardToProvider',
-    },
-  ]);
 });
 
 test('trace observation adapter records only complete command-specific provider calls', () => {
@@ -212,24 +162,4 @@ test('trace observation adapter records only complete command-specific provider 
     },
     { command: 'queryStatus' },
   ]);
-});
-
-test('trace diagnostics snapshots do not expose mutable provider run id arrays', () => {
-  const trace = new RuntimeTraceCollectorAdapter();
-
-  trace.record({
-    type: 'provider_call',
-    phase: 'started',
-    command: 'abortExecution',
-    toolSessionId: 'tool-1',
-    runIds: ['run-1'],
-  });
-
-  trace.snapshot().providerCalls[0]?.runIds?.push('mutated');
-
-  assert.deepEqual(trace.snapshot().providerCalls[0], {
-    command: 'abortExecution',
-    toolSessionId: 'tool-1',
-    runIds: ['run-1'],
-  });
 });

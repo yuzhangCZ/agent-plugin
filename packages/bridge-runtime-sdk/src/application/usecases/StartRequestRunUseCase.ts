@@ -7,7 +7,7 @@ import type { RuntimeCommand } from '../../domain/runtime-command.ts';
 import type { RequestRunCoordinator } from '../coordinators/index.ts';
 import type { StartRequestRunUseCase as StartRequestRunUseCasePort } from '../ports/runtime-usecase.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
-import type { ResolvedRequestRunPolicy } from '../request-run-policy.ts';
+import type { ResolvedRequestRunPolicy } from '../runtime-assembly/request-run-policy.ts';
 import type { RuntimeObservation } from '../runtime-observation/index.ts';
 
 type StartRequestRunCommand = Extract<RuntimeCommand, { kind: 'start_request_run' }>;
@@ -41,8 +41,13 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       welinkSessionId: command.source.welinkSessionId,
       runId,
     };
-    this.observation.usecaseStarted('start_request_run', command.traceId, context);
     const activeRunState = this.sessionRegistry.getRequestRunState(toolSessionId);
+    const activeRunIds = [...activeRunState.activeRunIds];
+    this.observation.usecaseStarted('start_request_run', command.traceId, {
+      ...context,
+      activeRunChatPolicy: this.requestRunPolicy.activeRunChatPolicy,
+      activeRunIds,
+    });
     if (activeRunState.activeRunIds.length > 0 && this.requestRunPolicy.activeRunChatPolicy === 'reject') {
       const error = new RuntimeContractError(
         'run_already_active',
@@ -51,16 +56,6 @@ export class StartRequestRunUseCase implements StartRequestRunUseCasePort {
       );
       this.observation.usecaseConflict('start_request_run', command.traceId, error, error.code, context);
       throw error;
-    }
-    if (activeRunState.activeRunIds.length > 0 && this.requestRunPolicy.activeRunChatPolicy === 'forwardToProvider') {
-      const activeRunIds = [...activeRunState.activeRunIds];
-      this.observation.concurrentRequestRunsDetected({
-        toolSessionId,
-        newRunId: runId,
-        activeRunIds,
-        activeRunCount: activeRunIds.length,
-        policy: 'forwardToProvider',
-      });
     }
     this.sessionRegistry.registerRequestRun(toolSessionId, runId);
 

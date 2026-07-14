@@ -37,7 +37,7 @@ import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
 import type { BridgeRuntimeInternalOptions } from './runtime-options.types.ts';
 import { DEFAULT_TOOL_DONE_COMPAT_DELAY_MS } from '../constants/runtime.ts';
-import { resolveRequestRunPolicy } from '../request-run-policy.ts';
+import { resolveRequestRunPolicy } from './request-run-policy.ts';
 
 // eslint-disable-next-line max-lines-per-function -- composition root 需要集中表达 runtime 依赖装配关系。
 export function createApplicationRuntimeSide(

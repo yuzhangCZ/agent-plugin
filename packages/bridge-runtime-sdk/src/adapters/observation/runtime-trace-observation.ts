@@ -36,15 +36,6 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
           });
         }
         return;
-      case 'request_run_policy':
-        this.trace.recordRequestRunPolicy({
-          action: event.action,
-          toolSessionId: event.toolSessionId,
-          newRunId: event.newRunId,
-          activeRunCount: event.activeRunCount,
-          policy: event.policy,
-        });
-        return;
       case 'uplink_emitted':
         this.trace.recordUplink(event.message);
         return;

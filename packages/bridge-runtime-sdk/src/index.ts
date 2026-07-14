@@ -53,7 +53,6 @@ export type {
   RuntimeTraceFact,
   RuntimeTraceInteraction,
   RuntimeTraceProviderCall,
-  RuntimeTraceRequestRunPolicy,
   RuntimeTraceTerminal,
   SessionTitleFact,
   SessionErrorFact,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveRequestRunPolicy } from '@/application/request-run-policy.ts';
+import { resolveRequestRunPolicy } from '@/application/runtime-assembly/request-run-policy.ts';
 
 test('request run policy defaults only when config or field is absent', () => {
   assert.deepEqual(resolveRequestRunPolicy(), { activeRunChatPolicy: 'reject' });

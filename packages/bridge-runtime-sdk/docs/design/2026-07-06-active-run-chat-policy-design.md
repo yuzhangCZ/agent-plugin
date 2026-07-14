@@ -481,7 +481,7 @@ export interface ProviderAbortSessionInput {
 | `'forwardToProvider'` | `ActiveRunChatPolicy` | 显式开启，active run 存在时仍调用 `provider.runMessage(input)` |
 | `ProviderAbortSessionInput.runIds` | `string[]` | 必填字段，表达 SDK 当前 active request run 集合；无 active run 时传空数组 |
 
-`RuntimeDiagnostics.requestRunPolicies` 是必填数组，只记录并发策略事件、`activeRunCount` 和新 run 标识，不保存完整 `activeRunIds`。provider abort 调用使用的精确 ID 集合记录在 `RuntimeDiagnostics.providerCalls` 对应 `abortExecution.runIds` 中；`startRequestRun` provider call 则继续使用必填的单个 `runId`，两者不得混用。
+Provider abort 调用使用的精确 ID 集合记录在 `RuntimeDiagnostics.providerCalls` 对应的 `abortExecution.runIds` 中；`startRequestRun` Provider call 则继续使用必填的单个 `runId`，两者不得混用。并发策略及 active run 上下文通过 `start_request_run` 的 usecase 日志观测，不写入 `RuntimeDiagnostics`。
 
 默认与校验规则：
 

@@ -95,7 +95,7 @@ export interface RequestRunPolicyOptions {
   /**
    * Active request run 期间收到新 chat 时应用的策略。
    *
-   * 缺省时由 request run policy resolver 归一化为 `reject`。
+   * 缺省时等同于 `reject`。
    */
   activeRunChatPolicy?: ActiveRunChatPolicy;
 }
@@ -215,20 +215,6 @@ export interface RuntimeTraceInteraction {
   tokenId?: string;
 }
 
-/**
- * 并发 request run 策略的公开诊断 trace。
- *
- * 仅记录策略事件和 active run 数量，不包含完整 `activeRunIds`。精确的 abort
- * 集合记录在 `RuntimeTraceProviderCall` 的 `abortExecution.runIds` 中。
- */
-export interface RuntimeTraceRequestRunPolicy {
-  action: 'concurrent_request_runs_detected';
-  toolSessionId: string;
-  newRunId: string;
-  activeRunCount: number;
-  policy: 'forwardToProvider';
-}
-
 export interface RuntimeTraceFailure {
   kind: RuntimeFailureKind;
   phase: RuntimeFailurePhase;
@@ -247,12 +233,6 @@ export interface RuntimeDiagnostics {
   uplinks: Array<{ type: string; toolSessionId?: string }>;
   terminals: RuntimeTraceTerminal[];
   interactions: RuntimeTraceInteraction[];
-  /**
-   * 并发 request run 策略事件的必填数组，不包含完整 `activeRunIds`。
-   *
-   * abort 调用使用的精确 ID 集合见 `providerCalls` 中 `abortExecution.runIds`。
-   */
-  requestRunPolicies: RuntimeTraceRequestRunPolicy[];
   derivedEvents: Array<{ type: string; toolSessionId: string }>;
   failures: RuntimeTraceFailure[];
 }

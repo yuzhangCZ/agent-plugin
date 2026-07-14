@@ -5,21 +5,7 @@ import type {
 
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './constants/runtime.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
-import type {
-  RuntimeTraceProviderCall,
-  RuntimeTraceRequestRunPolicy,
-} from '../public-contract.ts';
-
-function cloneProviderCall(call: RuntimeTraceProviderCall): RuntimeTraceProviderCall {
-  if (call.command === 'abortExecution') {
-    return {
-      ...call,
-      runIds: [...call.runIds],
-    };
-  }
-
-  return { ...call };
-}
+import type { RuntimeTraceProviderCall } from '../public-contract.ts';
 
 export interface RuntimeTraceFact {
   type: ProviderFact['type'];
@@ -57,7 +43,6 @@ export interface RuntimeDiagnostics {
   uplinks: Array<{ type: GatewayUplinkBusinessMessage['type']; toolSessionId?: string }>;
   terminals: RuntimeTraceTerminal[];
   interactions: RuntimeTraceInteraction[];
-  requestRunPolicies: RuntimeTraceRequestRunPolicy[];
   derivedEvents: Array<{ type: SkillProviderEvent['type']; toolSessionId: string }>;
   failures: RuntimeTraceFailure[];
 }
@@ -77,13 +62,12 @@ export class RuntimeTraceCollector {
     uplinks: [],
     terminals: [],
     interactions: [],
-    requestRunPolicies: [],
     derivedEvents: [],
     failures: [],
   };
 
   recordProviderCall(call: RuntimeTraceProviderCall): void {
-    this.diagnostics.providerCalls.push(cloneProviderCall(call));
+    this.diagnostics.providerCalls.push(call);
   }
 
   recordFact(toolSessionId: string, fact: ProviderFact): void {
@@ -110,10 +94,6 @@ export class RuntimeTraceCollector {
 
   recordInteraction(interaction: RuntimeTraceInteraction): void {
     this.diagnostics.interactions.push(interaction);
-  }
-
-  recordRequestRunPolicy(policyEvent: RuntimeTraceRequestRunPolicy): void {
-    this.diagnostics.requestRunPolicies.push(policyEvent);
   }
 
   recordDerivedEvent(toolSessionId: string, event: SkillProviderEvent): void {
@@ -154,12 +134,11 @@ export class RuntimeTraceCollector {
       lastInboundAt: this.diagnostics.lastInboundAt,
       lastOutboundAt: this.diagnostics.lastOutboundAt,
       lastHeartbeatAt: this.diagnostics.lastHeartbeatAt,
-      providerCalls: this.diagnostics.providerCalls.map(cloneProviderCall),
+      providerCalls: [...this.diagnostics.providerCalls],
       facts: [...this.diagnostics.facts],
       uplinks: [...this.diagnostics.uplinks],
       terminals: [...this.diagnostics.terminals],
       interactions: [...this.diagnostics.interactions],
-      requestRunPolicies: [...this.diagnostics.requestRunPolicies],
       derivedEvents: [...this.diagnostics.derivedEvents],
       failures: [...this.diagnostics.failures],
     };

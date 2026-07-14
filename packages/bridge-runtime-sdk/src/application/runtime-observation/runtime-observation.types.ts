@@ -1,6 +1,6 @@
 import type { GatewayDownstreamBusinessRequest, GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
 
-import type { BridgeGatewayProbeResult } from '../../public-contract.ts';
+import type { ActiveRunChatPolicy, BridgeGatewayProbeResult } from '../../public-contract.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from '../constants/runtime.ts';
 import type { ProviderFact, ProviderSlashCommand, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
@@ -136,6 +136,8 @@ export type UsecaseProgressObservationEvent = {
   toolSessionId?: string;
   welinkSessionId?: string;
   runId?: string;
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+  activeRunIds?: readonly string[];
   outcome?: ProviderTerminalResult['outcome'];
   error?: string;
   code?: string;
@@ -199,19 +201,6 @@ export type InteractionChangedObservationEvent = {
 };
 
 /**
- * request run 策略观测事件。
- */
-export type RequestRunPolicyObservationEvent = {
-  type: 'request_run_policy';
-  action: 'concurrent_request_runs_detected';
-  toolSessionId: string;
-  newRunId: string;
-  activeRunIds: readonly string[];
-  activeRunCount: number;
-  policy: 'forwardToProvider';
-};
-
-/**
  * uplink 生命周期观测事件。
  */
 export type UplinkObservationEvent =
@@ -269,7 +258,6 @@ export type RuntimeObservationEvent =
   | ProviderCallObservationEvent
   | FactProcessedObservationEvent
   | InteractionChangedObservationEvent
-  | RequestRunPolicyObservationEvent
   | UplinkObservationEvent
   | TerminalObservationEvent
   | FailureRecordedObservationEvent;
@@ -288,6 +276,8 @@ export type RuntimeObservationCommandContext = {
 
 export type RuntimeObservationUsecaseContext = RuntimeObservationCommandContext & {
   runId?: string;
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+  activeRunIds?: readonly string[];
   outcome?: ProviderTerminalResult['outcome'];
 };
 
