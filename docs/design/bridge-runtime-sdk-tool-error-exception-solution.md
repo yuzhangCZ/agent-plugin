@@ -268,43 +268,101 @@ type ToolErrorReportInput = {
 
 #### 4.4.1 已有 `tool_error` 上报场景
 
-| SDK 节点 | 触发场景 | 当前入口 | 当前形态 | 重要性 | 评审结论 |
-|---|---|---|---|---|---|
-| 入站协议校验 | gateway-client 判定 invalid `invoke`，且 frame 有 `toolSessionId` 或 `welinkSessionId` | `GatewayInboundPolicy.handle()` | `tool_error.error = gateway_invalid_invoke:${code}`，携带可用 session 标识 | P0 | 已有上报，保留 |
-| Provider API apply | `runMessage()` 返回 `ProviderRun` 前抛错 | `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | 携带 `toolSessionId`，error 当前可能直出异常 message | P0 | 已有上报；后续优化文案 |
-| Provider API apply | `replyQuestion()` / `replyPermission()` 找不到 pending interaction | `InteractionCoordinator` 抛 `RuntimeContractError` 后进入 command failure projector | `pending_interaction_not_found` catalog 文案 | P0 | 已有上报，保留 |
-| Runtime 前置约束 | 同一 `toolSessionId` 重复 `chat` | `StartRequestRunUseCase` 抛 `run_already_active` 后进入 command failure projector | `run_already_active` catalog 文案 | P0 | 已有上报，保留 |
-| request run facts | facts 生命周期非法，例如未 `message.start` 就 `text.delta` | `RequestRunCoordinator` + `RequestRunFailureToolErrorProjector` | `request_run_failed` | P0 | 已有上报，保留 |
-| request run terminal | `ProviderRun.result()` 返回 `outcome: "failed"` | `DefaultRunTerminalSignalProjector` | `tool_error`，`session_not_found` 时带 `reason` | P0 | 已有上报，保留 |
-| request run terminal | `ProviderRun.result()` reject | `RequestRunCoordinator` 抛出后被 command failure 捕获 | command failure `tool_error` | P0 | 已有兜底；建议补测试锁定 |
-| outbound run facts | `emitOutboundRun()` facts 生命周期非法 | `OutboundCoordinator.emitOutboundRunFailed()` + terminal projector | failed terminal `tool_error` | P0 | 已有上报，保留 |
+| SDK 节点 | 业务场景 | 技术触发场景 | 当前入口 | 当前形态 | 重要性 | 评审结论 |
+|---|---|---|---|---|---|---|
+| 入站协议校验 | 前端或 gateway 发来一条用户操作请求，但请求内容缺字段或格式不对，例如点击发送后下行消息缺少会话标识；常见兼容场景是 SDK 新版本新增或调整会话标识字段，而接入方仍使用旧版本 SDK，导致下行请求无法通过新协议校验 | gateway-client 判定 invalid `invoke`，且 frame 有 `toolSessionId` 或 `welinkSessionId` | `GatewayInboundPolicy.handle()` | `tool_error.error = gateway_invalid_invoke:${code}`，携带可用 session 标识 | P0 | 已有上报，保留 |
+| Provider API apply | 用户发送一条消息，SDK 已准备调用第三方 Agent，但 Agent 入口启动失败，例如底层服务不可用、认证失效、参数被 Provider 拒绝 | `runMessage()` 返回 `ProviderRun` 前抛错 | `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | 携带 `toolSessionId`，error 当前可能直出异常 message | P0 | 已有上报；后续优化文案 |
+| Provider API apply | 用户在前端回答问题或审批权限，但这条待回复卡片已过期、已被消费或本地状态丢失 | `replyQuestion()` / `replyPermission()` 找不到 pending interaction | `InteractionCoordinator` 抛 `RuntimeContractError` 后进入 command failure projector | `pending_interaction_not_found` catalog 文案 | P0 | 已有上报，保留 |
+| Runtime 前置约束 | 用户连续快速发送消息，或前端重复提交同一会话消息；上一轮还没结束，新一轮又进入同一 `toolSessionId` | 同一 `toolSessionId` 重复 `chat` | `StartRequestRunUseCase` 抛 `run_already_active` 后进入 command failure projector | `run_already_active` catalog 文案 | P0 | 已有上报，保留 |
+| request run facts | Agent 已开始回复，但事件顺序异常，例如还没创建消息就开始输出文本，前端无法正确拼出一条回答 | facts 生命周期非法，例如未 `message.start` 就 `text.delta` | `RequestRunCoordinator` + `RequestRunFailureToolErrorProjector` | `request_run_failed` | P0 | 已有上报，保留 |
+| request run terminal | Agent 正常结束本轮执行流程，但明确告诉 SDK 本轮失败，例如会话不存在、模型服务失败、工具执行失败 | `ProviderRun.result()` 返回 `outcome: "failed"` | `DefaultRunTerminalSignalProjector` | `tool_error`，`session_not_found` 时带 `reason` | P0 | 已有上报，保留 |
+| request run terminal | Agent 运行过程中终态 Promise 异常退出，SDK 没拿到规范的成功/失败结果 | `ProviderRun.result()` reject | `RequestRunCoordinator` 抛出后被 command failure 捕获 | command failure `tool_error` | P0 | 已有兜底；建议补测试锁定 |
+| outbound run facts | Agent 主动推送一轮消息给前端，例如后台任务、异步回调、主动通知，但这轮主动消息的事件流顺序错误 | `emitOutboundRun()` facts 生命周期非法 | `OutboundCoordinator.emitOutboundRunFailed()` + terminal projector | failed terminal `tool_error` | P0 | 已有上报，保留 |
+
+已有场景的上行数据示例：
+
+| 场景 | 上行 `tool_error` 示例 | 字段说明 |
+|---|---|---|
+| 入站协议校验失败 | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"gateway_invalid_invoke:missing_required_field"}` | `toolSessionId` / `welinkSessionId` 按 invalid frame 中可取得的路由字段携带；`error` 当前包含 gateway 校验错误码 |
+| `runMessage()` 返回前失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"Provider service unavailable"}` | 当前已有路径主要携带 `toolSessionId`；`error` 可能直出 Provider 异常信息，后续建议 catalog 化 |
+| 回复 question / permission 失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前交互已失效，请刷新后重试"}` | 用于前端提示用户原卡片已失效，需要重新触发或刷新 |
+| 同会话重复发送 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前会话正在处理中，请稍后再试"}` | 用于前端提示上一轮还在处理中，避免用户继续等待无结果 |
+| request facts 生命周期失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前请求处理失败，请重试"}` | 当前统一为 `request_run_failed` 文案，不暴露内部 fact 顺序细节 |
+| request terminal failed | `{"type":"tool_error","toolSessionId":"tool-123","error":"会话不存在","reason":"session_not_found"}` | `reason` 仅在 `ProviderError.code === "session_not_found"` 时携带，便于前端做会话恢复或重建 |
+| outbound run 失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"text.delta requires an open message"}` | 当前 outbound failed terminal 可能使用包装后的异常 message；后续建议统一为 catalog 文案 |
 
 #### 4.4.2 需要新增或补齐 `tool_error` 的场景
 
-| SDK 节点 | 缺口场景 | 现状 | 用户影响 | 重要性 | 建议动作 |
-|---|---|---|---|---|---|
-| Runtime command 路由 | `invoke` action 不支持，但消息里有 `toolSessionId` 或 `welinkSessionId` | `toRuntimeCommand()` 抛错；`CommandFailureToolErrorProjector.isSupportedAction()` 返回 `null` | 前端可能没有失败回包，点击后无响应 | P0 | 新增 unsupported invoke `tool_error` |
-| `createSession()` | Provider 抛错且会话尚未生成 `toolSessionId` | 当前 projector 允许进入，但输出不带 `welinkSessionId`；已有测试名也锁定“不回显 welinkSessionId” | 前端难以把失败挂到发起的新建会话请求 | P0 | `tool_error` 补带 `welinkSessionId` |
-| request run facts enrich | `permission.reply` 找不到展示上下文、`permission.ask` 展示冲突 | `ProviderFactEnricher.enrich()` 返回 `ok:false` 后只 `failureRecorded` 并 `continue` | 关键交互状态静默丢失，后续可能仍 `tool_done` | P1 | 作为 request lifecycle failure 发送 `request_run_failed` 并终止 run |
-| outbound run facts enrich | Provider 主动 `emitOutboundRun()` 中 permission enrich 失败 | 当前只记录后继续，最终可能 `tool_done` | 主动消息局部丢事件，用户误以为成功 | P1 | 走 `emitOutboundRunFailed()` 生成 terminal `tool_error` |
-| command failure 文案 | Provider API 抛普通 `Error` 或结构化 `ProviderCommandError` | 已会上报，但普通 message 可能直出 | 用户能感知失败，但可能看到技术错误或敏感信息 | P1 | 后续加 normalizer/catalog；不作为“缺上报”处理 |
+| SDK 节点 | 业务场景 | 技术缺口场景 | 现状 | 用户影响 | 重要性 | 建议动作 |
+|---|---|---|---|---|---|---|
+| Runtime command 路由 | 前端发起了一个 SDK 暂不支持的操作，例如新增按钮、灰度功能或 gateway 新 action 先上线，但 SDK 还没适配 | `invoke` action 不支持，但消息里有 `toolSessionId` 或 `welinkSessionId` | `toRuntimeCommand()` 抛错；`CommandFailureToolErrorProjector.isSupportedAction()` 返回 `null` | 前端可能没有失败回包，点击后无响应 | P0 | 新增 unsupported invoke `tool_error` |
+| `createSession()` | 用户点击“新建会话”或首次进入助手会话，第三方 Agent 创建底层会话失败，例如账号无权限、服务不可用、创建参数不合法 | Provider 抛错且会话尚未生成 `toolSessionId` | 当前 projector 允许进入，但输出不带 `welinkSessionId`；已有测试名也锁定“不回显 welinkSessionId” | 前端难以把失败挂到发起的新建会话请求 | P0 | `tool_error` 补带 `welinkSessionId` |
+| request run facts enrich | Agent 发起权限申请或权限结果回传，但 SDK 找不到对应展示上下文，例如权限卡片没有成功展示、permissionId 对不上、同一权限展示冲突 | `permission.reply` 找不到展示上下文、`permission.ask` 展示冲突 | `ProviderFactEnricher.enrich()` 返回 `ok:false` 后只 `failureRecorded` 并 `continue` | 关键交互状态静默丢失，后续可能仍 `tool_done` | P1 | 作为 request lifecycle failure 发送 `request_run_failed` 并终止 run |
+| outbound run facts enrich | Agent 在后台主动推送权限相关结果或异步任务结果，但这轮主动消息缺少前端展示所需上下文 | Provider 主动 `emitOutboundRun()` 中 permission enrich 失败 | 当前只记录后继续，最终可能 `tool_done` | 主动消息局部丢事件，用户误以为成功 | P1 | 走 `emitOutboundRunFailed()` 生成 terminal `tool_error` |
+| command failure 文案 | 用户已经能看到失败提示，但提示内容像 `ECONNRESET`、`socket hang up`、堆栈摘要或第三方内部错误码，产品和用户都难以理解 | Provider API 抛普通 `Error` 或结构化 `ProviderCommandError` | 已会上报，但普通 message 可能直出 | 用户能感知失败，但可能看到技术错误或敏感信息 | P1 | 后续加 normalizer/catalog；不作为“缺上报”处理 |
+
+新增/补齐后的上行数据示例：
+
+| 场景 | 预期上行 `tool_error` 示例 | 字段说明 |
+|---|---|---|
+| unsupported `invoke` | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"当前操作暂不支持，请升级 SDK 或稍后重试"}` | 有 `toolSessionId` / `welinkSessionId` 时都应尽量携带，方便前端把错误挂到正确会话或请求 |
+| `createSession()` 失败 | `{"type":"tool_error","welinkSessionId":"welink-123","error":"会话创建失败，请稍后重试"}` | 新建会话失败时通常还没有 `toolSessionId`，必须携带 `welinkSessionId` 才能让前端关联发起请求 |
+| request run facts enrich 失败 | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"当前请求处理失败，请重试"}` | 建议复用 `request_run_failed` 文案；如果 session registry 能拿到 `welinkSessionId`，也应补带 |
+| outbound run facts enrich 失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"主动消息处理失败，请重试"}` | 主动 outbound 没有用户当前输入气泡时，至少携带 `toolSessionId`，让前端定位到对应会话 |
+| command failure 文案规范化 | `{"type":"tool_error","toolSessionId":"tool-123","error":"服务暂时不可用，请稍后重试"}` | 协议字段不变，主要把 `error` 从技术异常改成稳定用户文案 |
 
 #### 4.4.3 不建议新增 `tool_error`，但要验证不无响应的场景
 
-| SDK 节点 | 场景 | 当前行为 | 重要性 | 结论 |
-|---|---|---|---|---|
-| slash command 查询 | `listSlashCommands()` 抛错 | 捕获后返回 `slash_commands_result([])` | P2 | 不新增 `tool_error`；空列表是明确降级响应 |
-| status 查询 | `health()` 抛错 | `QueryStatusUseCase` 抛错，外层不会生成 `tool_error` | P2/P3 | 不使用 `tool_error`；待确认是否需要 `status_response` 失败态 |
-| runtime 启动 | `initialize(context)` 抛错 | `runtime.start()` reject，status/diagnostics 记录失败 | P3 | 不使用 `tool_error` |
-| runtime 停止 | `dispose()` 抛错 | `runtime.stop()` reject 或 lifecycle failure | P3 | 不使用 `tool_error` |
-| 已废弃 outbound message | `emitOutboundMessage()` facts 失败 | Promise reject 给 Provider，缺少 run terminal 语义 | P2 | 不新增前端协议行为；新接入迁移到 `emitOutboundRun()` |
-| 上行发送口 | `GatewayOutboundSinkAdapter.send()` 校验失败或 driver 不可用 | 记录 outbound validation failure；不能保证再发 `tool_error` | P1 | 不递归发送；依赖 diagnostics / reconnect / gateway 状态 |
+| SDK 节点 | 业务场景 | 技术场景 | 当前行为 | 重要性 | 结论 |
+|---|---|---|---|---|---|
+| slash command 查询 | 用户打开输入框或输入 `/`，前端查询可用快捷命令；查询失败时可以展示空列表，不影响继续手动输入消息 | `listSlashCommands()` 抛错 | 捕获后返回 `slash_commands_result([])` | P2 | 不新增 `tool_error`；空列表是明确降级响应 |
+| status 查询 | 前端或运维面板查询 Agent 是否在线；这不是某个用户消息执行失败，而是健康状态读取失败 | `health()` 抛错 | `QueryStatusUseCase` 抛错，外层不会生成 `tool_error` | P2/P3 | 不使用 `tool_error`；待确认是否需要 `status_response` 失败态 |
+| runtime 启动 | 插件启动或 SDK runtime 初始化时，Provider 初始化失败，例如配置错误、认证失败、依赖服务不可用 | `initialize(context)` 抛错 | `runtime.start()` reject，status/diagnostics 记录失败 | P3 | 不使用 `tool_error` |
+| runtime 停止 | 插件关闭、重启或账号切换时，Provider 释放资源失败 | `dispose()` 抛错 | `runtime.stop()` reject 或 lifecycle failure | P3 | 不使用 `tool_error` |
+| 已废弃 outbound message | 老 Provider 仍使用旧的主动消息接口发送单批 facts；这条接口没有 run 终态概念 | `emitOutboundMessage()` facts 失败 | Promise reject 给 Provider，缺少 run terminal 语义 | P2 | 不新增前端协议行为；新接入迁移到 `emitOutboundRun()` |
+| 上行发送口 | SDK 已经生成上行消息，但 gateway 连接断开、未 READY、或消息不符合 schema，前端可能收不到任何回包 | `GatewayOutboundSinkAdapter.send()` 校验失败或 driver 不可用 | 记录 outbound validation failure；不能保证再发 `tool_error` | P1 | 不递归发送；依赖 diagnostics / reconnect / gateway 状态 |
 
-### 4.5 文档需要同步修改的内容
+### 4.5 对现有业务逻辑的影响
+
+本方案会新增部分 `tool_error` 上报，并引入统一上报输入 `ToolErrorReportInput`。整体目标是让异常从“静默、等待或仅 diagnostics 可见”变成“前端可感知失败”，但不改变 Provider public API、gateway schema 和正常成功路径。
+
+#### 4.5.1 新增 `tool_error` 的业务影响
+
+| 新增/补齐场景 | 现有业务表现 | 改造后业务表现 | 可能影响范围 | 风险级别 | 处理建议 |
+|---|---|---|---|---|---|
+| unsupported `invoke` 上报 `tool_error` | 前端发起 SDK 不支持的 action 时，可能没有失败回包，用户看到按钮无响应或一直等待 | 前端收到 `tool_error`，可展示“不支持当前操作/请升级 SDK” | 前端错误提示、gateway 新旧 action 灰度、测试用例断言 | 中 | 前端需确认收到该 `tool_error` 后不再继续 loading；测试补 unknown action 场景 |
+| `createSession()` 失败补 `welinkSessionId` | 新建会话失败时可能没有 `toolSessionId`，前端难以把错误挂回创建请求 | 前端可用 `welinkSessionId` 定位创建失败，展示明确错误 | 新建会话 UI、首次进入会话、会话映射缓存、前端错误路由逻辑 | 中 | 前端需确认 `welinkSessionId` 可作为 create failure 的路由键；测试补无 `toolSessionId` 场景 |
+| request run facts enrich 失败上报 `tool_error` 并终止 run | permission 展示上下文丢失时可能只记录 diagnostics，后续仍可能 `tool_done`，用户误以为成功 | 当前 run 以 `tool_error` 收口，不再继续发送误导性的成功终态 | 权限卡片、问题卡片、run 终态、前端消息气泡状态 | 中 | 需要确认前端对同一 run 收到 `tool_error` 后关闭 loading，并避免再展示成功态 |
+| outbound run facts enrich 失败上报 terminal `tool_error` | Provider 主动消息缺上下文时可能局部事件丢失，最终仍可能成功结束 | 主动消息失败会以 `tool_error` 告知前端 | 主动通知、后台任务结果、异步回调消息、会话消息列表 | 中 | 测试补主动 outbound 权限上下文缺失；产品确认主动消息失败提示方式 |
+| command failure 文案规范化 | 用户可能看到 `ECONNRESET`、`socket hang up` 等技术错误 | 用户看到稳定业务文案，原始错误留在 diagnostics | 前端 toast 文案、测试 snapshot、问题排查链路 | 低 | UI 自动化和单测不要断言原始异常字符串；diagnostics 保留原始错误摘要 |
+
+#### 4.5.2 `ToolErrorReportInput` / 统一 reporter 的影响
+
+| 影响点 | 是否改变现有业务语义 | 说明 | 可能影响范围 |
+|---|---|---|---|
+| `tool_error` 协议字段 | 否 | 仍使用 `type`、`toolSessionId?`、`welinkSessionId?`、`error`、`reason?`，不新增 gateway schema 字段 | gateway-schema、前端协议解析不需要改 schema |
+| Provider public API | 否 | `ThirdPartyAgentProvider` 方法签名不变；Provider 仍通过 throw、failed terminal 或 facts 表达失败 | 第三方接入方无需改接口，但建议按文档补异常测试 |
+| 正常成功路径 | 否 | `tool_event`、`tool_done`、`session_created`、`slash_commands_result` 成功路径不变 | 正常聊天、新建会话、slash 命令列表不应回归 |
+| 异常路径发送出口 | 是 | 原来多个位置直接构造/发送 `tool_error`，改为调用 `ToolErrorReporter.report(input)` | `GatewayInboundPolicy`、`downstream.ts`、`RequestRunCoordinator`、`OutboundCoordinator`、terminal projector 装配 |
+| 路由字段补齐 | 是 | `createSession()` 失败等场景会开始携带 `welinkSessionId`；request lifecycle 可在可取得时补带 `welinkSessionId` | 前端错误归属、会话创建失败展示、测试断言 |
+| observation / 埋码口径 | 是 | 统一 reporter 后，`tool_error` 上报可统一记录 `stage`、`level`、`messageKey`、路由字段是否存在 | 日志、diagnostics、监控看板、问题排查 |
+| 重复上报控制 | 是 | 统一 reporter 需要明确同一 run 只能有一个 terminal `tool_error`，避免 command failure 与 lifecycle failure 重复发送 | request run、outbound run、terminal projector |
+| 错误文案来源 | 部分改变 | 新增/规范化场景会从原始异常 message 转向 catalog 文案，但 diagnostics 保留原始错误 | 前端显示文案、自动化测试 snapshot、客服排障话术 |
+
+#### 4.5.3 需要重点回归的业务范围
+
+1. 会话创建：首次进入助手、点击新建会话、创建失败时前端是否能基于 `welinkSessionId` 结束 loading 并展示错误。
+2. 消息发送：用户发送消息时 Provider 启动失败、重复发送、run terminal failed 是否都能以单一失败态收口。
+3. 权限/问题交互：权限卡片过期、重复回复、上下文丢失时，前端是否展示失败而不是继续等待。
+4. 主动 outbound：后台任务或 Agent 主动消息失败时，前端是否能定位到会话并展示失败状态。
+5. 灰度兼容：gateway 或前端先发新 action、接入方仍用旧 SDK、会话标识字段不匹配时，用户是否看到明确升级/不支持提示。
+6. 监控排障：统一 reporter 后日志字段是否足够定位 `stage`、`level`、`toolSessionId`、`welinkSessionId` 和原始错误摘要。
+
+#### 4.5.4 文档需要同步修改的内容
 
 1. `docs/design/interfaces/bridge-runtime-sdk-integration.md`：补充异常感知矩阵，说明 Provider API apply failure、terminal failure、facts contract failure 的区别。
 2. `docs/design/interfaces/third-party-agent-provider-v1.md`：补充第三方 Provider 测试建议，明确哪些失败应 throw，哪些应返回 failed terminal。
-3. `packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`：补充 `tool_error` 投影边界说明。
+3. `packages/bridge-runtime-sdk/docs/bridge-runtime-sdk-architecture.md`：补充 `ToolErrorReporter` 与 `ToolErrorReportInput` 的职责边界。
 4. `packages/bridge-runtime-sdk/CHANGELOG.md`：实现后记录新增/补齐的前端可见失败终态。
 
 ## 5. 性能
