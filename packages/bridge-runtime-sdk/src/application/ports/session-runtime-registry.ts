@@ -28,7 +28,6 @@ export interface SessionRuntimeRegistry {
   registerRequestRun(toolSessionId: string, runId: string): RequestRunState;
   releaseRequestRun(toolSessionId: string, runId: string): RequestRunState;
   getRequestRunState(toolSessionId: string): RequestRunState;
-  hasActiveRequestRun(toolSessionId: string): boolean;
   acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false };
   releaseOutboundEmission(toolSessionId: string, messageId: string): void;
   getOutboundEmissionState(toolSessionId: string): OutboundEmissionState;

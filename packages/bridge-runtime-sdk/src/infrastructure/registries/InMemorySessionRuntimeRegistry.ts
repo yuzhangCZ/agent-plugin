@@ -80,10 +80,6 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     return this.snapshotRequestRunState(this.records.get(toolSessionId)?.requestRun ?? { activeRunIds: [] });
   }
 
-  hasActiveRequestRun(toolSessionId: string): boolean {
-    return this.getRequestRunState(toolSessionId).activeRunIds.length > 0;
-  }
-
   acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
     const record = this.ensureRecord({ toolSessionId });
     if (record.outbound.status !== 'idle') {

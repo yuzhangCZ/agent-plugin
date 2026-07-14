@@ -77,9 +77,6 @@ test('StartRequestRunUseCase acquires request run, calls provider, delegates run
       getRequestRunState() {
         return { activeRunIds: [] };
       },
-      hasActiveRequestRun() {
-        return false;
-      },
       registerRequestRun() {
         return { activeRunIds: ['run-active'] };
       },
@@ -273,9 +270,6 @@ test('StartRequestRunUseCase releases request run when provider throws', async (
     {
       getRequestRunState() {
         return { activeRunIds: [] };
-      },
-      hasActiveRequestRun() {
-        return false;
       },
       registerRequestRun() {
         return { activeRunIds: ['run-active'] };

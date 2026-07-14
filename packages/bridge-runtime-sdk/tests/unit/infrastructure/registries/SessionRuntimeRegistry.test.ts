@@ -12,12 +12,10 @@ test('session runtime registry coordinates request run and outbound emission ind
   assert.deepEqual(seeded.requestRun, { activeRunIds: [] });
   assert.deepEqual(seeded.outbound, { status: 'idle' });
   assert.deepEqual(registry.getRequestRunState('missing-tool'), { activeRunIds: [] });
-  assert.equal(registry.hasActiveRequestRun('missing-tool'), false);
   assert.deepEqual(registry.getOutboundEmissionState('missing-tool'), { status: 'idle' });
 
   assert.deepEqual(registry.registerRequestRun('tool-1', 'run-1'), { activeRunIds: ['run-1'] });
   assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: ['run-1'] });
-  assert.equal(registry.hasActiveRequestRun('tool-1'), true);
   assert.deepEqual(registry.registerRequestRun('tool-1', 'run-1'), { activeRunIds: ['run-1'] });
   assert.deepEqual(registry.registerRequestRun('tool-1', 'run-2'), { activeRunIds: ['run-1', 'run-2'] });
   assert.deepEqual(registry.releaseRequestRun('tool-1', 'run-missing'), { activeRunIds: ['run-1', 'run-2'] });
@@ -35,7 +33,6 @@ test('session runtime registry coordinates request run and outbound emission ind
   assert.deepEqual(registry.releaseRequestRun('tool-1', 'run-2'), { activeRunIds: [] });
   registry.releaseOutboundEmission('tool-1', 'msg-1');
   assert.deepEqual(registry.getRequestRunState('tool-1'), { activeRunIds: [] });
-  assert.equal(registry.hasActiveRequestRun('tool-1'), false);
   assert.deepEqual(registry.getOutboundEmissionState('tool-1'), { status: 'idle' });
 });
 

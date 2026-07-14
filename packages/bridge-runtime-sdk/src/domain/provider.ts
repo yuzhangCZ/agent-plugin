@@ -253,6 +253,11 @@ export interface ProviderCloseSessionInput {
 export interface ProviderAbortSessionInput {
   traceId: string;
   toolSessionId: string;
+  /**
+   * 调用 abort 时 SDK 观察到的 active request run ID 快照。
+   *
+   * 无 active run 时传入空数组；provider 根据自身 session/run 状态决定实际中止范围。
+   */
   runIds: string[];
 }
 

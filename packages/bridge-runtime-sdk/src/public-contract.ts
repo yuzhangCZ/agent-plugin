@@ -80,9 +80,23 @@ export type {
   ToolUpdateFact,
 };
 
+/**
+ * 控制同一 tool session 存在 active request run 时新 chat 的处理方式。
+ *
+ * `reject` 是默认兼容行为。仅当 provider 具备并发输入调度能力，且产出的输出可被
+ * 下游正确消费时，才应使用 `forwardToProvider`。
+ */
 export type ActiveRunChatPolicy = 'reject' | 'forwardToProvider';
 
+/**
+ * Request run 并发行为的 public 配置。
+ */
 export interface RequestRunPolicyOptions {
+  /**
+   * Active request run 期间收到新 chat 时应用的策略。
+   *
+   * 缺省时由 request run policy resolver 归一化为 `reject`。
+   */
   activeRunChatPolicy?: ActiveRunChatPolicy;
 }
 
@@ -148,6 +162,9 @@ export interface BridgeGatewayProbeResult {
 
 /**
  * Provider 调用的公开诊断 trace；标识字段由 command 决定。
+ *
+ * `startRequestRun` 必须使用单个 `runId`，`abortExecution` 必须使用 `runIds` 快照；
+ * 两个字段属于不同 command，不能互相替代。
  */
 export type RuntimeTraceProviderCall =
   | {
@@ -200,6 +217,9 @@ export interface RuntimeTraceInteraction {
 
 /**
  * 并发 request run 策略的公开诊断 trace。
+ *
+ * 仅记录策略事件和 active run 数量，不包含完整 `activeRunIds`。精确的 abort
+ * 集合记录在 `RuntimeTraceProviderCall` 的 `abortExecution.runIds` 中。
  */
 export interface RuntimeTraceRequestRunPolicy {
   action: 'concurrent_request_runs_detected';
@@ -227,6 +247,11 @@ export interface RuntimeDiagnostics {
   uplinks: Array<{ type: string; toolSessionId?: string }>;
   terminals: RuntimeTraceTerminal[];
   interactions: RuntimeTraceInteraction[];
+  /**
+   * 并发 request run 策略事件的必填数组，不包含完整 `activeRunIds`。
+   *
+   * abort 调用使用的精确 ID 集合见 `providerCalls` 中 `abortExecution.runIds`。
+   */
   requestRunPolicies: RuntimeTraceRequestRunPolicy[];
   derivedEvents: Array<{ type: string; toolSessionId: string }>;
   failures: RuntimeTraceFailure[];
