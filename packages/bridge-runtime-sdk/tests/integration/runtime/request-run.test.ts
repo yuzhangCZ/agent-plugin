@@ -12,6 +12,16 @@ import {
   flushEvents,
 } from '../support/runtime-harness.ts';
 
+async function waitFor(condition: () => boolean, failureMessage: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await flushEvents();
+  }
+  assert.fail(failureMessage);
+}
+
 test('runtime projects subagent envelope fields from provider facts onto tool_event messages', async () => {
   const connection = new FakeGatewayClient();
   const provider: ThirdPartyAgentProvider = {
@@ -514,6 +524,84 @@ test('active run chat policy forwardToProvider sends concurrent chat to provider
   firstRunResult.resolve({ outcome: 'completed' });
   secondRunResult.resolve({ outcome: 'completed' });
   await flushEvents();
+});
+
+test('provider failure releases only its concurrent request run before abort_session', async () => {
+  const connection = new FakeGatewayClient();
+  const firstRunResult = createDeferred<ProviderTerminalResult>();
+  const runIds: string[] = [];
+  let capturedAbortInput: Record<string, unknown> | undefined;
+  const provider = createProvider();
+  provider.runMessage = async (input) => {
+    runIds.push(input.runId);
+    if (runIds.length === 2) {
+      throw new Error('provider_down');
+    }
+    return {
+      runId: input.runId,
+      facts: createAsyncFacts([]),
+      result: async () => firstRunResult.promise,
+    };
+  };
+  provider.abortSession = async (input) => {
+    capturedAbortInput = input as unknown as Record<string, unknown>;
+    return { applied: true };
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await waitFor(() => runIds.length === 1, 'first request run did not reach the provider');
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-2',
+    payload: { toolSessionId: 'tool-1', text: 'second' },
+  });
+  await waitFor(
+    () => connection.sent.some((message) => (
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_error'
+      && 'error' in message
+      && message.error === 'provider_down'
+    )),
+    'failed request run did not reach its terminal error path',
+  );
+  await flushEvents();
+
+  const firstRunId = runIds[0];
+  assert.ok(firstRunId);
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'abort_session',
+    welinkSessionId: 'welink-3',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await waitFor(() => capturedAbortInput !== undefined, 'abort_session did not reach the provider');
+
+  assert.deepEqual(capturedAbortInput?.runIds, [firstRunId]);
+
+  firstRunResult.resolve({ outcome: 'aborted' });
+  await waitFor(
+    () => connection.sent.some((message) => (
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-1'
+    )),
+    'first request run did not settle during cleanup',
+  );
 });
 
 test('request run skips terminal tool_done delay when compatibility delay is disabled', async () => {

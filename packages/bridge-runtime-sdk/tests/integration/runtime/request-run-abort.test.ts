@@ -12,6 +12,16 @@ import {
   flushEvents,
 } from '../support/runtime-harness.ts';
 
+async function waitFor(condition: () => boolean, failureMessage: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await flushEvents();
+  }
+  assert.fail(failureMessage);
+}
+
 test('abort_session forwards active run ids and sends tool_done when run resolves aborted', async () => {
   const connection = new FakeGatewayClient();
   let finishFacts: (() => void) | undefined;
@@ -318,6 +328,114 @@ test('abort_session forwards all active request run ids when active chats are fo
   firstRunResult.resolve({ outcome: 'aborted' });
   secondRunResult.resolve({ outcome: 'aborted' });
   await flushEvents();
+});
+
+test('abort_session only forwards the independently active run after a concurrent run settles', async () => {
+  const connection = new FakeGatewayClient();
+  const firstRunResult = createDeferred<ProviderTerminalResult>();
+  const secondRunResult = createDeferred<ProviderTerminalResult>();
+  const runIds: string[] = [];
+  let capturedAbortInput: Record<string, unknown> | undefined;
+  const provider = createProvider();
+  provider.runMessage = async (input) => {
+    const runIndex = runIds.length;
+    runIds.push(input.runId);
+    if (runIndex === 2) {
+      return createFakeRun([], { outcome: 'completed' });
+    }
+    const result = runIndex === 0 ? firstRunResult : secondRunResult;
+    return {
+      runId: input.runId,
+      facts: createAsyncFacts([]),
+      result: async () => result.promise,
+    };
+  };
+  provider.abortSession = async (input) => {
+    capturedAbortInput = input as unknown as Record<string, unknown>;
+    return { applied: true };
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
+    requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' },
+  }));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-1',
+    payload: { toolSessionId: 'tool-1', text: 'first' },
+  });
+  await waitFor(() => runIds.length === 1, 'first request run did not reach the provider');
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-2',
+    payload: { toolSessionId: 'tool-1', text: 'second' },
+  });
+  await waitFor(() => runIds.length === 2, 'second request run did not reach the provider');
+
+  const firstRunId = runIds[0];
+  const secondRunId = runIds[1];
+  assert.ok(firstRunId);
+  assert.ok(secondRunId);
+  firstRunResult.resolve({ outcome: 'completed' });
+  await waitFor(
+    () => connection.sent.some((message) => (
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-1'
+    )),
+    'first request run did not settle',
+  );
+  await flushEvents();
+
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'abort_session',
+    welinkSessionId: 'welink-3',
+    payload: { toolSessionId: 'tool-1' },
+  });
+  await waitFor(() => capturedAbortInput !== undefined, 'abort_session did not reach the provider');
+
+  assert.deepEqual(capturedAbortInput?.runIds, [secondRunId]);
+
+  secondRunResult.resolve({ outcome: 'aborted' });
+  await waitFor(
+    () => connection.sent.filter((message) => (
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-1'
+    )).length === 2,
+    'second request run did not settle',
+  );
+  await flushEvents();
+
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-4',
+    payload: { toolSessionId: 'tool-1', text: 'third' },
+  });
+  await waitFor(() => runIds.length === 3, 'third request run did not reach the provider');
+  await waitFor(
+    () => connection.sent.filter((message) => (
+      typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-1'
+    )).length === 3,
+    'third request run did not settle',
+  );
+
+  assert.equal(runIds.length, 3);
 });
 
 test('run_already_active projects routable tool_error while preserving active request run lock', async () => {
