@@ -198,6 +198,17 @@ export interface RuntimeTraceInteraction {
   tokenId?: string;
 }
 
+/**
+ * 并发 request run 策略的公开诊断 trace。
+ */
+export interface RuntimeTraceRequestRunPolicy {
+  action: 'concurrent_request_runs_detected';
+  toolSessionId: string;
+  newRunId: string;
+  activeRunCount: number;
+  policy: 'forwardToProvider';
+}
+
 export interface RuntimeTraceFailure {
   kind: RuntimeFailureKind;
   phase: RuntimeFailurePhase;
@@ -216,6 +227,7 @@ export interface RuntimeDiagnostics {
   uplinks: Array<{ type: string; toolSessionId?: string }>;
   terminals: RuntimeTraceTerminal[];
   interactions: RuntimeTraceInteraction[];
+  requestRunPolicies: RuntimeTraceRequestRunPolicy[];
   derivedEvents: Array<{ type: string; toolSessionId: string }>;
   failures: RuntimeTraceFailure[];
 }
