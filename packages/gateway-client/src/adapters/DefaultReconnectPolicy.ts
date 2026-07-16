@@ -19,6 +19,7 @@ const DEFAULT_CLOCK: ReconnectClock = {
 export class DefaultReconnectPolicy implements ReconnectPolicy {
   private attempt = 0;
   private windowStartedAt: number | null = null;
+  private suspendedMs = 0;
   private readonly clock: ReconnectClock;
   private readonly random: () => number;
   private readonly config: Required<GatewayReconnectConfig>;
@@ -41,6 +42,11 @@ export class DefaultReconnectPolicy implements ReconnectPolicy {
   reset(): void {
     this.attempt = 0;
     this.windowStartedAt = null;
+    this.suspendedMs = 0;
+  }
+
+  recordSuspendedDuration(durationMs: number): void {
+    this.suspendedMs += Math.max(0, durationMs);
   }
 
   scheduleNextAttempt(): ReconnectDecision {
@@ -75,6 +81,6 @@ export class DefaultReconnectPolicy implements ReconnectPolicy {
   }
 
   private getElapsedMs(): number {
-    return Math.max(0, this.clock.now() - (this.windowStartedAt ?? this.clock.now()));
+    return Math.max(0, this.clock.now() - (this.windowStartedAt ?? this.clock.now()) - this.suspendedMs);
   }
 }
