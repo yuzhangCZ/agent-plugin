@@ -16,6 +16,10 @@ import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
 import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
 import { DefaultReconnectPolicy } from '../src/adapters/DefaultReconnectPolicy.ts';
+import {
+  DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS,
+  createGatewayRuntimeDependencies,
+} from '../src/factory/createGatewayRuntimeDependencies.ts';
 
 function statusKind(status: GatewayClientStatus): string {
   if (status.isReady()) {
@@ -887,6 +891,30 @@ test('default reconnect preset excludes delayed timer drift from maxElapsedMs bu
   }
 });
 
+test('default reconnect preset uses forty minute active elapsed budget', () => {
+  const clock = new FakeClock(0);
+  const dependencies = createGatewayRuntimeDependencies({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    clock,
+    random: () => 0,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  const first = dependencies.reconnectPolicy.scheduleNextAttempt();
+  assert.equal(first.ok, true);
+
+  clock.nowMs = 600_001;
+  assert.equal(dependencies.reconnectPolicy.getExhaustedDecision(), null);
+
+  clock.nowMs = DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS + 1;
+  assert.deepEqual(dependencies.reconnectPolicy.getExhaustedDecision(), {
+    ok: false,
+    elapsedMs: 2_400_001,
+    maxElapsedMs: DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS,
+  });
+});
+
 test('default reconnect policy exhausts after active maxElapsedMs', () => {
   const clock = new FakeClock(0);
   const policy = new DefaultReconnectPolicy(
@@ -895,7 +923,7 @@ test('default reconnect policy exhausts after active maxElapsedMs', () => {
       maxMs: 30_000,
       exponential: true,
       jitter: 'none',
-      maxElapsedMs: 600_000,
+      maxElapsedMs: 2_400_000,
       enabled: true,
     },
     { clock, random: () => 0 },
@@ -904,11 +932,11 @@ test('default reconnect policy exhausts after active maxElapsedMs', () => {
   const first = policy.scheduleNextAttempt();
   assert.equal(first.ok, true);
 
-  clock.nowMs = 600_001;
+  clock.nowMs = 2_400_001;
   assert.deepEqual(policy.getExhaustedDecision(), {
     ok: false,
-    elapsedMs: 600_001,
-    maxElapsedMs: 600_000,
+    elapsedMs: 2_400_001,
+    maxElapsedMs: 2_400_000,
   });
 });
 
@@ -920,7 +948,7 @@ test('default reconnect policy excludes delayed timer drift from elapsed budget'
       maxMs: 30_000,
       exponential: true,
       jitter: 'none',
-      maxElapsedMs: 600_000,
+      maxElapsedMs: 2_400_000,
       enabled: true,
     },
     { clock, random: () => 0 },

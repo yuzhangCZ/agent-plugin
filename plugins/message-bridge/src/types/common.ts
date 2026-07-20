@@ -94,7 +94,7 @@ export const DEFAULT_CONFIG = {
   heartbeatIntervalMs: 30000,
   reconnectBaseMs: 1000,
   reconnectMaxMs: 30000,
-  reconnectMaxElapsedMs: 600000,
+  reconnectMaxElapsedMs: 2400000,
   sdkTimeoutMs: 10000,
   configVersion: 1,
 } as const;

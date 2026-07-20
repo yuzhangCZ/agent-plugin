@@ -66,7 +66,7 @@
 | `gateway.reconnect.maxMs` | `30000` | 重连最大退避，单位毫秒 |
 | `gateway.reconnect.exponential` | `true` | 是否启用指数退避 |
 | `gateway.reconnect.jitter` | `full` | 重连抖动策略；`full` 表示在 `0..cappedDelay` 间随机 |
-| `gateway.reconnect.maxElapsedMs` | `600000` | 单轮自动重连总时长上限，单位毫秒 |
+| `gateway.reconnect.maxElapsedMs` | `2400000` | 单轮自动重连总时长上限，单位毫秒 |
 | `gateway.ping.intervalMs` | `30000` | 保留字段，当前未见运行时消费 |
 | `sdk.timeoutMs` | `10000` | SDK 调用超时，单位毫秒 |
 | `auth.ak` | `""` | Access Key，启用时必填 |
@@ -143,7 +143,7 @@
 | `gateway.reconnect.maxMs` | `number` | 否 | `30000` | 正整数 |
 | `gateway.reconnect.exponential` | `boolean` | 否 | `true` | 是否指数退避 |
 | `gateway.reconnect.jitter` | `'none' \| 'full'` | 否 | `full` | `full` 会在 `0..cappedDelay` 间随机 |
-| `gateway.reconnect.maxElapsedMs` | `number` | 否 | `600000` | 正整数；表示单轮自动重连总时长 |
+| `gateway.reconnect.maxElapsedMs` | `number` | 否 | `2400000` | 正整数；表示单轮自动重连总时长 |
 | `gateway.ping.intervalMs` | `number` | 否 | `30000` | 当前仅配置层存在，未见运行时消费 |
 | `sdk.timeoutMs` | `number` | 否 | `10000` | 正整数 |
 | `auth.ak` | `string` | 条件必填 | `""` | `enabled !== false` 时必填 |
