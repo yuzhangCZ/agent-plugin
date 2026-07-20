@@ -119,7 +119,7 @@ export class ObservedProviderCommandHandlers implements ProviderCommandHandlers 
   }
 
   async abortExecution(input: ProviderAbortSessionInput): Promise<{ applied: true }> {
-    const context = { toolSessionId: input.toolSessionId, runId: input.runId };
+    const context = { toolSessionId: input.toolSessionId, runIds: input.runIds };
     this.observation.providerCallStarted('abortExecution', input.traceId, context);
     try {
       const result = await this.handlers.abortExecution(input);

@@ -38,5 +38,6 @@
     "skipFiles": [
       "<node_internals>/**"
     ]
-  }
+  },
+  "java.compile.nullAnalysis.mode": "disabled"
 }

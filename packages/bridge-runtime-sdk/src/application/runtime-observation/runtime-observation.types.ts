@@ -1,6 +1,6 @@
 import type { GatewayDownstreamBusinessRequest, GatewayUplinkBusinessMessage, SkillProviderEvent } from '@agent-plugin/gateway-schema';
 
-import type { BridgeGatewayProbeResult } from '../../public-contract.ts';
+import type { ActiveRunChatPolicy, BridgeGatewayProbeResult } from '../../public-contract.ts';
 import type { RuntimeFailureKind, RuntimeFailurePhase } from '../constants/runtime.ts';
 import type { ProviderFact, ProviderSlashCommand, ProviderTerminalResult } from '../../domain/provider.ts';
 import type { LifecycleProfileKind } from '../fact-sequence-validator.ts';
@@ -136,6 +136,8 @@ export type UsecaseProgressObservationEvent = {
   toolSessionId?: string;
   welinkSessionId?: string;
   runId?: string;
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+  activeRunIds?: readonly string[];
   outcome?: ProviderTerminalResult['outcome'];
   error?: string;
   code?: string;
@@ -151,6 +153,7 @@ export type ProviderCallObservationEvent = {
   traceId?: string;
   toolSessionId?: string;
   runId?: string;
+  runIds?: string[];
   slashCommandCount?: number;
   slashCommands?: ProviderSlashCommand[];
   error?: string;
@@ -273,12 +276,15 @@ export type RuntimeObservationCommandContext = {
 
 export type RuntimeObservationUsecaseContext = RuntimeObservationCommandContext & {
   runId?: string;
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+  activeRunIds?: readonly string[];
   outcome?: ProviderTerminalResult['outcome'];
 };
 
 export type RuntimeObservationProviderContext = {
   toolSessionId?: string;
   runId?: string;
+  runIds?: string[];
   welinkSessionId?: string;
   slashCommandCount?: number;
   slashCommands?: ProviderSlashCommand[];

@@ -100,3 +100,26 @@ test('default runtime observation maps gateway probe events', () => {
     },
   ]);
 });
+
+test('observation records request run policy fields in usecase started context', () => {
+  const port = new RecordingObservationPort();
+  const observation = new DefaultRuntimeObservation(port);
+
+  observation.usecaseStarted('start_request_run', 'trace-run', {
+    toolSessionId: 'tool-1',
+    runId: 'run-2',
+    activeRunChatPolicy: 'forwardToProvider',
+    activeRunIds: ['run-1'],
+  });
+
+  assert.deepEqual(port.events, [{
+    type: 'usecase_progress',
+    phase: 'started',
+    usecase: 'start_request_run',
+    traceId: 'trace-run',
+    toolSessionId: 'tool-1',
+    runId: 'run-2',
+    activeRunChatPolicy: 'forwardToProvider',
+    activeRunIds: ['run-1'],
+  }]);
+});

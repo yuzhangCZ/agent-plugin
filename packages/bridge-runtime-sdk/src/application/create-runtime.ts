@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { BridgeGatewayLoggerObservationAdapter } from '../adapters/observation/runtime-logger-observation.ts';
 import { RuntimeTraceCollectorAdapter } from '../adapters/observation/runtime-trace-observation.ts';
 import type { ThirdPartyAgentProvider } from '../domain/provider.ts';
+import type { RequestRunPolicyOptions } from '../public-contract.ts';
 import {
   CompositeRuntimeObservationPort,
   DefaultRuntimeObservation,
@@ -27,6 +28,7 @@ import type { BridgeRuntimeInternalOptions } from './runtime-assembly/runtime-op
 export interface BridgeRuntimeOptions {
   provider: ThirdPartyAgentProvider;
   gatewayHost: BridgeGatewayHostConfig;
+  requestRunPolicy?: RequestRunPolicyOptions;
   logger?: BridgeGatewayLogger;
   debug?: boolean;
   traceIdFactory?: () => string;

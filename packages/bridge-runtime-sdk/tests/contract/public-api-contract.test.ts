@@ -41,6 +41,30 @@ test('public contract keeps qrcode auth types owned by skill-qrcode-auth', async
   assert.equal(indexSource.includes("from './public-contract.ts';"), true);
 });
 
+test('public contract exposes active run chat policy and abort run id set', async () => {
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const providerSource = await readFile(new URL('../../src/domain/provider.ts', import.meta.url), 'utf8');
+  const providerContractSource = await readFile(new URL('../../src/domain/provider-contract.ts', import.meta.url), 'utf8');
+
+  assert.match(publicContractSource, /export type ActiveRunChatPolicy = 'reject' \| 'forwardToProvider';/);
+  assert.match(publicContractSource, /export interface RequestRunPolicyOptions \{/);
+  assert.match(publicContractSource, /requestRunPolicy\?: RequestRunPolicyOptions;/);
+  assert.match(publicContractSource, /ProviderAbortSessionInput/);
+  assert.match(providerSource, /runIds: string\[];/);
+  assert.doesNotMatch(providerSource, /runId\?: string;/);
+  assert.match(providerContractSource, /runIds: string\[];/);
+  assert.doesNotMatch(providerContractSource, /runId\?: string;/);
+});
+
+test('public diagnostics does not expose request run policy history', async () => {
+  const publicContractSource = await readFile(new URL('../../src/public-contract.ts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(publicContractSource, /RuntimeTraceRequestRunPolicy/);
+  assert.doesNotMatch(publicContractSource, /requestRunPolicies/);
+  assert.doesNotMatch(indexSource, /RuntimeTraceRequestRunPolicy/);
+});
+
 test('stable entry does not expose internal facade skeleton symbols', () => {
   assert.equal('BridgeRuntimeFacade' in runtimeSdk, false);
   assert.equal('DefaultRuntimeCommandDispatcher' in runtimeSdk, false);
@@ -54,6 +78,22 @@ test('stable entry does not expose internal facade skeleton symbols', () => {
 
 test('public api positive type fixture locks BridgeRuntime status snapshot shape', async () => {
   await assertTypeFixturePasses('tests/type-contracts/tsconfig.positive.json');
+});
+
+test('public api negative type fixture requires abort execution trace run ids', async () => {
+  await assert.rejects(
+    execFileAsync(
+      'pnpm',
+      ['exec', 'tsc', '--noEmit', '-p', 'tests/type-contracts/tsconfig.negative-abort-trace-run-ids.json'],
+      { cwd: packageRoot },
+    ),
+    (error) => {
+      const output = typeof error === 'object' && error
+        ? `${'stdout' in error ? String(error.stdout) : ''}\n${'stderr' in error ? String(error.stderr) : ''}`
+        : '';
+      return output.includes('runIds') && output.includes('abortExecution');
+    },
+  );
 });
 
 test('runtime error public contract uses reason-oriented class-first codes', async () => {

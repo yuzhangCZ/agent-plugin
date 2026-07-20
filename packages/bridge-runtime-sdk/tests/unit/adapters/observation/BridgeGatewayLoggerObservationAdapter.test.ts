@@ -132,3 +132,39 @@ test('logger observation adapter projects gateway probe events', () => {
     },
   ]);
 });
+
+test('logger observation adapter logs request run policy fields on usecase started', () => {
+  const logger = new RecordingLogger();
+  const adapter = new BridgeGatewayLoggerObservationAdapter(logger);
+
+  adapter.record({
+    type: 'usecase_progress',
+    phase: 'started',
+    usecase: 'start_request_run',
+    traceId: 'trace-run',
+    toolSessionId: 'tool-1',
+    runId: 'run-2',
+    activeRunChatPolicy: 'forwardToProvider',
+    activeRunIds: ['run-1'],
+  });
+
+  assert.deepEqual(logger.logs, [{
+    level: 'info',
+    message: 'runtime_sdk.usecase.start_request_run.started',
+    meta: {
+      traceId: 'trace-run',
+      toolSessionId: 'tool-1',
+      welinkSessionId: undefined,
+      runId: 'run-2',
+      activeRunChatPolicy: 'forwardToProvider',
+      activeRunIds: ['run-1'],
+      outcome: undefined,
+      error: undefined,
+      code: undefined,
+    },
+  }]);
+  const meta = logger.logs[0]?.meta ?? {};
+  assert.equal('text' in meta, false);
+  assert.equal('content' in meta, false);
+  assert.equal('answers' in meta, false);
+});

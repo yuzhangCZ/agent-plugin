@@ -43,8 +43,8 @@ test('AbortExecutionUseCase forwards active run id and clears permission present
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return 'run-active';
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
       },
     } as never,
     {
@@ -57,12 +57,12 @@ test('AbortExecutionUseCase forwards active run id and clears permission present
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runId: 'run-active' }]);
+  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-active'] }]);
   assert.deepEqual(cleared, ['tool-1']);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
 });
 
-test('AbortExecutionUseCase forwards undefined run id when no active run exists', async () => {
+test('AbortExecutionUseCase forwards empty run id set when no active run exists', async () => {
   const abortCalls: unknown[] = [];
   const useCase = new AbortExecutionUseCase(
     {
@@ -72,8 +72,8 @@ test('AbortExecutionUseCase forwards undefined run id when no active run exists'
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return undefined;
+      getRequestRunState() {
+        return { activeRunIds: [] };
       },
     } as never,
     {
@@ -84,7 +84,32 @@ test('AbortExecutionUseCase forwards undefined run id when no active run exists'
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runId: undefined }]);
+  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: [] }]);
+});
+
+test('AbortExecutionUseCase forwards all active run ids', async () => {
+  const abortCalls: unknown[] = [];
+  const useCase = new AbortExecutionUseCase(
+    {
+      async abortExecution(input: unknown) {
+        abortCalls.push(input);
+        return { applied: true as const };
+      },
+    } as never,
+    {
+      getRequestRunState() {
+        return { activeRunIds: ['run-1', 'run-2'] };
+      },
+    } as never,
+    {
+      clearSession() {},
+    } as never,
+    new RecordingObservation() as never,
+  );
+
+  await useCase.execute(createCommand());
+
+  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-1', 'run-2'] }]);
 });
 
 test('AbortExecutionUseCase records failed observation and does not swallow provider failure', async () => {
@@ -96,8 +121,8 @@ test('AbortExecutionUseCase records failed observation and does not swallow prov
       },
     } as never,
     {
-      getActiveRequestRunId() {
-        return 'run-active';
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
       },
     } as never,
     {

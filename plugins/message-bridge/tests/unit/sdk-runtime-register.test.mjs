@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -185,6 +186,19 @@ async function flushAppLogs() {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
+async function waitFor(condition, label, timeoutMs = 200) {
+  const startedAt = Date.now();
+  let lastValue;
+  while (Date.now() - startedAt < timeoutMs) {
+    lastValue = condition();
+    if (lastValue) {
+      return lastValue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`${label} did not become true; last value: ${JSON.stringify(lastValue)}`);
+}
+
 function getProviderAdapter(runtime) {
   return runtime.providerAdapter;
 }
@@ -212,6 +226,140 @@ function createEntryContext(businessSessionId = 'user-runtime') {
     },
   };
 }
+
+test('sdk runtime opts active-run chat requests into provider forwarding', async () => {
+  const source = await readFile(new URL('../../src/runtime/SdkBridgeRuntime.ts', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /createBridgeRuntime\(\{[\s\S]*requestRunPolicy:\s*\{\s*activeRunChatPolicy:\s*'forwardToProvider',?\s*\}[\s\S]*\}\)/u,
+  );
+});
+
+test('sdk runtime forwards same-session active chats so provider adapter supersedes prior host run', async () => {
+  const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
+  const firstPrompt = createDeferred();
+  const secondPrompt = createDeferred();
+  const promptCalls = [];
+  let runtime;
+
+  try {
+    runtime = await startSdkRuntime({
+      session: {
+        create: async () => ({
+          data: {
+            id: 'ses-sdk-forward',
+            directory: '/workspace/sdk-forward',
+          },
+        }),
+        get: async () => ({
+          data: {
+            id: 'ses-sdk-forward',
+            directory: '/workspace/sdk-forward',
+          },
+        }),
+        prompt: async (input) => {
+          promptCalls.push(input);
+          return promptCalls.length === 1 ? firstPrompt.promise : secondPrompt.promise;
+        },
+      },
+    });
+    const ws = RegisterCaptureWebSocket.instances[0];
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'invoke',
+        action: 'chat',
+        welinkSessionId: 'welink-sdk-forward-1',
+        payload: {
+          toolSessionId: 'tool-sdk-forward',
+          text: 'first',
+          extParameters: createDirectEntryExtParameters('user-sdk-forward#bot-sdk-forward'),
+        },
+      }),
+    });
+    await waitFor(() => promptCalls.length === 1, 'first same-session prompt start');
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'invoke',
+        action: 'chat',
+        welinkSessionId: 'welink-sdk-forward-2',
+        payload: {
+          toolSessionId: 'tool-sdk-forward',
+          text: 'second',
+          extParameters: createDirectEntryExtParameters('user-sdk-forward#bot-sdk-forward'),
+        },
+      }),
+    });
+    const startRunCalls = await waitFor(() => {
+      const calls = runtime.sdkRuntime.getDiagnostics().providerCalls.filter(
+        (call) => call.command === 'startRequestRun' && call.toolSessionId === 'tool-sdk-forward',
+      );
+      return calls.length === 2 ? calls : false;
+    }, 'second same-session provider call');
+    const supersededDone = await waitFor(() => ws.sent.filter((message) =>
+      message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward'
+    ).length, 'superseded run terminal');
+
+    assert.equal(startRunCalls.length, 2);
+    assert.equal(promptCalls.length, 1);
+    assert.equal(supersededDone, 1);
+    assert.equal(ws.sent.some((message) =>
+      message.type === 'tool_error'
+      && message.toolSessionId === 'tool-sdk-forward'
+      && message.error === '当前会话正在处理中，请稍后再试'
+    ), false);
+
+    await runtime.handleEvent({
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'msg-sdk-forward-old',
+          sessionID: 'ses-sdk-forward',
+          role: 'assistant',
+          time: {
+            created: Date.now(),
+            completed: Date.now(),
+          },
+          finish: 'stop',
+        },
+      },
+    });
+    firstPrompt.resolve(createPromptResponse());
+    await waitFor(() => promptCalls.length === 2, 'second same-session prompt start');
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'invoke',
+        action: 'abort_session',
+        welinkSessionId: 'welink-sdk-forward-3',
+        payload: {
+          toolSessionId: 'tool-sdk-forward',
+        },
+      }),
+    });
+    await waitFor(() => ws.sent.filter((message) =>
+      message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward'
+    ).length === 2, 'second same-session run terminal', 1_000);
+    secondPrompt.resolve(createPromptResponse());
+    await flushAppLogs();
+
+    assert.equal(runtime.sdkRuntime.getDiagnostics().providerCalls.filter(
+      (call) => call.command === 'startRequestRun' && call.toolSessionId === 'tool-sdk-forward',
+    ).length, 2);
+    assert.equal(ws.sent.some((message) =>
+      message.type === 'tool_error'
+      && message.toolSessionId === 'tool-sdk-forward'
+      && message.error === '当前会话正在处理中，请稍后再试'
+    ), false);
+
+  } finally {
+    runtime?.stop();
+    restore();
+  }
+});
 
 test('sdk runtime telemetry refresh does not republish READY when public status is already ready', () => {
   __resetMessageBridgeStatusForTests();

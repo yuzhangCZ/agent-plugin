@@ -36,3 +36,11 @@ test("OpenClawGatewayBridge validates upstream messages before every send path",
   assert.match(source, /createBridgeRuntime/);
   assert.doesNotMatch(source, /OpenClawGatewaySink/);
 });
+
+test("OpenClawGatewayBridge does not opt into active-run chat forwarding", async () => {
+  const source = await readFile(bridgeSourcePath, "utf8");
+
+  assert.match(source, /createBridgeRuntime/);
+  assert.doesNotMatch(source, /activeRunChatPolicy/);
+  assert.doesNotMatch(source, /forwardToProvider/);
+});

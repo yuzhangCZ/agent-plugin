@@ -187,7 +187,7 @@ export interface ProviderCloseSessionInput {
 export interface ProviderAbortSessionInput {
   traceId: string;
   toolSessionId: string;
-  runId?: string;
+  runIds: string[];
 }
 
 /**

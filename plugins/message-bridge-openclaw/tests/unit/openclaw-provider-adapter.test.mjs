@@ -144,7 +144,7 @@ test("provider adapter abort closes active run and suppresses late runtime reply
   const result = await provider.abortSession({
     traceId: "trace-2",
     toolSessionId: "ses_abort_active_1",
-    runId: "sdk-run-1",
+    runIds: ["sdk-run-1"],
   });
   await capturedDispatcherOptions.deliver({ text: "late chunk" }, { kind: "block" });
 
@@ -243,7 +243,7 @@ test("provider adapter abort prefers runtime abort hook over session deletion", 
   const result = await provider.abortSession({
     traceId: "trace-1",
     toolSessionId: "tool-1",
-    runId: "run-1",
+    runIds: ["run-1"],
   });
 
   assert.deepEqual(result, { applied: true });

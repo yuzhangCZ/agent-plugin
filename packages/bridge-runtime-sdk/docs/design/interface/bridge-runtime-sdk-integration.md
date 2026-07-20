@@ -1,7 +1,7 @@
 # bridge-runtime-sdk 对外集成文档
 
-**Version:** 1.2
-**Date:** 2026-06-15
+**Version:** 1.3
+**Date:** 2026-07-14
 **Status:** Active  
 **Owner:** agent-plugin maintainers  
 **Related:** `@wecode/bridge-runtime-sdk` stable public contract
@@ -41,6 +41,12 @@ npm install @wecode/bridge-runtime-sdk
 ## 2.1 Changelog
 
 changelog 条目统一使用 `feat:`、`fix:`、`docs:` 前缀；真实 public contract 破坏性变更使用 `!` 标记。
+
+### 2026-07-14（未发布）
+
+- feat: `BridgeRuntimeOptions` 新增 `requestRunPolicy.activeRunChatPolicy`；默认使用 `reject`。SDK 集成方只有在 Provider 支持并发输入调度，并已按 `toolSessionId` 实现 run 输出队列后，才适合显式开启 `forwardToProvider`。
+- fix!: `ProviderAbortSessionInput` 从可选 `runId?: string` 改为必填 `runIds: string[]`；Provider 集成方必须遍历 `input.runIds`，终止其中仍处于 active 状态的每个 run。无 active run 时仍会收到 `[]`。
+- docs: 补充 abort 精确 run ID 快照的 diagnostics 查询位置。
 
 ### 2026-07-02 (1.0.4-beta)
 
@@ -117,6 +123,22 @@ changelog 条目统一使用 `feat:`、`fix:`、`docs:` 前缀；真实 public c
 | `debug` | `boolean` | 否 | 是否打开调试日志。 |
 | `traceIdFactory` | `() => string` | 否 | 自定义 traceId 生成器。未提供时由 SDK 生成。 |
 | `onTelemetryUpdated` | `() => void` | 否 | 运行时观测信息变更时触发。 |
+| `requestRunPolicy` | `RequestRunPolicyOptions` | 否 | Request run 并发行为配置；缺省时等同于 `activeRunChatPolicy: 'reject'`。 |
+
+#### 嵌套类型：`RequestRunPolicyOptions`
+
+| 字段 | 类型 | 是否必填 | 说明 |
+|---|---|---|---|
+| `activeRunChatPolicy` | `ActiveRunChatPolicy` | 否 | 同一 `toolSessionId` 存在 active request run 时新 chat 的处理策略；缺省时等同于 `reject`。 |
+
+#### `ActiveRunChatPolicy` 语义
+
+| 值 | 说明 |
+|---|---|
+| `'reject'` | 默认兼容行为；存在 active request run 时拒绝启动新 run。 |
+| `'forwardToProvider'` | 仍将新 chat 转发给 Provider；SDK 集成方必须支持并发输入调度，并按 `toolSessionId` 实现 run 输出队列。 |
+
+`forwardToProvider` 只改变新 chat 是否继续转发给 Provider。SDK 不会缓存、排序或串行化不同 run 的 facts。开启该策略前，SDK 集成方必须改造 Provider 或宿主适配层，为同一 `toolSessionId` 建立 run 输出队列，串行输出不同 run 的 facts，并保证一个 run 的输出边界收口后再输出下一个 run；否则多个 active run 的输出可能交错，导致 gateway 或前端无法正确消费。
 
 #### 嵌套类型：`BridgeGatewayHostConfig`
 
@@ -149,6 +171,18 @@ import { createBridgeRuntime } from '@wecode/bridge-runtime-sdk';
 const runtime = await createBridgeRuntime({
   provider,
   gatewayHost,
+});
+```
+
+确认 Provider 支持并发输入调度，且 SDK 集成方已实现 run 输出队列后，可显式开启 "forwardToProvider"
+
+```ts
+const runtime = await createBridgeRuntime({
+  provider,
+  gatewayHost,
+  requestRunPolicy: {
+    activeRunChatPolicy: 'forwardToProvider',
+  },
 });
 ```
 
@@ -621,9 +655,11 @@ async runMessage(input: ProviderRunMessageInput) {
 |---|---|---|---|
 | `traceId` | `string` | 是 | 本次调用 traceId。 |
 | `toolSessionId` | `string` | 是 | 目标 welink 会话标识；不代表宿主 agent session ID。 |
-| `runId` | `string` | 否 | 需要中止的具体 run 标识；未提供时由宿主自行决定中止范围。 |
+| `runIds` | `string[]` | 是 | 调用时 SDK 观察到当前toolSessionId存在的request run ID 快照；Provider 集成方必须逐项处理，该字段可能为空、包含一个或包含多个 ID。 |
 
-- 返回 `{ applied: true }` 时，表示中止操作已真实应用到底层宿主。
+- 返回 `{ applied: true }` 时，表示中止请求已由 Provider 接收并应用，不表示toolSessionId对于 run 已完成终态收口。
+- Provider 集成方必须遍历 `input.runIds`，对每个仍处于 active 状态的 run 触发终止；
+- 每个被终止的 run 都必须独立结束 facts 流，并在 facts 流结束后 resolve 对应的 `result()` 为 `{ outcome: 'aborted' }`。
 
 #### 中断时序图
 
@@ -632,23 +668,18 @@ sequenceDiagram
   participant RT as Runtime
   participant P as Provider
 
-  RT->>P: runMessage(input)
-  P-->>RT: ProviderRun { runId, facts, result() }
-
-  P-->>RT: message.start (msg_1)
-  P-->>RT: text.delta ...
-  Note over P: run 进行中
-
-  RT->>P: abortSession(input)
+  Note over RT,P: 调用时可能存在 0、1 或多个 active runs
+  RT->>P: abortSession({ runIds: [...] })
   P-->>RT: { applied: true }
-  Note over P: Provider 手动 resolve result() => { outcome: 'aborted' }
-
-  P-->>RT: result() => ProviderTerminalResult { outcome: 'aborted' }
-  Note over RT: facts 流自然结束或被 Provider 内部终止
+  loop 遍历 runIds 中仍处于 active 状态的每个 run
+    Note over P: 触发自身取消并结束对应 facts 流
+    Note over P: facts 流结束后 resolve result() => { outcome: 'aborted' }
+    P-->>RT: ProviderTerminalResult { outcome: 'aborted' }
+  end
 ```
 
 - 中断时 SDK 不会自动取消 facts 流或强制 resolve `result()`。
-- Provider 收到 `abortSession()` 后，必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
+- Provider 收到 `abortSession()` 后，必须遍历 `runIds`，终止其中仍处于 active 状态的每个 run，并在对应 facts 流结束后 resolve 各自的 `result()` 为 `{ outcome: 'aborted' }`。
 - `abortSession()` 返回 `{ applied: true }` 只表示中断请求已接收，不代表 `result()` 已 resolve；终态仍以 `result()` 为准。
 
 ### 5.10 `dispose()`
@@ -1154,7 +1185,11 @@ SDK 在生命周期和连接阶段抛出的稳定错误类型。
 
 ## 9. 最小接入示例
 
-### 9.1 最小 Provider 示例
+### 9.1 默认 `reject`：最小 Provider 示例
+
+不配置 `requestRunPolicy` 时，SDK 默认使用 `reject`。同一 `toolSessionId` 已有 active run 时，SDK 不会把新 chat 转发给 Provider，因此集成方不需要实现跨 run 输出队列。
+
+以下代码只展示 `runMessage()` 和 `abortSession()` 的核心接入。`hostAgent.startRun()` 代表集成方已有的宿主适配能力；其他 Provider 方法按实际宿主实现。
 
 ```ts
 import type {
@@ -1162,102 +1197,138 @@ import type {
   ProviderFact,
   ProviderRun,
   ProviderRunMessageInput,
-  ProviderRuntimeContext,
   ProviderTerminalResult,
-  ThirdPartyAgentProvider,
 } from '@wecode/bridge-runtime-sdk';
 
-export class DemoProvider implements ThirdPartyAgentProvider {
-  private outbound = null as ProviderRuntimeContext['outbound'] | null;
-  private activeRuns = new Map<string, (result: ProviderTerminalResult) => void>();
+interface HostRun {
+  facts: AsyncIterable<ProviderFact>;
+  result(): Promise<ProviderTerminalResult>;
+  abort(): void;
+}
 
-  async initialize(context: ProviderRuntimeContext): Promise<void> {
-    this.outbound = context.outbound;
-  }
+declare const hostAgent: {
+  startRun(input: ProviderRunMessageInput): Promise<HostRun>;
+};
 
-  async health() {
-    return { online: true };
-  }
-
-  async createSession() {
-    return { toolSessionId: 'ses_550e8400-e29b-41d4-a716-446655440000' };
-  }
-
-  async listSlashCommands() {
-    return { slashCommands: [] };
-  }
+class DemoProvider {
+  private readonly activeRuns = new Map<string, HostRun>();
 
   async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
-    const messageId = 'msg_6ba7b810-9dad-11d1-80b4-00c04fd430c8';
-    const partId = 'prt_f47ac10b-58cc-4372-a567-0e02b2c3d479';
+    const hostRun = await hostAgent.startRun(input);
+    this.activeRuns.set(input.runId, hostRun);
 
-    let resolveTerminal!: (result: ProviderTerminalResult) => void;
-    const terminalPromise = new Promise<ProviderTerminalResult>((resolve) => {
-      resolveTerminal = resolve;
+    return {
+      runId: input.runId,
+      facts: hostRun.facts,
+      result: async () => {
+        try {
+          return await hostRun.result();
+        } finally {
+          this.activeRuns.delete(input.runId);
+        }
+      },
+    };
+  }
+
+  async abortSession(input: ProviderAbortSessionInput) {
+    for (const runId of input.runIds) {
+      this.activeRuns.get(runId)?.abort();
+    }
+    return { applied: true } as const;
+  }
+}
+```
+
+- `HostRun.result()` 必须在 `HostRun.facts` 结束后才 resolve。
+- `HostRun.abort()` 必须结束对应 facts 流，并使 `result()` 最终返回 `{ outcome: 'aborted' }`。
+- Provider 仍须遍历 `input.runIds`；默认 `reject` 只限制新 chat，不改变 abort 契约。
+
+### 9.2 `forwardToProvider`：run 输出队列示例
+
+开启 `forwardToProvider` 后，同一 `toolSessionId` 可能同时存在多个 active run。SDK 集成方必须在 Provider 或宿主适配层实现 run 输出队列。下面的辅助类展示最小串行化边界：后一个 run 的 facts 必须等待前一个 run 的 facts 流结束。
+
+```ts
+class RunOutputQueue {
+  private readonly tails = new Map<string, Promise<void>>();
+
+  enqueue(toolSessionId: string, facts: AsyncIterable<ProviderFact>): AsyncIterable<ProviderFact> {
+    const previous = this.tails.get(toolSessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    this.activeRuns.set(input.runId, resolveTerminal);
+    const tail = previous.then(() => current);
+    this.tails.set(toolSessionId, tail);
     const self = this;
 
-    const facts: AsyncIterable<ProviderFact> = (async function* () {
+    return (async function* () {
+      await previous;
       try {
-        yield { type: 'message.start', messageId };
-        yield { type: 'text.done', messageId, partId, content: `echo: ${input.text}` };
-        yield { type: 'message.done', messageId };
-        // facts 流正常结束后，resolve 终态
-        resolveTerminal({ outcome: 'completed' });
-      } catch (error) {
-        // facts 流异常时，resolve failed
-        resolveTerminal({
-          outcome: 'failed',
-          error: {
-            code: 'internal_error',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        });
+        yield* facts;
       } finally {
-        self.activeRuns.delete(input.runId);
+        release();
+        if (self.tails.get(toolSessionId) === tail) {
+          self.tails.delete(toolSessionId);
+        }
+      }
+    })();
+  }
+}
+
+class ConcurrentDemoProvider {
+  private readonly outputQueue = new RunOutputQueue();
+  private readonly activeRuns = new Map<string, HostRun>();
+
+  async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
+    const hostRun = await hostAgent.startRun(input);
+    this.activeRuns.set(input.runId, hostRun);
+    const queuedFacts = this.outputQueue.enqueue(input.toolSessionId, hostRun.facts);
+
+    let finishFacts!: () => void;
+    const factsFinished = new Promise<void>((resolve) => {
+      finishFacts = resolve;
+    });
+    const facts = (async function* () {
+      try {
+        yield* queuedFacts;
+      } finally {
+        finishFacts();
       }
     })();
 
     return {
       runId: input.runId,
       facts,
-      result: () => terminalPromise,
+      result: async () => {
+        try {
+          const terminal = await hostRun.result();
+          await factsFinished;
+          return terminal;
+        } finally {
+          this.activeRuns.delete(input.runId);
+        }
+      },
     };
   }
 
-  async replyQuestion() {
-    return { applied: true };
-  }
-
-  async replyPermission() {
-    return { applied: true };
-  }
-
-  async closeSession() {
-    return { applied: true };
-  }
-
   async abortSession(input: ProviderAbortSessionInput) {
-    const resolve = input.runId ? this.activeRuns.get(input.runId) : undefined;
-    if (resolve) {
-      // 中断时手动 resolve result() 为 aborted
-      resolve({ outcome: 'aborted' });
-      this.activeRuns.delete(input.runId!);
+    for (const runId of input.runIds) {
+      this.activeRuns.get(runId)?.abort();
     }
-    return { applied: true };
+    return { applied: true } as const;
   }
 }
 ```
 
-- `result()` 必须在 facts 流结束后才 resolve，不得提前 resolve。
-- facts 流异常时，Provider 必须手动 resolve `result()` 为 `{ outcome: 'failed', error: ... }`。
-- 中断时（`abortSession` 被调用），Provider 必须手动 resolve 活跃 run 的 `result()` 为 `{ outcome: 'aborted' }`。
-- SDK 不会自动取消 facts 流或强制 resolve `result()`；终态收口是 Provider 的职责。
+- 队列按 `toolSessionId` 隔离，不同会话可以并行输出。
+- 同一会话内，队列按 `runMessage()` 的进入顺序串行消费各 run 的 facts。
+- 对外 `result()` 必须同时等待底层终态和排队后的 facts 流结束。
+- `abortSession()` 必须遍历 `runIds`；等待输出的 run 被终止后，也必须正常释放其队列位置。
+- 示例只展示 FIFO 输出策略。集成方可以采用替换或合并策略，但必须保证不同 run 的输出边界不会交错。
 
-### 9.2 最小文本输出示例
+### 9.3 最小文本输出示例
 
-> 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的 deferred Promise 模式。
+> 以下示例聚焦文本流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的默认 `reject` 示例，或 9.2 的 `forwardToProvider` 示例。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
@@ -1288,9 +1359,9 @@ async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
 }
 ```
 
-### 9.3 挂起交互与回复示例
+### 9.4 挂起交互与回复示例
 
-> 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的 deferred Promise 模式。
+> 以下示例聚焦交互流展示，省略 `result()` 收口逻辑；实际实现应参考 9.1 的默认 `reject` 示例，或 9.2 的 `forwardToProvider` 示例。
 
 ```ts
 async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
@@ -1326,7 +1397,7 @@ async replyQuestion(input: ProviderQuestionReplyInput) {
 }
 ```
 
-### 9.4 常见错误用法
+### 9.5 常见错误用法
 
 - 用 `message.done` 代替 `result()` 收口。
 - 返回的 `ProviderRun.runId` 与输入 `runId` 不一致。
