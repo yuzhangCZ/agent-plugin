@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import {
@@ -473,10 +474,13 @@ test('sdk runtime stop disconnects sdk runtime and resets public status', async 
   });
 });
 
-test('sdk runtime register falls back to pluginVersion when sdkVersion is unavailable', async () => {
+test('sdk runtime register falls back to source sdk package version when sdkVersion is not injected', async () => {
   const originalSdkPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
   const originalPluginVersion = globalThis.__MB_PACKAGE_VERSION__;
   const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
+  const sdkPackageJson = JSON.parse(
+    await readFile(new URL('../../../../packages/bridge-runtime-sdk/package.json', import.meta.url), 'utf8'),
+  );
 
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
   delete globalThis.__MB_PACKAGE_VERSION__;
@@ -489,7 +493,7 @@ test('sdk runtime register falls back to pluginVersion when sdkVersion is unavai
     assert.equal(ws.sent[0].toolType, 'opencode');
     assert.equal(ws.sent[0].toolVersion, '9.9.9');
     assert.equal(ws.sent[0].pluginVersion, 'unknown');
-    assert.equal('sdkVersion' in ws.sent[0], false);
+    assert.equal(ws.sent[0].sdkVersion, sdkPackageJson.version);
 
     runtime.stop();
   } finally {

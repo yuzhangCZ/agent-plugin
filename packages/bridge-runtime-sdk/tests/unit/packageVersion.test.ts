@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 import { resolvePackageVersion } from '@/index.ts';
 
@@ -23,7 +26,9 @@ test('returns injected package version when available', () => {
   assert.equal(resolvePackageVersion(), '0.0.0-test');
 });
 
-test('returns undefined when package version is not injected', () => {
+test('falls back to source package version when package version is not injected', async () => {
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
-  assert.equal(resolvePackageVersion(), undefined);
+  const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const packageJson = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
+  assert.equal(resolvePackageVersion(), packageJson.version);
 });

@@ -9,6 +9,8 @@ const ROOT_DIR = process.cwd();
 const RELEASE_DIR = path.join(ROOT_DIR, 'release');
 const OUTFILE = path.join(RELEASE_DIR, 'message-bridge.plugin.js');
 const PACKAGE_JSON_PATH = path.join(ROOT_DIR, 'package.json');
+const SDK_PACKAGE_JSON_PATH = path.resolve(ROOT_DIR, '..', '..', 'packages', 'bridge-runtime-sdk', 'package.json');
+const SDK_PACKAGE_NAME = '@wecode/bridge-runtime-sdk';
 
 function resolveBuildMode(argv) {
   const modeArg = argv.find((arg) => arg.startsWith('--mode='));
@@ -33,10 +35,23 @@ async function resolvePackageVersion() {
   return version;
 }
 
+async function resolveSdkPackageVersion() {
+  const packageJson = JSON.parse(await readFile(SDK_PACKAGE_JSON_PATH, 'utf8'));
+  if (packageJson.name !== SDK_PACKAGE_NAME) {
+    throw new Error(`unexpected SDK package name in ${SDK_PACKAGE_JSON_PATH}: ${packageJson.name}`);
+  }
+  const version = typeof packageJson.version === 'string' ? packageJson.version.trim() : '';
+  if (!version) {
+    throw new Error(`package.json version is missing: ${SDK_PACKAGE_JSON_PATH}`);
+  }
+  return version;
+}
+
 async function main() {
   const mode = resolveBuildMode(process.argv.slice(2));
   const injectedDefaultGatewayUrl = resolveInjectedDefaultGatewayUrl(process.env.MB_DEFAULT_GATEWAY_URL);
   const pluginVersion = await resolvePackageVersion();
+  const sdkPackageVersion = await resolveSdkPackageVersion();
   await rm(RELEASE_DIR, { recursive: true, force: true });
   await mkdir(RELEASE_DIR, { recursive: true });
 
@@ -53,9 +68,11 @@ async function main() {
       ? {
           'globalThis.__MB_DEFAULT_GATEWAY_URL__': JSON.stringify(injectedDefaultGatewayUrl),
           'globalThis.__MB_PACKAGE_VERSION__': JSON.stringify(pluginVersion),
+          'globalThis.__MB_SDK_PACKAGE_VERSION__': JSON.stringify(sdkPackageVersion),
         }
       : {
           'globalThis.__MB_PACKAGE_VERSION__': JSON.stringify(pluginVersion),
+          'globalThis.__MB_SDK_PACKAGE_VERSION__': JSON.stringify(sdkPackageVersion),
         },
   });
 
