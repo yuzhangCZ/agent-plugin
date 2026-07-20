@@ -44,31 +44,49 @@ interface StreamDefaultsInjectionPlan {
   blockStreamingCoalesce: boolean;
 }
 
+interface OptionalRecordReadResult {
+  record: Record<string, unknown>;
+  malformedConfigPath?: string;
+}
+
 // OpenClaw 配置来自用户文件，边界上只接受对象；异常形态记录路径后按空对象继续 fail-closed 注入默认值。
-function readOptionalRecord(value: unknown, path: string, malformedConfigPaths: string[]): Record<string, unknown> {
+function readOptionalRecord(value: unknown, path: string): OptionalRecordReadResult {
   const record = asRecord(value);
   if (value !== undefined && !record) {
-    malformedConfigPaths.push(path);
+    return {
+      record: {},
+      malformedConfigPath: path,
+    };
   }
-  return record ?? {};
+  return { record: record ?? {} };
+}
+
+function collectMalformedConfigPaths(...results: OptionalRecordReadResult[]): string[] {
+  return results
+    .map((result) => result.malformedConfigPath)
+    .filter((path): path is string => path !== undefined);
 }
 
 // 将散落在 agents/channels 下的 reply 相关配置收敛成稳定 shape，后续逻辑不再重复做对象收窄。
 function readReplyConfigShape(config: OpenClawConfig): ReplyConfigShape {
-  const malformedConfigPaths: string[] = [];
   const root: Record<string, unknown> = asRecord(config) ?? {};
-  const agents = readOptionalRecord(root.agents, "agents", malformedConfigPaths);
-  const defaults = readOptionalRecord(agents.defaults, "agents.defaults", malformedConfigPaths);
-  const channels = readOptionalRecord(root.channels, "channels", malformedConfigPaths);
-  const messageBridge = readOptionalRecord(channels["message-bridge"], "channels.message-bridge", malformedConfigPaths);
+  const agentsResult = readOptionalRecord(root.agents, "agents");
+  const defaultsResult = readOptionalRecord(agentsResult.record.defaults, "agents.defaults");
+  const channelsResult = readOptionalRecord(root.channels, "channels");
+  const messageBridgeResult = readOptionalRecord(channelsResult.record["message-bridge"], "channels.message-bridge");
 
   return {
     root,
-    agents,
-    defaults,
-    channels,
-    messageBridge,
-    malformedConfigPaths,
+    agents: agentsResult.record,
+    defaults: defaultsResult.record,
+    channels: channelsResult.record,
+    messageBridge: messageBridgeResult.record,
+    malformedConfigPaths: collectMalformedConfigPaths(
+      agentsResult,
+      defaultsResult,
+      channelsResult,
+      messageBridgeResult,
+    ),
   };
 }
 
@@ -118,7 +136,7 @@ function hasStreamDefaultsInjection(plan: StreamDefaultsInjectionPlan): boolean 
 
 // 只补缺失字段，不覆盖用户已显式配置的 block streaming profile。
 function injectStreamDefaults(shape: ReplyConfigShape, plan: StreamDefaultsInjectionPlan): OpenClawConfig {
-  return {
+  const effectiveConfig: OpenClawConfig = {
     ...shape.root,
     agents: {
       ...shape.agents,
@@ -136,7 +154,8 @@ function injectStreamDefaults(shape: ReplyConfigShape, plan: StreamDefaultsInjec
         ...shape.messageBridge,
       },
     },
-  } as OpenClawConfig;
+  };
+  return effectiveConfig;
 }
 
 /**
