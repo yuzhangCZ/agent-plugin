@@ -63,7 +63,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
     observation,
     traceIdFactory: options.traceIdFactory ?? randomUUID,
     commandFailureToolErrorProjector: applicationSide.commandFailureToolErrorProjector,
-    sink: gatewaySide.sink,
+    toolErrorReporter: applicationSide.toolErrorReporter,
   });
 
   return {

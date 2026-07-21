@@ -1,6 +1,6 @@
 # `bridge-runtime-sdk Provider API tool_error 异常感知缺口评审方案`
 
-- 方案日期：`2026-07-13`
+- 方案日期：`2026-07-21`
 - 目标工程：`agent-plugin / packages/bridge-runtime-sdk`
 - 参考文档：`docs/design/interfaces/bridge-runtime-sdk-integration.md`、`docs/design/interfaces/third-party-agent-provider-v1.md`、`packages/bridge-runtime-sdk/src/application/runtime-assembly/downstream.ts`、`packages/bridge-runtime-sdk/src/adapters/gateway/GatewayInboundPolicy.ts`、`packages/bridge-runtime-sdk/src/application/projectors/*`、`packages/bridge-runtime-sdk/src/application/coordinators/*`、`packages/bridge-runtime-sdk/src/application/usecases/*`
 - 方案类型：`SDK/API 异常处理评审方案`
@@ -44,7 +44,7 @@ flowchart TD
     G --> Z["前端收到失败<br/>或明确降级"]
     H --> Z
 
-    C -. 查询 / lifecycle .-> I["旁路能力<br/>slash 空列表降级<br/>health 失败态待确认<br/>init/dispose 走 diagnostics"]
+    C -. 查询 / lifecycle .-> I["旁路能力<br/>slash 空列表降级<br/>health 失败态待确认<br/>start/connect/dispose 走 diagnostics"]
     I -.-> Z
 
     classDef existing fill:#eef2ff,stroke:#4c6ef5,color:#1f1f1f;
@@ -236,7 +236,7 @@ type ToolErrorReportInput = {
 };
 ```
 
-建议最小实现范围如下：
+本次最小实现范围如下：
 
 1. 新增 `packages/bridge-runtime-sdk/src/application/reporters/ToolErrorReporter.ts`
    - 输入 `ToolErrorReportInput`，输出并发送合法 `ToolErrorMessage`。
@@ -250,7 +250,7 @@ type ToolErrorReportInput = {
    - `enriched.ok === false` 时记录 observation 后抛出 `RuntimeContractError('fact_sequence_invalid', ...)` 或引入更精确的 runtime code。
    - 复用现有 `RequestRunFailureToolErrorProjector` 发送 `request_run_failed`。
 4. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
-   - outbound run 的 enrich failure 抛出后由既有 `emitOutboundRunFailed()` 包装 failed terminal。
+   - outbound run 的 enrich failure 抛出后由 `emitOutboundRunFailed()` 进入失败终态，并通过 `ToolErrorReporter` 发送 catalog 文案。
    - 已废弃 `emitOutboundMessage()` 不强行补 terminal 语义，保持 Promise reject / diagnostics。
 5. 补充 focused tests
    - `command-failure-tool-error-projector.test.ts` 覆盖 unsupported action 与 welink-only create_session。
@@ -272,6 +272,7 @@ type ToolErrorReportInput = {
 |---|---|---|---|---|---|---|
 | 入站协议校验 | 前端或 gateway 发来一条用户操作请求，但请求内容缺字段或格式不对，例如点击发送后下行消息缺少会话标识；常见兼容场景是 SDK 新版本新增或调整会话标识字段，而接入方仍使用旧版本 SDK，导致下行请求无法通过新协议校验 | gateway-client 判定 invalid `invoke`，且 frame 有 `toolSessionId` 或 `welinkSessionId` | `GatewayInboundPolicy.handle()` | `tool_error.error = gateway_invalid_invoke:${code}`，携带可用 session 标识 | P0 | 已有上报，保留 |
 | Provider API apply | 用户发送一条消息，SDK 已准备调用第三方 Agent，但 Agent 入口启动失败，例如底层服务不可用、认证失效、参数被 Provider 拒绝 | `runMessage()` 返回 `ProviderRun` 前抛错 | `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | 携带 `toolSessionId`，error 当前可能直出异常 message | P0 | 已有上报；后续优化文案 |
+| Provider API apply | 第三方 Agent 返回了不符合 SDK 契约的执行句柄或创建结果，例如 `runMessage()` 没有返回可消费的 `facts/result()`，或 `createSession()` 没有返回有效会话标识 | Provider 返回非法 `ProviderRun` / `ProviderCreateSessionResult`，后续读取 `facts`、`result()` 或 `toolSessionId` 时异常 | use case / coordinator 抛错后进入 command failure catch | 当前通常走 command failure `tool_error`，但文案可能是技术异常 | P0 | 已有兜底；建议在 Provider 结果边界补显式校验和 catalog 文案 |
 | Provider API apply | 用户在前端回答问题或审批权限，但这条待回复卡片已过期、已被消费或本地状态丢失 | `replyQuestion()` / `replyPermission()` 找不到 pending interaction | `InteractionCoordinator` 抛 `RuntimeContractError` 后进入 command failure projector | `pending_interaction_not_found` catalog 文案 | P0 | 已有上报，保留 |
 | Runtime 前置约束 | 用户连续快速发送消息，或前端重复提交同一会话消息；上一轮还没结束，新一轮又进入同一 `toolSessionId` | 同一 `toolSessionId` 重复 `chat` | `StartRequestRunUseCase` 抛 `run_already_active` 后进入 command failure projector | `run_already_active` catalog 文案 | P0 | 已有上报，保留 |
 | request run facts | Agent 已开始回复，但事件顺序异常，例如还没创建消息就开始输出文本，前端无法正确拼出一条回答 | facts 生命周期非法，例如未 `message.start` 就 `text.delta` | `RequestRunCoordinator` + `RequestRunFailureToolErrorProjector` | `request_run_failed` | P0 | 已有上报，保留 |
@@ -285,6 +286,7 @@ type ToolErrorReportInput = {
 |---|---|---|
 | 入站协议校验失败 | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"gateway_invalid_invoke:missing_required_field"}` | `toolSessionId` / `welinkSessionId` 按 invalid frame 中可取得的路由字段携带；`error` 当前包含 gateway 校验错误码 |
 | `runMessage()` 返回前失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"Provider service unavailable"}` | 当前已有路径主要携带 `toolSessionId`；`error` 可能直出 Provider 异常信息，后续建议 catalog 化 |
+| Provider 返回非法结果 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前操作失败，请稍后重试"}` | 建议后续不要直出 `Cannot read properties...` 这类技术异常；原始错误保留在 diagnostics |
 | 回复 question / permission 失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前交互已失效，请刷新后重试"}` | 用于前端提示用户原卡片已失效，需要重新触发或刷新 |
 | 同会话重复发送 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前会话正在处理中，请稍后再试"}` | 用于前端提示上一轮还在处理中，避免用户继续等待无结果 |
 | request facts 生命周期失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"当前请求处理失败，请重试"}` | 当前统一为 `request_run_failed` 文案，不暴露内部 fact 顺序细节 |
@@ -318,6 +320,8 @@ type ToolErrorReportInput = {
 | slash command 查询 | 用户打开输入框或输入 `/`，前端查询可用快捷命令；查询失败时可以展示空列表，不影响继续手动输入消息 | `listSlashCommands()` 抛错 | 捕获后返回 `slash_commands_result([])` | P2 | 不新增 `tool_error`；空列表是明确降级响应 |
 | status 查询 | 前端或运维面板查询 Agent 是否在线；这不是某个用户消息执行失败，而是健康状态读取失败 | `health()` 抛错 | `QueryStatusUseCase` 抛错，外层不会生成 `tool_error` | P2/P3 | 不使用 `tool_error`；待确认是否需要 `status_response` 失败态 |
 | runtime 启动 | 插件启动或 SDK runtime 初始化时，Provider 初始化失败，例如配置错误、认证失败、依赖服务不可用 | `initialize(context)` 抛错 | `runtime.start()` reject，status/diagnostics 记录失败 | P3 | 不使用 `tool_error` |
+| runtime 连接 | 用户或宿主调用 `runtime.start()` 后，SDK 无法连上 gateway，例如鉴权失败、握手超时、gateway 地址错误 | `GatewayRuntimeDriver.connect()` 抛错，被 `RuntimeLifecycleService.connectGatewayOrFail()` 包装为 `BridgeRuntimeError` | `runtime.start()` reject，`getStatus()` 进入 `failed`，`getDiagnostics().failures` 记录 `startup_failure`，日志 `runtime_sdk.start.failed` 为 error | P3 | 不使用 `tool_error`；宿主/前端应通过 start reject、status、diagnostics 展示连接失败 |
+| runtime 运行中断线 | runtime 已启动，gateway 后续进入非重试关闭或运行期失败，例如鉴权被撤销、连接被服务端拒绝 | gateway status 进入 failure closed，被 `RuntimeLifecycleService.handleGatewayStatusChanged()` 标记 failed | `getStatus()` 进入 `failed`，diagnostics/log 记录 gateway runtime failure；已生成但未发送的上行消息无法再补 `tool_error` | P1/P3 | 不递归发送 `tool_error`；前端应监听 runtime/gateway 状态并提示连接不可用 |
 | runtime 停止 | 插件关闭、重启或账号切换时，Provider 释放资源失败 | `dispose()` 抛错 | `runtime.stop()` reject 或 lifecycle failure | P3 | 不使用 `tool_error` |
 | 已废弃 outbound message | 老 Provider 仍使用旧的主动消息接口发送单批 facts；这条接口没有 run 终态概念 | `emitOutboundMessage()` facts 失败 | Promise reject 给 Provider，缺少 run terminal 语义 | P2 | 不新增前端协议行为；新接入迁移到 `emitOutboundRun()` |
 | 上行发送口 | SDK 已经生成上行消息，但 gateway 连接断开、未 READY、或消息不符合 schema，前端可能收不到任何回包 | `GatewayOutboundSinkAdapter.send()` 校验失败或 driver 不可用 | 记录 outbound validation failure；不能保证再发 `tool_error` | P1 | 不递归发送；依赖 diagnostics / reconnect / gateway 状态 |
@@ -345,7 +349,7 @@ type ToolErrorReportInput = {
 | 正常成功路径 | 否 | `tool_event`、`tool_done`、`session_created`、`slash_commands_result` 成功路径不变 | 正常聊天、新建会话、slash 命令列表不应回归 |
 | 异常路径发送出口 | 是 | 原来多个位置直接构造/发送 `tool_error`，改为调用 `ToolErrorReporter.report(input)` | `GatewayInboundPolicy`、`downstream.ts`、`RequestRunCoordinator`、`OutboundCoordinator`、terminal projector 装配 |
 | 路由字段补齐 | 是 | `createSession()` 失败等场景会开始携带 `welinkSessionId`；request lifecycle 可在可取得时补带 `welinkSessionId` | 前端错误归属、会话创建失败展示、测试断言 |
-| observation / 埋码口径 | 是 | 统一 reporter 后，`tool_error` 上报可统一记录 `stage`、`level`、`messageKey`、路由字段是否存在 | 日志、diagnostics、监控看板、问题排查 |
+| observation / 埋码口径 | 是 | `ToolErrorReportInput` 保留 `stage`、`level`、`messageKey` 作为统一上报边界；当前 diagnostics 仍通过既有 `failureRecorded` 记录原始异常，后续可继续接入监控看板 | 日志、diagnostics、监控看板、问题排查 |
 | 重复上报控制 | 是 | 统一 reporter 需要明确同一 run 只能有一个 terminal `tool_error`，避免 command failure 与 lifecycle failure 重复发送 | request run、outbound run、terminal projector |
 | 错误文案来源 | 部分改变 | 新增/规范化场景会从原始异常 message 转向 catalog 文案，但 diagnostics 保留原始错误 | 前端显示文案、自动化测试 snapshot、客服排障话术 |
 
@@ -356,7 +360,8 @@ type ToolErrorReportInput = {
 3. 权限/问题交互：权限卡片过期、重复回复、上下文丢失时，前端是否展示失败而不是继续等待。
 4. 主动 outbound：后台任务或 Agent 主动消息失败时，前端是否能定位到会话并展示失败状态。
 5. 灰度兼容：gateway 或前端先发新 action、接入方仍用旧 SDK、会话标识字段不匹配时，用户是否看到明确升级/不支持提示。
-6. 监控排障：统一 reporter 后日志字段是否足够定位 `stage`、`level`、`toolSessionId`、`welinkSessionId` 和原始错误摘要。
+6. 启动/连接状态：`runtime.start()` Provider 初始化失败、gateway 连接失败、运行中 gateway 非重试关闭时，宿主是否能通过 status/diagnostics/error 日志展示连接不可用。
+7. 监控排障：统一 reporter 后日志字段是否足够定位 `stage`、`level`、`toolSessionId`、`welinkSessionId` 和原始错误摘要。
 
 #### 4.5.4 文档需要同步修改的内容
 
@@ -390,8 +395,10 @@ type ToolErrorReportInput = {
 2. `packages/bridge-runtime-sdk/src/application/projectors/CommandFailureToolErrorProjector.ts`
 3. `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
 4. `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
-5. `packages/bridge-runtime-sdk/tests/command-failure-tool-error-projector.test.ts`
-6. `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts`
+5. `packages/bridge-runtime-sdk/src/adapters/gateway/GatewayInboundPolicy.ts`
+6. `packages/bridge-runtime-sdk/src/application/runtime-assembly/*`
+7. `packages/bridge-runtime-sdk/tests/command-failure-tool-error-projector.test.ts`
+8. `packages/bridge-runtime-sdk/tests/runtime-sdk.test.ts`
 
 ### 8.2 间接影响
 
@@ -416,6 +423,7 @@ type ToolErrorReportInput = {
 | unsupported `invoke` action | runtime-sdk fake gateway driver 注入 unknown action | 需要构造 downstream message | 否 | 否 |
 | `createSession()` throw | mock Provider `createSession` 抛错 | 需要 mock Provider | 否 | 否 |
 | `runMessage()` 返回前 throw | mock Provider `runMessage` 抛错 | 需要 mock Provider | 否 | 否 |
+| Provider 返回非法 `ProviderRun` / create result | mock Provider 返回缺 `facts/result()` 的 run，或 `createSession()` 返回缺 `toolSessionId` 的结果 | 需要 mock Provider | 否 | 否 |
 | `ProviderRun.result()` failed | mock ProviderRun.result 返回 failed | 需要 mock ProviderRun | 否 | 否 |
 | `ProviderRun.result()` reject | mock ProviderRun.result reject | 需要 mock ProviderRun | 否 | 否 |
 | facts 生命周期非法 | mock facts async iterable 输出非法顺序 | 需要 mock facts | 否 | 否 |
@@ -424,6 +432,9 @@ type ToolErrorReportInput = {
 | `emitOutboundRun()` enrich failure | outbound facts 输出缺上下文 `permission.reply` | 需要 mock outbound facts | 否 | 否 |
 | slash command 查询失败 | mock `listSlashCommands()` throw | 需要 mock Provider | 否 | 否 |
 | health 查询失败 | mock `health()` throw | 需要 mock Provider | 否；如验证前端状态页可用 gateway | 否 |
+| runtime.start Provider 初始化失败 | mock `initialize()` throw | 需要 mock Provider | 否 | 否 |
+| runtime.start gateway 连接失败 | fake gateway driver / FakeGatewayClient `connect()` throw | 需要 fake driver | 可选；端到端时需要 | 否 |
+| runtime 运行中 gateway 非重试关闭 | fake gateway driver 发出 failure closed 状态 | 需要 fake driver | 可选；端到端时需要 | 否 |
 | gateway 断连 / sink 不可用 | fake driver 模拟 closed 或 send 失败 | 需要 fake driver | 可选；端到端时需要 | 可选 |
 | 真实第三方 agent 接入异常 | 端到端联调 | 使用测试账号和测试 gateway 数据 | 是 | 是，适合最终验收兜底 |
 

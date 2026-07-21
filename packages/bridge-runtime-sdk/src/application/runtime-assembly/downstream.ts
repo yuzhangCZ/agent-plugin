@@ -6,9 +6,9 @@ import { RUNTIME_FAILURE_KIND } from '../constants/runtime.ts';
 import type { RuntimeLifecycleService } from '../lifecycle/RuntimeLifecycleService.ts';
 import type { GatewayRuntimeDriver } from '../ports/gateway-runtime-driver.ts';
 import type { CommandFailureToolErrorProjector } from '../projectors/CommandFailureToolErrorProjector.ts';
+import type { ToolErrorReporter } from '../reporters/index.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
 import type { RuntimeCoreService } from '../runtime/RuntimeCoreService.ts';
-import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
 
 export function attachRuntimeDriverHandlers(input: {
   driver: GatewayRuntimeDriver;
@@ -17,7 +17,7 @@ export function attachRuntimeDriverHandlers(input: {
   observation: DefaultRuntimeObservation;
   traceIdFactory: () => string;
   commandFailureToolErrorProjector: CommandFailureToolErrorProjector;
-  sink: GatewayOutboundSinkAdapter;
+  toolErrorReporter: ToolErrorReporter;
 }): void {
   input.driver.attach({
     onGatewayStatusChanged: (status) => {
@@ -48,8 +48,14 @@ export function attachRuntimeDriverHandlers(input: {
           );
           const toolError = input.commandFailureToolErrorProjector.project({ summary, error });
           if (toolError) {
-            input.observation.uplinkEmitted(toolError);
-            input.sink.send(toolError);
+            input.toolErrorReporter.report({
+              stage: 'command_failure',
+              level: isUnsupportedDownstreamAction(error) ? 'P0' : 'P1',
+              welinkSessionId: toolError.welinkSessionId,
+              toolSessionId: toolError.toolSessionId,
+              error: toolError.error,
+              reason: toolError.reason,
+            });
           }
         }
       })();

@@ -3096,7 +3096,7 @@ test('request-level command failures stay ready and record command_execution_fai
   assert.equal(runtime.getStatus().failureReason, null);
 });
 
-test('create_session command failure projects tool_error without echoing welinkSessionId', async () => {
+test('create_session command failure projects tool_error with welinkSessionId', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -3138,7 +3138,35 @@ test('create_session command failure projects tool_error without echoing welinkS
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
+    welinkSessionId: 'welink-create-1',
     error: 'create_session_failed',
+  });
+});
+
+test('unsupported invoke action projects routable tool_error', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(createRuntimeOptions(createProvider(), connection));
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'rename_session',
+    welinkSessionId: 'welink-unsupported-1',
+    payload: { toolSessionId: 'tool-unsupported-1', title: 'New title' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-unsupported-1',
+    welinkSessionId: 'welink-unsupported-1',
+    error: '当前操作暂不支持，请升级 SDK 或稍后重试',
+  });
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'inbound_validation_failure',
+    phase: 'runtime',
+    message: 'Unsupported downstream action: rename_session',
+    code: undefined,
   });
 });
 
@@ -3473,6 +3501,76 @@ test('request run delays terminal tool_done by 100ms', async () => {
   assert.equal(runtime.getDiagnostics().uplinks.at(-1)?.type, 'tool_done');
 });
 
+test('request run enrich failure projects tool_error and suppresses terminal tool_done', async () => {
+  const connection = new FakeGatewayClient();
+  const runtime = await createBridgeRuntime(
+    createRuntimeOptions(
+      {
+        async health() {
+          return { online: true };
+        },
+        async createSession() {
+          return { toolSessionId: 'tool-1' };
+        },
+        async runMessage() {
+          return createFakeRun(
+            [
+              {
+                type: 'permission.reply',
+                permissionId: 'permission-missing-context',
+                response: 'once',
+              },
+            ],
+            { outcome: 'completed' },
+          );
+        },
+        async replyQuestion() {
+          return { applied: true };
+        },
+        async replyPermission() {
+          return { applied: true };
+        },
+        async closeSession() {
+          return { applied: true };
+        },
+        async abortSession() {
+          return { applied: true };
+        },
+      },
+      connection,
+    ),
+  );
+
+  await runtime.start();
+  connection.emitMessage({
+    type: 'invoke',
+    action: 'chat',
+    welinkSessionId: 'welink-enrich-1',
+    payload: { toolSessionId: 'tool-enrich-1', text: 'hi' },
+  });
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-enrich-1',
+    error: '当前请求处理失败，请重试',
+  });
+  assert.equal(connection.sent.some((message) => {
+    return typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-enrich-1';
+  }), false);
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'permission_reply_projection_missed',
+    code: 'fact_sequence_invalid',
+  });
+});
+
 test('request run sends terminal tool_error without compatibility delay', async () => {
   const connection = new FakeGatewayClient();
   const delayCalls: number[] = [];
@@ -3771,6 +3869,54 @@ test('emitOutboundRun emits tool_error when facts fail validation', async () => 
   assert.deepEqual(runtime.getDiagnostics().terminals.at(-1), {
     toolSessionId: 'tool-outbound-run-invalid',
     outcome: 'failed',
+  });
+});
+
+test('emitOutboundRun enrich failure emits terminal tool_error', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  let outbound: ProviderRuntimeContext['outbound'];
+  provider.initialize = async (context) => {
+    outbound = context.outbound;
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await assert.rejects(
+    () => outbound.emitOutboundRun({
+      toolSessionId: 'tool-outbound-run-enrich',
+      runId: 'outbound-run-enrich',
+      trigger: 'system',
+      facts: createAsyncFacts([
+        {
+          type: 'permission.reply',
+          permissionId: 'permission-missing-context',
+          response: 'once',
+        },
+      ]),
+    }),
+    (error) => error instanceof Error && 'code' in error && error.code === 'fact_sequence_invalid',
+  );
+  await flushEvents();
+
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'tool_error',
+    toolSessionId: 'tool-outbound-run-enrich',
+    error: '主动消息处理失败，请重试',
+  });
+  assert.equal(connection.sent.some((message) => {
+    return typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_done'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-outbound-run-enrich';
+  }), false);
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'permission_reply_projection_missed',
+    code: 'fact_sequence_invalid',
   });
 });
 

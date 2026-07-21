@@ -65,8 +65,14 @@ export class RequestRunCoordinator {
           toolSessionId: input.toolSessionId,
           welinkSessionId: input.welinkSessionId,
         });
-        this.pipeline.observation.uplinkEmitted(uplink);
-        await this.pipeline.sink.send(uplink);
+        this.pipeline.toolErrorReporter.report({
+          stage: 'request_lifecycle',
+          level: 'P1',
+          welinkSessionId: uplink.welinkSessionId,
+          toolSessionId: uplink.toolSessionId,
+          error: uplink.error,
+          reason: uplink.reason,
+        });
       }
       throw factsResult.reason;
     }
@@ -102,13 +108,16 @@ export class RequestRunCoordinator {
       this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
       const enriched = this.factEnricher.enrich(toolSessionId, fact);
       if (!enriched.ok) {
+        const error = new RuntimeContractError('fact_sequence_invalid', enriched.reason, {
+          reason: enriched.reason,
+        });
         this.pipeline.observation.failureRecorded(
           RUNTIME_FAILURE_KIND.outboundValidation,
           RUNTIME_FAILURE_PHASE.runtime,
           enriched.reason,
-          enriched.reason,
+          error.code,
         );
-        continue;
+        throw error;
       }
       const classification = classifyFact(fact.type);
       this.validator.consume(toolSessionId, fact, state, profile);

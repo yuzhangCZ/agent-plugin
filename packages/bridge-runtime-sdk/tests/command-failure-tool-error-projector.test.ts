@@ -61,7 +61,7 @@ test('command failure projector ignores lifecycle runtime contract failures', ()
   assert.equal(message, null);
 });
 
-test('command failure projector ignores unsupported actions', () => {
+test('command failure projector maps unsupported actions when route fields exist', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -74,5 +74,29 @@ test('command failure projector ignores unsupported actions', () => {
     error: new Error('Unsupported downstream action: unsupported_action'),
   });
 
-  assert.equal(message, null);
+  assert.deepEqual(message, {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: '当前操作暂不支持，请升级 SDK 或稍后重试',
+  });
+});
+
+test('command failure projector keeps welinkSessionId for create_session failures without toolSessionId', () => {
+  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
+
+  const message = projector.project({
+    summary: {
+      messageType: 'invoke',
+      action: 'create_session',
+      welinkSessionId: 'welink-create-1',
+    },
+    error: new Error('create_session_failed'),
+  });
+
+  assert.deepEqual(message, {
+    type: 'tool_error',
+    welinkSessionId: 'welink-create-1',
+    error: 'create_session_failed',
+  });
 });
