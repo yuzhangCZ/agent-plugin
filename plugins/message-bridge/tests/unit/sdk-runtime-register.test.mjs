@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readFile } from 'node:fs/promises';
 
 import { SdkBridgeRuntime } from '../../src/runtime/SdkBridgeRuntime.ts';
 import {
