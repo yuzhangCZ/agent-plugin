@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -10,6 +11,8 @@ import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
+
+const require = createRequire(import.meta.url);
 
 function createSdkRuntimeClient(overrides = {}) {
   const base = {
@@ -477,9 +480,7 @@ test('sdk runtime register falls back to source sdk package version when sdkVers
   const originalSdkPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
   const originalPluginVersion = globalThis.__MB_PACKAGE_VERSION__;
   const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
-  const sdkPackageJson = JSON.parse(
-    await readFile(new URL('../../../../packages/bridge-runtime-sdk/package.json', import.meta.url), 'utf8'),
-  );
+  const sdkPackageJson = JSON.parse(await readFile(require.resolve('@wecode/bridge-runtime-sdk/package.json'), 'utf8'));
 
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
   delete globalThis.__MB_PACKAGE_VERSION__;
