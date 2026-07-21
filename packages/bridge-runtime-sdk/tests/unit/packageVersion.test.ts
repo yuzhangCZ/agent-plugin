@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 
 import { resolvePackageVersion } from '@/index.ts';
 
-const require = createRequire(import.meta.url);
 const ORIGINAL_PACKAGE_VERSION = globalThis.__MB_SDK_PACKAGE_VERSION__;
 
 function restoreInjectedPackageVersion() {
@@ -26,8 +23,7 @@ test('returns injected package version when available', () => {
   assert.equal(resolvePackageVersion(), '0.0.0-test');
 });
 
-test('falls back to source package version when package version is not injected', async () => {
+test('returns undefined when package version is not injected', () => {
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
-  const packageJson = JSON.parse(await readFile(require.resolve('@wecode/bridge-runtime-sdk/package.json'), 'utf8'));
-  assert.equal(resolvePackageVersion(), packageJson.version);
+  assert.equal(resolvePackageVersion(), undefined);
 });

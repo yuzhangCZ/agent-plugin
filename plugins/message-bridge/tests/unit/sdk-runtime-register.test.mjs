@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -11,8 +10,6 @@ import {
   getMessageBridgeStatus,
   publishMessageBridgeStatus,
 } from '../../src/runtime/MessageBridgeStatusStore.ts';
-
-const require = createRequire(import.meta.url);
 
 function createSdkRuntimeClient(overrides = {}) {
   const base = {
@@ -476,13 +473,12 @@ test('sdk runtime stop disconnects sdk runtime and resets public status', async 
   });
 });
 
-test('sdk runtime register falls back to source sdk package version when sdkVersion is not injected', async () => {
+test('sdk runtime register reports injected sdk package version', async () => {
   const originalSdkPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
   const originalPluginVersion = globalThis.__MB_PACKAGE_VERSION__;
   const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
-  const sdkPackageJson = JSON.parse(await readFile(require.resolve('@wecode/bridge-runtime-sdk/package.json'), 'utf8'));
 
-  delete globalThis.__MB_SDK_PACKAGE_VERSION__;
+  globalThis.__MB_SDK_PACKAGE_VERSION__ = '1.2.3-sdk-test';
   delete globalThis.__MB_PACKAGE_VERSION__;
 
   try {
@@ -493,7 +489,7 @@ test('sdk runtime register falls back to source sdk package version when sdkVers
     assert.equal(ws.sent[0].toolType, 'opencode');
     assert.equal(ws.sent[0].toolVersion, '9.9.9');
     assert.equal(ws.sent[0].pluginVersion, 'unknown');
-    assert.equal(ws.sent[0].sdkVersion, sdkPackageJson.version);
+    assert.equal(ws.sent[0].sdkVersion, '1.2.3-sdk-test');
 
     runtime.stop();
   } finally {

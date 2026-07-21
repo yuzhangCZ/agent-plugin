@@ -28,13 +28,13 @@ test('normalizeBridgeGatewayHostConfig auto injects sdkVersion while preserving 
   assert.equal(normalized.register.pluginVersion, '0.1.0');
 });
 
-test('normalizeBridgeGatewayHostConfig uses source package version when sdk package version is not injected', () => {
+test('normalizeBridgeGatewayHostConfig omits sdkVersion when sdk package version is not injected', () => {
   const originalPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
   delete globalThis.__MB_SDK_PACKAGE_VERSION__;
 
   try {
     const normalized = normalizeBridgeGatewayHostConfig(createGatewayConfig());
-    assert.equal(normalized.register.sdkVersion, resolvePackageVersion());
+    assert.equal('sdkVersion' in normalized.register, false);
     assert.equal(normalized.register.pluginVersion, '0.1.0');
   } finally {
     if (typeof originalPackageVersion === 'undefined') {

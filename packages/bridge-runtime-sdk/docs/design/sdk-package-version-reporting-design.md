@@ -22,9 +22,9 @@
 ### 1.2 需求目标
 
 1. 插件分发 bundle 中稳定注入并上报 `sdkVersion`。
-2. SDK 源码开发和测试环境在未注入全局常量时，可以从 SDK 源码 `package.json` 读取版本作为兜底。
-3. 插件分发产物不能依赖携带 `packages/bridge-runtime-sdk/package.json` 或源码目录。
-4. 兜底读取不能误把插件自身 `package.json` 当作 SDK 版本来源。
+2. SDK runtime 只读取构建注入的版本常量，不在运行时读取 `package.json`。
+3. 插件构建脚本在打包前读取 SDK `package.json`，并把版本注入插件 bundle。
+4. 插件分发产物不能依赖携带 `packages/bridge-runtime-sdk/package.json` 或源码目录。
 5. 保持 `pluginVersion`、`toolVersion` 和 `sdkVersion` 的语义边界清晰。
 
 ### 1.3 非目标
@@ -54,13 +54,13 @@ flowchart TD
     SDKDist --> Resolver
     Resolver --> Register["gateway register.sdkVersion"]
 
-    SourceRuntime["源码测试/开发运行"] --> SourceFallback["读取 ../package.json 并校验 name"]
-    SourceFallback --> Resolver
+    SourceRuntime["源码测试/开发运行"] --> Resolver
+    Resolver --> MissingVersion["未注入时返回 undefined"]
 ```
 
 ### 2.2 方案核心
 
-以构建期注入 `__MB_SDK_PACKAGE_VERSION__` 作为插件分发产物的唯一可靠版本来源；SDK 源码 `package.json` 读取只作为开发和测试环境兜底，并通过包名校验防止在插件 bundle 中误读插件自身版本。
+以构建期注入 `__MB_SDK_PACKAGE_VERSION__` 作为 SDK runtime 的唯一版本来源。插件因为通过 workspace 源码 bundle SDK，无法复用 SDK 自身构建产物的注入结果，因此由插件构建脚本读取 SDK `package.json` 并注入同名常量。
 
 ## 3. 时序图
 
@@ -82,20 +82,17 @@ sequenceDiagram
     SDK->>Gateway: register(sdkVersion, pluginVersion, toolVersion)
 ```
 
-### 3.2 `源码环境未注入时读取 SDK package.json`
+### 3.2 `源码环境未注入时降级`
 
 ```mermaid
 sequenceDiagram
     participant Test as 测试/源码运行
     participant SDK as bridge-runtime-sdk
-    participant Pkg as ../package.json
     participant GatewayClient as gateway-client
 
     Test->>SDK: resolvePackageVersion()
     SDK->>SDK: 未发现 __MB_SDK_PACKAGE_VERSION__
-    SDK->>Pkg: 读取源码相邻 package.json
-    SDK->>SDK: 校验 name 和 version
-    SDK-->>GatewayClient: 返回 sdkVersion 或 undefined
+    SDK-->>GatewayClient: 返回 undefined
 ```
 
 ## 4. 技术细节
@@ -104,10 +101,8 @@ sequenceDiagram
 
 1. `packages/bridge-runtime-sdk/src/packageVersion.ts`
    - 优先读取 `globalThis.__MB_SDK_PACKAGE_VERSION__`。
-   - 未注入时在 Node.js 环境下按需通过 `process.getBuiltinModule('node:fs')` 读取 SDK 源码相邻 `package.json`。
-   - 仅当 `package.json.name === '@wecode/bridge-runtime-sdk'` 且 `version` 为非空字符串时返回兜底版本。
-   - 读取失败、JSON 非法、包名不匹配或版本为空时返回 `undefined`。
-   - 源码兜底结果在进程内缓存，避免重复同步文件读取。
+   - 未注入时返回 `undefined`。
+   - 不导入 `node:fs`，不读取 SDK 源码 `package.json`。
 2. `plugins/message-bridge/scripts/build-plugin.mjs`
    - 构建插件 bundle 前通过 `createRequire(import.meta.url).resolve('@wecode/bridge-runtime-sdk/package.json')` 定位 SDK manifest。
    - 校验 SDK 包名并取得版本。
@@ -117,33 +112,33 @@ sequenceDiagram
    - SDK manifest 路径同样通过 Node.js 模块解析获取，避免依赖 `../../packages/` 这类跨包相对路径。
    - 只对运行主入口 `bundle/index.js` 注入 SDK 版本；setup entry 不参与 gateway runtime register，不需要注入。
 4. 测试更新
-   - SDK 单测覆盖注入优先和源码 package 兜底。
-   - SDK gateway host contract 测试覆盖未注入时仍能形成 `sdkVersion`。
-   - OpenCode runtime register 测试覆盖无全局注入时上报源码 SDK 版本。
+   - SDK 单测覆盖注入优先和未注入时返回 `undefined`。
+   - SDK gateway host contract 测试覆盖未注入时省略 `sdkVersion`。
+   - OpenCode runtime register 测试覆盖有构建注入时上报 SDK 版本。
    - OpenClaw bundle artifact 测试覆盖插件 bundle 中包含 SDK 注入版本。
 
 ### 4.2 核心实现方式
 
-SDK resolver 使用“注入优先、源码兜底”的顺序：
+SDK resolver 只读取构建注入常量：
 
 ```ts
 export function resolvePackageVersion(): string | undefined {
-  return readInjectedPackageVersion() ?? readSourcePackageVersion() ?? undefined;
+  return readInjectedPackageVersion() ?? undefined;
 }
 ```
 
 插件构建脚本不依赖 SDK 的 `build-package.mjs`。插件 bundle 是最终分发产物，因此最终 bundle 的构建脚本必须自己读取 SDK workspace manifest，并通过 esbuild `define` 把 SDK 版本内联到产物中。
 
-源码兜底读取必须是受校验的、静默失败并带缓存的逻辑。它只服务源码开发、测试和非 bundle 的本地运行，不构成插件分发产物的运行时依赖。非 Node.js 环境下不会在模块加载阶段静态导入 `node:fs`，而是在缺少 Node 内建模块访问能力时直接降级为 `undefined`。
+SDK runtime 不在运行时读取 `package.json`。这避免了源码目录、bundle 输出目录和发布包内容之间形成隐式依赖，也避免 SDK runtime 同时维护“构建注入”和“文件读取”两套版本来源。
 
 ### 4.3 兼容与边界
 
 1. 对 gateway 协议兼容：`register.sdkVersion` 已是可选字段；本方案只让插件更稳定地提供该字段。
 2. 对现有插件兼容：`pluginVersion` 继续按插件自身构建常量注入，gateway 仍能同时看到 `sdkVersion` 和 `pluginVersion`。
 3. 对宿主版本语义兼容：`toolVersion` 继续表示 OpenCode/OpenClaw 宿主版本，不复用插件或 SDK 包版本。
-4. 对分发产物边界兼容：插件 bundle 不读取 `packages/bridge-runtime-sdk/package.json`，也不要求发布包包含该目录。
-5. 对异常路径降级：读取 SDK package 失败时返回 `undefined`，不阻断 runtime 启动；register 至少仍可携带 `pluginVersion`。
-6. 对误读防护：如果 bundle 运行目录旁存在插件 `package.json`，因 `name` 不等于 `@wecode/bridge-runtime-sdk`，不会被当作 SDK 版本。
+4. 对分发产物边界兼容：插件 bundle 运行时不读取 `packages/bridge-runtime-sdk/package.json`，也不要求发布包包含该目录。
+5. 对异常路径降级：插件构建阶段无法解析或读取 SDK package 时直接构建失败，避免发布缺少 `sdkVersion` 的新产物。
+6. 对误读防护：插件构建脚本校验 SDK manifest 的 `name` 必须为 `@wecode/bridge-runtime-sdk`。
 
 ### 4.4 相关接口联动
 
@@ -161,7 +156,7 @@ export function resolvePackageVersion(): string | undefined {
 
 ### 4.5 文档需要同步修改的内容
 
-1. 新增本文档记录版本来源、构建注入和运行时兜底边界。
+1. 新增本文档记录版本来源、构建注入和运行时边界。
 2. 若后续新增第三个 workspace 插件并通过源码 bundle SDK，应在该插件构建脚本中复用同样的 SDK 版本注入策略。
 3. 若后续 SDK 发布形态从源码 workspace 引用改为消费 `dist` 包，应重新评估插件构建脚本是否仍需重复注入。
 
@@ -169,7 +164,7 @@ export function resolvePackageVersion(): string | undefined {
 
 分发 bundle 中 `__MB_SDK_PACKAGE_VERSION__` 已被 esbuild 内联，运行时不产生文件系统读取。
 
-源码开发或测试环境在未注入全局常量时，会同步读取一次 SDK 源码 `package.json`。该操作只发生在 `resolvePackageVersion()` 被调用时，当前主要位于 gateway runtime config normalize 阶段，不涉及高频循环、消息流处理或长连接心跳路径。
+源码开发或测试环境在未注入全局常量时不会读取文件，`resolvePackageVersion()` 直接返回 `undefined`。该路径不涉及高频循环、消息流处理或长连接心跳路径。
 
 ## 6. 功耗
 
@@ -213,7 +208,7 @@ export function resolvePackageVersion(): string | undefined {
 
 1. `packages/bridge-runtime-sdk/tests/unit/packageVersion.test.ts`
    - 验证注入常量优先。
-   - 验证未注入时读取 SDK 源码 package 版本。
+   - 验证未注入时返回 `undefined`。
 2. `packages/bridge-runtime-sdk/tests/contract/gateway-runtime-host.test.ts`
    - 验证 normalize 后 register 保留 `pluginVersion` 并补充 `sdkVersion`。
 3. `plugins/message-bridge/tests/unit/sdk-runtime-register.test.mjs`
@@ -235,6 +230,6 @@ export function resolvePackageVersion(): string | undefined {
 
 ## 10. 最终建议
 
-最终建议采用“插件构建期显式注入 + SDK 源码兜底读取”的组合方案。构建期注入是分发产物的可靠真源，能保证插件 bundle 不依赖仓库源码目录；源码兜底只改善本地开发和测试体验，并通过 SDK 包名校验避免误读插件 package 版本。
+最终建议采用“SDK runtime 只读构建注入 + 插件构建期显式读取并注入”的方案。构建期注入是 SDK 版本的唯一运行时真源，能保证插件 bundle 不依赖仓库源码目录，也避免 SDK runtime 在生产路径上读取文件。
 
 后续新增通过 workspace 源码 bundle `@wecode/bridge-runtime-sdk` 的插件时，应同步在该插件构建脚本中读取并注入 `globalThis.__MB_SDK_PACKAGE_VERSION__`。若 SDK 后续切换为插件消费已构建 `dist` 包，应重新评估是否可以移除插件侧重复注入逻辑。
