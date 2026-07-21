@@ -1,0 +1,193 @@
+import type {
+  ProviderAbortSessionInput,
+  ProviderCloseSessionInput,
+  ProviderCreateSessionInput,
+  ProviderCreateSessionResult,
+  ProviderFact,
+  ProviderHealthInput,
+  ProviderHealthResult,
+  ProviderListSlashCommandsInput,
+  ProviderListSlashCommandsResult,
+  ProviderPermissionReplyInput,
+  ProviderQuestionReplyInput,
+  ProviderRun,
+  ProviderRunMessageInput,
+  ProviderRuntimeContext,
+  ThirdPartyAgentProvider,
+} from '@wecode/bridge-runtime-sdk';
+import type { ProviderScenarioConfig, ProviderScenarioKind } from '@agent-plugin/bridge-runtime-sdk-lab-shared';
+
+import { EventStore } from './event-store.ts';
+
+const DEFAULT_SCENARIO: ProviderScenarioConfig = {
+  command: '*',
+  kind: 'success',
+};
+
+export class TestProvider implements ThirdPartyAgentProvider {
+  readonly #events: EventStore;
+  readonly #scenarios = new Map<string, ProviderScenarioConfig>();
+  #context: ProviderRuntimeContext | undefined;
+
+  constructor(events: EventStore) {
+    this.#events = events;
+  }
+
+  setScenario(config: ProviderScenarioConfig): void {
+    this.#scenarios.set(config.command, config);
+    this.#events.append('scenario.configured', `Provider scenario set for ${config.command}`, config as unknown as Record<string, unknown>);
+  }
+
+  async initialize(context: ProviderRuntimeContext): Promise<void> {
+    this.#context = context;
+    this.#events.append('provider.initialize', 'Provider runtime context initialized');
+    await this.#maybeDelay('initialize');
+    this.#throwIfNeeded('initialize');
+  }
+
+  async health(input: ProviderHealthInput): Promise<ProviderHealthResult> {
+    const scenario = await this.#beforeCall('health', input);
+    return {
+      online: scenario.kind !== 'offline',
+    };
+  }
+
+  async createSession(input: ProviderCreateSessionInput): Promise<ProviderCreateSessionResult> {
+    await this.#beforeCall('createSession', input);
+    return {
+      toolSessionId: `ses_${crypto.randomUUID()}`,
+      title: input.title ?? 'SDK Lab Session',
+    };
+  }
+
+  async listSlashCommands(input: ProviderListSlashCommandsInput): Promise<ProviderListSlashCommandsResult> {
+    await this.#beforeCall('listSlashCommands', input);
+    return {
+      slashCommands: [
+        { command: '/new', description: 'Create a new lab session' },
+        { command: '/debug', description: 'Return diagnostics focused facts' },
+      ],
+    };
+  }
+
+  async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
+    const scenario = await this.#beforeCall('runMessage', input);
+    const facts = scenario.kind === 'invalid_fact' ? invalidFactStream() : defaultFactStream();
+    return {
+      runId: input.runId,
+      facts,
+      async result() {
+        if (scenario.kind === 'failed_run') {
+          return {
+            outcome: 'failed',
+            error: {
+              code: 'internal_error',
+              message: 'SDK lab configured failed run',
+            },
+          };
+        }
+        if (scenario.kind === 'aborted_run') {
+          return { outcome: 'aborted' };
+        }
+        return { outcome: 'completed' };
+      },
+    };
+  }
+
+  async replyQuestion(input: ProviderQuestionReplyInput): Promise<AppliedResult> {
+    await this.#beforeCall('replyQuestion', input);
+    return { applied: true };
+  }
+
+  async replyPermission(input: ProviderPermissionReplyInput): Promise<AppliedResult> {
+    await this.#beforeCall('replyPermission', input);
+    return { applied: true };
+  }
+
+  async closeSession(input: ProviderCloseSessionInput): Promise<AppliedResult> {
+    await this.#beforeCall('closeSession', input);
+    return { applied: true };
+  }
+
+  async abortSession(input: ProviderAbortSessionInput): Promise<AppliedResult> {
+    await this.#beforeCall('abortSession', input);
+    return { applied: true };
+  }
+
+  async dispose(): Promise<void> {
+    await this.#beforeCall('dispose', {});
+    this.#context = undefined;
+  }
+
+  async emitOutboundRun(): Promise<AppliedResult> {
+    if (!this.#context) {
+      throw new Error('Provider runtime context is not initialized');
+    }
+    return this.#context.outbound.emitOutboundRun({
+      toolSessionId: `ses_${crypto.randomUUID()}`,
+      runId: `run_${crypto.randomUUID()}`,
+      trigger: 'sdk-lab',
+      facts: defaultFactStream(),
+    });
+  }
+
+  async #beforeCall(command: string, input: unknown): Promise<ProviderScenarioConfig> {
+    const scenario = this.#scenarioFor(command);
+    this.#events.append('provider.call', `Provider ${command} called`, { command, input, scenario });
+    await delay(scenario.delayMs ?? 0);
+    this.#throwIfNeeded(command, scenario.kind);
+    if (scenario.kind === 'timeout') {
+      await delay(30_000);
+    }
+    return scenario;
+  }
+
+  async #maybeDelay(command: string): Promise<void> {
+    const scenario = this.#scenarioFor(command);
+    await delay(scenario.delayMs ?? 0);
+  }
+
+  #throwIfNeeded(command: string, kind = this.#scenarioFor(command).kind): void {
+    if (kind === 'throw') {
+      throw new Error(`SDK lab configured ${command} failure`);
+    }
+  }
+
+  #scenarioFor(command: string): ProviderScenarioConfig {
+    return this.#scenarios.get(command) ?? this.#scenarios.get('*') ?? DEFAULT_SCENARIO;
+  }
+}
+
+type AppliedResult = {
+  applied: true;
+};
+
+async function* defaultFactStream(): AsyncIterable<ProviderFact> {
+  const messageId = `msg_${crypto.randomUUID()}`;
+  const textPartId = `prt_${crypto.randomUUID()}`;
+  const toolPartId = `prt_${crypto.randomUUID()}`;
+  yield { type: 'message.start', messageId };
+  yield { type: 'thinking.delta', messageId, partId: `prt_${crypto.randomUUID()}`, content: 'Planning response' };
+  yield { type: 'tool.update', messageId, partId: toolPartId, toolCallId: `tool_${crypto.randomUUID()}`, toolName: 'sdk_lab_probe', status: 'running', input: { source: 'sdk-lab' } };
+  yield { type: 'text.delta', messageId, partId: textPartId, content: 'SDK lab response chunk' };
+  yield { type: 'text.done', messageId, partId: textPartId, content: 'SDK lab response chunk' };
+  yield { type: 'message.done', messageId, reason: 'completed' };
+}
+
+async function* invalidFactStream(): AsyncIterable<ProviderFact> {
+  yield {
+    type: 'text.delta',
+    messageId: `msg_${crypto.randomUUID()}`,
+    partId: `prt_${crypto.randomUUID()}`,
+    content: 'missing message.start',
+  };
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
