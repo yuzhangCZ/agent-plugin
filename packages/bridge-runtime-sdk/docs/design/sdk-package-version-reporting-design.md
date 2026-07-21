@@ -104,15 +104,17 @@ sequenceDiagram
 
 1. `packages/bridge-runtime-sdk/src/packageVersion.ts`
    - 优先读取 `globalThis.__MB_SDK_PACKAGE_VERSION__`。
-   - 未注入时读取 `new URL('../package.json', import.meta.url)`。
+   - 未注入时在 Node.js 环境下按需通过 `process.getBuiltinModule('node:fs')` 读取 SDK 源码相邻 `package.json`。
    - 仅当 `package.json.name === '@wecode/bridge-runtime-sdk'` 且 `version` 为非空字符串时返回兜底版本。
    - 读取失败、JSON 非法、包名不匹配或版本为空时返回 `undefined`。
+   - 源码兜底结果在进程内缓存，避免重复同步文件读取。
 2. `plugins/message-bridge/scripts/build-plugin.mjs`
-   - 构建插件 bundle 前读取 `../../packages/bridge-runtime-sdk/package.json`。
+   - 构建插件 bundle 前通过 `createRequire(import.meta.url).resolve('@wecode/bridge-runtime-sdk/package.json')` 定位 SDK manifest。
    - 校验 SDK 包名并取得版本。
    - 在 esbuild `define` 中注入 `globalThis.__MB_SDK_PACKAGE_VERSION__`。
 3. `plugins/message-bridge-openclaw/scripts/build-bundle.mjs`
    - 与 OpenCode 插件一致，在 bundle 构建时显式注入 SDK 包版本。
+   - SDK manifest 路径同样通过 Node.js 模块解析获取，避免依赖 `../../packages/` 这类跨包相对路径。
    - 只对运行主入口 `bundle/index.js` 注入 SDK 版本；setup entry 不参与 gateway runtime register，不需要注入。
 4. 测试更新
    - SDK 单测覆盖注入优先和源码 package 兜底。
@@ -132,7 +134,7 @@ export function resolvePackageVersion(): string | undefined {
 
 插件构建脚本不依赖 SDK 的 `build-package.mjs`。插件 bundle 是最终分发产物，因此最终 bundle 的构建脚本必须自己读取 SDK workspace manifest，并通过 esbuild `define` 把 SDK 版本内联到产物中。
 
-源码兜底读取必须是受校验的、静默失败的逻辑。它只服务源码开发、测试和非 bundle 的本地运行，不构成插件分发产物的运行时依赖。
+源码兜底读取必须是受校验的、静默失败并带缓存的逻辑。它只服务源码开发、测试和非 bundle 的本地运行，不构成插件分发产物的运行时依赖。非 Node.js 环境下不会在模块加载阶段静态导入 `node:fs`，而是在缺少 Node 内建模块访问能力时直接降级为 `undefined`。
 
 ### 4.3 兼容与边界
 

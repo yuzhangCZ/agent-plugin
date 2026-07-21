@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import { rm, mkdir, access, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { build } from 'esbuild';
 
+const require = createRequire(import.meta.url);
 const ROOT_DIR = process.cwd();
 const RELEASE_DIR = path.join(ROOT_DIR, 'release');
 const OUTFILE = path.join(RELEASE_DIR, 'message-bridge.plugin.js');
 const PACKAGE_JSON_PATH = path.join(ROOT_DIR, 'package.json');
-const SDK_PACKAGE_JSON_PATH = path.resolve(ROOT_DIR, '..', '..', 'packages', 'bridge-runtime-sdk', 'package.json');
 const SDK_PACKAGE_NAME = '@wecode/bridge-runtime-sdk';
 
 function resolveBuildMode(argv) {
@@ -35,14 +36,30 @@ async function resolvePackageVersion() {
   return version;
 }
 
+function resolveSdkPackageJsonPath() {
+  try {
+    return require.resolve(`${SDK_PACKAGE_NAME}/package.json`);
+  } catch (error) {
+    throw new Error(`failed to resolve ${SDK_PACKAGE_NAME}/package.json; run pnpm install before building`, {
+      cause: error,
+    });
+  }
+}
+
 async function resolveSdkPackageVersion() {
-  const packageJson = JSON.parse(await readFile(SDK_PACKAGE_JSON_PATH, 'utf8'));
+  const sdkPackageJsonPath = resolveSdkPackageJsonPath();
+  let packageJson;
+  try {
+    packageJson = JSON.parse(await readFile(sdkPackageJsonPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`failed to read SDK package manifest: ${sdkPackageJsonPath}`, { cause: error });
+  }
   if (packageJson.name !== SDK_PACKAGE_NAME) {
-    throw new Error(`unexpected SDK package name in ${SDK_PACKAGE_JSON_PATH}: ${packageJson.name}`);
+    throw new Error(`unexpected SDK package name in ${sdkPackageJsonPath}: ${packageJson.name}`);
   }
   const version = typeof packageJson.version === 'string' ? packageJson.version.trim() : '';
   if (!version) {
-    throw new Error(`package.json version is missing: ${SDK_PACKAGE_JSON_PATH}`);
+    throw new Error(`package.json version is missing: ${sdkPackageJsonPath}`);
   }
   return version;
 }
