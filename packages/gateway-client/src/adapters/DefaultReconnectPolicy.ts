@@ -45,8 +45,9 @@ export class DefaultReconnectPolicy implements ReconnectPolicy {
     this.suspendedMs = 0;
   }
 
-  recordSuspendedDuration(durationMs: number): void {
+  recordSuspendedDuration(durationMs: number): number {
     this.suspendedMs += Math.max(0, durationMs);
+    return this.suspendedMs;
   }
 
   scheduleNextAttempt(): ReconnectDecision {

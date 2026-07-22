@@ -34,8 +34,8 @@ export type ReconnectDecision = ReconnectScheduledDecision | ReconnectExhaustedD
 export interface ReconnectPolicy {
   startWindow(): void;
   reset(): void;
-  /** 记录休眠/挂起导致的调度漂移，这段时间不计入主动重连窗口。 */
-  recordSuspendedDuration(durationMs: number): void;
+  /** 记录休眠/挂起导致的调度漂移，并返回当前窗口累计扣除时间。 */
+  recordSuspendedDuration(durationMs: number): number;
   scheduleNextAttempt(): ReconnectDecision;
   getExhaustedDecision(): ReconnectExhaustedDecision | null;
 }

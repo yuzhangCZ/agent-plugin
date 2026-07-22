@@ -226,7 +226,9 @@ function buildFakeDependencies(overrides: Partial<GatewayClientRuntimeDependenci
 class FakeReconnectPolicy {
   startWindow(): void {}
   reset(): void {}
-  recordSuspendedDuration(): void {}
+  recordSuspendedDuration(): number {
+    return 0;
+  }
   scheduleNextAttempt() {
     return {
       ok: true as const,
@@ -876,10 +878,10 @@ test('default reconnect preset excludes delayed timer drift from maxElapsedMs bu
     await flushAsyncHandlers();
 
     assert.equal(FakeWebSocket.instances.length, 2);
-    assert.equal(
-      logs.warn.some((entry) => entry.message === 'gateway.reconnect.sleep_drift_detected'),
-      true,
-    );
+    const driftLog = logs.warn.find((entry) => entry.message === 'gateway.reconnect.sleep_drift_detected');
+    assert.ok(driftLog);
+    assert.equal(driftLog.meta?.driftMs, 599_001);
+    assert.equal(driftLog.meta?.suspendedMs, 599_001);
     assert.equal(
       logs.warn.some((entry) => entry.message === 'gateway.reconnect.exhausted'),
       false,
@@ -2227,7 +2229,9 @@ test('reconnect attempt whitelist close clears reconnecting when next retry is e
       reconnectPolicy: {
         startWindow() {},
         reset() {},
-        recordSuspendedDuration() {},
+        recordSuspendedDuration() {
+          return 0;
+        },
         scheduleNextAttempt() {
           scheduleCount += 1;
           if (scheduleCount === 1) {

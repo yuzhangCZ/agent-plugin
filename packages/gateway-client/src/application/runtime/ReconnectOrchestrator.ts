@@ -72,11 +72,12 @@ export class ReconnectOrchestrator {
 
       const driftMs = this.now() - expectedFireAt;
       if (driftMs > SLEEP_DRIFT_THRESHOLD_MS) {
-        this.policy.recordSuspendedDuration(driftMs);
+        const suspendedMs = this.policy.recordSuspendedDuration(driftMs);
         this.context.logger?.warn?.('gateway.reconnect.sleep_drift_detected', {
           attempt: reconnectDecision.attempt,
           reconnectAttempts: reconnectDecision.attempt,
           driftMs,
+          suspendedMs,
           thresholdMs: SLEEP_DRIFT_THRESHOLD_MS,
         });
       }
