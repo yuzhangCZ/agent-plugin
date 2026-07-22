@@ -49,7 +49,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
   ]);
   const observation = new DefaultRuntimeObservation(observationPort);
   const gatewaySide = createGatewayRuntimeSide(options, internalOptions, observation);
-  const applicationSide = createApplicationRuntimeSide(options, internalOptions, observation, gatewaySide.sink);
+  const applicationSide = createApplicationRuntimeSide(options, observation, gatewaySide.sink);
   const probe = new RuntimeProbeService(gatewaySide.probeDriver);
   const lifecycle = new RuntimeLifecycleService(
     applicationSide.core,

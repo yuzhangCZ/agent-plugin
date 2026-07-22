@@ -8,7 +8,6 @@ import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
-import { delayBeforeTerminalToolDone } from './terminal-signal-delay.ts';
 
 const OUTBOUND_PROFILE: LifecycleProfile = { kind: 'outbound' };
 // outbound_run 复用 request_run 的多消息生命周期校验，只在 observation 口径上区分来源。
@@ -166,7 +165,6 @@ export class OutboundCoordinator {
       result,
     });
     this.pipeline.observation.terminalProjected(toolSessionId, result, { runId });
-    await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }

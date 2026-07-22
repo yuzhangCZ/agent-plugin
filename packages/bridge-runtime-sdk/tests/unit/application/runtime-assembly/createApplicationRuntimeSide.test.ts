@@ -74,11 +74,6 @@ test('createApplicationRuntimeSide wires forwardToProvider request run policy in
       gatewayHost: { gatewayUrl: 'http://127.0.0.1:18080', register: { channel: 'test' } },
       requestRunPolicy: { activeRunChatPolicy: 'forwardToProvider' },
     },
-    {
-      provider: {} as never,
-      gatewayHost: {} as never,
-      toolDoneCompatDelay: { delayMs: 0, sleep: async () => {} },
-    },
     observation,
     { send() {} } as never,
   );
