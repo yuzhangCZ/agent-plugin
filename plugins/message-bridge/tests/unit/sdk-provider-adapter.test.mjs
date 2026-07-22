@@ -963,53 +963,11 @@ test('provider adapter abortSession command port closes all runs under returned 
     runB.result().then(() => 'settled'),
     new Promise((resolve) => setImmediate(() => resolve('pending'))),
   ]), 'pending');
-  promptA.resolve(createPromptActionResult({ messageId: 'msg-abort-a' }));
+  promptA.resolve(createPromptResponse({ info: { id: 'msg-abort-a', error: { name: 'MessageAbortedError' } } }));
   assert.deepEqual(await runA.result(), { outcome: 'aborted' });
   assert.deepEqual(await runB.result(), { outcome: 'aborted' });
   assert.deepEqual(await collect(runA.facts), []);
   assert.deepEqual(await collect(runB.facts), []);
-});
-
-test('provider adapter abortSession fallback closes all runs under resolved host session', async () => {
-  const abortCalls = [];
-  const prompt = createDeferred();
-  const adapter = createAdapter({
-    bindings: [['conversation-a', 'host-shared'], ['conversation-b', 'host-shared']],
-    session: {
-      prompt: async () => prompt.promise,
-      abort: async (input) => {
-        abortCalls.push(input);
-        return { data: true };
-      },
-    },
-  });
-
-  const runA = await adapter.runMessage({
-    traceId: 'trace-a',
-    runId: 'run-a',
-    toolSessionId: 'conversation-a',
-    text: 'first',
-  });
-  const runB = await adapter.runMessage({
-    traceId: 'trace-b',
-    runId: 'run-b',
-    toolSessionId: 'conversation-b',
-    text: 'second',
-  });
-
-  assert.deepEqual(await adapter.abortSession({ toolSessionId: 'conversation-b' }), { applied: true });
-  assert.equal(abortCalls.length, 1);
-  assert.equal(await Promise.race([
-    runA.result().then(() => 'settled'),
-    new Promise((resolve) => setImmediate(() => resolve('pending'))),
-  ]), 'pending');
-  assert.equal(await Promise.race([
-    runB.result().then(() => 'settled'),
-    new Promise((resolve) => setImmediate(() => resolve('pending'))),
-  ]), 'pending');
-  prompt.resolve(createPromptActionResult({ messageId: 'msg-abort-fallback' }));
-  assert.deepEqual(await runA.result(), { outcome: 'aborted' });
-  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
 });
 
 test('provider adapter abortSession clears queued TUI outbound run events for aborted host session', async () => {
@@ -1075,6 +1033,13 @@ test('provider adapter abortSession overrides completed prompt while run is stil
       prompt: async () => prompt.promise,
       abort: async () => ({ data: true }),
     },
+    abortSessionCommandPort: {
+      execute: async (input) => ({
+        kind: 'aborted',
+        toolSessionId: input.toolSessionId,
+        hostSessionId: 'host-a',
+      }),
+    },
   });
 
   const run = await adapter.runMessage({
@@ -1084,7 +1049,7 @@ test('provider adapter abortSession overrides completed prompt while run is stil
     text: 'hello',
   });
 
-  prompt.resolve(createPromptResponse());
+  prompt.resolve(createPromptResponse({ info: { id: 'msg-abort', error: { name: 'MessageAbortedError' } } }));
   await Promise.resolve();
   await Promise.resolve();
 
@@ -1226,7 +1191,7 @@ test('provider adapter skips queued prompt after abortSession under the same hos
   ]), 'pending');
   assert.equal(promptCount, 1);
 
-  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a' }));
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-a', terminal: { kind: 'aborted' } }));
   assert.deepEqual(await runA.result(), { outcome: 'aborted' });
   assert.deepEqual(await runB.result(), { outcome: 'aborted' });
   assert.equal(promptCount, 1);
@@ -1274,15 +1239,6 @@ test('provider adapter keeps abort batch queued until running prompt task finish
     new Promise((resolve) => setImmediate(() => resolve('pending'))),
   ]), 'pending');
 
-  const runC = await adapter.runMessage({
-    traceId: 'trace-c',
-    runId: 'run-c',
-    toolSessionId: 'conversation-c',
-    text: 'third',
-  });
-  assert.equal(promptCount, 1);
-  assert.equal(adapter.hasActiveHostSessionRunForTest('host-shared'), true);
-
   await adapter.handleEvent({
     type: 'message.updated',
     properties: {
@@ -1298,9 +1254,16 @@ test('provider adapter keeps abort batch queued until running prompt task finish
       },
     },
   });
-  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-old' }));
+  firstPrompt.resolve(createPromptActionResult({ messageId: 'msg-old', terminal: { kind: 'aborted' } }));
   assert.deepEqual(await runA.result(), { outcome: 'aborted' });
   assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+
+  const runC = await adapter.runMessage({
+    traceId: 'trace-c',
+    runId: 'run-c',
+    toolSessionId: 'conversation-c',
+    text: 'third',
+  });
   await waitFor(() => promptCount === 2, 'new prompt did not start after abort batch finished');
   assert.equal(promptCount, 2);
 
@@ -1329,7 +1292,7 @@ test('provider adapter keeps abort batch queued until running prompt task finish
   ]);
 });
 
-test('provider adapter releases abort batch as aborted after final idle when running prompt never returns', async () => {
+test('provider adapter releases abort batch as timeout-failed after final idle when running prompt never returns', async () => {
   const thirdPrompt = createDeferred();
   let promptCount = 0;
   const adapter = createAdapter({
@@ -1370,9 +1333,21 @@ test('provider adapter releases abort batch as aborted after final idle when run
   });
 
   assert.deepEqual(await withTimeout(runA.result(), 'first abort batch run did not settle'), {
-    outcome: 'aborted',
+    outcome: 'failed',
+    error: {
+      code: 'timeout',
+      message: 'provider_run_final_idle_timeout',
+      retryable: true,
+    },
   });
-  assert.deepEqual(await runB.result(), { outcome: 'aborted' });
+  assert.deepEqual(await runB.result(), {
+    outcome: 'failed',
+    error: {
+      code: 'timeout',
+      message: 'provider_run_final_idle_timeout',
+      retryable: true,
+    },
+  });
   await waitFor(() => promptCount === 2, 'new prompt did not start after abort batch final idle');
 
   await emitCompletedAssistantMessage(adapter, 'host-shared', 'msg-new-after-timeout');

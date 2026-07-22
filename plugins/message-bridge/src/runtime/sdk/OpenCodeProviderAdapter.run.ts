@@ -508,6 +508,7 @@ export class ActiveRunRegistry {
         promptStarted,
       });
     }
+    this.hostQueues.delete(hostSessionId);
     return queue;
   }
 
