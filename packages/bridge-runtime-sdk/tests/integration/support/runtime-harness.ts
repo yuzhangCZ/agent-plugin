@@ -159,12 +159,7 @@ export class FakeGatewayClient extends EventEmitter implements BridgeGatewayHost
 export function createRuntimeOptions(
   provider: ThirdPartyAgentProvider,
   connection: FakeGatewayClient,
-  extra?: Partial<BridgeRuntimeOptions> & {
-    toolDoneCompatDelay?: {
-      sleep?: (ms: number) => Promise<void>;
-      delayMs?: number;
-    };
-  },
+  extra?: Partial<BridgeRuntimeOptions>,
 ): BridgeRuntimeOptions {
   return {
     provider,
@@ -182,9 +177,6 @@ export function createRuntimeOptions(
     } satisfies BridgeGatewayHostConfig,
     connectionFactory: () => connection,
     traceIdFactory: () => 'trace-fixed',
-    toolDoneCompatDelay: {
-      sleep: async () => {},
-    },
     ...extra,
   };
 }

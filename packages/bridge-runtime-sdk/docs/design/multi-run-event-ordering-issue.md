@@ -1,10 +1,12 @@
 # bridge-runtime-sdk 多 run events 出站时序问题
 
-- **Version:** 1.2
+- **Version:** 1.3
 - **Date:** 2026-07-22
-- **Status:** Active
+- **Status:** Historical
 - **Owner:** agent-plugin maintainers
 - **Related:** `packages/bridge-runtime-sdk/docs/design/2026-07-06-active-run-chat-policy-design.md`
+
+> **已解决说明（2026-07-22）：** 本文第 3.3、5.1、5.3 节描述的根因——SDK 内部 100ms `tool_done` 兼容延迟（`delayBeforeTerminalToolDone`）——已移除。该延迟窗口消除后，上述场景的时序错乱不再由 SDK 侧引入。第 7 节定义的 `serializedOutput` 完整顺序强保证仍为后续工作，本文保留作历史追溯依据，不参与当前实现决策。
 
 ## 1. 背景
 
