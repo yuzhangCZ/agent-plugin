@@ -1,5 +1,6 @@
 import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
+import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../constants/gateway-messages.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
@@ -89,6 +90,17 @@ export class RequestRunCoordinator {
       runId: input.runId,
     });
     await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
+    if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
+      this.pipeline.toolErrorReporter.report({
+        stage: 'request_terminal',
+        level: 'P0',
+        welinkSessionId: uplink.welinkSessionId,
+        toolSessionId: uplink.toolSessionId,
+        error: uplink.error,
+        reason: uplink.reason,
+      });
+      return;
+    }
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }
