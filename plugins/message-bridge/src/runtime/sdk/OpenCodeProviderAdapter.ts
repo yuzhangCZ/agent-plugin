@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Provider facade 汇总稳定接口与装配逻辑，拆分需独立兼容性评审。 */
 import type {
   ProviderHealthInput,
   ProviderHealthResult,
@@ -87,7 +88,7 @@ type ProviderAdapterOptions = {
   logger: BridgeLogger;
   createSessionCommandPort: CreateSessionCommandPort;
   closeSessionCommandPort?: CloseSessionCommandPort;
-  abortSessionCommandPort?: AbortSessionCommandPort;
+  abortSessionCommandPort: AbortSessionCommandPort;
   questionReplyCommandPort?: QuestionReplyCommandPort;
   permissionReplyCommandPort?: PermissionReplyCommandPort;
   effectiveDirectory?: string;
@@ -114,7 +115,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly createSessionCommandPort: CreateSessionCommandPort;
   private readonly closeSessionCommandPort?: CloseSessionCommandPort;
-  private readonly abortSessionCommandPort?: AbortSessionCommandPort;
+  private readonly abortSessionCommandPort: AbortSessionCommandPort;
   private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
   private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
   private readonly effectiveDirectory?: string;
@@ -419,7 +420,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       if (result.kind === 'closed') {
         this.tuiOutboundRuns.closeByHostSession(result.sessionId);
       }
-      this.activeRuns.abortByAnchorSession(input.toolSessionId, 'abort_session');
+      this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'abort_session');
       return { applied: true };
     }
 
@@ -431,38 +432,22 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       throw new Error(result.errorMessage ?? 'close_session_failed');
     }
     this.tuiOutboundRuns.closeByHostSession(context.opencodeSessionId);
-    this.activeRuns.abortByAnchorSession(input.toolSessionId, 'abort_session');
     return { applied: true };
   }
 
   async abortSession(input: { toolSessionId: string }): Promise<{ applied: true }> {
-    if (this.abortSessionCommandPort) {
-      const result = await this.abortSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
-      if (result.kind !== 'aborted') {
-        const error = new Error('abort_session_not_active');
-        Object.assign(error, {
-          errorEvidence: {
-            sourceOperation: 'session.abort',
-            sourceErrorCode: 'session_not_found',
-          },
-        });
-        throw error;
-      }
-      this.tuiOutboundRuns.closeByHostSession(result.hostSessionId);
-      this.activeRuns.abortAllByHostSession(result.hostSessionId, 'abort_session');
-      return { applied: true };
+    const result = await this.abortSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
+    if (result.kind !== 'aborted') {
+      const error = new Error('abort_session_not_active');
+      Object.assign(error, {
+        errorEvidence: {
+          sourceOperation: 'session.abort',
+          sourceErrorCode: 'session_not_found',
+        },
+      });
+      throw error;
     }
-
-    const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
-    const result = await this.opencodeSessionGatewayAdapter.abortSession({
-      sessionId: context.opencodeSessionId,
-      logger: this.logger,
-    });
-    if (!result.success) {
-      throw new Error(result.errorMessage ?? 'abort_session_failed');
-    }
-    this.tuiOutboundRuns.closeByHostSession(context.opencodeSessionId);
-    this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'abort_session');
+    this.tuiOutboundRuns.closeByHostSession(result.hostSessionId);
     return { applied: true };
   }
 
@@ -508,7 +493,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       anchorSessionId,
       hostSessionId,
       runId,
-      initialTrackingSessionId: hostSessionId,
       logger: this.logger,
       ...(this.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: this.finalIdleTimeoutMs } : {}),
       canFinalIdleTimeout: (input) => !this.pendingInteractionRecorder?.hasPendingForRun?.(input),
@@ -524,19 +508,19 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
     runId: string;
     trackingSessionIds: ReadonlySet<string>;
   }): void {
-    const result = this.activeRuns.deleteIfCurrentRun(input.anchorSessionId, input.runId);
-    if (!result.deleted) {
-      this.activeRuns.removeHostQueueEntry(input.hostSessionId, input.runId);
-      if (result.currentRunId) {
-        this.logger.debug?.('provider_adapter.active_run.cleanup_skipped', {
-          anchorSessionId: input.anchorSessionId,
-          cleanupRunId: input.runId,
-          currentRunId: result.currentRunId,
-          trackingSessionIds: [...input.trackingSessionIds],
-          cleanupSkippedReason: 'active_run_replaced',
-        });
-      }
+    const result = this.activeRuns.removeHeadIfRun(input.hostSessionId, input.runId);
+    const logContext = {
+      anchorSessionId: input.anchorSessionId,
+      hostSessionId: input.hostSessionId,
+      runId: input.runId,
+      status: result.status,
+      remainingRunIds: result.remainingRunIds,
+    };
+    if (result.status === 'head_mismatch') {
+      this.logger.error?.('provider_adapter.active_run.cleanup_head_mismatch', logContext);
+      return;
     }
+    this.logger.debug?.('provider_adapter.active_run.cleaned_up', logContext);
 
     for (const trackingSessionId of input.trackingSessionIds) {
       this.partKinds.clearSession(trackingSessionId);

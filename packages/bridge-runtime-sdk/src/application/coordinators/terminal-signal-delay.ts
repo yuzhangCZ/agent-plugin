@@ -14,5 +14,5 @@ export async function delayBeforeTerminalToolDone(
     return;
   }
 
-  await options.sleep(options.delayMs);
+  // await options.sleep(options.delayMs);
 }

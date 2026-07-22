@@ -109,13 +109,35 @@ function createResolvedConfig(overrides = {}) {
   };
 }
 
-function createPromptResponse() {
+function createPromptResponse(messageId = 'msg-prompt-1') {
   return {
     data: {
       info: {
-        id: 'msg-prompt-1',
+        id: messageId,
+        cost: 0.12,
+        tokens: {
+          input: 10,
+          output: 20,
+          reasoning: 3,
+          cache: { read: 0, write: 0 },
+        },
       },
       parts: [{ type: 'step-finish' }],
+    },
+  };
+}
+
+function completedAssistantEvent(sessionId, messageId) {
+  return {
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: messageId,
+        sessionID: sessionId,
+        role: 'assistant',
+        time: { created: Date.now(), completed: Date.now() },
+        finish: 'stop',
+      },
     },
   };
 }
@@ -236,7 +258,7 @@ test('sdk runtime opts active-run chat requests into provider forwarding', async
   );
 });
 
-test('sdk runtime forwards same-session active chats so provider adapter supersedes prior host run', async () => {
+test('sdk runtime forwards same-session active chats without premature queued-run terminal', async () => {
   const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
   const firstPrompt = createDeferred();
   const secondPrompt = createDeferred();
@@ -298,53 +320,69 @@ test('sdk runtime forwards same-session active chats so provider adapter superse
       );
       return calls.length === 2 ? calls : false;
     }, 'second same-session provider call');
-    const supersededDone = await waitFor(() => ws.sent.filter((message) =>
-      message.type === 'tool_done'
-      && message.toolSessionId === 'tool-sdk-forward'
-    ).length, 'superseded run terminal');
-
     assert.equal(startRunCalls.length, 2);
     assert.equal(promptCalls.length, 1);
-    assert.equal(supersededDone, 1);
+    assert.equal(ws.sent.filter((message) =>
+      message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward'
+    ).length, 0);
     assert.equal(ws.sent.some((message) =>
       message.type === 'tool_error'
       && message.toolSessionId === 'tool-sdk-forward'
       && message.error === '当前会话正在处理中，请稍后再试'
     ), false);
 
-    await runtime.handleEvent({
-      type: 'message.updated',
-      properties: {
-        info: {
-          id: 'msg-sdk-forward-old',
-          sessionID: 'ses-sdk-forward',
-          role: 'assistant',
-          time: {
-            created: Date.now(),
-            completed: Date.now(),
-          },
-          finish: 'stop',
-        },
-      },
-    });
-    firstPrompt.resolve(createPromptResponse());
+    const messageEvents = (messageId) => ws.sent.filter((message) =>
+      message.type === 'tool_event'
+      && message.toolSessionId === 'tool-sdk-forward'
+      && message.event?.properties?.messageId === messageId
+    );
+    await runtime.handleEvent(completedAssistantEvent(
+      'ses-sdk-forward',
+      'msg-sdk-forward-first',
+    ));
+    firstPrompt.resolve(createPromptResponse('msg-sdk-forward-first'));
+    await waitFor(() => ws.sent.filter((message) =>
+      message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward'
+    ).length === 1, 'first run terminal', 1_000);
+    assert.equal(messageEvents('msg-sdk-forward-first').length > 0, true);
+    assert.equal(messageEvents('msg-sdk-forward-second').length, 0);
     await waitFor(() => promptCalls.length === 2, 'second same-session prompt start');
-    ws.onmessage?.({
-      data: JSON.stringify({
-        type: 'invoke',
-        action: 'abort_session',
-        welinkSessionId: 'welink-sdk-forward-3',
-        payload: {
-          toolSessionId: 'tool-sdk-forward',
-        },
-      }),
-    });
+
+    await runtime.handleEvent(completedAssistantEvent(
+      'ses-sdk-forward',
+      'msg-sdk-forward-second',
+    ));
+    secondPrompt.resolve(createPromptResponse('msg-sdk-forward-second'));
     await waitFor(() => ws.sent.filter((message) =>
       message.type === 'tool_done'
       && message.toolSessionId === 'tool-sdk-forward'
     ).length === 2, 'second same-session run terminal', 1_000);
-    secondPrompt.resolve(createPromptResponse());
-    await flushAppLogs();
+    assert.equal(messageEvents('msg-sdk-forward-second').length > 0, true);
+
+    const firstEventIndex = ws.sent.findIndex((message) =>
+      message.type === 'tool_event'
+      && message.event?.properties?.messageId === 'msg-sdk-forward-first'
+    );
+    const firstDoneIndex = ws.sent.findIndex((message) =>
+      message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward'
+    );
+    const secondEventIndex = ws.sent.findIndex((message) =>
+      message.type === 'tool_event'
+      && message.event?.properties?.messageId === 'msg-sdk-forward-second'
+    );
+    const secondDoneIndex = ws.sent.findIndex((message, index) =>
+      index > firstDoneIndex
+      && message.type === 'tool_done'
+      && message.toolSessionId === 'tool-sdk-forward');
+    assert.equal(
+      firstEventIndex < firstDoneIndex
+      && firstDoneIndex < secondEventIndex
+      && secondEventIndex < secondDoneIndex,
+      true,
+    );
 
     assert.equal(runtime.sdkRuntime.getDiagnostics().providerCalls.filter(
       (call) => call.command === 'startRequestRun' && call.toolSessionId === 'tool-sdk-forward',

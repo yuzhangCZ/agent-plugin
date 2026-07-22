@@ -1,3 +1,4 @@
+/* eslint-disable max-classes-per-file, max-lines -- 事件路由策略集中共享解析上下文，拆分需独立架构任务。 */
 import type { ProviderRuntimeContext } from '@wecode/bridge-runtime-sdk';
 import { getErrorMessage } from '../../utils/error.js';
 import { asTrimmedString } from '../../utils/type-guards.js';
@@ -398,7 +399,7 @@ export class ProviderEventCoordinator {
         reason: 'unsupported_event',
         routeSummary: {
           eventType: event.type,
-          ...(rawSessionId ? { rawSessionId } : {}),
+          rawSessionId
         },
       });
       return undefined;
@@ -406,10 +407,7 @@ export class ProviderEventCoordinator {
 
     const rawSessionId = this.dependencies.rawSessionLocator.locate(event);
     if (!rawSessionId) {
-      this.logEventDropped({
-        event,
-        reason: 'missing_raw_session_id',
-      });
+      this.logEventDropped({ event, reason: 'missing_raw_session_id' });
       return undefined;
     }
     const resolution = await this.dependencies.identityResolver.resolve(rawSessionId);
@@ -423,7 +421,8 @@ export class ProviderEventCoordinator {
       });
     }
 
-    const activeRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
+    const headRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
+    const activeRun = headRun?.hasPromptStarted() ? headRun : undefined;
     const factSessionContext = this.buildFactSessionContext(resolution, activeRun);
     const runtimeContext = this.dependencies.getRuntimeContext();
     const eventRouteSummary = buildEventRouteSummary({
@@ -439,7 +438,7 @@ export class ProviderEventCoordinator {
       rawSessionId,
       resolution,
       eventClass,
-      ...(activeRun ? { activeRun } : {}),
+      activeRun,
       factSessionContext,
       runtimeContext,
       eventRouteSummary,
