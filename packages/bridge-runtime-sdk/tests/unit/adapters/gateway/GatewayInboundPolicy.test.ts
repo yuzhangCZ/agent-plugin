@@ -105,14 +105,14 @@ test('GatewayInboundPolicy sends tool_error with unsupported_action joined by ac
   }]);
 });
 
-test('GatewayInboundPolicy sends tool_error with missing_required_field joined by field segment', () => {
+test('GatewayInboundPolicy sends tool_error with invalid_field_value joined by field segment', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
   const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
 
   policy.handle(
     createInvalidInvokeFrame(
-      { code: 'missing_required_field', field: 'payload.text', message: 'payload.text is required' },
+      { code: 'invalid_field_value', field: 'payload.text', message: 'payload.text is required' },
       { welinkSessionId: 'wl-1', toolSessionId: 'tool-1' },
     ),
     { isGatewayReady: true },
@@ -122,18 +122,18 @@ test('GatewayInboundPolicy sends tool_error with missing_required_field joined b
     type: 'tool_error',
     welinkSessionId: 'wl-1',
     toolSessionId: 'tool-1',
-    error: '请求格式异常，请稍后重试 (missing_required_field: payload.text)',
+    error: '请求格式异常，请稍后重试 (invalid_field_value: payload.text)',
   }]);
 });
 
-test('GatewayInboundPolicy sends tool_error with invalid_field_type joined by field segment', () => {
+test('GatewayInboundPolicy sends tool_error with invalid_field_value for type-mismatch field', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
   const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
 
   policy.handle(
     createInvalidInvokeFrame(
-      { code: 'invalid_field_type', field: 'payload.suppressReply', message: 'payload.suppressReply must be a boolean' },
+      { code: 'invalid_field_value', field: 'payload.suppressReply', message: 'payload.suppressReply must be a boolean' },
       { welinkSessionId: 'wl-1', toolSessionId: 'tool-1' },
     ),
     { isGatewayReady: true },
@@ -143,7 +143,7 @@ test('GatewayInboundPolicy sends tool_error with invalid_field_type joined by fi
     type: 'tool_error',
     welinkSessionId: 'wl-1',
     toolSessionId: 'tool-1',
-    error: '请求格式异常，请稍后重试 (invalid_field_type: payload.suppressReply)',
+    error: '请求格式异常，请稍后重试 (invalid_field_value: payload.suppressReply)',
   }]);
 });
 
@@ -154,7 +154,7 @@ test('GatewayInboundPolicy does not send tool_error when no routable session ids
 
   policy.handle(
     createInvalidInvokeFrame(
-      { code: 'missing_required_field', field: 'payload.text', message: 'payload.text is required' },
+      { code: 'invalid_field_value', field: 'payload.text', message: 'payload.text is required' },
     ),
     { isGatewayReady: true },
   );

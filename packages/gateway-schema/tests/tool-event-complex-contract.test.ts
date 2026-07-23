@@ -127,7 +127,7 @@ test('validateToolEvent rejects malformed message.updated payloads with a shared
   }
   assertWireViolationShape(missingIdResult.error, {
     stage: 'event',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'properties.info.id',
     messageType: 'message.updated',
     eventType: 'message.updated',
@@ -179,7 +179,7 @@ test('validateToolEvent rejects malformed message.updated payloads with a shared
   }
   assertWireViolationShape(invalidCreatedTypeResult.error, {
     stage: 'event',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'properties.info.time.created',
     messageType: 'message.updated',
     eventType: 'message.updated',
@@ -438,7 +438,7 @@ test('validateToolEvent rejects malformed message.part.updated payloads with a s
   }
   assertWireViolationShape(missingMessageIdResult.error, {
     stage: 'event',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'properties.part.messageID',
     messageType: 'message.part.updated',
     eventType: 'message.part.updated',

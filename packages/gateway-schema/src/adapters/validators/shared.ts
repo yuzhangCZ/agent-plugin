@@ -54,7 +54,7 @@ export function requireNonEmptyString(
   if (!normalized) {
     return fail({
       stage: params.stage,
-      code: 'missing_required_field',
+      code: 'invalid_field_value',
       field: params.field,
       message: `${params.field} is required`,
       messageType: params.messageType,
@@ -83,7 +83,7 @@ export function requireStringPreservingEmpty(
   if (value === undefined) {
     return fail({
       stage: params.stage,
-      code: 'missing_required_field',
+      code: 'invalid_field_value',
       field: params.field,
       message: `${params.field} is required`,
       messageType: params.messageType,
@@ -126,7 +126,7 @@ export function invalidFieldType(
 ): Result<never, WireContractViolation> {
   return fail({
     stage: params.stage,
-    code: params.code ?? 'invalid_field_type',
+    code: params.code ?? 'invalid_field_value',
     field: params.field,
     message: `${params.field} must be ${params.expected}`,
     messageType: params.messageType,

@@ -19,8 +19,6 @@ export class ToolErrorMessageCatalog {
         return '当前请求处理失败，请重试';
       case 'unsupported_action':
         return `暂不支持该操作类型，请检查版本后重试 (unsupported_action${segment ? `: ${segment}` : ''})`;
-      case 'missing_required_field':
-      case 'invalid_field_type':
       case 'invalid_field_value':
         return `请求格式异常，请稍后重试 (${key}${segment ? `: ${segment}` : ''})`;
       default:
