@@ -462,7 +462,7 @@ type GatewayInboundFrame =
 - responder 只消费 `inbound.invalid`，不通过 `error` 事件触发回包
 - 至少存在 `welinkSessionId` 或 `toolSessionId` 之一才允许 best-effort 回 `tool_error`
 - 连接未到 `READY` 时只记录 `runtime.invalid_invoke.skipped_not_ready`，不强行发送
-- 回包统一使用 `gateway_invalid_invoke:<code>` 作为 `tool_error.error`
+- 回包 `tool_error.error` 采用中文友好文案，由 `ToolErrorMessageCatalog` 统一维护：`unsupported_action` 拼接实际 action 值（`暂不支持该操作类型，请检查版本后重试 (unsupported_action: {action})`）；`missing_required_field`/`invalid_field_type`/`invalid_field_value` 拼接 `violation.field`（`请求格式异常，请稍后重试 ({code}: {field})`，segment 缺失时降级为 `({code})`）；其他 code 走兜底文案 `请求处理异常，请稍后重试`
 - 这条逻辑属于插件 bounded context，`gateway-client` 不直接发送 `tool_error`
 
 ## 八、兼容边界
