@@ -90,12 +90,23 @@ export function createInvalidInvokeInboundFrame(overrides = {}) {
   };
 }
 
+function defaultInvalidInvokeError(code, segment) {
+  if (code === 'unsupported_action') {
+    return `暂不支持该操作类型，请检查版本后重试 (unsupported_action${segment ? `: ${segment}` : ''})`;
+  }
+  if (code === 'missing_required_field' || code === 'invalid_field_type' || code === 'invalid_field_value') {
+    return `请求格式异常，请稍后重试 (${code}${segment ? `: ${segment}` : ''})`;
+  }
+  return '请求处理异常，请稍后重试';
+}
+
 export function assertInvalidInvokeToolErrorContract(message, expected = {}) {
   const code = expected.code ?? 'missing_required_field';
+  const segment = expected.segment ?? (code === 'unsupported_action' ? 'chat' : 'payload.text');
   assertToolErrorShape(message, {
     welinkSessionId: expected.welinkSessionId,
     toolSessionId: expected.toolSessionId,
-    error: expected.error ?? `gateway_invalid_invoke:${code}`,
+    error: expected.error ?? defaultInvalidInvokeError(code, segment),
     reason: expected.reason,
     hasCode: false,
   });

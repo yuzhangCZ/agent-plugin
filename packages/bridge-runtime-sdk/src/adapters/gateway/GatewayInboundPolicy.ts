@@ -1,8 +1,9 @@
 import type { GatewayInboundFrame } from '@agent-plugin/gateway-client';
-import type { ToolErrorMessage } from '@agent-plugin/gateway-schema';
+import type { ToolErrorMessage, WireViolation } from '@agent-plugin/gateway-schema';
 
 import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../../application/constants/gateway-messages.ts';
 import { RUNTIME_FAILURE_KIND } from '../../application/constants/runtime.ts';
+import { ToolErrorMessageCatalog } from '../../application/projectors/ToolErrorMessageCatalog.ts';
 import type { InboundPolicy } from '../../application/ports/inbound-policy.ts';
 import type { OutboundSink } from '../../application/ports/outbound-sink.ts';
 import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
@@ -17,13 +18,16 @@ type InvalidInvokeGatewayInboundFrame = Extract<GatewayInboundFrame, { kind: 'in
 export class GatewayInboundPolicy implements InboundPolicy {
   private readonly observation: RuntimeObservation;
   private readonly sink: OutboundSink;
+  private readonly catalog: ToolErrorMessageCatalog;
 
   constructor(
     observation: RuntimeObservation,
     sink: OutboundSink,
+    catalog: ToolErrorMessageCatalog,
   ) {
     this.observation = observation;
     this.sink = sink;
+    this.catalog = catalog;
   }
 
   handle(frame: GatewayInboundFrame, input: { isGatewayReady: boolean }): void {
@@ -55,7 +59,7 @@ export class GatewayInboundPolicy implements InboundPolicy {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
       ...(frame.welinkSessionId ? { welinkSessionId: frame.welinkSessionId } : {}),
       ...(frame.toolSessionId ? { toolSessionId: frame.toolSessionId } : {}),
-      error: this.buildInvalidInvokeToolError(frame.violation.violation.code),
+      error: this.buildInvalidInvokeToolError(frame.violation.violation),
     };
     this.observation.uplinkEmitted(toolError);
     void this.sink.send(toolError);
@@ -65,7 +69,8 @@ export class GatewayInboundPolicy implements InboundPolicy {
     return frame.kind === 'invalid' && frame.messageType === 'invoke';
   }
 
-  private buildInvalidInvokeToolError(code: string): string {
-    return `gateway_invalid_invoke:${code}`;
+  private buildInvalidInvokeToolError(violation: WireViolation): string {
+    const segment = violation.code === 'unsupported_action' ? violation.action : violation.field;
+    return this.catalog.get(violation.code, segment);
   }
 }

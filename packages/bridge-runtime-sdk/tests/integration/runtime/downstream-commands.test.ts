@@ -333,7 +333,7 @@ test('runtime handles invalid invoke inbound frames and records transport diagno
     type: 'tool_error',
     welinkSessionId: 'wl-invalid-1',
     toolSessionId: 'tool-invalid-1',
-    error: 'gateway_invalid_invoke:missing_required_field',
+    error: '请求格式异常，请稍后重试 (missing_required_field: payload.text)',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'inbound_validation_failure',
