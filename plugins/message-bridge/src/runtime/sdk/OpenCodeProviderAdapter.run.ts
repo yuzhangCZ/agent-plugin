@@ -198,7 +198,6 @@ export class ActiveProviderRunHandle {
       this.tryCleanup();
     });
     this.factDrainTracker = new FactDrainTracker({
-      mode: 'active_run',
       anchorSessionId: options.anchorSessionId,
       runId: options.runId,
       queue: this.queue,

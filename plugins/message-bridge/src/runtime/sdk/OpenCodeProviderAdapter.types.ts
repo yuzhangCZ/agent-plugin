@@ -1,6 +1,5 @@
 import type { BridgeEvent } from '../types.js';
 import type { ProviderFact } from '@wecode/bridge-runtime-sdk';
-import type { ActiveProviderRunHandle } from './OpenCodeProviderAdapter.run.js';
 
 /**
  * message part 在 provider fact 中的内容类别。
@@ -23,7 +22,6 @@ export type AssistantMessageLifecycleState = {
 export type RawEventTranslation = {
   recognized: boolean;
   toolSessionId?: string;
-  envelopeMessageId?: string;
   facts: ProviderFact[];
   terminalCandidateMessageId?: string;
 };
@@ -49,28 +47,6 @@ export type ActiveRunIdentity = {
   hostSessionId: string;
   runId: string;
 };
-
-/**
- * raw event 路由决策的目标摘要。
- * @remarks
- * 该类型用于表达 active run、outbound fallback 或 fail-closed drop 的边界语义。
- */
-export type EventRouteTarget =
-  | { kind: 'active_run'; run: ActiveProviderRunHandle; anchorSessionId: string }
-  | { kind: 'outbound'; anchorSessionId: string; reason: 'attached_owner' }
-  | {
-      kind: 'drop';
-      reason: 'missing_active_run' | 'missing_outbound_target' | 'unsupported_event' | 'missing_session_identity';
-    };
-
-/**
- * outbound fallback 目标解析端口。
- * @remarks
- * 只能返回当前宿主会话已 attach 的 anchor，找不到时必须返回 `undefined` 并让调用方 fail-closed。
- */
-export interface OutboundTargetResolverPort {
-  resolve(hostSessionId: string): { anchorSessionId: string } | undefined;
-}
 
 /**
  * raw session id 到宿主/子会话身份的解析结果。
@@ -141,13 +117,10 @@ type PendingInteractionRecordBase = {
 };
 
 export type PendingInteractionRecorderInput =
-  | (PendingInteractionRecordBase & {
-      source: 'active_run';
-      runId: string;
-    })
-  | (PendingInteractionRecordBase & {
-      source: 'outbound';
-    });
+  (PendingInteractionRecordBase & {
+    source: 'active_run';
+    runId: string;
+  });
 
 export interface PendingInteractionRecorderPort {
   record(input: PendingInteractionRecorderInput): void;

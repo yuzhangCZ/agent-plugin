@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- Provider facade 汇总稳定接口与装配逻辑，拆分需独立兼容性评审。 */
+/* Provider facade 汇总稳定接口与装配逻辑，拆分需独立兼容性评审。 */
 import type {
   ProviderHealthInput,
   ProviderHealthResult,
@@ -10,7 +10,6 @@ import type {
   ProviderRun,
   ProviderRunMessageInput,
   ProviderRuntimeContext,
-  ProviderFact,
   ThirdPartyAgentProvider,
 } from '@wecode/bridge-runtime-sdk';
 import type { OpencodeSessionGatewayAdapter } from '../../adapter/index.js';
@@ -31,11 +30,10 @@ import type {
   ChatActionContext,
   ChatExecutionContextResolver,
   ChatQueuedExecution,
-  EventAnchorResolver,
   ExecutionSessionInvalidationPort,
   SdkChatRunPlanner,
 } from './SdkChatControlPlane.js';
-import type { FactSessionContext, PendingInteractionRecorderPort } from './OpenCodeProviderAdapter.types.js';
+import type { PendingInteractionRecorderPort } from './OpenCodeProviderAdapter.types.js';
 import {
   ActiveRunRegistry,
   ActiveProviderRunHandle,
@@ -45,7 +43,6 @@ import {
 import { HostSessionRunCoordinator } from './HostSessionRunCoordinator.js';
 import {
   DefaultProtocolDiagnosticPort,
-  DefaultOutboundTargetResolver,
   EventRawSessionLocator,
   EventSessionIdentityResolver,
   FactRoutingContextAssembler,
@@ -61,7 +58,6 @@ import {
   PermissionAskedTranslator,
   PermissionRepliedTranslator,
   QuestionAskedTranslator,
-  SessionErrorTranslator,
   SessionUpdatedTranslator,
 } from './OpenCodeProviderAdapter.translation.js';
 import {
@@ -73,7 +69,6 @@ import {
 } from './session-isolation/index.js';
 import { bindProviderCommandTerminal } from './OpenCodeProviderAdapter.command.js';
 import { bindProviderPromptTerminal } from './OpenCodeProviderAdapter.prompt.js';
-import { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.js';
 
 const LOCAL_SLASH_COMMANDS = [
   { kind: 'new', command: '/new', description: '新建会话' },
@@ -87,7 +82,7 @@ type ProviderAdapterOptions = {
   rawClient: HostClientLike;
   logger: BridgeLogger;
   createSessionCommandPort: CreateSessionCommandPort;
-  closeSessionCommandPort?: CloseSessionCommandPort;
+  closeSessionCommandPort: CloseSessionCommandPort;
   abortSessionCommandPort: AbortSessionCommandPort;
   questionReplyCommandPort?: QuestionReplyCommandPort;
   permissionReplyCommandPort?: PermissionReplyCommandPort;
@@ -96,7 +91,6 @@ type ProviderAdapterOptions = {
   chatRunPlanner: SdkChatRunPlanner;
   contextResolver: ChatExecutionContextResolver;
   executionSessionInvalidationPort: ExecutionSessionInvalidationPort;
-  eventAnchorResolver: EventAnchorResolver;
   subagentSessionMapper: SubagentSessionMapper;
   hostEventPort?: HostEventPort;
   pendingInteractionRecorder?: PendingInteractionRecorderPort;
@@ -114,7 +108,7 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly rawClient: HostClientLike;
   private readonly opencodeSessionGatewayAdapter: OpencodeSessionGatewayAdapter;
   private readonly createSessionCommandPort: CreateSessionCommandPort;
-  private readonly closeSessionCommandPort?: CloseSessionCommandPort;
+  private readonly closeSessionCommandPort: CloseSessionCommandPort;
   private readonly abortSessionCommandPort: AbortSessionCommandPort;
   private readonly questionReplyCommandPort?: QuestionReplyCommandPort;
   private readonly permissionReplyCommandPort?: PermissionReplyCommandPort;
@@ -130,30 +124,14 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
   private readonly runCoordinator: HostSessionRunCoordinator;
   private readonly partKinds = new PartKindStore();
   private readonly assistantMessageStates = new AssistantMessageStateStore();
-  private readonly tuiOutboundRuns: TuiOutboundRunRegistry;
 
   private readonly eventCoordinator: ProviderEventCoordinator;
-  private runtimeContext: ProviderRuntimeContext | null = null;
 
   constructor(options: ProviderAdapterOptions) {
     this.logger = options.logger;
     this.finalIdleTimeoutMs = options.finalIdleTimeoutMs;
     this.pendingInteractionRecorder = options.pendingInteractionRecorder;
     this.runCoordinator = new HostSessionRunCoordinator(this.logger);
-    this.tuiOutboundRuns = new TuiOutboundRunRegistry({
-      logger: this.logger,
-      ...(options.finalIdleTimeoutMs !== undefined ? { finalIdleTimeoutMs: options.finalIdleTimeoutMs } : {}),
-      onFinalIdleTimeout: (input) => {
-        this.cleanupTuiOutboundRunState(input);
-      },
-      onTranslationAccepted: (input) => {
-        this.recordPendingInteractions(
-          input.facts,
-          input.factSessionContext,
-          input.hostSessionId,
-        );
-      },
-    });
     this.rawClient = options.rawClient;
     this.opencodeSessionGatewayAdapter = options.opencodeSessionGatewayAdapter;
     this.createSessionCommandPort = options.createSessionCommandPort;
@@ -174,14 +152,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       .register('permission.asked', new PermissionAskedTranslator())
       .register('permission.replied', new PermissionRepliedTranslator())
       .register('session.updated', new SessionUpdatedTranslator());
-    const outboundTranslatorRegistry = new EventTranslatorRegistry()
-      .register('message.updated', new AssistantMessageEventTranslator())
-      .register('message.part.delta', new MessagePartDeltaTranslator())
-      .register('message.part.updated', new MessagePartUpdatedTranslator())
-      .register('question.asked', new QuestionAskedTranslator(true))
-      .register('permission.asked', new PermissionAskedTranslator())
-      .register('permission.replied', new PermissionRepliedTranslator())
-      .register('session.error', new SessionErrorTranslator());
 
     this.eventCoordinator = new ProviderEventCoordinator({
       logger: this.logger,
@@ -197,22 +167,16 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
         subagentSessionMapper: options.subagentSessionMapper,
       }),
       activeRunRegistry: this.activeRuns,
-      outboundTargetResolver: new DefaultOutboundTargetResolver({
-        eventAnchorResolver: options.eventAnchorResolver,
-      }),
       assistantMessageState: this.assistantMessageStates,
       partKindState: this.partKinds,
-      tuiOutboundRunRegistry: this.tuiOutboundRuns,
       activeRunTranslatorRegistry,
-      outboundTranslatorRegistry,
       ...(options.hostEventPort ? { sessionIsolationHostEventPort: options.hostEventPort } : {}),
       ...(options.pendingInteractionRecorder ? { pendingInteractionRecorder: options.pendingInteractionRecorder } : {}),
-      getRuntimeContext: () => this.runtimeContext,
     });
   }
 
-  async initialize(context: ProviderRuntimeContext): Promise<void> {
-    this.runtimeContext = context;
+  async initialize(_context: ProviderRuntimeContext): Promise<void> {
+    // Provider SPI 保留入口；当前无 outbound 等需要从 runtime context 读取的状态，保留空体以兼容 SDK 可选 initialize? 契约。
   }
 
   async health(_input: ProviderHealthInput): Promise<ProviderHealthResult> {
@@ -415,23 +379,9 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
 
   async closeSession(input: { toolSessionId: string }): Promise<{ applied: true }> {
     const context = await this.contextResolver.resolveForControlAction(input.toolSessionId, this.logger);
-    if (this.closeSessionCommandPort) {
-      const result = await this.closeSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
-      if (result.kind === 'closed') {
-        this.tuiOutboundRuns.closeByHostSession(result.sessionId);
-      }
-      this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'abort_session');
-      return { applied: true };
-    }
+    await this.closeSessionCommandPort.execute({ toolSessionId: input.toolSessionId });
+    this.activeRuns.abortAllByHostSession(context.opencodeSessionId, 'abort_session');
 
-    const result = await this.opencodeSessionGatewayAdapter.closeSession({
-      sessionId: context.opencodeSessionId,
-      logger: this.logger,
-    });
-    if (!result.success) {
-      throw new Error(result.errorMessage ?? 'close_session_failed');
-    }
-    this.tuiOutboundRuns.closeByHostSession(context.opencodeSessionId);
     return { applied: true };
   }
 
@@ -447,7 +397,6 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       });
       throw error;
     }
-    this.tuiOutboundRuns.closeByHostSession(result.hostSessionId);
     return { applied: true };
   }
 
@@ -527,54 +476,4 @@ export class OpenCodeProviderAdapter implements ThirdPartyAgentProvider {
       this.assistantMessageStates.clearSession(trackingSessionId);
     }
   }
-
-  private cleanupTuiOutboundRunState(input: {
-    hostSessionId: string;
-    runId: string;
-    trackingSessionIds: ReadonlySet<string>;
-  }): void {
-    // final idle 代表本轮 TUI outbound run 已 fail-closed，本地 message/part 状态必须同步丢弃。
-    // 后续迟到 part 会按 orphan/unsupported 保护路径处理，避免污染下一轮 outbound run。
-    for (const trackingSessionId of input.trackingSessionIds) {
-      this.partKinds.clearSession(trackingSessionId);
-      this.assistantMessageStates.clearSession(trackingSessionId);
-    }
-    this.logger.debug?.('provider_adapter.tui_outbound_run_state_cleared', {
-      hostSessionId: input.hostSessionId,
-      runId: input.runId,
-      trackingSessionIds: [...input.trackingSessionIds],
-    });
-  }
-
-  private recordPendingInteractions(
-    facts: ProviderFact[],
-    factSessionContext: FactSessionContext,
-    hostSessionId: string,
-  ): void {
-    const recorder = this.pendingInteractionRecorder;
-    if (!recorder) {
-      return;
-    }
-    for (const fact of facts) {
-      if (fact.type === 'question.ask') {
-        recorder.record({
-          kind: 'question',
-          source: 'outbound',
-          tokenId: fact.questionId,
-          toolSessionId: factSessionContext.anchorSessionId,
-          hostSessionId,
-        });
-      }
-      if (fact.type === 'permission.ask') {
-        recorder.record({
-          kind: 'permission',
-          source: 'outbound',
-          tokenId: fact.permissionId,
-          toolSessionId: factSessionContext.anchorSessionId,
-          hostSessionId,
-        });
-      }
-    }
-  }
-
 }
