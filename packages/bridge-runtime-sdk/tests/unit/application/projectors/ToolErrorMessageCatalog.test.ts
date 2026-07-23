@@ -35,30 +35,6 @@ test('catalog degrades unsupported_action without segment', () => {
   );
 });
 
-test('catalog maps missing_required_field with field segment', () => {
-  const catalog = new ToolErrorMessageCatalog();
-  assert.equal(
-    catalog.get('missing_required_field', 'payload.text'),
-    '请求格式异常，请稍后重试 (missing_required_field: payload.text)',
-  );
-});
-
-test('catalog degrades missing_required_field without segment', () => {
-  const catalog = new ToolErrorMessageCatalog();
-  assert.equal(
-    catalog.get('missing_required_field'),
-    '请求格式异常，请稍后重试 (missing_required_field)',
-  );
-});
-
-test('catalog maps invalid_field_type with field segment', () => {
-  const catalog = new ToolErrorMessageCatalog();
-  assert.equal(
-    catalog.get('invalid_field_type', 'payload.suppressReply'),
-    '请求格式异常，请稍后重试 (invalid_field_type: payload.suppressReply)',
-  );
-});
-
 test('catalog maps invalid_field_value with field segment', () => {
   const catalog = new ToolErrorMessageCatalog();
   assert.equal(

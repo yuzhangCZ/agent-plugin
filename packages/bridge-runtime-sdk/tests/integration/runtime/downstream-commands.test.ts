@@ -14,7 +14,7 @@ function createInvalidInvokeInboundFrame() {
     violation: {
       violation: {
         stage: 'payload',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'payload.text',
         message: 'payload.text is required',
         messageType: 'invoke',
@@ -333,13 +333,13 @@ test('runtime handles invalid invoke inbound frames and records transport diagno
     type: 'tool_error',
     welinkSessionId: 'wl-invalid-1',
     toolSessionId: 'tool-invalid-1',
-    error: '请求格式异常，请稍后重试 (missing_required_field: payload.text)',
+    error: '请求格式异常，请稍后重试 (invalid_field_value: payload.text)',
   });
   assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
     kind: 'inbound_validation_failure',
     phase: 'runtime',
     message: 'payload.text is required',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
   });
   assert.equal(runtime.getDiagnostics().gatewayState, 'ready');
   assert.equal(typeof runtime.getDiagnostics().lastInboundAt, 'number');

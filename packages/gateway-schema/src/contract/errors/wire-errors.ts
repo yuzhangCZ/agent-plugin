@@ -13,8 +13,6 @@ export type WireErrorCode =
   | 'unsupported_message'
   | 'unsupported_action'
   | 'unsupported_event_type'
-  | 'missing_required_field'
-  | 'invalid_field_type'
   | 'invalid_field_value'
   | 'projection_contract_violation'
   | 'compat_legacy_mapping_failed';
