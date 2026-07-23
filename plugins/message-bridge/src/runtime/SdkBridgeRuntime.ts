@@ -33,7 +33,6 @@ import type { BridgeEvent } from './types.js';
 import { OpenCodeProviderAdapter } from './sdk/OpenCodeProviderAdapter.js';
 import {
   DefaultChatExecutionContextResolver,
-  DefaultEventAnchorResolver,
   DefaultExecutionSessionInvalidationPort,
 } from './sdk/SdkChatControlPlane.js';
 import { createSdkChatRunPlanner } from './sdk/SdkChatRunPlannerFactory.js';
@@ -283,9 +282,6 @@ export class SdkBridgeRuntime implements ManagedRuntime {
       contextResolver,
       executionSessionInvalidationPort: new DefaultExecutionSessionInvalidationPort({
         bindingStore,
-        ownershipResolver,
-      }),
-      eventAnchorResolver: new DefaultEventAnchorResolver({
         ownershipResolver,
       }),
       subagentSessionMapper: new SubagentSessionMapper(() => startupValidation.sdkClient),

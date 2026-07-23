@@ -2,7 +2,6 @@ import type { Hooks as OpenCodeHooks } from '@opencode-ai/plugin';
 import type { Event as OpenCodeSdkEvent } from '@opencode-ai/sdk';
 import type { Event as OpenCodeSdkV2Event } from '@opencode-ai/sdk/v2';
 
-import type { SessionErrorTranslator } from '../../src/runtime/sdk/OpenCodeProviderAdapter.translation.ts';
 import type { BridgeEvent } from '../../src/runtime/types.ts';
 
 type Assert<T extends true> = T;
@@ -12,12 +11,9 @@ type EventType<T> = T extends { type: infer Type } ? Type : never;
 type PluginHookEvent = Parameters<NonNullable<OpenCodeHooks['event']>>[0]['event'];
 type OpenCodeHostEvent = PluginHookEvent | OpenCodeSdkEvent | OpenCodeSdkV2Event;
 type BridgeEventType = EventType<BridgeEvent>;
-type SessionErrorEvent = Extract<BridgeEvent, { type: 'session.error' }>;
-type SessionErrorTranslatorEvent = Parameters<SessionErrorTranslator['translate']>[0]['event'];
 
 type _BridgeEventDoesNotExceedOpenCodeHostEvents = Assert<Extends<BridgeEvent, OpenCodeHostEvent>>;
 type _BridgeEventIncludesMessagePartDelta = Assert<Extends<'message.part.delta', BridgeEventType>>;
 type _BridgeEventIncludesPermissionAsked = Assert<Extends<'permission.asked', BridgeEventType>>;
 type _BridgeEventIncludesPermissionReplied = Assert<Extends<'permission.replied', BridgeEventType>>;
 type _BridgeEventIncludesQuestionAsked = Assert<Extends<'question.asked', BridgeEventType>>;
-type _SessionErrorTranslatorReceivesSessionErrorEvent = Assert<Extends<SessionErrorTranslatorEvent, SessionErrorEvent>>;
