@@ -1,16 +1,47 @@
 import { mkdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
+const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const bundleDir = path.join(rootDir, "bundle");
 const sourcePackageJsonPath = path.join(rootDir, "package.json");
+const sdkPackageName = "@wecode/bridge-runtime-sdk";
 const sourcePluginManifestPath = path.join(rootDir, "openclaw.plugin.json");
 const sourceReadmePath = path.join(rootDir, "README.bundle.md");
 const localhostDefaultGatewayUrl = "ws://localhost:8081/ws/agent";
+
+function resolveSdkPackageJsonPath() {
+  try {
+    return require.resolve(`${sdkPackageName}/package.json`);
+  } catch (error) {
+    throw new Error(`failed to resolve ${sdkPackageName}/package.json; run pnpm install before building`, {
+      cause: error,
+    });
+  }
+}
+
+async function readSdkPackageVersion() {
+  const sdkPackageJsonPath = resolveSdkPackageJsonPath();
+  let sdkPackageJson;
+  try {
+    sdkPackageJson = JSON.parse(await readFile(sdkPackageJsonPath, "utf8"));
+  } catch (error) {
+    throw new Error(`failed to read SDK package manifest: ${sdkPackageJsonPath}`, { cause: error });
+  }
+  if (sdkPackageJson.name !== sdkPackageName) {
+    throw new Error(`unexpected SDK package name in ${sdkPackageJsonPath}: ${sdkPackageJson.name}`);
+  }
+  const sdkPackageVersion = typeof sdkPackageJson.version === "string" ? sdkPackageJson.version.trim() : "";
+  if (!sdkPackageVersion) {
+    throw new Error(`package.json version is missing: ${sdkPackageJsonPath}`);
+  }
+  return sdkPackageVersion;
+}
 
 async function main() {
   const defaultGatewayUrl = process.env.MB_DEFAULT_GATEWAY_URL?.trim() || localhostDefaultGatewayUrl;
@@ -19,6 +50,7 @@ async function main() {
   if (!packageVersion) {
     throw new Error(`package.json version is missing: ${sourcePackageJsonPath}`);
   }
+  const sdkPackageVersion = await readSdkPackageVersion();
   await rm(bundleDir, { recursive: true, force: true });
   await mkdir(bundleDir, { recursive: true });
 
@@ -33,6 +65,7 @@ async function main() {
     define: {
       "globalThis.__MB_DEFAULT_GATEWAY_URL__": JSON.stringify(defaultGatewayUrl),
       "globalThis.__MB_PLUGIN_PACKAGE_VERSION__": JSON.stringify(packageVersion),
+      "globalThis.__MB_SDK_PACKAGE_VERSION__": JSON.stringify(sdkPackageVersion),
     },
   });
 

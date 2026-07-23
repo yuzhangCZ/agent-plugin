@@ -511,12 +511,12 @@ test('sdk runtime stop disconnects sdk runtime and resets public status', async 
   });
 });
 
-test('sdk runtime register falls back to pluginVersion when sdkVersion is unavailable', async () => {
+test('sdk runtime register reports injected sdk package version', async () => {
   const originalSdkPackageVersion = globalThis.__MB_SDK_PACKAGE_VERSION__;
   const originalPluginVersion = globalThis.__MB_PACKAGE_VERSION__;
   const { RegisterCaptureWebSocket, restore } = installRegisterCaptureWebSocket();
 
-  delete globalThis.__MB_SDK_PACKAGE_VERSION__;
+  globalThis.__MB_SDK_PACKAGE_VERSION__ = '1.2.3-sdk-test';
   delete globalThis.__MB_PACKAGE_VERSION__;
 
   try {
@@ -527,7 +527,7 @@ test('sdk runtime register falls back to pluginVersion when sdkVersion is unavai
     assert.equal(ws.sent[0].toolType, 'opencode');
     assert.equal(ws.sent[0].toolVersion, '9.9.9');
     assert.equal(ws.sent[0].pluginVersion, 'unknown');
-    assert.equal('sdkVersion' in ws.sent[0], false);
+    assert.equal(ws.sent[0].sdkVersion, '1.2.3-sdk-test');
 
     runtime.stop();
   } finally {

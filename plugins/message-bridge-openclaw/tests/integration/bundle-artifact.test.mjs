@@ -42,7 +42,7 @@ test("builds bundle-only artifact with publish metadata", async () => {
   assert.equal(manifest.openclaw.install.minHostVersion, sourceManifest.openclaw.install.minHostVersion);
   assert.match(bundleContent, /ws:\/\/localhost:8081\/ws\/agent/);
   assert.match(bundleContent, new RegExp(sourceManifest.version.replaceAll(".", "\\.")));
-  assert.doesNotMatch(bundleContent, new RegExp(sdkManifest.version.replaceAll(".", "\\.")));
+  assert.match(bundleContent, new RegExp(sdkManifest.version.replaceAll(".", "\\.")));
   assert.match(setupEntryContent, /definePluginEntry/);
   assert.match(bundleContent, /openclaw\/plugin-sdk/);
 });
