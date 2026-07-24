@@ -26,7 +26,7 @@ test("shared upstream validator rejects malformed tool_event envelopes", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.violation.code, "missing_required_field");
+  assert.equal(result.error.violation.code, "invalid_field_value");
   assert.equal(result.error.violation.field, "properties.questions[].question");
 });
 

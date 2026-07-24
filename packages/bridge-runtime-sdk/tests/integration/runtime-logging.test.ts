@@ -227,7 +227,7 @@ test('runtime logs invalid invoke rejection and gateway failures through observa
     toolSessionId: 'tool-1',
     violation: {
       violation: {
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         message: 'payload.text is required',
       },
     },
@@ -263,7 +263,7 @@ test('runtime logs invalid tool_event validation with event type and field befor
   assert.equal(validationLog?.meta?.messageType, 'tool_event');
   assert.equal(validationLog?.meta?.eventType, 'session.status');
   assert.equal(validationLog?.meta?.field, 'properties.sessionID');
-  assert.equal(validationLog?.meta?.code, 'missing_required_field');
+  assert.equal(validationLog?.meta?.code, 'invalid_field_value');
   assert.equal(validationLog?.meta?.toolSessionId, 'tool-invalid-event');
   assert.equal(driver.sent.length, 0);
 });

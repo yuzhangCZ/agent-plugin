@@ -258,7 +258,7 @@ test('wire violation assertions cover the shared error envelope', () => {
     assertWireViolationShape(
       {
         stage: 'payload',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'welinkSessionId',
         message: 'welinkSessionId is required',
         messageType: 'invoke',
@@ -266,7 +266,7 @@ test('wire violation assertions cover the shared error envelope', () => {
       },
       {
         stage: 'payload',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'welinkSessionId',
         message: 'welinkSessionId is required',
         messageType: 'invoke',

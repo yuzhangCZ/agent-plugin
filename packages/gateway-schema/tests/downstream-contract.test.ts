@@ -236,7 +236,7 @@ test('normalizeDownstream rejects missing create_session welinkSessionId', () =>
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'welinkSessionId',
     messageType: 'invoke',
     action: 'create_session',
@@ -279,7 +279,7 @@ test('normalizeDownstream rejects non-string chat assistantId', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.assistantId',
     messageType: 'invoke',
     action: 'chat',
@@ -502,7 +502,7 @@ test('normalizeDownstream rejects non-boolean chat suppressReply', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'suppressReply',
     messageType: 'invoke',
     action: 'chat',
@@ -523,7 +523,7 @@ test('normalizeDownstream rejects array chat extParameters', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
@@ -544,7 +544,7 @@ test('normalizeDownstream rejects null chat extParameters', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
@@ -565,7 +565,7 @@ test('normalizeDownstream rejects primitive chat extParameters', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
@@ -586,7 +586,7 @@ test('normalizeDownstream rejects non-json-object chat extParameters like Date',
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.extParameters',
     messageType: 'invoke',
     action: 'chat',
@@ -680,7 +680,7 @@ test('normalizeDownstream rejects non JSON object platformExtParam', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.extParameters.platformExtParam',
     messageType: 'invoke',
     action: 'chat',
@@ -711,7 +711,7 @@ test('normalizeDownstream rejects non object platformExtParam values', () => {
     assert.equal(result.ok, false, key);
     assertWireViolationShape(result.error, {
       stage: 'payload',
-      code: 'invalid_field_type',
+      code: 'invalid_field_value',
       field: `payload.extParameters.${key}`,
       messageType: 'invoke',
       action: 'chat',
@@ -758,7 +758,7 @@ test('normalizeDownstream rejects query_slash_commands without toolSessionId', (
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'toolSessionId',
     messageType: 'invoke',
     action: 'query_slash_commands',
@@ -1046,7 +1046,7 @@ test('normalizeDownstream rejects serialized question_reply answer arrays with n
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.answer',
     messageType: 'invoke',
     action: 'question_reply',
@@ -1065,7 +1065,7 @@ test('normalizeDownstream rejects question_reply without answer or answers', () 
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.answers',
     messageType: 'invoke',
     action: 'question_reply',
@@ -1147,7 +1147,7 @@ test('normalizeDownstream rejects question_reply when both questionId and toolCa
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'payload.questionId',
     messageType: 'invoke',
     action: 'question_reply',

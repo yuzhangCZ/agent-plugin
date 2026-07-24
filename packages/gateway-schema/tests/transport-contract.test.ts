@@ -145,7 +145,7 @@ test('validateGatewayUpstreamTransportMessage rejects legacy slash_commands_resu
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'transport',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'toolSessionId',
     messageType: 'slash_commands_result',
   });
@@ -220,7 +220,7 @@ test('validateGatewayUpstreamTransportMessage rejects non-string register macAdd
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'transport',
-    code: 'invalid_field_type',
+    code: 'invalid_field_value',
     field: 'macAddress',
     messageType: 'register',
   });
@@ -253,7 +253,7 @@ test('validateGatewayUpstreamTransportMessage rejects malformed tool_event envel
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'event',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'properties.sessionID',
     messageType: 'session.status',
     eventType: 'session.status',

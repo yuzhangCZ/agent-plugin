@@ -172,7 +172,7 @@ test('inbound frame router surfaces invalid business frames without transport si
       violation: {
         violation: {
           stage: 'payload',
-          code: 'missing_required_field',
+          code: 'invalid_field_value',
           field: 'payload.text',
           message: 'payload.text is required',
           messageType: 'invoke',

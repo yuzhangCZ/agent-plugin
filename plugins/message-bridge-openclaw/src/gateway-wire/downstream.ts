@@ -12,7 +12,7 @@ import { asRecord, asTrimmedString, type PlainObject } from "../utils/type-guard
 export * from "../contracts/downstream.js";
 
 export interface DownstreamNormalizationError {
-  code: "unsupported_message" | "unsupported_action" | "missing_required_field" | "invalid_payload";
+  code: "unsupported_message" | "unsupported_action" | "invalid_payload";
   message: string;
   stage: "message" | "payload";
   field: string;
@@ -53,8 +53,7 @@ function toNormalizationError(error: WireContractViolation): DownstreamNormaliza
   return {
     code:
       error.violation.code === "unsupported_message" ||
-      error.violation.code === "unsupported_action" ||
-      error.violation.code === "missing_required_field"
+      error.violation.code === "unsupported_action"
         ? error.violation.code
         : "invalid_payload",
     message: error.violation.message,

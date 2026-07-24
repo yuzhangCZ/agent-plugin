@@ -47,10 +47,6 @@ function createOutboundCoordinator(input: {
       factProjector: new DefaultFactToSkillEventProjector(),
       eventProjector: new DefaultSkillEventToGatewayMessageProjector(),
       observation: input.observation,
-      toolDoneCompatDelay: {
-        sleep: async () => {},
-        delayMs: 100,
-      },
     },
     factEnricher,
     new DefaultRunTerminalSignalProjector(),

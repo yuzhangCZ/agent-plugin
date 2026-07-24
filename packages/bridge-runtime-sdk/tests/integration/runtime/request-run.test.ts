@@ -405,49 +405,8 @@ test('request run projects session.error exactly once before terminal tool_error
   });
 });
 
-test('request run delays terminal tool_done by 100ms', async () => {
+test('request run sends terminal tool_error', async () => {
   const connection = new FakeGatewayClient();
-  const delay = createDeferred<void>();
-  const delayCalls: number[] = [];
-  const provider = createProvider();
-  provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
-  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
-    toolDoneCompatDelay: {
-      sleep(ms) {
-        delayCalls.push(ms);
-        return delay.promise;
-      },
-    },
-  }));
-
-  await runtime.start();
-  connection.emitMessage({
-    type: 'invoke',
-    action: 'chat',
-    welinkSessionId: 'welink-1',
-    payload: { toolSessionId: 'tool-1', text: 'hi' },
-  });
-  await flushEvents();
-
-  assert.deepEqual(delayCalls, [100]);
-  assert.equal(connection.sent.some((message) => (
-    typeof message === 'object' && message !== null && 'type' in message && message.type === 'tool_done'
-  )), false);
-  assert.equal(runtime.getDiagnostics().uplinks.some((message) => message.type === 'tool_done'), false);
-
-  delay.resolve();
-  await flushEvents();
-
-  assert.deepEqual(connection.sent.at(-1), {
-    type: 'tool_done',
-    toolSessionId: 'tool-1',
-  });
-  assert.equal(runtime.getDiagnostics().uplinks.at(-1)?.type, 'tool_done');
-});
-
-test('request run sends terminal tool_error without compatibility delay', async () => {
-  const connection = new FakeGatewayClient();
-  const delayCalls: number[] = [];
   const provider = createProvider();
   provider.runMessage = async () => createFakeRun([], {
     outcome: 'failed',
@@ -456,14 +415,7 @@ test('request run sends terminal tool_error without compatibility delay', async 
       message: 'provider failed',
     },
   });
-  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
-    toolDoneCompatDelay: {
-      sleep(ms) {
-        delayCalls.push(ms);
-        return Promise.resolve();
-      },
-    },
-  }));
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
 
   await runtime.start();
   connection.emitMessage({
@@ -474,7 +426,6 @@ test('request run sends terminal tool_error without compatibility delay', async 
   });
   await flushEvents();
 
-  assert.deepEqual(delayCalls, []);
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
     toolSessionId: 'tool-1',
@@ -608,37 +559,6 @@ test('provider failure releases only its concurrent request run before abort_ses
     )),
     'first request run did not settle during cleanup',
   );
-});
-
-test('request run skips terminal tool_done delay when compatibility delay is disabled', async () => {
-  const connection = new FakeGatewayClient();
-  const delayCalls: number[] = [];
-  const provider = createProvider();
-  provider.runMessage = async () => createFakeRun([], { outcome: 'completed' });
-  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection, {
-    toolDoneCompatDelay: {
-      sleep(ms) {
-        delayCalls.push(ms);
-        return Promise.resolve();
-      },
-      delayMs: 0,
-    },
-  }));
-
-  await runtime.start();
-  connection.emitMessage({
-    type: 'invoke',
-    action: 'chat',
-    welinkSessionId: 'welink-1',
-    payload: { toolSessionId: 'tool-1', text: 'hi' },
-  });
-  await flushEvents();
-
-  assert.deepEqual(delayCalls, []);
-  assert.deepEqual(connection.sent.at(-1), {
-    type: 'tool_done',
-    toolSessionId: 'tool-1',
-  });
 });
 
 test('terminal tool_error carries session_not_found reason when provider returns structured stale-session error', async () => {

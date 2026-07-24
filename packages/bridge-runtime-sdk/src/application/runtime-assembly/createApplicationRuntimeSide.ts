@@ -1,5 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
-
 import {
   ObservedProviderCommandHandlers,
   ProviderApiAdapter,
@@ -20,6 +18,7 @@ import {
   DefaultSkillEventToGatewayMessageProjector,
   ToolErrorMessageCatalog,
 } from '../projectors/index.ts';
+import { ToolErrorReporter } from '../reporters/index.ts';
 import { RuntimeCommandDispatcher } from '../RuntimeCommandDispatcher.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
 import { RuntimeCoreService } from '../runtime/RuntimeCoreService.ts';
@@ -35,19 +34,17 @@ import {
 } from '../usecases/index.ts';
 import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
-import type { BridgeRuntimeInternalOptions } from './runtime-options.types.ts';
-import { DEFAULT_TOOL_DONE_COMPAT_DELAY_MS } from '../constants/runtime.ts';
 import { resolveRequestRunPolicy } from './request-run-policy.ts';
 
 // eslint-disable-next-line max-lines-per-function -- composition root 需要集中表达 runtime 依赖装配关系。
 export function createApplicationRuntimeSide(
   options: BridgeRuntimeOptions,
-  internalOptions: BridgeRuntimeInternalOptions,
   observation: DefaultRuntimeObservation,
   sink: GatewayOutboundSinkAdapter,
 ): {
   core: RuntimeCoreService;
   commandFailureToolErrorProjector: CommandFailureToolErrorProjector;
+  toolErrorReporter: ToolErrorReporter;
 } {
   const sessionRegistry = new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry = new InMemoryPendingInteractionRegistry();
@@ -58,11 +55,8 @@ export function createApplicationRuntimeSide(
   const eventProjector = new DefaultSkillEventToGatewayMessageProjector();
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
   const terminalProjector = new DefaultRunTerminalSignalProjector();
-  const toolDoneCompatDelay = {
-    sleep: internalOptions.toolDoneCompatDelay?.sleep ?? sleep,
-    delayMs: internalOptions.toolDoneCompatDelay?.delayMs ?? DEFAULT_TOOL_DONE_COMPAT_DELAY_MS,
-  };
   const toolErrorMessageCatalog = new ToolErrorMessageCatalog();
+  const toolErrorReporter = new ToolErrorReporter(sink, observation, toolErrorMessageCatalog);
   const commandFailureToolErrorProjector = new CommandFailureToolErrorProjector(toolErrorMessageCatalog);
   const requestRunFailureToolErrorProjector = new RequestRunFailureToolErrorProjector(toolErrorMessageCatalog);
   const validator = new FactSequenceValidator();
@@ -79,8 +73,8 @@ export function createApplicationRuntimeSide(
       sink,
       factProjector,
       eventProjector,
+      toolErrorReporter,
       observation,
-      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,
@@ -94,8 +88,8 @@ export function createApplicationRuntimeSide(
       sink,
       factProjector,
       eventProjector,
+      toolErrorReporter,
       observation,
-      toolDoneCompatDelay,
     },
     factEnricher,
     terminalProjector,
@@ -137,5 +131,6 @@ export function createApplicationRuntimeSide(
       observation,
     }),
     commandFailureToolErrorProjector,
+    toolErrorReporter,
   };
 }

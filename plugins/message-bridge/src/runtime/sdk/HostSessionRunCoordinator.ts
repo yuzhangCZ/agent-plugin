@@ -78,72 +78,46 @@ export class HostSessionRunCoordinator {
   }
 
   private async runTask(task: HostSessionRunTask): Promise<void> {
-    if (task.handle.tryStartPrompt()) {
-      this.logDebug('provider_adapter.run_queue.prompt_started', task.handle);
-      await this.runStartedPromptTask(task);
-    } else {
-      this.closeUnexpectedStartableTask(task.handle);
+    const promptStarted = this.runOrAbort(task.handle);
+    if (promptStarted) {
+      await this.waitForPromptOrTimeout(task.handle, task.work);
     }
     await task.handle.result();
   }
 
-  private async runStartedPromptTask(task: HostSessionRunTask): Promise<void> {
-    let workFinished = false;
-    const workPromise = task.work()
-      .then(() => {
-        workFinished = true;
-      })
-      .catch((error) => {
-        workFinished = true;
-        if (task.handle.hasForceClosed()) {
-          this.logger?.debug?.('provider_adapter.run_queue.prompt_task_late_failure_ignored', {
-            hostSessionId: task.handle.hostSessionId,
-            anchorSessionId: task.handle.anchorSessionId,
-            runId: task.handle.runId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return;
-        }
-        this.handlePromptTaskFailure(task, error);
-      })
+  /**
+   * 决定如何处理当前 task：跳过启动。
+   * @returns 是否启动了宿主 prompt work
+   * @remarks abort 收口已由 `ActiveRunRegistry.abortAllByHostSession` 直接调用 `finishAbort` 完成；
+   * `tryStartPrompt` 在 `abortRequested` 或 `forceClosed` 时返回 false，因此此处不再重复检查。
+   */
+  private runOrAbort(handle: ActiveProviderRunHandle): boolean {
+    if (handle.tryStartPrompt()) {
+      this.logDebug('provider_adapter.run_queue.prompt_started', handle);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 等待宿主 prompt work 与 final idle timeout 的竞争结果。
+   * @remarks abort 已在 enqueue 阶段由 `abortAllByHostSession` 调用 `finishAbort` 收口，此处不再重复。
+   * task 在 force-closed 之后才返回的 detached 警告由 handle 自身在 `markPromptTaskFinished` 中记录。
+   */
+  private async waitForPromptOrTimeout(
+    handle: ActiveProviderRunHandle,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    const workPromise = handle
+      .run(work)
       .finally(() => {
-        task.handle.markPromptTaskFinished();
+        handle.markPromptTaskFinished();
       });
 
     await Promise.race([
       workPromise,
-      task.handle.waitPromptFinalIdleTimeout(),
+      handle.waitPromptFinalIdleTimeout(),
     ]);
-
-    if (!workFinished && task.handle.hasForceClosed()) {
-      this.logger?.warn?.('provider_adapter.run_queue.prompt_task_detached_after_final_idle', {
-        hostSessionId: task.handle.hostSessionId,
-        anchorSessionId: task.handle.anchorSessionId,
-        runId: task.handle.runId,
-      });
-    }
-  }
-
-  private handlePromptTaskFailure(task: HostSessionRunTask, error: unknown): void {
-    this.logger?.error?.('provider_adapter.run_queue.prompt_task_failed', {
-      hostSessionId: task.handle.hostSessionId,
-      anchorSessionId: task.handle.anchorSessionId,
-      runId: task.handle.runId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    task.handle.forceFailAndClose({
-      code: 'internal_error',
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  private closeUnexpectedStartableTask(handle: ActiveProviderRunHandle): void {
-    this.logDebug('provider_adapter.run_queue.prompt_start_skipped', handle, {
-      canStartPrompt: handle.canStartPrompt(),
-    });
-    if (handle.canStartPrompt()) {
-      handle.forceAbortAndClose('abort_session');
-    }
   }
 
   private shiftProcessedTask(hostSessionId: string, queue: HostSessionRunTask[]): void {

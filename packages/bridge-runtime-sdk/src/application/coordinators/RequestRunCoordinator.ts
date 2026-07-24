@@ -1,5 +1,6 @@
 import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
+import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../constants/gateway-messages.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
@@ -8,7 +9,6 @@ import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
-import { delayBeforeTerminalToolDone } from './terminal-signal-delay.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 
@@ -65,8 +65,14 @@ export class RequestRunCoordinator {
           toolSessionId: input.toolSessionId,
           welinkSessionId: input.welinkSessionId,
         });
-        this.pipeline.observation.uplinkEmitted(uplink);
-        await this.pipeline.sink.send(uplink);
+        this.pipeline.toolErrorReporter.report({
+          stage: 'request_lifecycle',
+          level: 'P1',
+          welinkSessionId: uplink.welinkSessionId,
+          toolSessionId: uplink.toolSessionId,
+          error: uplink.error,
+          reason: uplink.reason,
+        });
       }
       throw factsResult.reason;
     }
@@ -82,7 +88,17 @@ export class RequestRunCoordinator {
       welinkSessionId: input.welinkSessionId,
       runId: input.runId,
     });
-    await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
+    if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
+      this.pipeline.toolErrorReporter.report({
+        stage: 'request_terminal',
+        level: 'P0',
+        welinkSessionId: uplink.welinkSessionId,
+        toolSessionId: uplink.toolSessionId,
+        error: uplink.error,
+        reason: uplink.reason,
+      });
+      return;
+    }
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }

@@ -42,23 +42,32 @@ export class CommandFailureToolErrorProjector {
     if (!input.summary.toolSessionId && !input.summary.welinkSessionId) {
       return null;
     }
-    if (!this.isSupportedAction(input.summary.action)) {
+    const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
+    const shouldKeepWelinkSessionId = unsupportedDownstreamAction || input.summary.action === 'create_session';
+    if (!this.isSupportedAction(input.summary.action) && !unsupportedDownstreamAction) {
       return null;
     }
 
-    const errorMessage = this.resolveErrorMessage(input.error);
+    const errorMessage = this.resolveErrorMessage(input.error, unsupportedDownstreamAction);
     if (!errorMessage) {
       return null;
     }
 
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
+      ...(shouldKeepWelinkSessionId && input.summary.welinkSessionId
+        ? { welinkSessionId: input.summary.welinkSessionId }
+        : {}),
       ...(input.summary.toolSessionId ? { toolSessionId: input.summary.toolSessionId } : {}),
       error: errorMessage,
     };
   }
 
-  private resolveErrorMessage(error: unknown): string | null {
+  private resolveErrorMessage(error: unknown, unsupportedDownstreamAction: boolean): string | null {
+    if (unsupportedDownstreamAction) {
+      return this.catalog.get('unsupported_action');
+    }
+
     if (error instanceof RuntimeContractError) {
       switch (error.code) {
         case 'run_already_active':
@@ -86,5 +95,9 @@ export class CommandFailureToolErrorProjector {
       || action === 'permission_reply'
       || action === 'close_session'
       || action === 'abort_session';
+  }
+
+  private isUnsupportedDownstreamAction(error: unknown): boolean {
+    return error instanceof Error && error.message.startsWith('Unsupported downstream action:');
   }
 }

@@ -7,7 +7,6 @@ import type {
   PermissionReplyFact,
   QuestionAskFact,
   QuestionOption,
-  SessionErrorFact,
   SessionTitleFact,
   TextDeltaFact,
   TextDoneFact,
@@ -16,9 +15,6 @@ import type {
   ToolUpdateFact,
 } from '@wecode/bridge-runtime-sdk';
 import { asJsonObject, asNumber, asRecord, asString, asTrimmedString } from '../../utils/type-guards.js';
-import type {
-  SessionErrorEvent,
-} from '../../contracts/upstream-events.js';
 import type {
   RawEventTranslation,
   TranslationContext,
@@ -31,33 +27,12 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function buildDeterministicEnvelopeMessageId(prefix: string, token: string): string {
-  return `${prefix}:${token}`;
-}
-
 function buildSyntheticPartId(): string {
   return `prt_${randomUUID().replaceAll('-', '')}`;
 }
 
 function resolveGeneratedPartId(properties: Record<string, unknown> | undefined): string | undefined {
   return asTrimmedString(properties?.partID);
-}
-
-function resolveSessionError(error: SessionErrorEvent['properties']['error']): SessionErrorFact['error'] | undefined {
-  if (!asRecord(error)) {
-    return;
-  }
-
-  const code = asTrimmedString(error?.name) ?? 'UnknownError';
-  let message = `${code}. ${asTrimmedString(error?.data?.message)}`;
-  if (error?.name === 'APIError' && error?.data?.statusCode) {
-    message += ` statusCode=${error.data.statusCode}`;
-  }
-
-  return {
-    code: 'internal_error',
-    message,
-  };
 }
 
 function buildFactRoutingFields(
@@ -79,7 +54,6 @@ function rejectFactWithoutOpenMessage(
   input: {
     trackingSessionId: string;
     messageId: string;
-    envelopeMessageId: string;
     partId?: string;
     partType?: string;
   },
@@ -93,7 +67,6 @@ function rejectFactWithoutOpenMessage(
   return {
     recognized: true,
     toolSessionId: context.factSessionContext.anchorSessionId,
-    envelopeMessageId: input.envelopeMessageId,
     facts: [],
   };
 }
@@ -148,7 +121,6 @@ export class AssistantMessageEventTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [],
       };
     }
@@ -202,7 +174,6 @@ export class AssistantMessageEventTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: messageId,
       facts,
       terminalCandidateMessageId,
     };
@@ -234,7 +205,6 @@ export class MessagePartDeltaTranslator implements EventTranslator {
         {
           trackingSessionId,
           messageId,
-          envelopeMessageId: messageId,
           partId,
           partType: kind === 'reasoning' ? 'reasoning' : 'text',
         },
@@ -262,7 +232,6 @@ export class MessagePartDeltaTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: messageId,
       facts: [fact],
     };
   }
@@ -291,7 +260,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [],
       };
     }
@@ -302,7 +270,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
         return rejectFactWithoutOpenMessage(context, 'text_done_without_open_message', {
           trackingSessionId,
           messageId,
-          envelopeMessageId: messageId,
           partId,
           partType,
         });
@@ -310,7 +277,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [{
           type: 'text.done',
           ...factRoutingFields,
@@ -330,7 +296,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
         return {
           recognized: true,
           toolSessionId: context.factSessionContext.anchorSessionId,
-          envelopeMessageId: messageId,
           facts: [],
         };
       }
@@ -338,7 +303,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
         return rejectFactWithoutOpenMessage(context, 'thinking_done_without_open_message', {
           trackingSessionId,
           messageId,
-          envelopeMessageId: messageId,
           partId,
           partType,
         });
@@ -346,7 +310,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [{
           type: 'thinking.done',
           ...factRoutingFields,
@@ -371,7 +334,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
         return rejectFactWithoutOpenMessage(context, 'tool_update_without_open_message', {
           trackingSessionId,
           messageId,
-          envelopeMessageId: messageId,
           partId,
           partType,
         });
@@ -387,7 +349,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [{
           type: 'tool.update',
           ...factRoutingFields,
@@ -408,7 +369,6 @@ export class MessagePartUpdatedTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: messageId,
       facts: [],
     };
   }
@@ -442,7 +402,6 @@ export class QuestionAskedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: buildDeterministicEnvelopeMessageId('question', questionId),
         facts: [],
       };
     }
@@ -456,7 +415,6 @@ export class QuestionAskedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: messageId,
         facts: [],
       };
     }
@@ -502,7 +460,6 @@ export class QuestionAskedTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: messageId,
       facts: [fact],
     };
   }
@@ -529,7 +486,6 @@ export class PermissionAskedTranslator implements EventTranslator {
       return {
         recognized: true,
         toolSessionId: context.factSessionContext.anchorSessionId,
-        envelopeMessageId: buildDeterministicEnvelopeMessageId('permission', permissionId),
         facts: [],
       };
     }
@@ -563,7 +519,6 @@ export class PermissionAskedTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: messageId ?? buildDeterministicEnvelopeMessageId('permission', permissionId),
       facts: [fact],
     };
   }
@@ -598,7 +553,6 @@ export class PermissionRepliedTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: buildDeterministicEnvelopeMessageId('permission-reply', permissionId),
       facts: [fact],
     };
   }
@@ -631,41 +585,6 @@ export class SessionUpdatedTranslator implements EventTranslator {
     return {
       recognized: true,
       toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: buildDeterministicEnvelopeMessageId('session-title', rawSessionId),
-      facts: [fact],
-    };
-  }
-}
-
-/**
- * 翻译 detached `session.error` 为 outbound session error fact。
- * @remarks
- * 该事件不进入 active run，避免和 prompt terminal `info.error` 对同源错误重复记账。
- */
-export class SessionErrorTranslator implements EventTranslator {
-  translate(context: TranslationContext<SessionErrorEvent>): RawEventTranslation {
-    const { properties } = context.event;
-    const resolvedError = resolveSessionError(properties.error);
-    const rawSessionId = asTrimmedString(properties.sessionID);
-    if (!rawSessionId || !resolvedError) {
-      return { recognized: true, facts: [] };
-    }
-
-    const factRoutingFields = buildFactRoutingFields(context);
-    const fact: SessionErrorFact = {
-      type: 'session.error',
-      ...factRoutingFields,
-      error: {
-        code: resolvedError.code,
-        message: resolvedError.message,
-      },
-      raw: properties,
-    };
-
-    return {
-      recognized: true,
-      toolSessionId: context.factSessionContext.anchorSessionId,
-      envelopeMessageId: buildDeterministicEnvelopeMessageId('session-error', rawSessionId),
       facts: [fact],
     };
   }

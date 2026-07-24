@@ -77,13 +77,9 @@ export interface ChatExecutionContextResolver {
 export interface ExecutionSessionInvalidationPort {
   invalidateAfterFailure(input: {
     conversationId: string;
-    hostSessionId: string;
-    error: unknown;
-  }): void;
-}
-
-export interface EventAnchorResolver {
-  resolveForEvent(opencodeSessionId: string): { anchor: string } | undefined;
+     hostSessionId: string;
+     error: unknown;
+   }): void;
 }
 
 export interface SessionAttachmentPort {
@@ -300,8 +296,8 @@ export class DefaultChatExecutionContextResolver implements ChatExecutionContext
 
     try {
       const session = await this.dependencies.hostSessionQueryPort.getSession(existing.activeOpencodeSessionId);
-      // 普通 chat 命中已有 binding 也代表该 anchor 最近使用了此 host session；
-      // TUI detached outbound run 会依赖 attached owner 选择回流目标。
+      // 普通 chat 命中已有 binding 也代表该 anchor 最近使用了此 host session，
+      // 需要刷新 attached owner 以保留最近一次 anchor 归属。
       await this.refreshAttachedOwner(anchor, existing.activeOpencodeSessionId);
       return {
         opencodeSessionId: existing.activeOpencodeSessionId,
@@ -414,19 +410,5 @@ export class DefaultExecutionSessionInvalidationPort implements ExecutionSession
       ...(typeof evidence?.sourceOperation === 'string' ? { sourceOperation: evidence.sourceOperation } : {}),
       ...(typeof evidence?.sourceErrorCode === 'string' ? { sourceErrorCode: evidence.sourceErrorCode } : {}),
     };
-  }
-}
-
-/**
- * event 归属解析器。
- */
-export class DefaultEventAnchorResolver implements EventAnchorResolver {
-  constructor(private readonly dependencies: {
-    ownershipResolver: OpencodeSessionOwnershipResolver;
-  }) {}
-
-  resolveForEvent(opencodeSessionId: string): { anchor: string } | undefined {
-    const anchor = this.dependencies.ownershipResolver.resolveAttachedAnchor(opencodeSessionId);
-    return anchor ? { anchor } : undefined;
   }
 }

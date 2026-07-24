@@ -165,7 +165,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
     assertWireViolationShape(
       {
         stage: 'payload',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'welinkSessionId',
         message: 'welinkSessionId is required',
         messageType: 'invoke',
@@ -173,7 +173,7 @@ test('shared fixtures and assertions expose the baseline protocol helpers', asyn
       },
       {
         stage: 'payload',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'welinkSessionId',
         message: 'welinkSessionId is required',
         messageType: 'invoke',

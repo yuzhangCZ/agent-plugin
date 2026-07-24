@@ -1,14 +1,12 @@
-import type { ProviderRuntimeContext } from '@wecode/bridge-runtime-sdk';
+/* eslint-disable max-classes-per-file -- 事件路由策略集中共享解析上下文，拆分需独立架构任务。 */
 import { getErrorMessage } from '../../utils/error.js';
 import { asTrimmedString } from '../../utils/type-guards.js';
 import type { SubagentSessionMapper } from '../../session/SubagentSessionMapper.js';
 import type { HostEventPort } from '../../port/session-isolation/inbound/index.js';
-import type { EventAnchorResolver } from './SdkChatControlPlane.js';
 import type { BridgeEvent } from '../types.js';
 import type { BridgeLogger } from '../AppLogger.js';
 import type {
   FactSessionContext,
-  OutboundTargetResolverPort,
   PendingInteractionRecorderPort,
   ProtocolDiagnosticPort,
   SessionIdentityResolution,
@@ -22,9 +20,8 @@ import type {
   ActiveRunRegistry,
 } from './OpenCodeProviderAdapter.run.js';
 import { EventTranslatorRegistry } from './OpenCodeProviderAdapter.translation.js';
-import type { TuiOutboundRunRegistry } from './OpenCodeProviderAdapter.outbound-run.js';
 
-type EventClass = 'run_scoped' | 'run_scoped_with_outbound_fallback' | 'run_adjacent_metadata' | 'control_metadata' | 'unsupported';
+type EventClass = 'run_scoped' | 'run_adjacent_metadata' | 'control_metadata' | 'unsupported';
 
 type EventRoutingState = {
   event: BridgeEvent;
@@ -33,7 +30,6 @@ type EventRoutingState = {
   eventClass: EventClass;
   activeRun?: ActiveProviderRunHandle;
   factSessionContext: FactSessionContext;
-  runtimeContext: ProviderRuntimeContext | null;
   eventRouteSummary: Record<string, unknown>;
   translationContext: TranslationContext;
 };
@@ -42,19 +38,7 @@ type EventDropReason =
   | 'missing_raw_session_id'
   | 'missing_active_run'
   | 'unsupported_event'
-  | 'missing_runtime_context'
-  | 'missing_outbound_target'
-  | 'empty_outbound_translation';
-
-function toAsyncFacts<T>(facts: T[]): AsyncIterable<T> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const fact of facts) {
-        yield fact;
-      }
-    },
-  };
-}
+  | 'missing_session_identity';
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
@@ -149,7 +133,7 @@ function classifyEvent(type: BridgeEvent['type']): EventClass {
     case 'permission.asked':
     case 'permission.replied':
     case 'session.error':
-      return 'run_scoped_with_outbound_fallback';
+      return 'run_scoped';
     case 'session.updated':
       return 'run_adjacent_metadata';
     case 'session.created':
@@ -284,20 +268,6 @@ export class FactRoutingContextAssembler {
 }
 
 /**
- * 为无 active run 的 TUI fallback 事件查找 outbound 兜底目标。
- * @remarks
- * 只允许已 attach 的宿主会话 fallback 到对应 anchor，避免把游离事件发给错误会话。
- */
-export class DefaultOutboundTargetResolver implements OutboundTargetResolverPort {
-  constructor(private readonly dependencies: { eventAnchorResolver: EventAnchorResolver }) {}
-
-  resolve(hostSessionId: string): { anchorSessionId: string } | undefined {
-    const resolved = this.dependencies.eventAnchorResolver.resolveForEvent(hostSessionId);
-    return resolved?.anchor ? { anchorSessionId: resolved.anchor } : undefined;
-  }
-}
-
-/**
  * 记录 `session.created` 中的父子会话关系。
  * @remarks
  * 该类只更新子 agent 映射，不产生 provider fact。
@@ -339,8 +309,9 @@ export class SessionCreatedRecorder {
 /**
  * OpenCode raw event 的路由协调器。
  * @remarks
- * 负责 session 身份解析、active run 优先路由、TUI outbound fallback 和诊断日志；
+ * 负责 session 身份解析、active run 路由和诊断日志；
  * 具体 raw event -> fact 映射由 translator registry 完成。
+ * 无 active run 的事件按 `missing_active_run` 丢弃。
  */
 export class ProviderEventCoordinator {
   constructor(private readonly dependencies: {
@@ -352,15 +323,11 @@ export class ProviderEventCoordinator {
     factRoutingContextAssembler: FactRoutingContextAssembler;
     sessionCreatedRecorder: SessionCreatedRecorder;
     activeRunRegistry: ActiveRunRegistry;
-    outboundTargetResolver: OutboundTargetResolverPort;
     assistantMessageState: AssistantMessageStateStore;
     partKindState: PartKindStore;
-    tuiOutboundRunRegistry: TuiOutboundRunRegistry;
     activeRunTranslatorRegistry: EventTranslatorRegistry;
-    outboundTranslatorRegistry: EventTranslatorRegistry;
     sessionIsolationHostEventPort?: HostEventPort;
     pendingInteractionRecorder?: PendingInteractionRecorderPort;
-    getRuntimeContext: () => ProviderRuntimeContext | null;
   }) {}
 
   async handleEvent(event: BridgeEvent): Promise<boolean> {
@@ -374,10 +341,7 @@ export class ProviderEventCoordinator {
       return false;
     }
     this.logEventReceived(routingState);
-    if (this.tryRouteToActiveRun(routingState)) {
-      return true;
-    }
-    return this.tryRouteToOutbound(routingState);
+    return this.tryRouteToActiveRun(routingState);
   }
 
   private recordSessionCreatedIfNeeded(event: BridgeEvent): boolean {
@@ -398,7 +362,7 @@ export class ProviderEventCoordinator {
         reason: 'unsupported_event',
         routeSummary: {
           eventType: event.type,
-          ...(rawSessionId ? { rawSessionId } : {}),
+          rawSessionId
         },
       });
       return undefined;
@@ -406,10 +370,7 @@ export class ProviderEventCoordinator {
 
     const rawSessionId = this.dependencies.rawSessionLocator.locate(event);
     if (!rawSessionId) {
-      this.logEventDropped({
-        event,
-        reason: 'missing_raw_session_id',
-      });
+      this.logEventDropped({ event, reason: 'missing_raw_session_id' });
       return undefined;
     }
     const resolution = await this.dependencies.identityResolver.resolve(rawSessionId);
@@ -423,9 +384,9 @@ export class ProviderEventCoordinator {
       });
     }
 
-    const activeRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
+    const headRun = this.dependencies.activeRunRegistry.getHeadByHostSession(resolution.hostSessionId);
+    const activeRun = headRun?.hasPromptStarted() ? headRun : undefined;
     const factSessionContext = this.buildFactSessionContext(resolution, activeRun);
-    const runtimeContext = this.dependencies.getRuntimeContext();
     const eventRouteSummary = buildEventRouteSummary({
       event,
       rawSessionId,
@@ -439,9 +400,8 @@ export class ProviderEventCoordinator {
       rawSessionId,
       resolution,
       eventClass,
-      ...(activeRun ? { activeRun } : {}),
+      activeRun,
       factSessionContext,
-      runtimeContext,
       eventRouteSummary,
       translationContext,
     };
@@ -491,10 +451,7 @@ export class ProviderEventCoordinator {
   }
 
   private logEventReceived(routingState: EventRoutingState): void {
-    this.dependencies.logger.debug?.('provider_adapter.event.received', {
-      ...routingState.eventRouteSummary,
-      hasRuntimeContext: Boolean(routingState.runtimeContext),
-    });
+    this.dependencies.logger.debug?.('provider_adapter.event.received', routingState.eventRouteSummary);
   }
 
   private logEventDropped(input: {
@@ -510,13 +467,11 @@ export class ProviderEventCoordinator {
 
   private tryRouteToActiveRun(routingState: EventRoutingState): boolean {
     if (!routingState.activeRun) {
-      if (routingState.eventClass !== 'run_scoped_with_outbound_fallback') {
-        this.logEventDropped({
-          event: routingState.event,
-          reason: 'missing_active_run',
-          routeSummary: routingState.eventRouteSummary,
-        });
-      }
+      this.logEventDropped({
+        event: routingState.event,
+        reason: 'missing_active_run',
+        routeSummary: routingState.eventRouteSummary,
+      });
       return false;
     }
     if (!this.canRouteToActiveRun(routingState.eventClass)) {
@@ -556,92 +511,6 @@ export class ProviderEventCoordinator {
 
   private canRouteToActiveRun(eventClass: EventClass): boolean {
     return eventClass !== 'control_metadata' && eventClass !== 'unsupported';
-  }
-
-  private async tryRouteToOutbound(routingState: EventRoutingState): Promise<boolean> {
-    if (routingState.eventClass !== 'run_scoped_with_outbound_fallback') {
-      return false;
-    }
-    if (!routingState.runtimeContext) {
-      this.logEventDropped({
-        event: routingState.event,
-        reason: 'missing_runtime_context',
-        routeSummary: routingState.eventRouteSummary,
-      });
-      return false;
-    }
-    const emitOutboundRun = routingState.runtimeContext.outbound.emitOutboundRun;
-    if (typeof emitOutboundRun !== 'function' && routingState.event.type !== 'session.error') {
-      this.logEventDropped({
-        event: routingState.event,
-        reason: 'missing_runtime_context',
-        routeSummary: routingState.eventRouteSummary,
-      });
-      return false;
-    }
-
-    const outboundTarget = this.dependencies.outboundTargetResolver.resolve(routingState.resolution.hostSessionId);
-    if (!outboundTarget) {
-      this.logEventDropped({
-        event: routingState.event,
-        reason: 'missing_outbound_target',
-        routeSummary: routingState.eventRouteSummary,
-      });
-      return false;
-    }
-
-    const factSessionContext = this.dependencies.factRoutingContextAssembler.assemble({
-      resolution: routingState.resolution,
-      anchorSessionId: outboundTarget.anchorSessionId,
-    });
-    const translation = this.dependencies.outboundTranslatorRegistry.translate(
-      this.buildTranslationContext(routingState.event, factSessionContext),
-    );
-    this.dependencies.logger.debug?.('provider_adapter.event.translation', {
-      ...routingState.eventRouteSummary,
-      anchorSessionId: outboundTarget.anchorSessionId,
-      recognized: translation.recognized,
-      factTypes: translation.facts.map((fact) => fact.type),
-    });
-    if (!translation.recognized || translation.facts.length === 0 || !translation.envelopeMessageId) {
-      this.logEventDropped({
-        event: routingState.event,
-        reason: 'empty_outbound_translation',
-        routeSummary: {
-          ...routingState.eventRouteSummary,
-          recognized: translation.recognized,
-          factCount: translation.facts.length,
-          hasEnvelopeMessageId: Boolean(translation.envelopeMessageId),
-        },
-      });
-      return false;
-    }
-
-    if (typeof emitOutboundRun === 'function') {
-      // 新 outbound run 通道具备一轮多消息语义；TUI fallback 统一进入该队列，保持顺序和锁语义一致。
-      this.dependencies.tuiOutboundRunRegistry.push({
-        hostSessionId: routingState.resolution.hostSessionId,
-        anchorSessionId: outboundTarget.anchorSessionId,
-        factSessionContext,
-        runtimeContext: routingState.runtimeContext,
-        translation,
-      });
-    } else {
-      // 兼容旧 SDK：只有单 fact 的 session.error 可以降级到 message 级 outbound。
-      await routingState.runtimeContext.outbound.emitOutboundMessage({
-        toolSessionId: outboundTarget.anchorSessionId,
-        messageId: translation.envelopeMessageId,
-        trigger: 'system',
-        facts: toAsyncFacts(translation.facts),
-      });
-    }
-    this.dependencies.logger.debug?.('provider_adapter.event.routed_to_outbound', {
-      eventType: routingState.event.type,
-      factTypes: translation.facts.map((fact) => fact.type),
-      toolSessionId: outboundTarget.anchorSessionId,
-      messageId: translation.envelopeMessageId,
-    });
-    return true;
   }
 
   private async observeSessionIsolationHostEvent(event: BridgeEvent): Promise<void> {

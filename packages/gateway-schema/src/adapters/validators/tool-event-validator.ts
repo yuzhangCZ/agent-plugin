@@ -572,7 +572,7 @@ export class DefaultToolEventValidator implements ToolEventValidatorPort {
     if (!isRecord(raw) || !readString(raw.type)) {
       return fail({
         stage: 'event',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'type',
         message: 'type is required',
       });

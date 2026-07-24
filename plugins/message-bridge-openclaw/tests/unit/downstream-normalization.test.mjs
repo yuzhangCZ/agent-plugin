@@ -42,7 +42,7 @@ test("create_session requires welinkSessionId", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "missing_required_field");
+  assert.equal(result.error.code, "invalid_payload");
   assert.match(result.error.message, /welinkSessionId/);
 });
 
@@ -73,7 +73,7 @@ test("permission_reply invalid payload is rejected with action context", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "missing_required_field");
+  assert.equal(result.error.code, "invalid_payload");
   assert.equal(result.error.action, "permission_reply");
 });
 
@@ -184,7 +184,7 @@ test("logs downstream.normalization_failed with stage and field", () => {
   assert.equal(warns[0].message, "downstream.normalization_failed");
   assert.equal(warns[0].meta.stage, "payload");
   assert.equal(warns[0].meta.field, "payload.text");
-  assert.equal(warns[0].meta.errorCode, "missing_required_field");
+  assert.equal(warns[0].meta.errorCode, "invalid_payload");
   assert.equal(warns[0].meta.messageType, "invoke");
   assert.equal(warns[0].meta.action, "chat");
   assert.equal(warns[0].meta.welinkSessionId, "wl_log_1");
@@ -354,7 +354,7 @@ test("openclaw bridge replies tool_error for routable invalid invoke inbound fra
 
   assert.equal(connection.sent.length, 1);
   assertInvalidInvokeToolErrorContract(connection.sent[0], {
-    code: "missing_required_field",
+    code: "invalid_field_value",
     welinkSessionId: "wl-invalid-1",
     toolSessionId: "tool-invalid-1",
   });
@@ -371,7 +371,7 @@ test("openclaw bridge only logs unroutable invalid invoke inbound frames", async
       violation: {
         violation: {
           stage: "payload",
-          code: "missing_required_field",
+          code: "invalid_field_value",
           field: "payload.text",
           message: "payload.text is required",
           messageType: "invoke",
@@ -423,7 +423,7 @@ test("openclaw bridge replies tool_error when only welinkSessionId is routable",
       violation: {
         violation: {
           stage: "payload",
-          code: "missing_required_field",
+          code: "invalid_field_value",
           field: "payload.text",
           message: "payload.text is required",
           messageType: "invoke",
@@ -444,7 +444,7 @@ test("openclaw bridge replies tool_error when only welinkSessionId is routable",
 
   assert.equal(connection.sent.length, 1);
   assertInvalidInvokeToolErrorContract(connection.sent[0], {
-    code: "missing_required_field",
+    code: "invalid_field_value",
     welinkSessionId: "wl-invalid-1",
     toolSessionId: undefined,
   });
@@ -461,7 +461,7 @@ test("openclaw bridge replies tool_error when only toolSessionId is routable", a
       violation: {
         violation: {
           stage: "payload",
-          code: "missing_required_field",
+          code: "invalid_field_value",
           field: "payload.text",
           message: "payload.text is required",
           messageType: "invoke",
@@ -483,7 +483,7 @@ test("openclaw bridge replies tool_error when only toolSessionId is routable", a
 
   assert.equal(connection.sent.length, 1);
   assertInvalidInvokeToolErrorContract(connection.sent[0], {
-    code: "missing_required_field",
+    code: "invalid_field_value",
     welinkSessionId: undefined,
     toolSessionId: "tool-invalid-1",
   });
@@ -498,7 +498,7 @@ test("openclaw bridge start wires invalid invoke inbound frames to tool_error", 
 
   assert.equal(connection.sent.length, 1);
   assertInvalidInvokeToolErrorContract(connection.sent[0], {
-    code: "missing_required_field",
+    code: "invalid_field_value",
     welinkSessionId: "wl-invalid-1",
     toolSessionId: "tool-invalid-1",
   });

@@ -6,11 +6,9 @@ const FACT_DRAIN_QUIET_PERIOD_MS = 40;
 const FACT_DRAIN_TIMEOUT_MS = 250;
 const FACT_FINAL_IDLE_TIMEOUT_MS = 300_000;
 
-export type FactDrainMode = 'active_run' | 'outbound_run';
 export type FactDrainCloseReason = 'quiet_period' | 'drain_timeout' | 'final_idle_timeout' | 'manual';
 
 type FactDrainTrackerOptions = {
-  mode: FactDrainMode;
   anchorSessionId: string;
   runId: string;
   queue: AsyncIterableQueue<ProviderFact>;
@@ -34,9 +32,7 @@ type FactDrainTrackerOptions = {
  * 4. 最终兜底：final idle timeout 到期，用于 prompt 不返回或 open message 长期无有效事件的永久挂起；
  * 5. 手动关闭：上层 abort/cleanup 可直接调用 `closeFacts('manual')`。
  *
- * `canCloseFacts` 是 quiet period 与 drain timeout 共享的关闭资格闸门；未提供时默认允许关闭，
- * 因此 active run 保持原有 prompt terminal + quiet/drain 语义。outbound run 会传入该闸门，
- * 用 open assistant message 状态阻止 facts iterator 被提前关闭。
+ * `canCloseFacts` 是 quiet period 与 drain timeout 共享的关闭资格闸门；未提供时默认允许关闭。
  *
  * final idle watchdog 只由调用方在“有效事件”时刷新；有效事件定义为产出 fact 或 terminal candidate，
  * 空翻译和 unsupported 噪声不会续命。
@@ -102,7 +98,6 @@ export class FactDrainTracker {
     this.options.logger.debug?.('provider_adapter.fact_drain.closed', {
       toolSessionId: this.options.anchorSessionId,
       runId: this.options.runId,
-      mode: this.options.mode,
       reason,
       lastTerminalCandidateMessageId: this.lastTerminalCandidateMessageId,
     });
@@ -114,7 +109,7 @@ export class FactDrainTracker {
     if (!this.hasTerminalCandidate()) {
       return false;
     }
-    return this.options.mode === 'outbound_run' || this.isPromptCloseEligible();
+    return this.isPromptCloseEligible();
   }
 
   private armQuietTimer(): void {
@@ -183,7 +178,7 @@ export class FactDrainTracker {
       this.options.logger.warn('provider_adapter.protocol_diagnostic', {
         toolSessionId: this.options.anchorSessionId,
         runId: this.options.runId,
-        code: `${this.options.mode}_final_idle_timeout`,
+        code: 'active_run_final_idle_timeout',
         lastTerminalCandidateMessageId: this.lastTerminalCandidateMessageId,
       });
       this.options.onFinalIdleTimeout?.();

@@ -76,10 +76,6 @@ function createCoordinator(input: {
           input.events.push('observation.terminalProjected');
         },
       },
-      toolDoneCompatDelay: {
-        sleep: async () => {},
-        delayMs: 100,
-      },
     } as never,
     {
       enrich(_toolSessionId: string, fact: unknown) {
