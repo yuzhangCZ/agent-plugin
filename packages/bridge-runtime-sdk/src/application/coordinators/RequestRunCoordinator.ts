@@ -9,7 +9,6 @@ import type { EventPipeline } from './coordinator.types.ts';
 import { InteractionCoordinator } from './InteractionCoordinator.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import type { ProviderFactEnricher } from '../ProviderFactEnricher.ts';
-import { delayBeforeTerminalToolDone } from './terminal-signal-delay.ts';
 
 const REQUEST_RUN_PROFILE: LifecycleProfile = { kind: 'request_run' };
 
@@ -89,7 +88,6 @@ export class RequestRunCoordinator {
       welinkSessionId: input.welinkSessionId,
       runId: input.runId,
     });
-    await delayBeforeTerminalToolDone(uplink, this.pipeline.toolDoneCompatDelay);
     if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
       this.pipeline.toolErrorReporter.report({
         stage: 'request_terminal',

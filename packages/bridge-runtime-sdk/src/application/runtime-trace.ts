@@ -5,20 +5,7 @@ import type {
 
 import type { RuntimeFailureKind, RuntimeFailurePhase } from './constants/runtime.ts';
 import type { ProviderFact, ProviderTerminalResult } from '../domain/provider.ts';
-
-export interface RuntimeTraceProviderCall {
-  command:
-    | 'queryStatus'
-    | 'createSession'
-    | 'listSlashCommands'
-    | 'startRequestRun'
-    | 'replyQuestion'
-    | 'replyPermission'
-    | 'closeSession'
-    | 'abortExecution';
-  toolSessionId?: string;
-  runId?: string;
-}
+import type { RuntimeTraceProviderCall } from '../public-contract.ts';
 
 export interface RuntimeTraceFact {
   type: ProviderFact['type'];

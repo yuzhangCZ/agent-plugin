@@ -1,3 +1,5 @@
+import type { WireErrorCode } from '@agent-plugin/gateway-schema';
+
 /**
  * 前端可见 `tool_error.error` 文案目录。
  * @remarks
@@ -11,7 +13,10 @@ export type ToolErrorMessageKey =
   | 'outbound_run_failed';
 
 export class ToolErrorMessageCatalog {
-  get(key: ToolErrorMessageKey): string {
+  get(
+    key: ToolErrorMessageKey | WireErrorCode,
+    segment?: string,
+  ): string {
     switch (key) {
       case 'run_already_active':
         return '当前会话正在处理中，请稍后再试';
@@ -22,8 +27,13 @@ export class ToolErrorMessageCatalog {
       case 'outbound_run_failed':
         return '主动消息处理失败，请重试';
       case 'request_run_failed':
-      default:
         return '当前请求处理失败，请重试';
+      case 'unsupported_action':
+        return `暂不支持该操作类型，请检查版本后重试 (unsupported_action${segment ? `: ${segment}` : ''})`;
+      case 'invalid_field_value':
+        return `请求格式异常，请稍后重试 (${key}${segment ? `: ${segment}` : ''})`;
+      default:
+        return '请求处理异常，请稍后重试';
     }
   }
 }

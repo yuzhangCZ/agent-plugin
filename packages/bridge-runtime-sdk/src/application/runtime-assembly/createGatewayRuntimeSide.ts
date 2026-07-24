@@ -2,6 +2,7 @@ import { GatewayInboundPolicy } from '../../adapters/gateway/GatewayInboundPolic
 import { GatewayOutboundSinkAdapter } from '../../adapters/gateway/GatewayOutboundSinkAdapter.ts';
 import { GatewayProbeDriver } from '../../adapters/gateway/GatewayProbeDriver.ts';
 import { GatewayRuntimeDriver } from '../../adapters/gateway/GatewayRuntimeDriver.ts';
+import { ToolErrorMessageCatalog } from '../projectors/ToolErrorMessageCatalog.ts';
 import type { BridgeRuntimeOptions } from '../create-runtime.ts';
 import type { InboundPolicy } from '../ports/inbound-policy.ts';
 import { ToolErrorReporter } from '../reporters/index.ts';
@@ -43,7 +44,7 @@ export function createGatewayRuntimeSide(
   });
   const sink = new GatewayOutboundSinkAdapter(runtimeDriver, observation);
   const toolErrorReporter = new ToolErrorReporter(sink, observation);
-  inboundPolicyImpl = new GatewayInboundPolicy(observation, toolErrorReporter);
+  inboundPolicyImpl = new GatewayInboundPolicy(observation, toolErrorReporter, new ToolErrorMessageCatalog());
 
   return {
     runtimeDriver,

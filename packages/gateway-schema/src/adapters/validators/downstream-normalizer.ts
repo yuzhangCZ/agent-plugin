@@ -150,7 +150,7 @@ export class DefaultDownstreamNormalizer implements DownstreamNormalizerPort {
     if (!isRecord(raw) || !asString(raw.type)) {
       return fail({
         stage: 'message',
-        code: 'missing_required_field',
+        code: 'invalid_field_value',
         field: 'type',
         message: 'type is required',
       });

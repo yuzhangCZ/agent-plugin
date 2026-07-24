@@ -9,8 +9,4 @@ export interface EventPipeline {
   eventProjector: SkillEventToGatewayMessageProjector;
   toolErrorReporter: ToolErrorReporter;
   observation: RuntimeObservation;
-  toolDoneCompatDelay: {
-    sleep: (ms: number) => Promise<void>;
-    delayMs: number;
-  };
 }

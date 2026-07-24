@@ -1,10 +1,12 @@
 # message-bridge 切换 bridge-runtime-sdk 方案设计
 
-**Version:** 1.1  
-**Date:** 2026-05-18  
+**Version:** 1.2  
+**Date:** 2026-07-23  
 **Status:** Draft  
 **Owner:** message-bridge maintainers  
 **Related:** `../product/prd.md`, `../architecture/overview.md`, `./interfaces/bridge-runtime-sdk-replacement-assessment.md`, `../../../../docs/architecture/bridge-runtime-sdk-architecture.md`, `../../../../docs/design/interfaces/bridge-runtime-sdk-integration.md`
+
+> **变更说明（v1.2）**：`message-bridge` 不再使用 `ProviderRuntimeContext.outbound` 通道同步 detached TUI 事件到前端。`OpenCodeProviderAdapter` 移除了 `TuiOutboundRunRegistry`、outbound fallback 与 outbound continuation 路径，无 active run 的 run-scoped 事件（`message.*` / `question.asked` / `permission.*` / `session.error`）一律按 `missing_active_run` 丢弃并记录 debug 日志。本文中"异步事实回流"、"permission.replied 固定结论"、"continuation 回流规则"三处原描述 outbound continuation 行为的条款已替换为新行为；`bridge-runtime-sdk` 的 `RuntimeOutboundEmitter` 公共契约与 `message-bridge-openclaw` 适配插件不受影响。
 
 ## 摘要
 
@@ -222,12 +224,9 @@ flowchart LR
    - `permission.reply` resolved 由 provider 真源产出。
    - SDK 不在 `replyPermission()` 成功时自动合成 resolved fact。
 5. **异步事实回流**
-   - 若 resolved 不属于当前 `runMessage().facts` 流，必须通过 `ProviderRuntimeContext.outbound.emitOutboundMessage()` 回流。
-   - 若 `permission.reply` 仍属于原 `runMessage().facts` 流，可以继续沿用该消息流既有的 `messageId`。
-   - 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并对该 `messageId` 的批次唯一性负责；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
-   - 当前 SDK runtime 只负责消费 provider 提供的 outbound `messageId`，并保证单个 `toolSessionId` 不存在并发 active outbound；不负责替 provider 建立历史 `messageId` 去重账本。
-   - outbound continuation 场景下，provider 不得以 `permissionId` 直接代替 `messageId`；`permissionId` 继续只承担 reply target 语义。
-   - 原始 `permission.ask` 关联的 `messageId` 只作为回放锚点、诊断线索或宿主侧上下文引用，不再作为 outbound continuation 的强制消息标识。
+   - `permission.reply` 必须在产生时归属到对应 `runMessage().facts` 流（即同一 `runId` 的 active run），由 `permission.replied` 事件路由进入 active run 后产出 `PermissionReplyFact`。
+   - 若因 active run 已被 abort / close 等原因不存在而无法归属，对应 `permission.replied` 事件按 `missing_active_run` 丢弃并记录 debug 日志；`message-bridge` 不再使用 `ProviderRuntimeContext.outbound` 通道进行 outbound continuation。
+   - SDK 的 `RuntimeOutboundEmitter` 公共契约与 `message-bridge-openclaw` 适配插件不受本规则影响。
 6. **拒答快路径**
    - `suppressReply` 必须走 synthetic `ProviderRun`。
    - 最小序列固定为 `message.start -> text.done -> message.done -> terminal completed`。
@@ -511,11 +510,9 @@ sequenceDiagram
 1. SDK 不自动合成 resolved fact。
 2. `PermissionReplyFact` 的唯一原始事件来源是 `permission.replied`。
 3. `permission.updated` 及其 `status` / `response` / `resolved` 字段变化不作为生成 `PermissionReplyFact` 的依据。
-4. 若 `permission.replied` 不属于当前 `runMessage().facts` 流，provider 必须通过 `ProviderRuntimeContext.outbound.emitOutboundMessage()` 发出 `PermissionReplyFact`。
-5. 若 `permission.replied` 仍属于原 `runMessage().facts` 流，可以继续沿用该消息流既有的 `messageId`。
-6. 若 `permission.replied` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并保证它在当前 `toolSessionId` 内唯一；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
-7. outbound continuation 场景下，provider 不得以 `permissionId` 直接代替 `messageId`；`permissionId` 继续只承担 reply target 语义。
-8. 原始 `permission.ask` 关联的 `messageId` 只作为回放锚点、诊断线索或宿主侧上下文引用，不再作为 outbound continuation 的强制消息标识。
+4. `permission.replied` 事件由 `OpenCodeProviderAdapter` 路由进入对应 active run 的 facts 流产出 `PermissionReplyFact`；`message-bridge` 不再使用 `ProviderRuntimeContext.outbound` 通道做 outbound continuation。
+5. 若 `permission.replied` 发生时无对应 active run（已 abort / close），事件按 `missing_active_run` 丢弃并记录 debug 日志。
+6. SDK 的 `RuntimeOutboundEmitter` 公共契约与 `message-bridge-openclaw` 适配插件不受本规则影响。
 
 ```mermaid
 sequenceDiagram
@@ -524,7 +521,6 @@ sequenceDiagram
   participant MBPROV as MB-PROV: message-bridge OpenCode Provider Adapter
   participant OCSDK as OpenCode SDK/API
   participant OC as OpenCode
-  participant OUT as RuntimeOutboundEmitter
 
   GW->>MBRT: invoke.permission_reply
   MBRT->>MBRT: consume pending permission interaction
@@ -533,9 +529,8 @@ sequenceDiagram
   OCSDK->>OC: reply
   OC-->>OCSDK: permission.replied
   OCSDK-->>MBPROV: permission.replied
-  MBPROV->>OUT: emitOutboundMessage(facts)
-  OUT-->>MBRT: PermissionReplyFact
-  MBRT->>GW: tool_event(permission.reply)
+  MBPROV->>MBPROV: route to active run facts
+  MBRT-->>GW: tool_event(permission.reply)
 ```
 
 ### 6.8 `close_session` / `abort_session`
@@ -756,13 +751,10 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 
 1. continuation 回流是否属于原 `runMessage().facts` 流，以“宿主回调发生时原 run 是否仍持有该 interaction 的活动流写入权”判定。
 2. 若属于原 facts 流，则由该 run 的事实流继续产出对应 `ProviderFact`。
-3. 若不属于原 facts 流，则统一走 SDK `emitOutboundMessage(...)`。
+3. 若不属于原 facts 流，`message-bridge` 不再使用 SDK `emitOutboundMessage(...)` 做 outbound continuation；对应事件按 `missing_active_run` 丢弃并记录 debug 日志。
 4. SDK 不自动合成 `permission.reply` resolved fact；resolved 事实仍由 provider 真源产出。
-5. 若 `permission.reply` 作为原 facts 流内事件回流，可以继续复用该消息流已存在的 `messageId`。
-6. 若 `permission.reply` 改走 outbound continuation，provider 必须为该 outbound facts 批次生成新的 `messageId`，并对该 `messageId` 的批次唯一性负责；同一批 outbound facts 的 `messageId` 必须一致，且与 `EmitOutboundMessageInput.messageId` 一致。
-7. outbound continuation 场景下，provider 不得以 `permissionId` 直接代替 `messageId`；`permissionId` 继续只承担 reply target 语义。
-8. 原始 `permission.ask` 关联的 `messageId` 只作为回放锚点、诊断线索或宿主侧上下文引用，不再作为 outbound continuation 的强制消息标识。
-9. 当前 SDK runtime 可验证的是“单个 active outbound 不并发”与“单批 facts 的 `messageId` 一致性”；若需要验证历史批次不复用 `messageId`，必须由 provider 或额外诊断设施承担。
+5. `permission.reply` 必须经由对应 active run 的 facts 流回流并复用该消息流既有的 `messageId`；`permissionId` 继续只承担 reply target 语义。
+6. SDK 的 `RuntimeOutboundEmitter` 公共契约与 `message-bridge-openclaw` 适配插件不受本节规则影响。
 
 ### 7.9 `suppressReply` 与 `session.get` 约束
 
@@ -840,7 +832,7 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 
 1. `invoke.chat` 标准路径：前置策略完成，provider 启动 run，SDK 输出正式 uplink。
 2. `invoke.chat` + `suppressReply=true`：真实宿主不启动，仅走 synthetic run。
-3. `permission.ask -> permission_reply -> permission.reply`：主键绑定正确；原 facts 流内回流时沿用原消息 `messageId`；outbound continuation 时由 provider 生成新的批次 `messageId`，且同批 facts 与 `EmitOutboundMessageInput.messageId` 保持一致；回流路径正确。
+3. `permission.ask -> permission_reply -> permission.reply`：主键绑定正确，事件归属到对应 active run 的 facts 流并沿用原消息 `messageId`；无 active run 时按 `missing_active_run` 丢弃并记录 debug 日志；回流路径正确。
 4. `question.ask -> question_reply`：挂起交互命中、消费与继续执行路径正确。
 5. `session.get` 成功与失败：插件策略层行为清晰，不污染 provider fact 语义层。
 6. raw event 缺字段或无法翻译：adapter 诊断与 fail-closed 边界明确。
@@ -857,7 +849,7 @@ OpenCode raw event 到 `ProviderFact` 的边界必须严格收敛。
 除运行时行为外，还必须显式检查以下一致性：
 
 1. 与 `plugins/message-bridge/docs/product/prd.md` 的 action / event / fast-fail 结论一致。
-2. 与 `docs/design/interfaces/bridge-runtime-sdk-integration.md` 的 Provider SPI 与 outbound 语义一致。
+2. 与 `docs/design/interfaces/bridge-runtime-sdk-integration.md` 的 Provider SPI 一致；`message-bridge` 不再使用 Provider SPI 中的 outbound continuation 通道。
 3. 与 `packages/gateway-schema/src/contract/schemas/upstream*.ts` 的上行扁平消息字段一致。
 4. 与 `packages/gateway-schema/src/contract/schemas/downstream*.ts` 的下行字段约束一致，尤其是 `permission_reply/question_reply` 的 payload 形状。
 5. 若发现实现与本文或 PRD 存在冲突，必须显式登记差异，不得静默改写结论。

@@ -1,8 +1,10 @@
+/* eslint-disable max-lines -- OpenClaw provider adapter 集中承载 runtime reply、事件翻译和 SDK provider contract 映射，后续拆分单独处理。 */
 import { randomUUID } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 import type {
   ProviderFact,
+  ProviderAbortSessionInput,
   ProviderPermissionReplyInput,
   ProviderQuestionReplyInput,
   ProviderRuntimeContext,
@@ -34,7 +36,6 @@ import { createDeferred } from "./deferred.js";
 import { extractAssistantText } from "./message-extraction.js";
 import type {
   ActiveRunState,
-  ActiveToolState,
   MessageBridgeRoute,
   OpenClawProviderAdapterOptions,
   RuntimeGatewayEvent,
@@ -144,7 +145,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     return { online: this.options.isOnline() };
   }
 
-  async createSession(input: {
+  async createSession(_input: {
     traceId: string;
     title?: string;
     assistantId?: string;
@@ -277,21 +278,22 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
    * @remarks 本地先关闭 fact 流，再 best-effort 调宿主 abort/cancel；
    * 这样即使宿主取消失败，也不会继续向 SDK 投影晚到增量。
    */
-  async abortSession(input: { traceId: string; toolSessionId: string; runId?: string }): Promise<{ applied: true }> {
+  // eslint-disable-next-line complexity -- abort 需要同时协调本地活跃 run、approval 清理和宿主 best-effort cancel。
+  async abortSession(input: ProviderAbortSessionInput): Promise<{ applied: true }> {
     const record = this.options.sessionRegistry.get(input.toolSessionId);
     if (!record) {
       throw new Error("unknown_tool_session");
     }
 
     const activeRun = this.activeRunsBySessionKey.get(record.sessionKey);
-    const abortRunId = activeRun?.runId ?? input.runId;
+    const abortRunId = activeRun?.runId ?? input.runIds[0];
     if (activeRun) {
       this.abortActiveRun(activeRun);
     }
     this.approvalRegistry.clearSession(input.toolSessionId);
 
     const replyRuntime = (this.options.runtime.channel?.reply ?? {}) as ReplyAbortRuntime;
-    let runtimeHandled = false;
+    let runtimeHandled: boolean;
     try {
       runtimeHandled = await callRuntimeMethod(replyRuntime, ["abortRun", "cancelRun"], {
         sessionKey: record.sessionKey,
@@ -430,6 +432,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     );
   }
 
+  // eslint-disable-next-line max-lines-per-function -- reply runtime 执行路径集中维护 OpenClaw block/final/tool 回调顺序。
   private async runWithReplyRuntime(
     state: ActiveRunState,
     text: string,
@@ -868,6 +871,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }
   }
 
+  // eslint-disable-next-line complexity -- tool 事件需要兼容 OpenClaw 多种字段形态并映射为单一 tool.update fact。
   private handleToolAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
     if (state.abortRequested || state.completed) {
       return;
@@ -925,6 +929,7 @@ export class OpenClawProviderAdapter implements ThirdPartyAgentProvider {
     }));
   }
 
+  // eslint-disable-next-line complexity -- assistant 事件按 OpenClaw lifecycle 入口集中路由，避免拆散状态机判断。
   private handleAssistantAgentEvent(state: ActiveRunState, payload: Record<string, unknown>): void {
     if (state.abortRequested || state.completed) {
       return;

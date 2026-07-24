@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "bridge-runtime-sdk: debug current test file",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/bridge-runtime-sdk",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--import",
+        "./scripts/register-test-alias-loader.mjs",
+        "--experimental-strip-types",
+        "--test"
+      ],
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "bridge-runtime-sdk: debug selected test case",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/bridge-runtime-sdk",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--import",
+        "./scripts/register-test-alias-loader.mjs",
+        "--experimental-strip-types",
+        "--test",
+        "--test-name-pattern",
+        "${selectedText}"
+      ],
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import type {
+  RequestRunState,
   SessionRuntimeRecord,
   SessionRuntimeRegistry,
 } from '../../application/ports/session-runtime-registry.ts';
@@ -9,7 +10,20 @@ import type {
 export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
   private readonly records = new Map<string, SessionRuntimeRecord>();
 
-  ensure(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord {
+  private snapshotRequestRunState(state: RequestRunState): RequestRunState {
+    return { activeRunIds: [...state.activeRunIds] };
+  }
+
+  private snapshotRecord(record: SessionRuntimeRecord): SessionRuntimeRecord {
+    return {
+      toolSessionId: record.toolSessionId,
+      ...(record.welinkSessionId ? { welinkSessionId: record.welinkSessionId } : {}),
+      requestRun: this.snapshotRequestRunState(record.requestRun),
+      outbound: { ...record.outbound },
+    };
+  }
+
+  private ensureRecord(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord {
     const existing = this.records.get(input.toolSessionId);
     if (existing) {
       if (input.welinkSessionId && !existing.welinkSessionId) {
@@ -21,53 +35,58 @@ export class InMemorySessionRuntimeRegistry implements SessionRuntimeRegistry {
     const created: SessionRuntimeRecord = {
       toolSessionId: input.toolSessionId,
       ...(input.welinkSessionId ? { welinkSessionId: input.welinkSessionId } : {}),
-      requestRun: { status: 'idle' },
+      requestRun: { activeRunIds: [] },
       outbound: { status: 'idle' },
     };
     this.records.set(input.toolSessionId, created);
     return created;
   }
 
+  ensure(input: { toolSessionId: string; welinkSessionId?: string }): SessionRuntimeRecord {
+    return this.snapshotRecord(this.ensureRecord(input));
+  }
+
   get(toolSessionId: string): SessionRuntimeRecord | undefined {
-    return this.records.get(toolSessionId);
+    const record = this.records.get(toolSessionId);
+    return record ? this.snapshotRecord(record) : undefined;
   }
 
   delete(toolSessionId: string): void {
     this.records.delete(toolSessionId);
   }
 
-  acquireRequestRun(toolSessionId: string, runId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
-    const record = this.ensure({ toolSessionId });
-    if (record.requestRun.status !== 'idle') {
-      return { ok: false };
+  registerRequestRun(toolSessionId: string, runId: string): RequestRunState {
+    const record = this.ensureRecord({ toolSessionId });
+    if (!record.requestRun.activeRunIds.includes(runId)) {
+      record.requestRun = { activeRunIds: [...record.requestRun.activeRunIds, runId] };
     }
-    record.requestRun = { status: 'running', runId };
-    return { ok: true, record };
+    return this.snapshotRequestRunState(record.requestRun);
   }
 
-  releaseRequestRun(toolSessionId: string, runId: string): void {
+  releaseRequestRun(toolSessionId: string, runId: string): RequestRunState {
     const record = this.records.get(toolSessionId);
-    if (record?.requestRun.status === 'running' && record.requestRun.runId === runId) {
-      record.requestRun = { status: 'idle' };
+    if (!record) {
+      return this.snapshotRequestRunState({ activeRunIds: [] });
     }
+    if (record.requestRun.activeRunIds.includes(runId)) {
+      record.requestRun = {
+        activeRunIds: record.requestRun.activeRunIds.filter((activeRunId) => activeRunId !== runId),
+      };
+    }
+    return this.snapshotRequestRunState(record.requestRun);
   }
 
-  getRequestRunState(toolSessionId: string) {
-    return this.records.get(toolSessionId)?.requestRun ?? { status: 'idle' };
-  }
-
-  getActiveRequestRunId(toolSessionId: string): string | undefined {
-    const requestRun = this.getRequestRunState(toolSessionId);
-    return requestRun.status === 'running' ? requestRun.runId : undefined;
+  getRequestRunState(toolSessionId: string): RequestRunState {
+    return this.snapshotRequestRunState(this.records.get(toolSessionId)?.requestRun ?? { activeRunIds: [] });
   }
 
   acquireOutboundEmission(toolSessionId: string, messageId: string): { ok: true; record: SessionRuntimeRecord } | { ok: false } {
-    const record = this.ensure({ toolSessionId });
+    const record = this.ensureRecord({ toolSessionId });
     if (record.outbound.status !== 'idle') {
       return { ok: false };
     }
     record.outbound = { status: 'emitting', messageId };
-    return { ok: true, record };
+    return { ok: true, record: this.snapshotRecord(record) };
   }
 
   releaseOutboundEmission(toolSessionId: string, messageId: string): void {

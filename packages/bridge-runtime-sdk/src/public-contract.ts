@@ -80,6 +80,26 @@ export type {
   ToolUpdateFact,
 };
 
+/**
+ * 控制同一 tool session 存在 active request run 时新 chat 的处理方式。
+ *
+ * `reject` 是默认兼容行为。仅当 provider 具备并发输入调度能力，且产出的输出可被
+ * 下游正确消费时，才应使用 `forwardToProvider`。
+ */
+export type ActiveRunChatPolicy = 'reject' | 'forwardToProvider';
+
+/**
+ * Request run 并发行为的 public 配置。
+ */
+export interface RequestRunPolicyOptions {
+  /**
+   * Active request run 期间收到新 chat 时应用的策略。
+   *
+   * 缺省时等同于 `reject`。
+   */
+  activeRunChatPolicy?: ActiveRunChatPolicy;
+}
+
 export { qrcodeAuth } from '@wecode/skill-qrcode-auth';
 export type {
   QrCodeAssistantInfo,
@@ -140,19 +160,42 @@ export interface BridgeGatewayProbeResult {
   reason?: string;
 }
 
-export interface RuntimeTraceProviderCall {
-  command:
-    | 'queryStatus'
-    | 'createSession'
-    | 'listSlashCommands'
-    | 'startRequestRun'
-    | 'replyQuestion'
-    | 'replyPermission'
-    | 'closeSession'
-    | 'abortExecution';
-  toolSessionId?: string;
-  runId?: string;
-}
+/**
+ * Provider 调用的公开诊断 trace；标识字段由 command 决定。
+ *
+ * `startRequestRun` 必须使用单个 `runId`，`abortExecution` 必须使用 `runIds` 快照；
+ * 两个字段属于不同 command，不能互相替代。
+ */
+export type RuntimeTraceProviderCall =
+  | {
+      command: 'startRequestRun';
+      toolSessionId: string;
+      runId: string;
+      runIds?: never;
+    }
+  | {
+      command: 'abortExecution';
+      toolSessionId: string;
+      runId?: never;
+      runIds: string[];
+    }
+  | {
+      command: 'closeSession';
+      toolSessionId: string;
+      runId?: never;
+      runIds?: never;
+    }
+  | {
+      command:
+        | 'queryStatus'
+        | 'createSession'
+        | 'listSlashCommands'
+        | 'replyQuestion'
+        | 'replyPermission';
+      toolSessionId?: never;
+      runId?: never;
+      runIds?: never;
+    };
 
 export interface RuntimeTraceFact {
   type: ProviderFact['type'];
@@ -247,6 +290,7 @@ export interface BridgeRuntime {
 export interface BridgeRuntimeOptions {
   provider: ThirdPartyAgentProvider;
   gatewayHost: BridgeGatewayHostConfig;
+  requestRunPolicy?: RequestRunPolicyOptions;
   logger?: BridgeGatewayLogger;
   debug?: boolean;
   traceIdFactory?: () => string;

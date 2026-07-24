@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { BridgeGatewayLoggerObservationAdapter } from '../adapters/observation/runtime-logger-observation.ts';
 import { RuntimeTraceCollectorAdapter } from '../adapters/observation/runtime-trace-observation.ts';
 import type { ThirdPartyAgentProvider } from '../domain/provider.ts';
+import type { RequestRunPolicyOptions } from '../public-contract.ts';
 import {
   CompositeRuntimeObservationPort,
   DefaultRuntimeObservation,
@@ -27,6 +28,7 @@ import type { BridgeRuntimeInternalOptions } from './runtime-assembly/runtime-op
 export interface BridgeRuntimeOptions {
   provider: ThirdPartyAgentProvider;
   gatewayHost: BridgeGatewayHostConfig;
+  requestRunPolicy?: RequestRunPolicyOptions;
   logger?: BridgeGatewayLogger;
   debug?: boolean;
   traceIdFactory?: () => string;
@@ -47,7 +49,7 @@ export async function createBridgeRuntime(options: BridgeRuntimeOptions): Promis
   ]);
   const observation = new DefaultRuntimeObservation(observationPort);
   const gatewaySide = createGatewayRuntimeSide(options, internalOptions, observation);
-  const applicationSide = createApplicationRuntimeSide(options, internalOptions, observation, gatewaySide.sink);
+  const applicationSide = createApplicationRuntimeSide(options, observation, gatewaySide.sink);
   const probe = new RuntimeProbeService(gatewaySide.probeDriver);
   const lifecycle = new RuntimeLifecycleService(
     applicationSide.core,

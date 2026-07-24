@@ -2,6 +2,8 @@ node_modules/
 .DS_Store
 logs/
 .tmp/
+coverage/
+packages/*/coverage/
 packages/*/dist/
 plugins/*/dist/
 plugins/message-bridge/release/

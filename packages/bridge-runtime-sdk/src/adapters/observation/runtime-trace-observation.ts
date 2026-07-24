@@ -11,16 +11,11 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
     this.trace = trace;
   }
 
+  // eslint-disable-next-line complexity -- trace observation adapter 按事件类型集中分派 diagnostics 投影，保持诊断写入入口单一。
   record(event: RuntimeObservationEvent): void {
     switch (event.type) {
       case 'provider_call':
-        if (event.phase === 'started') {
-          this.trace.recordProviderCall({
-            command: event.command,
-            ...(event.toolSessionId ? { toolSessionId: event.toolSessionId } : {}),
-            ...(event.runId ? { runId: event.runId } : {}),
-          });
-        }
+        this.recordProviderCall(event);
         return;
       case 'fact_processed':
         if (event.phase === 'received') {
@@ -76,6 +71,46 @@ export class RuntimeTraceCollectorAdapter implements RuntimeObservationPort {
         return;
       default:
         return;
+    }
+  }
+
+  private recordProviderCall(event: Extract<RuntimeObservationEvent, { type: 'provider_call' }>): void {
+    if (event.phase !== 'started') {
+      return;
+    }
+
+    switch (event.command) {
+      case 'startRequestRun':
+        if (!event.toolSessionId || !event.runId) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+          runId: event.runId,
+        });
+        return;
+      case 'abortExecution':
+        if (!event.toolSessionId || !event.runIds) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+          runIds: event.runIds,
+        });
+        return;
+      case 'closeSession':
+        if (!event.toolSessionId) {
+          return;
+        }
+        this.trace.recordProviderCall({
+          command: event.command,
+          toolSessionId: event.toolSessionId,
+        });
+        return;
+      default:
+        this.trace.recordProviderCall({ command: event.command });
     }
   }
 

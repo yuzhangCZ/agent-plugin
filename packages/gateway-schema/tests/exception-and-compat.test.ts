@@ -19,7 +19,7 @@ test('downstream contract violations use the shared violation envelope', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'payload',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'welinkSessionId',
     messageType: 'invoke',
     action: 'create_session',
@@ -40,7 +40,7 @@ test('tool_event contract violations use the shared violation envelope', () => {
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'event',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'properties.part.messageID',
     messageType: 'message.part.updated',
   });

@@ -7,16 +7,12 @@ type PendingInteractionRecordBase = {
   tokenId: string;
 };
 
-export type PendingInteractionRecord =
-  | (PendingInteractionRecordBase & {
-      source: 'active_run';
-      runId: string;
-    })
-  | (PendingInteractionRecordBase & {
-      source: 'outbound';
-    });
+export type PendingInteractionRecord = PendingInteractionRecordBase & {
+  source: 'active_run';
+  runId: string;
+};
 
-type RunScopedPendingInteractionRecord = Extract<PendingInteractionRecord, { source: 'active_run' }>;
+type RunScopedPendingInteractionRecord = PendingInteractionRecord;
 
 /**
  * runtime 内存态 pending interaction registry。
@@ -33,13 +29,11 @@ export class RuntimePendingInteractionRegistry {
   register(record: PendingInteractionRecord): void {
     const recordKey = this.key(record.kind, record.tokenId);
     const previous = this.records.get(recordKey);
-    if (this.isRunScoped(previous)) {
+    if (previous) {
       this.deleteRunIndex(previous, recordKey);
     }
     this.records.set(recordKey, record);
-    if (this.isRunScoped(record)) {
-      this.addRunIndex(record, recordKey);
-    }
+    this.addRunIndex(record, recordKey);
   }
 
   record(record: PendingInteractionRecord): void {
@@ -61,9 +55,7 @@ export class RuntimePendingInteractionRegistry {
       return undefined;
     }
     this.records.delete(key);
-    if (this.isRunScoped(current)) {
-      this.deleteRunIndex(current, key);
-    }
+    this.deleteRunIndex(current, key);
     return current;
   }
 
@@ -72,19 +64,13 @@ export class RuntimePendingInteractionRegistry {
   }
 
   private sameRecord(left: PendingInteractionRecord, right: PendingInteractionRecord): boolean {
-    if (
-      left.kind !== right.kind
-      || left.tokenId !== right.tokenId
-      || left.toolSessionId !== right.toolSessionId
-      || left.hostSessionId !== right.hostSessionId
-      || left.source !== right.source
-    ) {
-      return false;
-    }
-    if (this.isRunScoped(left) && this.isRunScoped(right)) {
-      return left.runId === right.runId;
-    }
-    return left.source === 'outbound' && right.source === 'outbound';
+    return (
+      left.kind === right.kind
+      && left.tokenId === right.tokenId
+      && left.toolSessionId === right.toolSessionId
+      && left.hostSessionId === right.hostSessionId
+      && left.runId === right.runId
+    );
   }
 
   private addRunIndex(record: RunScopedPendingInteractionRecord, recordKey: string): void {
@@ -124,9 +110,5 @@ export class RuntimePendingInteractionRegistry {
       hostSessionId: record.hostSessionId,
       runId: record.runId,
     });
-  }
-
-  private isRunScoped(record: PendingInteractionRecord | undefined): record is RunScopedPendingInteractionRecord {
-    return record?.source === 'active_run';
   }
 }

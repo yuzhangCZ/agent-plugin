@@ -4,7 +4,7 @@
 **Date:** 2026-03-31  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
-**Related:** [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [gateway-wire-v1-architecture.md](./gateway-wire-v1-architecture.md), [gateway-client-architecture.md](./gateway-client-architecture.md), [message-bridge architecture overview](../../plugins/message-bridge/docs/architecture/overview.md), [OpenClaw protocol sequence](../../plugins/message-bridge-openclaw/docs/protocol-sequence.md), [test-layering.md](../testing/test-layering.md)
+**Related:** [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [bridge-refactor-migration-plan.md](./bridge-refactor-migration-plan.md), [gateway-wire-v1-architecture.md](./gateway-wire-v1-architecture.md), [gateway-client-architecture.md](./gateway-client-architecture.md), [message-bridge architecture overview](../../plugins/message-bridge/docs/architecture/overview.md), [OpenClaw protocol sequence](../../plugins/message-bridge-openclaw/docs/protocol-sequence.md), [测试治理规则](../rules/testing.md)
 
 ## Background
 

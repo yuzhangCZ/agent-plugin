@@ -4,7 +4,7 @@
 **Date:** 2026-03-30  
 **Status:** Draft  
 **Owner:** agent-plugin maintainers  
-**Related:** [bridge-refactor-architecture.md](./bridge-refactor-architecture.md), [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [test-layering.md](../testing/test-layering.md)
+**Related:** [bridge-refactor-architecture.md](./bridge-refactor-architecture.md), [0001-plugin-migration-governance.md](../adr/0001-plugin-migration-governance.md), [测试治理规则](../rules/testing.md)
 
 ## Summary
 

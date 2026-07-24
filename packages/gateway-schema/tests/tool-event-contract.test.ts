@@ -382,7 +382,7 @@ test('validateToolEvent rejects malformed events with a shared violation envelop
   assert.equal(result.ok, false);
   assertWireViolationShape(result.error, {
     stage: 'event',
-    code: 'missing_required_field',
+    code: 'invalid_field_value',
     field: 'properties.info.sessionID',
     messageType: 'message.updated',
   });

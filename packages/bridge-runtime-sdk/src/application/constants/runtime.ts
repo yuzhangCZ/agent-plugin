@@ -1,6 +1,5 @@
 export const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 export const DEFAULT_PROVIDER_RUN_FAILURE_MESSAGE = 'provider_run_failed';
-export const DEFAULT_TOOL_DONE_COMPAT_DELAY_MS = 100;
 
 export const RUNTIME_FAILURE_KIND = {
   startup: 'startup_failure',
