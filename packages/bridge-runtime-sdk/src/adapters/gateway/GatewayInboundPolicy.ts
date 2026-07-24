@@ -1,5 +1,5 @@
 import type { GatewayInboundFrame } from '@agent-plugin/gateway-client';
-import type { ToolErrorMessage, WireViolation } from '@agent-plugin/gateway-schema';
+import type { WireViolation } from '@agent-plugin/gateway-schema';
 
 import { RUNTIME_FAILURE_KIND } from '../../application/constants/runtime.ts';
 import { ToolErrorMessageCatalog } from '../../application/projectors/ToolErrorMessageCatalog.ts';
