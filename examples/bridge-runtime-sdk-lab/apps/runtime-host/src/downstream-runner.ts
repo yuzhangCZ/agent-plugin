@@ -29,13 +29,19 @@ export class DownstreamScenarioRunner {
 
     const fromIndex = this.#gateway.receivedMessages.length;
     const failuresFromIndex = this.#getFailures().length;
-    this.#gateway.send(raw);
+    if (scenario.trigger === 'provider_outbound') {
+      await this.#provider.emitOutboundRun(scenario.expected.providerScenario?.kind);
+    } else if (scenario.trigger === 'mock_gateway_disconnect') {
+      this.#gateway.disconnectActive();
+    } else {
+      this.#gateway.send(raw);
+    }
     const uplinks = await this.#gateway.waitForMessages(fromIndex);
     const failures = this.#getFailures().slice(failuresFromIndex);
     const toolErrors = uplinks
       .filter(isToolError)
       .map((message) => toToolErrorView(message, scenario.expected.stage));
-    const matchedExpectation = matchesExpectation(scenario, uplinks, toolErrors);
+    const matchedExpectation = matchesExpectation(scenario, uplinks, toolErrors, failures);
     const result: DownstreamRunResult = {
       scenario,
       raw,
@@ -54,13 +60,26 @@ export class DownstreamScenarioRunner {
   }
 }
 
-function matchesExpectation(scenario: DownstreamScenario, uplinks: unknown[], toolErrors: ToolErrorView[]): boolean {
+function matchesExpectation(
+  scenario: DownstreamScenario,
+  uplinks: unknown[],
+  toolErrors: ToolErrorView[],
+  failures: unknown[],
+): boolean {
   if (scenario.expected.outcome === 'failure_only') {
     return toolErrors.length === 0;
   }
+  if (scenario.expected.outcome === 'diagnostics_only') {
+    return toolErrors.length === 0;
+  }
+  if (scenario.expected.outcome === 'runtime_failed') {
+    return failures.length > 0 && toolErrors.length === 0;
+  }
   if (scenario.expected.outcome === 'tool_error') {
     return toolErrors.some((toolError) => {
-      return scenario.expected.errorIncludes ? toolError.error.includes(scenario.expected.errorIncludes) : true;
+      const errorMatches = scenario.expected.errorIncludes ? toolError.error.includes(scenario.expected.errorIncludes) : true;
+      const reasonMatches = scenario.expected.reason ? toolError.reason === scenario.expected.reason : true;
+      return errorMatches && reasonMatches;
     });
   }
   return uplinks.some((message) => {
@@ -74,6 +93,12 @@ function buildNote(scenario: DownstreamScenario, toolErrors: ToolErrorView[], up
   }
   if (scenario.expected.outcome === 'failure_only' && toolErrors.length === 0) {
     return '无 tool_error，符合预期：该场景只记录 failure，不具备可回包路由目标。';
+  }
+  if (scenario.expected.outcome === 'diagnostics_only' && toolErrors.length === 0) {
+    return '无 tool_error，符合预期：该场景按方案只记录 diagnostics 或继续产生正常终态。';
+  }
+  if (scenario.expected.outcome === 'runtime_failed' && toolErrors.length === 0) {
+    return '无 tool_error，符合预期：gateway 不可用时通过 runtime status/diagnostics 感知。';
   }
   if (uplinks.length === 0) {
     return '未捕获到上行消息。';

@@ -266,6 +266,10 @@ function toScenarioKind(value: string | undefined): ProviderScenarioConfig['kind
     case 'timeout':
     case 'invalid_fact':
     case 'failed_run':
+    case 'session_not_found':
+    case 'result_reject':
+    case 'facts_throw':
+    case 'enrich_failure':
     case 'aborted_run':
       return value;
     case 'success':

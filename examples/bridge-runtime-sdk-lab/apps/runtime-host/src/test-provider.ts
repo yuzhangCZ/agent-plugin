@@ -72,7 +72,7 @@ export class TestProvider implements ThirdPartyAgentProvider {
 
   async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
     const scenario = await this.#beforeCall('runMessage', input);
-    const facts = scenario.kind === 'invalid_fact' ? invalidFactStream() : defaultFactStream();
+    const facts = factStreamForScenario(scenario.kind);
     return {
       runId: input.runId,
       facts,
@@ -85,6 +85,18 @@ export class TestProvider implements ThirdPartyAgentProvider {
               message: 'SDK lab configured failed run',
             },
           };
+        }
+        if (scenario.kind === 'session_not_found') {
+          return {
+            outcome: 'failed',
+            error: {
+              code: 'session_not_found',
+              message: 'SDK lab configured missing session',
+            },
+          };
+        }
+        if (scenario.kind === 'result_reject') {
+          throw new Error('SDK lab configured ProviderRun.result rejection');
         }
         if (scenario.kind === 'aborted_run') {
           return { outcome: 'aborted' };
@@ -119,15 +131,16 @@ export class TestProvider implements ThirdPartyAgentProvider {
     this.#context = undefined;
   }
 
-  async emitOutboundRun(): Promise<AppliedResult> {
+  async emitOutboundRun(kind?: ProviderScenarioKind): Promise<AppliedResult> {
     if (!this.#context) {
       throw new Error('Provider runtime context is not initialized');
     }
+    const scenario = kind ? { ...DEFAULT_SCENARIO, command: 'outbound', kind } : this.#scenarioFor('outbound');
     return this.#context.outbound.emitOutboundRun({
       toolSessionId: `ses_${crypto.randomUUID()}`,
       runId: `run_${crypto.randomUUID()}`,
       trigger: 'sdk-lab',
-      facts: defaultFactStream(),
+      facts: factStreamForScenario(scenario.kind),
     });
   }
 
@@ -181,6 +194,35 @@ async function* invalidFactStream(): AsyncIterable<ProviderFact> {
     partId: `prt_${crypto.randomUUID()}`,
     content: 'missing message.start',
   };
+}
+
+async function* throwingFactStream(): AsyncIterable<ProviderFact> {
+  yield { type: 'message.start', messageId: `msg_${crypto.randomUUID()}` };
+  throw new Error('SDK lab configured facts iterator failure');
+}
+
+async function* enrichFailureFactStream(): AsyncIterable<ProviderFact> {
+  const messageId = `msg_${crypto.randomUUID()}`;
+  yield {
+    type: 'permission.reply',
+    permissionId: `permission_${crypto.randomUUID()}`,
+    response: 'once',
+  };
+  yield { type: 'message.start', messageId };
+  yield { type: 'message.done', messageId, reason: 'completed' };
+}
+
+function factStreamForScenario(kind: ProviderScenarioKind): AsyncIterable<ProviderFact> {
+  switch (kind) {
+    case 'invalid_fact':
+      return invalidFactStream();
+    case 'facts_throw':
+      return throwingFactStream();
+    case 'enrich_failure':
+      return enrichFailureFactStream();
+    default:
+      return defaultFactStream();
+  }
 }
 
 function delay(ms: number): Promise<void> {

@@ -21,7 +21,18 @@ export interface RuntimeActionResult<TPayload = unknown> {
   };
 }
 
-export type ProviderScenarioKind = 'success' | 'offline' | 'throw' | 'timeout' | 'invalid_fact' | 'failed_run' | 'aborted_run';
+export type ProviderScenarioKind =
+  | 'success'
+  | 'offline'
+  | 'throw'
+  | 'timeout'
+  | 'invalid_fact'
+  | 'failed_run'
+  | 'session_not_found'
+  | 'result_reject'
+  | 'facts_throw'
+  | 'enrich_failure'
+  | 'aborted_run';
 
 export interface ProviderScenarioConfig {
   command: string;
@@ -48,21 +59,37 @@ export interface RuntimeSnapshot {
 export type DownstreamExpectedOutcome =
   | 'tool_error'
   | 'failure_only'
+  | 'diagnostics_only'
   | 'session_created'
   | 'tool_done'
+  | 'runtime_failed'
   | 'status_response'
   | 'slash_commands_result';
+
+export type LabScenarioTrigger = 'gateway_downstream' | 'provider_outbound' | 'mock_gateway_disconnect';
+
+export type ToolErrorStage =
+  | 'inbound_invalid'
+  | 'command_failure'
+  | 'request_lifecycle'
+  | 'request_terminal'
+  | 'outbound_terminal'
+  | 'diagnostics_only'
+  | 'lifecycle_status'
+  | 'success';
 
 export interface DownstreamScenario {
   id: string;
   group: string;
   title: string;
   description: string;
+  trigger?: LabScenarioTrigger;
   raw: unknown;
   expected: {
     outcome: DownstreamExpectedOutcome;
-    stage: 'inbound_validation' | 'command_execution' | 'interaction_resolution' | 'provider_call' | 'success';
+    stage: ToolErrorStage;
     errorIncludes?: string;
+    reason?: string;
     providerScenario?: ProviderScenarioConfig;
   };
 }

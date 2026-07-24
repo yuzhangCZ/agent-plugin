@@ -105,6 +105,15 @@ export class LabMockGateway {
     this.#events.append('mock_gateway.downstream', 'Mock gateway sent downstream', { raw });
   }
 
+  disconnectActive(reason = 'lab scenario disconnect'): void {
+    const socket = Array.from(this.#sockets).at(-1);
+    if (!socket) {
+      throw new Error('Mock gateway has no active SDK connection');
+    }
+    socket.close(1011, reason);
+    this.#events.append('mock_gateway.disconnect_requested', 'Mock gateway closed active SDK connection', { reason });
+  }
+
   async waitForMessages(fromIndex: number, timeoutMs = 1200): Promise<unknown[]> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {

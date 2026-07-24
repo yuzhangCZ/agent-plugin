@@ -51,17 +51,33 @@ const commands = [
   'closeSession',
   'abortSession',
   'dispose',
+  'outbound',
 ];
 
-const scenarioKinds: ProviderScenarioConfig['kind'][] = [
-  'success',
-  'offline',
-  'throw',
-  'timeout',
-  'invalid_fact',
-  'failed_run',
-  'aborted_run',
-];
+const scenarioKindsByCommand: Record<string, ProviderScenarioConfig['kind'][]> = {
+  initialize: ['success', 'throw', 'timeout'],
+  health: ['success', 'offline', 'throw', 'timeout'],
+  createSession: ['success', 'throw', 'timeout'],
+  listSlashCommands: ['success', 'throw', 'timeout'],
+  runMessage: [
+    'success',
+    'throw',
+    'timeout',
+    'invalid_fact',
+    'failed_run',
+    'session_not_found',
+    'result_reject',
+    'facts_throw',
+    'enrich_failure',
+    'aborted_run',
+  ],
+  replyQuestion: ['success', 'throw', 'timeout'],
+  replyPermission: ['success', 'throw', 'timeout'],
+  closeSession: ['success', 'throw', 'timeout'],
+  abortSession: ['success', 'throw', 'timeout'],
+  dispose: ['success', 'throw', 'timeout'],
+  outbound: ['success', 'invalid_fact', 'facts_throw', 'enrich_failure'],
+};
 
 function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>({ mode: 'real-gateway', events: [] });
@@ -126,17 +142,18 @@ function App(): React.JSX.Element {
   const eventGroups = useMemo(() => groupEvents(snapshot.events), [snapshot.events]);
   const selectedDownstream = downstreamScenarios.find((item) => item.id === selectedDownstreamId);
   const groupedDownstream = useMemo(() => groupScenarios(downstreamScenarios), [downstreamScenarios]);
+  const availableScenarioKinds = scenarioKindsByCommand[scenario.command] ?? ['success'];
 
   const runRuntimeAction = useCallback(async (action: (typeof runtimeButtons)[number]['id']) => {
     setBusyAction(action);
     try {
-      const result = await callRuntimeAction(action, config);
+      const result = await callRuntimeAction(action, config, mode);
       setLastResult(result);
       await refresh();
     } finally {
       setBusyAction(undefined);
     }
-  }, [config, refresh]);
+  }, [config, mode, refresh]);
 
   const updateMode = useCallback(async (nextMode: GatewayMode) => {
     setMode(nextMode);
@@ -294,7 +311,13 @@ function App(): React.JSX.Element {
             <div className="scenario-form">
               <label>
                 <span>Command</span>
-                <select value={scenario.command} onChange={(event) => setScenario({ ...scenario, command: event.target.value })}>
+                <select
+                  value={scenario.command}
+                  onChange={(event) => setScenario(normalizeScenarioForCommand({
+                    ...scenario,
+                    command: event.target.value,
+                  }))}
+                >
                   {commands.map((command) => (
                     <option key={command} value={command}>{command}</option>
                   ))}
@@ -303,7 +326,7 @@ function App(): React.JSX.Element {
               <label>
                 <span>Kind</span>
                 <select value={scenario.kind} onChange={(event) => setScenario({ ...scenario, kind: event.target.value as ProviderScenarioConfig['kind'] })}>
-                  {scenarioKinds.map((kind) => (
+                  {availableScenarioKinds.map((kind) => (
                     <option key={kind} value={kind}>{kind}</option>
                   ))}
                 </select>
@@ -319,11 +342,16 @@ function App(): React.JSX.Element {
             </div>
             <div className="command-strip">
               {commands.map((command) => (
-                <button key={command} className={scenario.command === command ? 'selected' : ''} onClick={() => setScenario({ ...scenario, command })}>
+                <button
+                  key={command}
+                  className={scenario.command === command ? 'selected' : ''}
+                  onClick={() => setScenario(normalizeScenarioForCommand({ ...scenario, command }))}
+                >
                   {command}
                 </button>
               ))}
             </div>
+            <p className="muted">Kind 会随 Command 过滤，只展示该 Provider API 可触发的行为。</p>
           </div>
 
           <div className="panel">
@@ -360,7 +388,7 @@ function App(): React.JSX.Element {
         <section className="panel downstream-lab">
           <div className="section-title">
             <Bug size={16} />
-            <span>Downstream Lab</span>
+            <span>Stage Matrix Lab</span>
           </div>
           <div className="downstream-layout">
             <div className="scenario-list">
@@ -388,9 +416,9 @@ function App(): React.JSX.Element {
               </div>
               <pre>{JSON.stringify(selectedDownstream?.raw ?? {}, null, 2)}</pre>
               <button className="primary wide" onClick={() => void runDownstreamScenario()} disabled={busyAction === 'downstream' || mode !== 'mock-gateway'}>
-                发送下行场景
+                运行矩阵场景
               </button>
-              {mode !== 'mock-gateway' ? <p className="muted">切换到 Mock 模式，初始化并启动 runtime 后运行下行场景。</p> : null}
+              {mode !== 'mock-gateway' ? <p className="muted">切换到 Mock 模式，初始化并启动 runtime 后运行矩阵场景。</p> : null}
             </div>
             <div className="tool-error-panel">
               <div className="section-title">
@@ -466,7 +494,7 @@ function App(): React.JSX.Element {
 
 function GatewayUplinkSummary({ result }: { result: DownstreamRunResult | undefined }): React.JSX.Element {
   if (!result) {
-    return <p className="muted">运行下行场景后，这里会展示 SDK 发往 gateway 的全部上行消息。</p>;
+    return <p className="muted">运行矩阵场景后，这里会展示 SDK 发往 gateway 的全部上行消息。</p>;
   }
 
   if (result.uplinks.length === 0) {
@@ -495,7 +523,7 @@ function GatewayUplinkSummary({ result }: { result: DownstreamRunResult | undefi
 
 function ToolErrorSummary({ result }: { result: DownstreamRunResult | undefined }): React.JSX.Element {
   if (!result) {
-    return <p className="muted">运行下行场景后，这里会展示 SDK 上行的 tool_error。</p>;
+    return <p className="muted">运行矩阵场景后，这里会展示 SDK 上行的 tool_error。</p>;
   }
 
   if (result.toolErrors.length === 0) {
@@ -546,11 +574,21 @@ function readRouteSummary(value: unknown): string {
   return route.length > 0 ? route.join(' / ') : 'route: -';
 }
 
-async function callRuntimeAction(action: (typeof runtimeButtons)[number]['id'], config: Record<string, string>): Promise<RuntimeActionResult> {
+async function callRuntimeAction(
+  action: (typeof runtimeButtons)[number]['id'],
+  config: Record<string, string>,
+  mode: GatewayMode,
+): Promise<RuntimeActionResult> {
   if (action === 'create') {
+    const body = mode === 'real-gateway'
+      ? {
+          toolVersion: config.toolVersion,
+          pluginVersion: config.pluginVersion,
+        }
+      : config;
     return api('/api/runtime/create', {
       method: 'POST',
-      body: JSON.stringify(config),
+      body: JSON.stringify(body),
     });
   }
   if (action === 'probe') {
@@ -611,6 +649,17 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function normalizeScenarioForCommand(scenario: ProviderScenarioConfig): ProviderScenarioConfig {
+  const kinds = scenarioKindsByCommand[scenario.command] ?? ['success'];
+  if (kinds.includes(scenario.kind)) {
+    return scenario;
+  }
+  return {
+    ...scenario,
+    kind: kinds[0] ?? 'success',
+  };
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(
