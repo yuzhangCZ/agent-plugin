@@ -120,16 +120,13 @@ export class RequestRunCoordinator {
       this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
       const enriched = this.factEnricher.enrich(toolSessionId, fact);
       if (!enriched.ok) {
-        const error = new RuntimeContractError('fact_sequence_invalid', enriched.reason, {
-          reason: enriched.reason,
-        });
         this.pipeline.observation.failureRecorded(
           RUNTIME_FAILURE_KIND.outboundValidation,
           RUNTIME_FAILURE_PHASE.runtime,
           enriched.reason,
-          error.code,
+          enriched.reason,
         );
-        throw error;
+        continue;
       }
       const classification = classifyFact(fact.type);
       this.validator.consume(toolSessionId, fact, state, profile);

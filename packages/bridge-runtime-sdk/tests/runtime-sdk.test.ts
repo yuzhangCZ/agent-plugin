@@ -3501,7 +3501,7 @@ test('request run delays terminal tool_done by 100ms', async () => {
   assert.equal(runtime.getDiagnostics().uplinks.at(-1)?.type, 'tool_done');
 });
 
-test('request run enrich failure projects tool_error and suppresses terminal tool_done', async () => {
+test('request run enrich failure preserves continue behavior', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -3551,15 +3551,14 @@ test('request run enrich failure projects tool_error and suppresses terminal too
   await flushEvents();
 
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'tool_error',
+    type: 'tool_done',
     toolSessionId: 'tool-enrich-1',
-    error: '当前请求处理失败，请重试',
   });
   assert.equal(connection.sent.some((message) => {
     return typeof message === 'object'
       && message !== null
       && 'type' in message
-      && message.type === 'tool_done'
+      && message.type === 'tool_error'
       && 'toolSessionId' in message
       && message.toolSessionId === 'tool-enrich-1';
   }), false);
@@ -3567,7 +3566,7 @@ test('request run enrich failure projects tool_error and suppresses terminal too
     kind: 'outbound_validation_failure',
     phase: 'runtime',
     message: 'permission_reply_projection_missed',
-    code: 'fact_sequence_invalid',
+    code: 'permission_reply_projection_missed',
   });
 });
 
@@ -3872,7 +3871,7 @@ test('emitOutboundRun emits tool_error when facts fail validation', async () => 
   });
 });
 
-test('emitOutboundRun enrich failure emits terminal tool_error', async () => {
+test('emitOutboundRun enrich failure preserves continue behavior', async () => {
   const connection = new FakeGatewayClient();
   const provider = createProvider();
   let outbound: ProviderRuntimeContext['outbound'];
@@ -3882,33 +3881,29 @@ test('emitOutboundRun enrich failure emits terminal tool_error', async () => {
   const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
 
   await runtime.start();
-  await assert.rejects(
-    () => outbound.emitOutboundRun({
-      toolSessionId: 'tool-outbound-run-enrich',
-      runId: 'outbound-run-enrich',
-      trigger: 'system',
-      facts: createAsyncFacts([
-        {
-          type: 'permission.reply',
-          permissionId: 'permission-missing-context',
-          response: 'once',
-        },
-      ]),
-    }),
-    (error) => error instanceof Error && 'code' in error && error.code === 'fact_sequence_invalid',
-  );
+  await outbound.emitOutboundRun({
+    toolSessionId: 'tool-outbound-run-enrich',
+    runId: 'outbound-run-enrich',
+    trigger: 'system',
+    facts: createAsyncFacts([
+      {
+        type: 'permission.reply',
+        permissionId: 'permission-missing-context',
+        response: 'once',
+      },
+    ]),
+  });
   await flushEvents();
 
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'tool_error',
+    type: 'tool_done',
     toolSessionId: 'tool-outbound-run-enrich',
-    error: '主动消息处理失败，请重试',
   });
   assert.equal(connection.sent.some((message) => {
     return typeof message === 'object'
       && message !== null
       && 'type' in message
-      && message.type === 'tool_done'
+      && message.type === 'tool_error'
       && 'toolSessionId' in message
       && message.toolSessionId === 'tool-outbound-run-enrich';
   }), false);
@@ -3916,7 +3911,47 @@ test('emitOutboundRun enrich failure emits terminal tool_error', async () => {
     kind: 'outbound_validation_failure',
     phase: 'runtime',
     message: 'permission_reply_projection_missed',
-    code: 'fact_sequence_invalid',
+    code: 'permission_reply_projection_missed',
+  });
+});
+
+test('emitOutboundMessage enrich failure preserves legacy continue behavior', async () => {
+  const connection = new FakeGatewayClient();
+  const provider = createProvider();
+  let outbound: ProviderRuntimeContext['outbound'];
+  provider.initialize = async (context) => {
+    outbound = context.outbound;
+  };
+  const runtime = await createBridgeRuntime(createRuntimeOptions(provider, connection));
+
+  await runtime.start();
+  await outbound.emitOutboundMessage({
+    toolSessionId: 'tool-outbound-message-enrich',
+    messageId: 'outbound-message-enrich',
+    trigger: 'system',
+    facts: createAsyncFacts([
+      {
+        type: 'permission.reply',
+        permissionId: 'permission-missing-context',
+        response: 'once',
+      },
+    ]),
+  });
+  await flushEvents();
+
+  assert.equal(connection.sent.some((message) => {
+    return typeof message === 'object'
+      && message !== null
+      && 'type' in message
+      && message.type === 'tool_error'
+      && 'toolSessionId' in message
+      && message.toolSessionId === 'tool-outbound-message-enrich';
+  }), false);
+  assert.deepEqual(runtime.getDiagnostics().failures.at(-1), {
+    kind: 'outbound_validation_failure',
+    phase: 'runtime',
+    message: 'permission_reply_projection_missed',
+    code: 'permission_reply_projection_missed',
   });
 });
 

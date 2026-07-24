@@ -182,8 +182,8 @@ sequenceDiagram
 
 1. 新增统一 `ToolErrorReporter`，收敛 `tool_error` 的构造、路由字段、级别、observation 和发送。
 2. `CommandFailureToolErrorProjector` 补齐可路由失败：unsupported `invoke`、`create_session` 失败只有 `welinkSessionId` 的场景。
-3. `RequestRunCoordinator` 将 `ProviderFactEnricher.enrich()` 失败从“记录后继续”升级为 request run 失败终态，避免关键 permission 事件静默丢失后仍发 `tool_done`。
-4. `OutboundCoordinator.emitOutboundRun()` 将 enrich 失败走 failed terminal，避免主动消息部分事件丢失。
+3. `RequestRunCoordinator` 的 `ProviderFactEnricher.enrich()` 失败本轮不改变 main 分支逻辑，继续记录 diagnostics 后 `continue`；只保留 facts 生命周期异常进入 request lifecycle `tool_error`。
+4. `OutboundCoordinator.emitOutboundRun()` enrich 失败本轮不改变 main 分支逻辑，继续记录 diagnostics 后 `continue`；只保留普通 outbound run failed terminal 走 reporter。
 5. `status_query` 的 Provider `health()` 失败不建议使用 `tool_error`，但需要单独确认是否补 `status_response` 失败态，避免状态查询调用方等待。
 6. 保持 `ListSlashCommandsUseCase` 的空列表降级，不新增 `tool_error`。
 
@@ -214,7 +214,7 @@ sequenceDiagram
 1. 新增应用层 `ToolErrorReporter`，统一 `tool_error` 的路由字段补齐、文案选择、级别记录、`observation.uplinkEmitted()` 和 `sink.send()`。
 2. 各阶段不直接 `sink.send(tool_error)`，而是调用 `ToolErrorReporter.report(input)`。
 3. 各阶段仍保留失败判定边界：inbound invalid、command failure、request lifecycle、request terminal、outbound terminal 不合并成一个大 catch。
-4. 可以通过抛异常传递到阶段边界的场景：Provider API apply 失败、unsupported invoke、facts lifecycle/enrich failure。
+4. 可以通过抛异常传递到阶段边界的场景：Provider API apply 失败、unsupported invoke、request facts lifecycle failure、outbound facts lifecycle failure。
 5. 不建议通过抛异常统一处理的场景：`ProviderRun.result()` 返回 `outcome: "failed"`，它是 terminal 真源；gateway invalid frame 也不是 runtime command 异常。
 
 推荐的上报输入模型如下：
@@ -247,14 +247,15 @@ type ToolErrorReportInput = {
    - `tool_error` 输出同时支持 `toolSessionId` 与 `welinkSessionId`；`create_session` 失败时至少携带 `welinkSessionId`。
    - `fact_sequence_invalid`、`pending_interaction_conflict` 仍交给 request lifecycle 路径，避免重复上报。
 3. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/RequestRunCoordinator.ts`
-   - `enriched.ok === false` 时记录 observation 后抛出 `RuntimeContractError('fact_sequence_invalid', ...)` 或引入更精确的 runtime code。
-   - 复用现有 `RequestRunFailureToolErrorProjector` 发送 `request_run_failed`。
+   - request terminal failed 通过 `ToolErrorReporter` 统一发送。
+   - request run enrich failure 不改变 main 分支逻辑，仍记录 diagnostics 后 `continue`。
 4. 修改 `packages/bridge-runtime-sdk/src/application/coordinators/OutboundCoordinator.ts`
-   - outbound run 的 enrich failure 抛出后由 `emitOutboundRunFailed()` 进入失败终态，并通过 `ToolErrorReporter` 发送 catalog 文案。
-   - 已废弃 `emitOutboundMessage()` 不强行补 terminal 语义，保持 Promise reject / diagnostics。
+   - outbound run 的普通 failed terminal 通过 `ToolErrorReporter` 统一发送。
+   - outbound run enrich failure 不改变 main 分支逻辑，仍记录 diagnostics 后 `continue`。
+   - 已废弃 `emitOutboundMessage()` 不强行补 terminal 语义，保持原 diagnostics / Promise 行为。
 5. 补充 focused tests
    - `command-failure-tool-error-projector.test.ts` 覆盖 unsupported action 与 welink-only create_session。
-   - `runtime-sdk.test.ts` 覆盖 request run enrich failure、outbound run enrich failure。
+  - `runtime-sdk.test.ts` 覆盖 request/outbound terminal failure，以及 request/outbound enrich failure 保持 main 分支行为。
 
 ### 4.3 兼容与边界
 
@@ -300,7 +301,7 @@ type ToolErrorReportInput = {
 | Runtime command 路由 | 前端发起了一个 SDK 暂不支持的操作，例如新增按钮、灰度功能或 gateway 新 action 先上线，但 SDK 还没适配 | `invoke` action 不支持，但消息里有 `toolSessionId` 或 `welinkSessionId` | `toRuntimeCommand()` 抛错；`CommandFailureToolErrorProjector.isSupportedAction()` 返回 `null` | 前端可能没有失败回包，点击后无响应 | P0 | 新增 unsupported invoke `tool_error` |
 | `createSession()` | 用户点击“新建会话”或首次进入助手会话，第三方 Agent 创建底层会话失败，例如账号无权限、服务不可用、创建参数不合法 | Provider 抛错且会话尚未生成 `toolSessionId` | 当前 projector 允许进入，但输出不带 `welinkSessionId`；已有测试名也锁定“不回显 welinkSessionId” | 前端难以把失败挂到发起的新建会话请求 | P0 | `tool_error` 补带 `welinkSessionId` |
 | request run facts enrich | Agent 发起权限申请或权限结果回传，但 SDK 找不到对应展示上下文，例如权限卡片没有成功展示、permissionId 对不上、同一权限展示冲突 | `permission.reply` 找不到展示上下文、`permission.ask` 展示冲突 | `ProviderFactEnricher.enrich()` 返回 `ok:false` 后只 `failureRecorded` 并 `continue` | 关键交互状态静默丢失，后续可能仍 `tool_done` | P1 | 作为 request lifecycle failure 发送 `request_run_failed` 并终止 run |
-| outbound run facts enrich | Agent 在后台主动推送权限相关结果或异步任务结果，但这轮主动消息缺少前端展示所需上下文 | Provider 主动 `emitOutboundRun()` 中 permission enrich 失败 | 当前只记录后继续，最终可能 `tool_done` | 主动消息局部丢事件，用户误以为成功 | P1 | 走 `emitOutboundRunFailed()` 生成 terminal `tool_error` |
+| outbound run facts enrich | Agent 在后台主动推送权限相关结果或异步任务结果，但这轮主动消息缺少前端展示所需上下文 | Provider 主动 `emitOutboundRun()` 中 permission enrich 失败 | 当前只记录后继续，最终可能 `tool_done` | 主动消息局部丢事件，用户误以为成功 | P1 | 本轮按要求不改变 main 分支逻辑，不新增 `tool_error` |
 | command failure 文案 | 用户已经能看到失败提示，但提示内容像 `ECONNRESET`、`socket hang up`、堆栈摘要或第三方内部错误码，产品和用户都难以理解 | Provider API 抛普通 `Error` 或结构化 `ProviderCommandError` | 已会上报，但普通 message 可能直出 | 用户能感知失败，但可能看到技术错误或敏感信息 | P1 | 后续加 normalizer/catalog；不作为“缺上报”处理 |
 
 新增/补齐后的上行数据示例：
@@ -309,8 +310,6 @@ type ToolErrorReportInput = {
 |---|---|---|
 | unsupported `invoke` | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"当前操作暂不支持，请升级 SDK 或稍后重试"}` | 有 `toolSessionId` / `welinkSessionId` 时都应尽量携带，方便前端把错误挂到正确会话或请求 |
 | `createSession()` 失败 | `{"type":"tool_error","welinkSessionId":"welink-123","error":"会话创建失败，请稍后重试"}` | 新建会话失败时通常还没有 `toolSessionId`，必须携带 `welinkSessionId` 才能让前端关联发起请求 |
-| request run facts enrich 失败 | `{"type":"tool_error","toolSessionId":"tool-123","welinkSessionId":"welink-123","error":"当前请求处理失败，请重试"}` | 建议复用 `request_run_failed` 文案；如果 session registry 能拿到 `welinkSessionId`，也应补带 |
-| outbound run facts enrich 失败 | `{"type":"tool_error","toolSessionId":"tool-123","error":"主动消息处理失败，请重试"}` | 主动 outbound 没有用户当前输入气泡时，至少携带 `toolSessionId`，让前端定位到对应会话 |
 | command failure 文案规范化 | `{"type":"tool_error","toolSessionId":"tool-123","error":"服务暂时不可用，请稍后重试"}` | 协议字段不变，主要把 `error` 从技术异常改成稳定用户文案 |
 
 #### 4.4.3 不建议新增 `tool_error`，但要验证不无响应的场景
@@ -324,6 +323,7 @@ type ToolErrorReportInput = {
 | runtime 运行中断线 | runtime 已启动，gateway 后续进入非重试关闭或运行期失败，例如鉴权被撤销、连接被服务端拒绝 | gateway status 进入 failure closed，被 `RuntimeLifecycleService.handleGatewayStatusChanged()` 标记 failed | `getStatus()` 进入 `failed`，diagnostics/log 记录 gateway runtime failure；已生成但未发送的上行消息无法再补 `tool_error` | P1/P3 | 不递归发送 `tool_error`；前端应监听 runtime/gateway 状态并提示连接不可用 |
 | runtime 停止 | 插件关闭、重启或账号切换时，Provider 释放资源失败 | `dispose()` 抛错 | `runtime.stop()` reject 或 lifecycle failure | P3 | 不使用 `tool_error` |
 | 已废弃 outbound message | 老 Provider 仍使用旧的主动消息接口发送单批 facts；这条接口没有 run 终态概念 | `emitOutboundMessage()` facts 失败 | Promise reject 给 Provider，缺少 run terminal 语义 | P2 | 不新增前端协议行为；新接入迁移到 `emitOutboundRun()` |
+| request run facts enrich | Agent 回复权限结果，但 SDK 找不到对应权限展示上下文 | `ProviderFactEnricher.enrich()` 返回 `ok:false` | 记录 diagnostics 后继续，当前最终仍可能 `tool_done` | P1 | 本轮按要求不改变 main 分支逻辑，不新增 `tool_error` |
 | 上行发送口 | SDK 已经生成上行消息，但 gateway 连接断开、未 READY、或消息不符合 schema，前端可能收不到任何回包 | `GatewayOutboundSinkAdapter.send()` 校验失败或 driver 不可用 | 记录 outbound validation failure；不能保证再发 `tool_error` | P1 | 不递归发送；依赖 diagnostics / reconnect / gateway 状态 |
 
 ### 4.5 对现有业务逻辑的影响
@@ -336,8 +336,8 @@ type ToolErrorReportInput = {
 |---|---|---|---|---|---|
 | unsupported `invoke` 上报 `tool_error` | 前端发起 SDK 不支持的 action 时，可能没有失败回包，用户看到按钮无响应或一直等待 | 前端收到 `tool_error`，可展示“不支持当前操作/请升级 SDK” | 前端错误提示、gateway 新旧 action 灰度、测试用例断言 | 中 | 前端需确认收到该 `tool_error` 后不再继续 loading；测试补 unknown action 场景 |
 | `createSession()` 失败补 `welinkSessionId` | 新建会话失败时可能没有 `toolSessionId`，前端难以把错误挂回创建请求 | 前端可用 `welinkSessionId` 定位创建失败，展示明确错误 | 新建会话 UI、首次进入会话、会话映射缓存、前端错误路由逻辑 | 中 | 前端需确认 `welinkSessionId` 可作为 create failure 的路由键；测试补无 `toolSessionId` 场景 |
-| request run facts enrich 失败上报 `tool_error` 并终止 run | permission 展示上下文丢失时可能只记录 diagnostics，后续仍可能 `tool_done`，用户误以为成功 | 当前 run 以 `tool_error` 收口，不再继续发送误导性的成功终态 | 权限卡片、问题卡片、run 终态、前端消息气泡状态 | 中 | 需要确认前端对同一 run 收到 `tool_error` 后关闭 loading，并避免再展示成功态 |
-| outbound run facts enrich 失败上报 terminal `tool_error` | Provider 主动消息缺上下文时可能局部事件丢失，最终仍可能成功结束 | 主动消息失败会以 `tool_error` 告知前端 | 主动通知、后台任务结果、异步回调消息、会话消息列表 | 中 | 测试补主动 outbound 权限上下文缺失；产品确认主动消息失败提示方式 |
+| request run facts enrich 失败 | permission 展示上下文丢失时可能只记录 diagnostics，后续仍可能 `tool_done`，用户误以为成功 | 本轮不改变 main 分支逻辑：记录 diagnostics 后继续，不新增 `tool_error` | 权限卡片、问题卡片、run 终态、前端消息气泡状态 | 低 | 测试锁定 main 行为；如后续产品确认需要前端失败态，再单独设计兼容方案 |
+| outbound run facts enrich 失败 | Provider 主动消息缺上下文时可能局部事件丢失，最终仍可能成功结束 | 本轮不改变 main 分支逻辑：记录 diagnostics 后继续，不新增 `tool_error` | 主动通知、后台任务结果、异步回调消息、会话消息列表 | 低 | 测试锁定 main 行为；如后续产品确认需要前端失败态，再单独设计兼容方案 |
 | command failure 文案规范化 | 用户可能看到 `ECONNRESET`、`socket hang up` 等技术错误 | 用户看到稳定业务文案，原始错误留在 diagnostics | 前端 toast 文案、测试 snapshot、问题排查链路 | 低 | UI 自动化和单测不要断言原始异常字符串；diagnostics 保留原始错误摘要 |
 
 #### 4.5.2 `ToolErrorReportInput` / 统一 reporter 的影响
@@ -427,9 +427,9 @@ type ToolErrorReportInput = {
 | `ProviderRun.result()` failed | mock ProviderRun.result 返回 failed | 需要 mock ProviderRun | 否 | 否 |
 | `ProviderRun.result()` reject | mock ProviderRun.result reject | 需要 mock ProviderRun | 否 | 否 |
 | facts 生命周期非法 | mock facts async iterable 输出非法顺序 | 需要 mock facts | 否 | 否 |
-| request run enrich failure | mock facts 输出缺上下文 `permission.reply` | 需要 mock facts | 否 | 否 |
+| request run enrich failure | mock facts 输出缺上下文 `permission.reply`，验证继续 main 行为 | 需要 mock facts | 否 | 否 |
 | `emitOutboundRun()` 生命周期非法 | 在 `initialize()` 保存 outbound 后调用非法 facts | 需要 mock outbound facts | 否 | 否 |
-| `emitOutboundRun()` enrich failure | outbound facts 输出缺上下文 `permission.reply` | 需要 mock outbound facts | 否 | 否 |
+| `emitOutboundRun()` enrich failure | outbound facts 输出缺上下文 `permission.reply`，验证继续 main 行为 | 需要 mock outbound facts | 否 | 否 |
 | slash command 查询失败 | mock `listSlashCommands()` throw | 需要 mock Provider | 否 | 否 |
 | health 查询失败 | mock `health()` throw | 需要 mock Provider | 否；如验证前端状态页可用 gateway | 否 |
 | runtime.start Provider 初始化失败 | mock `initialize()` throw | 需要 mock Provider | 否 | 否 |
@@ -460,6 +460,6 @@ type ToolErrorReportInput = {
 
 ## 10. 最终建议
 
-最终结论：推荐先做 P0/P1 缺口补齐，而不是先重写已有 `tool_error` 文案体系。优先级为：unsupported `invoke` 补 `tool_error`、`create_session` 失败补 `welinkSessionId`、request run enrich failure 改失败终态、outbound run enrich failure 改 failed terminal。随后再做 Provider 错误 normalizer/catalog，解决已有上报直出技术异常的问题。
+最终结论：推荐先做 P0/P1 缺口补齐，而不是先重写已有 `tool_error` 文案体系。优先级为：unsupported `invoke` 补 `tool_error`、`create_session` 失败补 `welinkSessionId`、request/outbound terminal failed 统一 reporter。request/outbound run enrich failure 本轮保持 main 分支 `continue` 行为，不新增 `tool_error`；如后续产品确认需要前端失败态，再单独设计兼容方案。随后再做 Provider 错误 normalizer/catalog，解决已有上报直出技术异常的问题。
 
 测试上以 mock Provider、mock facts、FakeGateway driver 为主即可覆盖绝大多数异常；gateway 服务器和手动破坏 agent 只用于最终端到端验收，重点确认前端是否能用 `toolSessionId` / `welinkSessionId` 正确展示失败，不再出现无响应或长时间等待。

@@ -14,7 +14,6 @@ import { delayBeforeTerminalToolDone } from './terminal-signal-delay.ts';
 const OUTBOUND_PROFILE: LifecycleProfile = { kind: 'outbound' };
 // outbound_run 复用 request_run 的多消息生命周期校验，只在 observation 口径上区分来源。
 const OUTBOUND_RUN_PROFILE: LifecycleProfile = { kind: 'outbound_run' };
-const ENRICH_FAILURE_REASON_DETAIL = 'enrichFailureReason';
 
 /**
  * outbound 协调器。
@@ -104,16 +103,13 @@ export class OutboundCoordinator {
       this.pipeline.observation.factReceived(toolSessionId, fact, profile.kind);
       const enriched = this.factEnricher.enrich(toolSessionId, fact);
       if (!enriched.ok) {
-        const error = new RuntimeContractError('fact_sequence_invalid', enriched.reason, {
-          [ENRICH_FAILURE_REASON_DETAIL]: enriched.reason,
-        });
         this.pipeline.observation.failureRecorded(
           RUNTIME_FAILURE_KIND.outboundValidation,
           RUNTIME_FAILURE_PHASE.runtime,
           enriched.reason,
-          error.code,
+          enriched.reason,
         );
-        throw error;
+        continue;
       }
       const classification = classifyFact(fact.type);
       this.validator.consume(toolSessionId, fact, state, profile);
@@ -145,25 +141,6 @@ export class OutboundCoordinator {
   }
 
   private async emitOutboundRunFailed(toolSessionId: string, runId: string, error: unknown): Promise<void> {
-    if (this.isEnrichFailure(error)) {
-      this.pipeline.observation.terminalReceived(toolSessionId, {
-        outcome: 'failed',
-        error: {
-          code: 'internal_error',
-          message: (error as RuntimeContractError).message,
-          details: { runtimeCode: (error as RuntimeContractError).code, ...(error as RuntimeContractError).details },
-        },
-      }, { runId });
-      this.pipeline.observation.terminalProjected(toolSessionId, { outcome: 'failed' }, { runId });
-      this.pipeline.toolErrorReporter.report({
-        stage: 'outbound_terminal',
-        level: 'P1',
-        toolSessionId,
-        messageKey: 'outbound_run_failed',
-      });
-      return;
-    }
-
     const result: ProviderTerminalResult = {
       outcome: 'failed',
       error: {
@@ -177,12 +154,6 @@ export class OutboundCoordinator {
     } catch {
       // 保留原始 facts 流错误；终态发送失败会由 sink/gateway 侧观测记录。
     }
-  }
-
-  private isEnrichFailure(error: unknown): boolean {
-    return error instanceof RuntimeContractError
-      && error.code === 'fact_sequence_invalid'
-      && Boolean(error.details?.[ENRICH_FAILURE_REASON_DETAIL]);
   }
 
   private async emitOutboundRunTerminal(

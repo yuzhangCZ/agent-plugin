@@ -127,7 +127,7 @@ sequenceDiagram
 
 1. `inbound_invalid`：由 `GatewayInboundPolicy` 在 invalid `invoke` 场景调用 `ToolErrorReporter`。
 2. `command_failure`：由 `downstream.ts` 的 command catch 统一调用 `ToolErrorReporter`。
-3. `request_lifecycle`：由 `RequestRunCoordinator` 在 request facts 生命周期或 enrich 失败时调用 `ToolErrorReporter`。
+3. `request_lifecycle`：由 `RequestRunCoordinator` 在 request facts 生命周期失败时调用 `ToolErrorReporter`；request enrich failure 本轮保持 main 分支 `continue` 行为。
 4. `request_terminal`：由 `RequestRunCoordinator` 在 terminal projector 产出 `tool_error` 时调用 `ToolErrorReporter`。
 5. `outbound_terminal`：由 `OutboundCoordinator` 在 outbound run failed terminal 或 enrich failure 时调用 `ToolErrorReporter`。
 
@@ -148,12 +148,10 @@ sequenceDiagram
 | `command_failure` | 中止执行失败 | 用户点击停止，Provider 中止任务失败 | `abortSession()` 抛错 | Provider 异常 message | P1 | mock Provider `abortSession()` throw |
 | `command_failure` | request terminal Promise reject | Provider 已返回 `ProviderRun`，但 `result()` 没返回规范 terminal，而是直接 reject | `ProviderRun.result()` reject 后向外抛出，被 command failure catch 收口 | reject 异常 message | P0 | mock `ProviderRun.result()` reject |
 | `request_lifecycle` | request facts 生命周期非法 | Agent 开始回复后，事件顺序错误，前端无法拼出正常消息 | 未 `message.start` 就 `text.delta`、`message.done` 顺序错误、`tool.update` 内容非法等 | `当前请求处理失败，请重试` | P0 | mock facts 输出非法顺序 |
-| `request_lifecycle` | request facts enrich 失败 | 权限回复找不到对应权限展示上下文，或权限展示上下文冲突 | `ProviderFactEnricher.enrich()` 返回 `ok:false` | `当前请求处理失败，请重试` | P1 | mock facts 输出孤立 `permission.reply` |
 | `request_lifecycle` | request pending interaction 冲突 | 不同会话或不同上下文复用了同一个 question / permission id，SDK 无法安全路由回复 | validator / interaction registry 抛 `pending_interaction_conflict` | `当前请求处理失败，请重试` | P1 | mock 重复 questionId / permissionId |
 | `request_terminal` | Provider 明确返回 failed terminal | Agent 正常跑到终态，但明确告诉 SDK 本轮失败，例如模型失败、工具失败、远端服务失败 | `ProviderRun.result()` 返回 `{ outcome: "failed", error }` | `error.message`；缺失时用默认失败文案 | P0 | mock `result()` 返回 failed |
 | `request_terminal` | 会话不存在 failed terminal | Agent 返回底层会话不存在，前端可能需要重建会话 | `ProviderRun.result()` failed 且 `error.code === "session_not_found"` | `error.message`，并带 `reason: "session_not_found"` | P0 | mock failed terminal code 为 `session_not_found` |
 | `outbound_terminal` | outbound run facts 生命周期非法 | Provider 主动推送后台任务结果，但 facts 顺序错误 | `emitOutboundRun()` facts 校验失败 | 内部校验错误 message，例如 `text.delta requires an open message` | P0 | 在 `initialize()` 保存 outbound 后调用非法 facts |
-| `outbound_terminal` | outbound run facts enrich 失败 | Provider 主动推送权限相关结果，但缺少前端展示上下文 | `emitOutboundRun()` 中 `ProviderFactEnricher.enrich()` 返回 `ok:false` | `主动消息处理失败，请重试` | P1 | outbound facts 输出孤立 `permission.reply` |
 | `outbound_terminal` | outbound run facts 流其它异常 | Provider 主动消息的 async iterable 中途抛错 | `emitOutboundRun()` consume facts 抛出非 enrich 异常 | 异常 message | P1 | mock outbound facts async iterator throw |
 
 #### 4.2.2 不走这 5 类 `tool_error` 的异常场景
@@ -166,7 +164,9 @@ sequenceDiagram
 | `runtime.stop()` Provider dispose 失败 | 插件关闭或账号切换时 Provider 释放资源失败 | `runtime.stop()` reject；diagnostics/log 记录失败 | 停止阶段不是某个用户会话执行失败 | P3 | mock `dispose()` throw |
 | `health()` 查询失败 | 前端或宿主查询 Agent 是否在线，Provider 健康检查失败 | status 查询失败或 diagnostics/log；是否需要失败态响应待业务确认 | 状态查询不是会话执行，不应伪装为消息失败 | P2/P3 | mock `health()` throw |
 | `listSlashCommands()` 查询失败 | 用户输入 `/` 查询快捷命令，Provider 查询失败 | 返回空 `slash_commands_result` 降级 | 已有明确降级响应，用户仍可继续输入普通消息 | P2 | mock `listSlashCommands()` throw |
-| `emitOutboundMessage()` 老接口 facts 失败 | 旧 Provider 使用单批主动消息接口推送异常 facts | Promise reject 给 Provider；diagnostics/log | 老接口没有 run terminal 语义；新接入应迁移 `emitOutboundRun()` | P2 | mock `emitOutboundMessage()` 非法 facts |
+| request run facts enrich 失败 | Agent 回复权限结果，但 SDK 找不到对应权限展示上下文 | 维持 main 分支行为：记录 diagnostics 后继续，当前最终仍可能 `tool_done` | 本轮按要求不改变原逻辑，不抛异常、不新增 `tool_error` | P1 | mock request facts 输出孤立 `permission.reply` |
+| `emitOutboundRun()` facts enrich 失败 | Provider 主动推送权限相关结果，但缺少前端展示上下文 | 维持 main 分支行为：记录 diagnostics 后继续，当前最终仍可能 `tool_done` | 本轮按要求不改变原逻辑，不抛异常、不新增 `tool_error` | P1 | mock outbound run 输出孤立 `permission.reply` |
+| `emitOutboundMessage()` 老接口 facts 失败 | 旧 Provider 使用单批主动消息接口推送异常 facts | 生命周期非法时 Promise reject；enrich 失败维持 main 分支行为，仅记录 diagnostics 后继续 | 老接口没有 run terminal 语义；新接入应迁移 `emitOutboundRun()` | P2 | mock `emitOutboundMessage()` 非法 facts 和孤立 `permission.reply` |
 | `GatewayOutboundSinkAdapter.send()` 上行 schema 校验失败 | SDK 生成的上行消息不符合 gateway schema | diagnostics 记录 outbound validation failure | 如果连 `tool_error` 自身都可能非法，不能再递归构造另一个 `tool_error` | P1 | 构造非法 uplink 投影或 schema 校验失败 |
 | gateway sink/driver 发送失败 | 发送时 gateway 不可用、连接断开或 driver 抛错 | diagnostics/log 或 gateway status | 发送通道本身失败，不能可靠补发 `tool_error` | P1 | fake driver closed/send throw |
 | `query_status` 下行命令失败 | 宿主查询 runtime/provider 状态，Provider health 抛错 | command failure diagnostics；是否返回失败响应待确认 | 状态查询不是用户消息执行失败，是否使用 `tool_error` 需要产品确认 | P2/P3 | mock `health()` throw 后发 status query |
@@ -239,9 +239,9 @@ sequenceDiagram
 
 1. 构造 invalid `invoke`，验证 `inbound_invalid` 的 `tool_error`。
 2. 构造 unsupported action、`createSession()` throw、`runMessage()` throw、pending interaction missing，验证 `command_failure`。
-3. 构造 request facts 顺序非法、孤立 `permission.reply`、重复 permission/question id，验证 `request_lifecycle`。
+3. 构造 request facts 顺序非法、重复 permission/question id，验证 `request_lifecycle`；孤立 `permission.reply` 验证保持 main 分支 continue 行为。
 4. 构造 `ProviderRun.result()` failed 与 `session_not_found`，验证 `request_terminal`。
-5. 构造 `emitOutboundRun()` 非法 facts、孤立 `permission.reply`、async iterator throw，验证 `outbound_terminal`。
+5. 构造 `emitOutboundRun()` 非法 facts、async iterator throw，验证 `outbound_terminal`。
 
 ### 9.2 兼容测试
 
