@@ -22,8 +22,6 @@ export class ToolErrorMessageCatalog {
         return '当前会话正在处理中，请稍后再试';
       case 'pending_interaction_not_found':
         return '当前交互已失效，请刷新后重试';
-      case 'unsupported_action':
-        return '当前操作暂不支持，请升级 SDK 或稍后重试';
       case 'outbound_run_failed':
         return '主动消息处理失败，请重试';
       case 'request_run_failed':

@@ -300,8 +300,6 @@ type ToolErrorReportInput = {
 |---|---|---|---|---|---|---|
 | Runtime command 路由 | 前端发起了一个 SDK 暂不支持的操作，例如新增按钮、灰度功能或 gateway 新 action 先上线，但 SDK 还没适配 | `invoke` action 不支持，但消息里有 `toolSessionId` 或 `welinkSessionId` | `toRuntimeCommand()` 抛错；`CommandFailureToolErrorProjector.isSupportedAction()` 返回 `null` | 前端可能没有失败回包，点击后无响应 | P0 | 新增 unsupported invoke `tool_error` |
 | `createSession()` | 用户点击“新建会话”或首次进入助手会话，第三方 Agent 创建底层会话失败，例如账号无权限、服务不可用、创建参数不合法 | Provider 抛错且会话尚未生成 `toolSessionId` | 当前 projector 允许进入，但输出不带 `welinkSessionId`；已有测试名也锁定“不回显 welinkSessionId” | 前端难以把失败挂到发起的新建会话请求 | P0 | `tool_error` 补带 `welinkSessionId` |
-| request run facts enrich | Agent 发起权限申请或权限结果回传，但 SDK 找不到对应展示上下文，例如权限卡片没有成功展示、permissionId 对不上、同一权限展示冲突 | `permission.reply` 找不到展示上下文、`permission.ask` 展示冲突 | `ProviderFactEnricher.enrich()` 返回 `ok:false` 后只 `failureRecorded` 并 `continue` | 关键交互状态静默丢失，后续可能仍 `tool_done` | P1 | 作为 request lifecycle failure 发送 `request_run_failed` 并终止 run |
-| outbound run facts enrich | Agent 在后台主动推送权限相关结果或异步任务结果，但这轮主动消息缺少前端展示所需上下文 | Provider 主动 `emitOutboundRun()` 中 permission enrich 失败 | 当前只记录后继续，最终可能 `tool_done` | 主动消息局部丢事件，用户误以为成功 | P1 | 本轮按要求不改变 main 分支逻辑，不新增 `tool_error` |
 | command failure 文案 | 用户已经能看到失败提示，但提示内容像 `ECONNRESET`、`socket hang up`、堆栈摘要或第三方内部错误码，产品和用户都难以理解 | Provider API 抛普通 `Error` 或结构化 `ProviderCommandError` | 已会上报，但普通 message 可能直出 | 用户能感知失败，但可能看到技术错误或敏感信息 | P1 | 后续加 normalizer/catalog；不作为“缺上报”处理 |
 
 新增/补齐后的上行数据示例：
@@ -357,7 +355,7 @@ type ToolErrorReportInput = {
 
 1. 会话创建：首次进入助手、点击新建会话、创建失败时前端是否能基于 `welinkSessionId` 结束 loading 并展示错误。
 2. 消息发送：用户发送消息时 Provider 启动失败、重复发送、run terminal failed 是否都能以单一失败态收口。
-3. 权限/问题交互：权限卡片过期、重复回复、上下文丢失时，前端是否展示失败而不是继续等待。
+3. 权限/问题交互：权限卡片过期、重复回复时，前端是否展示失败而不是继续等待；上下文丢失类 enrich failure 本轮保持 diagnostics + continue 行为。
 4. 主动 outbound：后台任务或 Agent 主动消息失败时，前端是否能定位到会话并展示失败状态。
 5. 灰度兼容：gateway 或前端先发新 action、接入方仍用旧 SDK、会话标识字段不匹配时，用户是否看到明确升级/不支持提示。
 6. 启动/连接状态：`runtime.start()` Provider 初始化失败、gateway 连接失败、运行中 gateway 非重试关闭时，宿主是否能通过 status/diagnostics/error 日志展示连接不可用。
@@ -372,7 +370,7 @@ type ToolErrorReportInput = {
 
 ## 5. 性能
 
-不新增常态请求；只在异常路径上多发送 `tool_error` 或更早终止异常 facts 流。`ProviderFactEnricher` 失败从 continue 改为终止后，异常场景下反而减少后续无效投影。
+不新增常态请求；只在已补齐的异常路径上多发送 `tool_error`。`ProviderFactEnricher` 失败本轮保持 main 分支 `failureRecorded` 后 `continue` 行为，不新增前端上行消息，也不提前终止 facts 流。
 
 ## 6. 功耗
 

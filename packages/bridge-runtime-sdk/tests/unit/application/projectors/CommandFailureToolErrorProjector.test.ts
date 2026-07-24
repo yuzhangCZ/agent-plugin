@@ -78,7 +78,7 @@ test('command failure projector maps unsupported actions when route fields exist
     type: 'tool_error',
     toolSessionId: 'tool-1',
     welinkSessionId: 'welink-1',
-    error: '当前操作暂不支持，请升级 SDK 或稍后重试',
+    error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
   });
 });
 

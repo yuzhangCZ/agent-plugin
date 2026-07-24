@@ -7,6 +7,7 @@ import type { ToolErrorMessage } from '@agent-plugin/gateway-schema';
 import { GatewayInboundPolicy } from '@/adapters/gateway/GatewayInboundPolicy.ts';
 import type { OutboundSink } from '@/application/ports/outbound-sink.ts';
 import { ToolErrorMessageCatalog } from '@/application/projectors/ToolErrorMessageCatalog.ts';
+import { ToolErrorReporter } from '@/application/reporters/index.ts';
 import type { RuntimeObservation } from '@/application/runtime-observation/index.ts';
 
 interface FakeObservation extends RuntimeObservation {
@@ -57,6 +58,15 @@ function createFakeSink(): FakeSink {
 } } as unknown as FakeSink;
 }
 
+function createPolicy(observation: RuntimeObservation, sink: OutboundSink): GatewayInboundPolicy {
+  const catalog = new ToolErrorMessageCatalog();
+  return new GatewayInboundPolicy(
+    observation,
+    new ToolErrorReporter(sink, observation, catalog),
+    catalog,
+  );
+}
+
 function createInvalidInvokeFrame(
   violation: { code: string; field?: string; action?: string; message: string },
   options: { welinkSessionId?: string; toolSessionId?: string } = {},
@@ -87,7 +97,7 @@ function createInvalidInvokeFrame(
 test('GatewayInboundPolicy sends tool_error with unsupported_action joined by action segment', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   policy.handle(
     createInvalidInvokeFrame(
@@ -108,7 +118,7 @@ test('GatewayInboundPolicy sends tool_error with unsupported_action joined by ac
 test('GatewayInboundPolicy sends tool_error with invalid_field_value joined by field segment', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   policy.handle(
     createInvalidInvokeFrame(
@@ -129,7 +139,7 @@ test('GatewayInboundPolicy sends tool_error with invalid_field_value joined by f
 test('GatewayInboundPolicy sends tool_error with invalid_field_value for type-mismatch field', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   policy.handle(
     createInvalidInvokeFrame(
@@ -150,7 +160,7 @@ test('GatewayInboundPolicy sends tool_error with invalid_field_value for type-mi
 test('GatewayInboundPolicy does not send tool_error when no routable session ids', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   policy.handle(
     createInvalidInvokeFrame(
@@ -167,7 +177,7 @@ test('GatewayInboundPolicy does not send tool_error when no routable session ids
 test('GatewayInboundPolicy does not send tool_error when gateway not ready', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   policy.handle(
     createInvalidInvokeFrame(
@@ -186,7 +196,7 @@ test('GatewayInboundPolicy does not send tool_error when gateway not ready', () 
 test('GatewayInboundPolicy ignores invalid frames that are not invoke', () => {
   const observation = createFakeObservation();
   const sink = createFakeSink();
-  const policy = new GatewayInboundPolicy(observation, sink, new ToolErrorMessageCatalog());
+  const policy = createPolicy(observation, sink);
 
   const nonInvokeFrame = {
     kind: 'invalid',
