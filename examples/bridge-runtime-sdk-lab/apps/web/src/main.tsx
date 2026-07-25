@@ -129,10 +129,16 @@ function App(): React.JSX.Element {
     const events = new EventSource('/api/events');
     events.onmessage = (message) => {
       const event = JSON.parse(message.data) as LabEvent;
-      setSnapshot((current) => ({
-        ...current,
-        events: [event, ...current.events].slice(0, 300),
-      }));
+      setSnapshot((current) => {
+        const downstream = toGatewayDownstreamView(event, current.mode);
+        return {
+          ...current,
+          downstreams: downstream
+            ? [downstream, ...(current.downstreams ?? [])].slice(0, 80)
+            : current.downstreams,
+          events: [event, ...current.events].slice(0, 300),
+        };
+      });
     };
     return () => {
       events.close();
@@ -629,6 +635,92 @@ function toDownstreamDisplay(downstream: LabGatewayDownstreamView): Record<strin
     code: downstream.code,
     raw: downstream.raw,
   };
+}
+
+function toGatewayDownstreamView(event: LabEvent, mode: GatewayMode): LabGatewayDownstreamView | null {
+  if (event.type === 'mock_gateway.downstream') {
+    const raw = asRecord(event.meta)?.raw;
+    const rawRecord = asRecord(raw);
+    const payload = asRecord(rawRecord?.payload);
+    return {
+      id: event.id,
+      at: event.at,
+      source: 'mock-gateway',
+      phase: 'mock_sent',
+      messageType: stringField(rawRecord, 'type'),
+      action: stringField(rawRecord, 'action'),
+      command: stringField(rawRecord, 'action'),
+      toolSessionId: stringField(rawRecord, 'toolSessionId') ?? stringField(payload, 'toolSessionId'),
+      welinkSessionId: stringField(rawRecord, 'welinkSessionId'),
+      traceId: stringField(rawRecord, 'traceId'),
+      raw,
+    };
+  }
+
+  if (event.type === 'sdk.log.info' && event.message === 'runtime_sdk.downstream.received') {
+    const meta = asRecord(event.meta);
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase: 'received',
+      messageType: stringField(meta, 'messageType'),
+      action: stringField(meta, 'action'),
+      toolSessionId: stringField(meta, 'toolSessionId'),
+      welinkSessionId: stringField(meta, 'welinkSessionId'),
+    };
+  }
+
+  if (event.type === 'sdk.log.debug' && event.message === 'gateway.message.received') {
+    const meta = asRecord(event.meta);
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase: 'received',
+      messageType: stringField(meta, 'messageType'),
+      action: stringField(meta, 'action'),
+      toolSessionId: stringField(meta, 'toolSessionId'),
+      welinkSessionId: stringField(meta, 'welinkSessionId'),
+    };
+  }
+
+  if (event.type.startsWith('sdk.log.') && event.message.startsWith('runtime_sdk.downstream.')) {
+    const meta = asRecord(event.meta);
+    const phase = event.message.replace('runtime_sdk.downstream.', '');
+    if (!isProcessedPhase(phase)) {
+      return null;
+    }
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase,
+      messageType: stringField(meta, 'messageType'),
+      command: stringField(meta, 'command'),
+      toolSessionId: stringField(meta, 'toolSessionId'),
+      welinkSessionId: stringField(meta, 'welinkSessionId'),
+      error: stringField(meta, 'error'),
+      code: stringField(meta, 'code'),
+    };
+  }
+
+  return null;
+}
+
+function isProcessedPhase(value: string): value is LabGatewayDownstreamView['phase'] {
+  return value === 'handled' || value === 'failed' || value === 'invalid_invoke_rejected';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringField(record: Record<string, unknown> | undefined, field: string): string | undefined {
+  const value = record?.[field];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function readRouteSummary(value: unknown): string {

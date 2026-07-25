@@ -44,6 +44,20 @@ function toGatewayDownstreamView(event: LabEvent, mode: GatewayMode): LabGateway
     };
   }
 
+  if (event.type === 'sdk.log.debug' && event.message === 'gateway.message.received') {
+    const meta = asRecord(event.meta);
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase: 'received',
+      messageType: stringField(meta, 'messageType'),
+      action: stringField(meta, 'action'),
+      toolSessionId: stringField(meta, 'toolSessionId'),
+      welinkSessionId: stringField(meta, 'welinkSessionId'),
+    };
+  }
+
   if (event.type.startsWith('sdk.log.') && event.message.startsWith('runtime_sdk.downstream.')) {
     const meta = asRecord(event.meta);
     const phase = event.message.replace('runtime_sdk.downstream.', '');
