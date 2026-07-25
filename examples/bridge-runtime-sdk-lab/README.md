@@ -3,7 +3,7 @@
 Bridge Runtime SDK Lab 是 `@wecode/bridge-runtime-sdk` 的本地集成验收实验台。它包含：
 
 - `apps/runtime-host`：Node 服务，读取 `.opencode/message-bridge.jsonc`，持有 `BridgeRuntime` 实例，并实现可配置测试 Provider。
-- `apps/web`：React/Vite 前端，用于触发 Runtime API、设置 Provider 场景、运行 stage 矩阵场景、查看 `tool_error`、gateway uplink、事件流与 diagnostics。
+- `apps/web`：React/Vite 前端，用于触发 Runtime API、设置 Provider 场景、运行 stage 矩阵场景、查看 gateway downstream/uplink、`tool_error`、事件流与 diagnostics。
 - `packages/shared`：前后端共享类型。
 
 完整使用说明见 [docs/lab-guide.md](docs/lab-guide.md)。
@@ -55,7 +55,7 @@ mock gateway status -> runtime status/diagnostics
 3. 点击“启动”，等待 runtime 进入可用或可解释状态。
 4. 在 `Stage Matrix Lab` 选择场景，例如 `chat 缺少 text`、`chat terminal session_not_found` 或 `emitOutboundRun facts 顺序非法`。
 5. 点击“运行矩阵场景”。
-6. 在 `Tool Error` 面板查看 SDK 上行的 `tool_error`、路由 ID、阶段、uplinks 和 failures。
+6. 在 `Gateway Downstream`、`Gateway Uplink` 和 `Tool Error` 面板查看 SDK 收到的下行摘要、上行消息、`tool_error`、路由 ID、阶段和 failures。
 
 如果场景预期是 `failure_only`，前端会显示“无 tool_error，符合预期”，表示该下行没有可回包的 `welinkSessionId` 或 `toolSessionId`。
 

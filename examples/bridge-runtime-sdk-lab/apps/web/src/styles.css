@@ -497,6 +497,39 @@ button:disabled {
   font-size: 11px;
 }
 
+.downstream-meta {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.downstream-meta span,
+.downstream-meta time {
+  width: fit-content;
+  padding: 3px 6px;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 5px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+}
+
+.downstream-list.compact {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.downstream-list.compact .uplink-card {
+  gap: 7px;
+  padding: 9px;
+}
+
+.downstream-list.compact .uplink-card strong {
+  font-size: 11px;
+}
+
 .status-card {
   display: flex;
   gap: 12px;

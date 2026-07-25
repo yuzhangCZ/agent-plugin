@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { buildGatewayDownstreamViews } from '../src/downstream-view.ts';
 import { getDownstreamScenarios } from '../src/downstream-scenarios.ts';
 
 test('downstream scenarios include explicit tool_error coverage', () => {
@@ -39,4 +40,54 @@ test('stage matrix scenarios cover diagnostics-only and fake gateway status path
     scenarios.find((item) => item.id === 'mock-gateway-disconnect')?.expected.outcome,
     'runtime_failed',
   );
+});
+
+test('gateway downstream views include mock raw and sdk processed summaries', () => {
+  const views = buildGatewayDownstreamViews([
+    {
+      id: 1,
+      at: 1000,
+      type: 'mock_gateway.downstream',
+      message: 'Mock gateway sent downstream',
+      meta: {
+        raw: {
+          type: 'invoke',
+          action: 'chat',
+          welinkSessionId: 'wl-1',
+          payload: { toolSessionId: 'tool-1' },
+        },
+      },
+    },
+    {
+      id: 2,
+      at: 1001,
+      type: 'sdk.log.info',
+      message: 'runtime_sdk.downstream.received',
+      meta: {
+        messageType: 'invoke',
+        action: 'chat',
+        toolSessionId: 'tool-1',
+        welinkSessionId: 'wl-1',
+      },
+    },
+    {
+      id: 3,
+      at: 1002,
+      type: 'sdk.log.warn',
+      message: 'runtime_sdk.downstream.invalid_invoke_rejected',
+      meta: {
+        messageType: 'invoke',
+        toolSessionId: 'tool-1',
+        welinkSessionId: 'wl-1',
+        error: 'invalid',
+        code: 'invalid_field_value',
+      },
+    },
+  ], 'mock-gateway');
+
+  assert.equal(views.length, 3);
+  assert.equal(views[0]?.phase, 'invalid_invoke_rejected');
+  assert.equal(views[1]?.phase, 'received');
+  assert.equal(views[2]?.phase, 'mock_sent');
+  assert.equal(views[2]?.raw && typeof views[2].raw, 'object');
 });

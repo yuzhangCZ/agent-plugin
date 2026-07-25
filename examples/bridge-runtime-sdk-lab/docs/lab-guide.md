@@ -7,7 +7,7 @@ Owner: bridge-runtime-sdk maintainers
 
 ## 1. 实验室定位
 
-Bridge Runtime SDK Lab 是 `@wecode/bridge-runtime-sdk` 的本地集成验收实验台，用来验证 SDK Runtime API、Provider API、gateway 下行、Provider outbound、`tool_error`、gateway uplink 和 diagnostics 的可见行为。
+Bridge Runtime SDK Lab 是 `@wecode/bridge-runtime-sdk` 的本地集成验收实验台，用来验证 SDK Runtime API、Provider API、gateway 下行、Provider outbound、`tool_error`、gateway downstream/uplink 和 diagnostics 的可见行为。
 
 实验室不是“浏览器直接调用 SDK”。真实结构是：
 
@@ -88,14 +88,14 @@ runtime-host 会读取：
 
 ### 4.2 Mock 模式
 
-Mock 模式用于本地验证下行协议、`tool_error`、gateway uplink 和异常矩阵。
+Mock 模式用于本地验证下行协议、`tool_error`、gateway downstream/uplink 和异常矩阵。
 
 Mock 模式下：
 
 1. runtime-host 启动 `LabMockGateway`。
 2. 初始化 runtime 时，host 自动把 SDK 的 gateway URL 改成本地 mock gateway。
 3. `Stage Matrix Lab` 可以向 SDK 注入 gateway 下行消息。
-4. `LabMockGateway` 会捕获 SDK 发出的所有 uplink。
+4. `LabMockGateway` 会记录注入的 downstream raw，并捕获 SDK 发出的所有 uplink。
 
 验证 `tool_error` 和异常矩阵时优先使用 Mock 模式。
 
@@ -271,7 +271,26 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 
 ## 8. 结果面板说明
 
-### 8.1 Gateway Uplink
+### 8.1 Gateway Downstream
+
+展示 SDK 从 gateway 收到的最近下行摘要。
+
+真实模式下，面板展示 SDK observation/logger 里的安全摘要：
+
+- `messageType`
+- `action`
+- `command`
+- `toolSessionId`
+- `welinkSessionId`
+- `error`
+- `code`
+- 处理阶段
+
+Mock 模式下，实验室自己注入的下行还会展示 `raw`，方便对照原始 payload。
+
+注意：真实 gateway 下行不会展示完整 raw payload，避免把真实业务内容或敏感字段直接写入实验台快照。
+
+### 8.2 Gateway Uplink
 
 展示 SDK 发往 gateway 的全部上行消息，包括：
 
@@ -286,7 +305,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 
 这个面板用来判断“是否有符合契约的上行数据”。
 
-### 8.2 Tool Error
+### 8.3 Tool Error
 
 只筛选展示上行中的 `tool_error`。
 
@@ -298,7 +317,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 - `welinkSessionId`：创建会话或兼容路由 ID。
 - `reason`：结构化原因，目前重点看 `session_not_found`。
 
-### 8.3 最近结果
+### 8.4 最近结果
 
 展示最近一次 HTTP API 返回值。适合查看：
 
@@ -306,7 +325,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 - `/api/downstream/run` 的完整 `DownstreamRunResult`。
 - `matchedExpectation` 是否为 `true`。
 
-### 8.4 事件流
+### 8.5 事件流
 
 展示 runtime-host 记录的事件和 SDK logger 输出。适合排查：
 
@@ -338,7 +357,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 3. 点击“启动”。
 4. 选择 `chat 缺少 text`。
 5. 点击“运行矩阵场景”。
-6. 查看 `Gateway Uplink` 和 `Tool Error`。
+6. 查看 `Gateway Downstream`、`Gateway Uplink` 和 `Tool Error`。
 
 ### 9.3 自由组合 Provider 行为
 
@@ -389,4 +408,3 @@ pnpm --dir examples/bridge-runtime-sdk-lab/apps/web build
 pnpm --dir packages/bridge-runtime-sdk test
 pnpm lint:changed
 ```
-

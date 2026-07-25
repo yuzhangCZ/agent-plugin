@@ -11,6 +11,7 @@ import { createBridgeRuntime } from '@wecode/bridge-runtime-sdk';
 import type { GatewayMode, RuntimeSnapshot, SafeGatewayConfig } from '@agent-plugin/bridge-runtime-sdk-lab-shared';
 
 import { toSafeGatewayConfig } from './config-loader.ts';
+import { buildGatewayDownstreamViews } from './downstream-view.ts';
 import { EventStore } from './event-store.ts';
 import { sanitizeForDisplay } from './sanitize.ts';
 import { TestProvider } from './test-provider.ts';
@@ -115,12 +116,14 @@ export class RuntimeManager {
   }
 
   snapshot(): RuntimeSnapshot {
+    const events = this.#events.list();
     return {
       mode: this.#mode,
       gateway: this.#gateway,
       status: this.getStatus(),
       diagnostics: this.getDiagnostics(),
-      events: this.#events.list(),
+      downstreams: buildGatewayDownstreamViews(events, this.#mode),
+      events,
     };
   }
 

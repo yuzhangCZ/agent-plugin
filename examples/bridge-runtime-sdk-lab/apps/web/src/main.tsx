@@ -21,6 +21,7 @@ import type {
   DownstreamRunResult,
   DownstreamScenario,
   GatewayMode,
+  LabGatewayDownstreamView,
   LabEvent,
   ProviderScenarioConfig,
   RuntimeActionResult,
@@ -277,6 +278,14 @@ function App(): React.JSX.Element {
             <button className={mode === 'mock-gateway' ? 'selected' : ''} onClick={() => void updateMode('mock-gateway')}>Mock</button>
           </div>
         </section>
+
+        <section className="panel">
+          <div className="section-title">
+            <Radar size={16} />
+            <span>Gateway Downstream</span>
+          </div>
+          <GatewayDownstreamSummary downstreams={snapshot.downstreams ?? []} compact />
+        </section>
       </aside>
 
       <section className="workspace">
@@ -492,6 +501,37 @@ function App(): React.JSX.Element {
   );
 }
 
+function GatewayDownstreamSummary({
+  downstreams,
+  compact = false,
+}: {
+  downstreams: LabGatewayDownstreamView[];
+  compact?: boolean;
+}): React.JSX.Element {
+  if (downstreams.length === 0) {
+    return <p className="muted">真实或 Mock gateway 下行到达 SDK 后，这里会展示最近的下行摘要。</p>;
+  }
+
+  return (
+    <div className={compact ? 'downstream-list compact' : 'uplink-list'}>
+      {downstreams.slice(0, compact ? 12 : 20).map((downstream) => (
+        <article key={downstream.id} className="uplink-card">
+          <div>
+            <strong>{readDownstreamTitle(downstream)}</strong>
+            <span>{readDownstreamRouteSummary(downstream)}</span>
+          </div>
+          <div className="downstream-meta">
+            <span>{downstream.source}</span>
+            <span>{downstream.phase}</span>
+            <time>{new Date(downstream.at).toLocaleTimeString()}</time>
+          </div>
+          {compact ? null : <pre>{JSON.stringify(toDownstreamDisplay(downstream), null, 2)}</pre>}
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function GatewayUplinkSummary({ result }: { result: DownstreamRunResult | undefined }): React.JSX.Element {
   if (!result) {
     return <p className="muted">运行矩阵场景后，这里会展示 SDK 发往 gateway 的全部上行消息。</p>;
@@ -559,6 +599,36 @@ function readMessageType(value: unknown): string {
   }
   const messageType = value.type;
   return typeof messageType === 'string' ? messageType : 'unknown';
+}
+
+function readDownstreamTitle(downstream: LabGatewayDownstreamView): string {
+  const action = downstream.action ?? downstream.command;
+  return [downstream.messageType ?? 'downstream', action].filter(Boolean).join(' / ');
+}
+
+function readDownstreamRouteSummary(downstream: LabGatewayDownstreamView): string {
+  const route = [
+    downstream.toolSessionId ? `tool=${downstream.toolSessionId}` : undefined,
+    downstream.welinkSessionId ? `welink=${downstream.welinkSessionId}` : undefined,
+    downstream.traceId ? `trace=${downstream.traceId}` : undefined,
+  ].filter(Boolean);
+  return route.length > 0 ? route.join(' / ') : 'route: -';
+}
+
+function toDownstreamDisplay(downstream: LabGatewayDownstreamView): Record<string, unknown> {
+  return {
+    source: downstream.source,
+    phase: downstream.phase,
+    messageType: downstream.messageType,
+    action: downstream.action,
+    command: downstream.command,
+    toolSessionId: downstream.toolSessionId,
+    welinkSessionId: downstream.welinkSessionId,
+    traceId: downstream.traceId,
+    error: downstream.error,
+    code: downstream.code,
+    raw: downstream.raw,
+  };
 }
 
 function readRouteSummary(value: unknown): string {

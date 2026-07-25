@@ -53,7 +53,24 @@ export interface RuntimeSnapshot {
   gateway?: SafeGatewayConfig;
   status?: unknown;
   diagnostics?: unknown;
+  downstreams?: LabGatewayDownstreamView[];
   events: LabEvent[];
+}
+
+export interface LabGatewayDownstreamView {
+  id: number;
+  at: number;
+  source: GatewayMode | 'sdk-observation';
+  phase: 'received' | 'handled' | 'failed' | 'invalid_invoke_rejected' | 'mock_sent';
+  messageType?: string;
+  action?: string;
+  command?: string;
+  toolSessionId?: string;
+  welinkSessionId?: string;
+  traceId?: string;
+  error?: string;
+  code?: string;
+  raw?: unknown;
 }
 
 export type DownstreamExpectedOutcome =
