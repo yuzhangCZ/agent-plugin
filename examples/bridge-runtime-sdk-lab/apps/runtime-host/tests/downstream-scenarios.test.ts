@@ -61,6 +61,12 @@ test('gateway downstream views include mock raw and sdk processed summaries', ()
     {
       id: 2,
       at: 1001,
+      type: 'sdk.log.info',
+      message: '「onMessage」===>「{"type":"invoke","action":"chat","welinkSessionId":"wl-raw","payload":{"toolSessionId":"tool-raw","text":"hello raw"}}」',
+    },
+    {
+      id: 3,
+      at: 1002,
       type: 'sdk.log.debug',
       message: 'gateway.message.received',
       meta: {
@@ -71,8 +77,8 @@ test('gateway downstream views include mock raw and sdk processed summaries', ()
       },
     },
     {
-      id: 3,
-      at: 1002,
+      id: 4,
+      at: 1003,
       type: 'sdk.log.info',
       message: 'runtime_sdk.downstream.received',
       meta: {
@@ -83,8 +89,8 @@ test('gateway downstream views include mock raw and sdk processed summaries', ()
       },
     },
     {
-      id: 4,
-      at: 1003,
+      id: 5,
+      at: 1004,
       type: 'sdk.log.warn',
       message: 'runtime_sdk.downstream.invalid_invoke_rejected',
       meta: {
@@ -97,10 +103,13 @@ test('gateway downstream views include mock raw and sdk processed summaries', ()
     },
   ], 'mock-gateway');
 
-  assert.equal(views.length, 4);
+  assert.equal(views.length, 5);
   assert.equal(views[0]?.phase, 'invalid_invoke_rejected');
   assert.equal(views[1]?.phase, 'received');
   assert.equal(views[2]?.phase, 'received');
-  assert.equal(views[3]?.phase, 'mock_sent');
-  assert.equal(views[3]?.raw && typeof views[3].raw, 'object');
+  assert.equal(views[3]?.phase, 'received');
+  assert.equal(views[3]?.rawText?.includes('"text":"hello raw"'), true);
+  assert.equal(views[4]?.phase, 'mock_sent');
+  assert.equal(views[4]?.raw && typeof views[4].raw, 'object');
+  assert.equal(views[4]?.rawText?.includes('"action":"chat"'), true);
 });

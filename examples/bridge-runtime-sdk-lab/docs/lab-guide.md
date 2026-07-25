@@ -273,9 +273,9 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 
 ### 8.1 Gateway Downstream
 
-展示 SDK 从 gateway 收到的最近下行摘要。
+展示 SDK 从 gateway 收到的最近下行报文，并以格式化 JSON 展示。
 
-真实模式下，面板展示 SDK observation/logger 里的安全摘要：
+真实模式下，面板会优先从 SDK gateway `onMessage` 日志中解析完整下行 JSON；如果当前事件没有完整 raw，则展示 SDK observation/logger 里的安全摘要：
 
 - `messageType`
 - `action`
@@ -286,9 +286,11 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 - `code`
 - 处理阶段
 
-Mock 模式下，实验室自己注入的下行还会展示 `raw`，方便对照原始 payload。
+Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原始 payload。
 
-注意：真实 gateway 下行不会展示完整 raw payload，避免把真实业务内容或敏感字段直接写入实验台快照。
+面板右上角的清空按钮只清空 Gateway Downstream 面板数据，不清空事件流和 diagnostics；清空后刷新页面也不会恢复旧下行数据，新的下行仍会继续显示。
+
+注意：完整下行报文可能包含真实业务内容。截图、导出或提交日志前请确认没有敏感信息。
 
 ### 8.2 Gateway Uplink
 

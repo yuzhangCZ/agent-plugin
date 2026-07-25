@@ -15,6 +15,7 @@ import {
   Send,
   ShieldCheck,
   TerminalSquare,
+  Trash2,
   Zap,
 } from 'lucide-react';
 import type {
@@ -210,6 +211,20 @@ function App(): React.JSX.Element {
     }
   }, [qrInput, refresh]);
 
+  const clearDownstreams = useCallback(async () => {
+    const result = await api<RuntimeActionResult<RuntimeSnapshot>>('/api/downstreams/clear', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    setLastResult(result);
+    if (result.payload) {
+      setSnapshot(result.payload);
+      setMode(result.payload.mode);
+      return;
+    }
+    setSnapshot((current) => ({ ...current, downstreams: [] }));
+  }, []);
+
   const runDownstreamScenario = useCallback(async () => {
     setBusyAction('downstream');
     try {
@@ -286,9 +301,14 @@ function App(): React.JSX.Element {
         </section>
 
         <section className="panel">
-          <div className="section-title">
-            <Radar size={16} />
-            <span>Gateway Downstream</span>
+          <div className="section-title split-title">
+            <div>
+              <Radar size={16} />
+              <span>Gateway Downstream</span>
+            </div>
+            <button className="mini-icon-button" onClick={() => void clearDownstreams()} title="清空下行面板">
+              <Trash2 size={14} />
+            </button>
           </div>
           <GatewayDownstreamSummary downstreams={snapshot.downstreams ?? []} compact />
         </section>
@@ -531,7 +551,7 @@ function GatewayDownstreamSummary({
             <span>{downstream.phase}</span>
             <time>{new Date(downstream.at).toLocaleTimeString()}</time>
           </div>
-          {compact ? null : <pre>{JSON.stringify(toDownstreamDisplay(downstream), null, 2)}</pre>}
+          <pre>{formatDownstreamPacket(downstream)}</pre>
         </article>
       ))}
     </div>
@@ -634,7 +654,22 @@ function toDownstreamDisplay(downstream: LabGatewayDownstreamView): Record<strin
     error: downstream.error,
     code: downstream.code,
     raw: downstream.raw,
+    rawText: downstream.rawText,
   };
+}
+
+function formatDownstreamPacket(downstream: LabGatewayDownstreamView): string {
+  if (downstream.rawText) {
+    try {
+      return JSON.stringify(JSON.parse(downstream.rawText), null, 2);
+    } catch {
+      return downstream.rawText;
+    }
+  }
+  if (downstream.raw !== undefined) {
+    return JSON.stringify(downstream.raw, null, 2);
+  }
+  return JSON.stringify(toDownstreamDisplay(downstream), null, 2);
 }
 
 function toGatewayDownstreamView(event: LabEvent, mode: GatewayMode): LabGatewayDownstreamView | null {
@@ -654,6 +689,27 @@ function toGatewayDownstreamView(event: LabEvent, mode: GatewayMode): LabGateway
       welinkSessionId: stringField(rawRecord, 'welinkSessionId'),
       traceId: stringField(rawRecord, 'traceId'),
       raw,
+      rawText: raw === undefined ? undefined : JSON.stringify(raw),
+    };
+  }
+
+  const gatewayRawText = extractGatewayInboundRawText(event.message);
+  if (gatewayRawText) {
+    const rawRecord = parseRawRecord(gatewayRawText);
+    const payload = asRecord(rawRecord?.payload);
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase: 'received',
+      messageType: stringField(rawRecord, 'type'),
+      action: stringField(rawRecord, 'action'),
+      command: stringField(rawRecord, 'action'),
+      toolSessionId: stringField(rawRecord, 'toolSessionId') ?? stringField(payload, 'toolSessionId'),
+      welinkSessionId: stringField(rawRecord, 'welinkSessionId'),
+      traceId: stringField(rawRecord, 'traceId'),
+      raw: rawRecord,
+      rawText: gatewayRawText,
     };
   }
 
@@ -721,6 +777,27 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function stringField(record: Record<string, unknown> | undefined, field: string): string | undefined {
   const value = record?.[field];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function extractGatewayInboundRawText(message: string): string | undefined {
+  if (!message.includes('onMessage')) {
+    return undefined;
+  }
+  const start = message.lastIndexOf('「');
+  const end = message.lastIndexOf('」');
+  if (start < 0 || end <= start) {
+    return undefined;
+  }
+  const rawText = message.slice(start + 1, end);
+  return rawText.trim().startsWith('{') ? rawText : undefined;
+}
+
+function parseRawRecord(rawText: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(JSON.parse(rawText));
+  } catch {
+    return undefined;
+  }
 }
 
 function readRouteSummary(value: unknown): string {

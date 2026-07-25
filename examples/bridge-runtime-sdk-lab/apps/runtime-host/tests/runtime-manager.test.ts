@@ -74,3 +74,21 @@ test('stops the previous runtime before replacing it', async () => {
 
   assert.equal(stopCount, 1);
 });
+
+test('clears gateway downstream panel without clearing event stream', () => {
+  const manager = new RuntimeManager();
+  manager.events.append('sdk.log.info', '「onMessage」===>「{"type":"invoke","action":"chat","payload":{"toolSessionId":"tool-before"}}」');
+
+  assert.equal(manager.snapshot().downstreams?.length, 1);
+
+  const cleared = manager.clearGatewayDownstreams();
+
+  assert.deepEqual(cleared.downstreams, []);
+  assert.ok(cleared.events.length >= 2);
+
+  manager.events.append('sdk.log.info', '「onMessage」===>「{"type":"invoke","action":"chat","payload":{"toolSessionId":"tool-after"}}」');
+
+  const next = manager.snapshot().downstreams ?? [];
+  assert.equal(next.length, 1);
+  assert.equal(next[0]?.toolSessionId, 'tool-after');
+});

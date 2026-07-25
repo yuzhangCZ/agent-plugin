@@ -36,6 +36,7 @@ export class RuntimeManager {
   #runtime: BridgeRuntime | undefined;
   #gateway: SafeGatewayConfig | undefined;
   #mode: GatewayMode = 'real-gateway';
+  #downstreamClearedBeforeId = 0;
 
   constructor(options: RuntimeManagerOptions = {}) {
     this.#events = options.events ?? new EventStore();
@@ -115,14 +116,23 @@ export class RuntimeManager {
     return sanitizeForDisplay(diagnostics) as RuntimeDiagnostics | undefined;
   }
 
+  clearGatewayDownstreams(): RuntimeSnapshot {
+    this.#downstreamClearedBeforeId = this.#events.latestId();
+    this.#events.append('gateway_downstream.cleared', 'Gateway downstream panel cleared', {
+      clearedBeforeEventId: this.#downstreamClearedBeforeId,
+    });
+    return this.snapshot();
+  }
+
   snapshot(): RuntimeSnapshot {
     const events = this.#events.list();
+    const downstreamEvents = events.filter((event) => event.id > this.#downstreamClearedBeforeId);
     return {
       mode: this.#mode,
       gateway: this.#gateway,
       status: this.getStatus(),
       diagnostics: this.getDiagnostics(),
-      downstreams: buildGatewayDownstreamViews(events, this.#mode),
+      downstreams: buildGatewayDownstreamViews(downstreamEvents, this.#mode),
       events,
     };
   }

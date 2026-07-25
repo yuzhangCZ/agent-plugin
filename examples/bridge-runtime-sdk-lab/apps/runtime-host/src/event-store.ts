@@ -34,6 +34,10 @@ export class EventStore {
     return [...this.#events];
   }
 
+  latestId(): number {
+    return this.#nextId - 1;
+  }
+
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener);
     return () => {

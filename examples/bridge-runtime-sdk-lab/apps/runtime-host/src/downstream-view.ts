@@ -27,6 +27,27 @@ function toGatewayDownstreamView(event: LabEvent, mode: GatewayMode): LabGateway
       welinkSessionId: stringField(rawRecord, 'welinkSessionId'),
       traceId: stringField(rawRecord, 'traceId'),
       raw,
+      rawText: raw === undefined ? undefined : JSON.stringify(raw),
+    };
+  }
+
+  const gatewayRawText = extractGatewayInboundRawText(event.message);
+  if (gatewayRawText) {
+    const rawRecord = parseRawRecord(gatewayRawText);
+    const payload = asRecord(rawRecord?.payload);
+    return {
+      id: event.id,
+      at: event.at,
+      source: mode,
+      phase: 'received',
+      messageType: stringField(rawRecord, 'type'),
+      action: stringField(rawRecord, 'action'),
+      command: stringField(rawRecord, 'action'),
+      toolSessionId: stringField(rawRecord, 'toolSessionId') ?? stringField(payload, 'toolSessionId'),
+      welinkSessionId: stringField(rawRecord, 'welinkSessionId'),
+      traceId: stringField(rawRecord, 'traceId'),
+      raw: rawRecord,
+      rawText: gatewayRawText,
     };
   }
 
@@ -88,4 +109,25 @@ function isProcessedPhase(value: string): value is LabGatewayDownstreamView['pha
 function stringField(record: Record<string, unknown> | undefined, field: string): string | undefined {
   const value = record?.[field];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function extractGatewayInboundRawText(message: string): string | undefined {
+  if (!message.includes('onMessage')) {
+    return undefined;
+  }
+  const start = message.lastIndexOf('「');
+  const end = message.lastIndexOf('」');
+  if (start < 0 || end <= start) {
+    return undefined;
+  }
+  const rawText = message.slice(start + 1, end);
+  return rawText.trim().startsWith('{') ? rawText : undefined;
+}
+
+function parseRawRecord(rawText: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(JSON.parse(rawText));
+  } catch {
+    return undefined;
+  }
 }

@@ -57,6 +57,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     streamEvents(req, res);
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/api/downstreams/clear') {
+    sendJson(res, 200, actionResult('downstreams.clear', manager.clearGatewayDownstreams()));
+    return;
+  }
   if (req.method === 'POST' && url.pathname === '/api/runtime/create') {
     const body = await readJson(req);
     const overrides = toOverrides(body);

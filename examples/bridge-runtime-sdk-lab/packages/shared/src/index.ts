@@ -71,6 +71,7 @@ export interface LabGatewayDownstreamView {
   error?: string;
   code?: string;
   raw?: unknown;
+  rawText?: string;
 }
 
 export type DownstreamExpectedOutcome =
