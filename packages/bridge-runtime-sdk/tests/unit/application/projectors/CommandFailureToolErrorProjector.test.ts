@@ -41,6 +41,7 @@ test('command failure projector maps pending_interaction_not_found to catalog me
 
   assert.deepEqual(message, {
     type: 'tool_error',
+    welinkSessionId: 'welink-1',
     error: '当前交互已失效，请刷新后重试',
   });
 });
@@ -61,7 +62,7 @@ test('command failure projector ignores lifecycle runtime contract failures', ()
   assert.equal(message, null);
 });
 
-test('command failure projector ignores unsupported actions even when route fields exist', () => {
+test('command failure projector maps unsupported actions when route fields exist', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -74,10 +75,15 @@ test('command failure projector ignores unsupported actions even when route fiel
     error: new Error('Unsupported downstream action: unsupported_action'),
   });
 
-  assert.equal(message, null);
+  assert.deepEqual(message, {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    welinkSessionId: 'welink-1',
+    error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
+  });
 });
 
-test('command failure projector maps unsupported downstream errors after action allowlist', () => {
+test('command failure projector maps unsupported downstream errors to catalog message', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -93,6 +99,45 @@ test('command failure projector maps unsupported downstream errors after action 
     type: 'tool_error',
     toolSessionId: 'tool-1',
     error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
+  });
+});
+
+test('command failure projector reports non-catalog errors for unsupported routed actions', () => {
+  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
+
+  const message = projector.project({
+    summary: {
+      messageType: 'invoke',
+      action: 'future_action',
+      toolSessionId: 'tool-1',
+      welinkSessionId: 'welink-1',
+    },
+    error: new Error('future action failed'),
+  });
+
+  assert.deepEqual(message, {
+    type: 'tool_error',
+    toolSessionId: 'tool-1',
+    error: 'future action failed',
+  });
+});
+
+test('command failure projector keeps welinkSessionId when it is the only route field', () => {
+  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
+
+  const message = projector.project({
+    summary: {
+      messageType: 'invoke',
+      action: 'future_action',
+      welinkSessionId: 'welink-1',
+    },
+    error: new Error('future action failed'),
+  });
+
+  assert.deepEqual(message, {
+    type: 'tool_error',
+    welinkSessionId: 'welink-1',
+    error: 'future action failed',
   });
 });
 

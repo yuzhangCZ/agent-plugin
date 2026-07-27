@@ -43,10 +43,9 @@ export class CommandFailureToolErrorProjector {
       return null;
     }
     const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
-    const shouldKeepWelinkSessionId = input.summary.action === 'create_session';
-    if (!this.isSupportedAction(input.summary.action)) {
-      return null;
-    }
+    const shouldKeepWelinkSessionId = unsupportedDownstreamAction
+      || input.summary.action === 'create_session'
+      || !input.summary.toolSessionId;
 
     const errorMessage = this.resolveErrorMessage(input.error, unsupportedDownstreamAction);
     if (!errorMessage) {
@@ -86,15 +85,6 @@ export class CommandFailureToolErrorProjector {
     }
 
     return normalizeErrorMessage(error);
-  }
-
-  private isSupportedAction(action: string | undefined): boolean {
-    return action === 'chat'
-      || action === 'create_session'
-      || action === 'question_reply'
-      || action === 'permission_reply'
-      || action === 'close_session'
-      || action === 'abort_session';
   }
 
   private isUnsupportedDownstreamAction(error: unknown): boolean {
