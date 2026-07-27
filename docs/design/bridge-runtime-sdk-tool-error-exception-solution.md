@@ -189,31 +189,29 @@ sequenceDiagram
 
 ### 4.2 核心实现方式
 
-当前 SDK 里 `tool_error` 上报分散在 5 类节点：
+当前 SDK 里 `ToolErrorReporter` 上报分散在 3 类节点：
 
-这 5 类节点不是 5 个新接口，而是 `tool_error` 发生位置的阶段划分，便于判断异常应该由谁负责收口：
+这 3 类节点不是 3 个新接口，而是统一 reporter 发生位置的阶段划分，便于判断异常应该由谁负责收口：
 
 | 阶段 | 中文理解 | 发生时机 | 典型异常 | 理解方式 |
 |---|---|---|---|---|
 | `inbound_invalid` | 入站请求非法 | gateway 消息刚进入 SDK，还没转换成 runtime command | 下行 `invoke` 字段不合法、缺必要字段、协议校验失败 | 请求在门口验票失败，业务还没开始 |
 | `command_failure` | 命令应用失败 | SDK 已识别出命令，正在调用 Provider API | `createSession()`、`runMessage()`、`reply*()`、`closeSession()`、`abortSession()` 抛错 | 命令接住了，但调用 Provider 失败 |
 | `request_lifecycle` | chat run 事件流生命周期失败 | `runMessage()` 已返回 `ProviderRun`，SDK 正在消费 `facts` | facts 顺序非法、`permission.reply` 找不到展示上下文、pending interaction 冲突 | 消息已经开始跑，但中途事件流坏了 |
-| `request_terminal` | chat run 最终失败 | `ProviderRun.result()` 返回最终结果 | `outcome: "failed"`、`session_not_found`、agent 执行失败 | 消息跑完了，终态明确失败 |
-| `outbound_terminal` | Provider 主动 outbound run 最终失败 | Provider 调用 `context.outbound.emitOutboundRun()` 主动发送消息 | outbound facts 非法、主动消息发送过程失败 | 不是用户 chat，而是 Provider 主动推送失败 |
 
 | 序号 | 上报节点 | 当前入口 | 是否已有上报 | 级别 | 是否建议统一到 `ToolErrorReporter` |
 |---|---|---|---|---|---|
 | 1 | 入站 invalid invoke | `GatewayInboundPolicy.handle()` | 已有 | P0 | 是。保留入站判定，统一 reporter 构造和发送 |
 | 2 | command failure | `attachRuntimeDriverHandlers()` + `CommandFailureToolErrorProjector` | 已有，`create_session` 路由字段需补齐 | P0 | 是。保留 command catch，统一 reporter 处理文案、路由和发送 |
 | 3 | request run lifecycle failure | `RequestRunCoordinator` + `RequestRunFailureToolErrorProjector` | 已有 | P0 | 是。保留 coordinator 判定，统一 reporter 发送 |
-| 4 | request run terminal failed | `DefaultRunTerminalSignalProjector` | 已有 | P0 | 是。terminal projector 仍负责 terminal 语义，reporter 负责发送 |
-| 5 | outbound run terminal failed | `OutboundCoordinator.emitOutboundRunFailed()` + `DefaultRunTerminalSignalProjector` | 已有 | P0 | 是。outbound coordinator 负责包装 failed terminal，reporter 负责发送 |
+| 4 | request run terminal failed | `DefaultRunTerminalSignalProjector` | 已有 | P0 | 否。本轮按要求恢复 main 分支 coordinator 原发送路径 |
+| 5 | outbound run terminal failed | `OutboundCoordinator.emitOutboundRunFailed()` + `DefaultRunTerminalSignalProjector` | 已有 | P0 | 否。本轮按要求恢复 main 分支 coordinator 原发送路径 |
 
 统一处理建议：
 
 1. 新增应用层 `ToolErrorReporter`，统一 `tool_error` 的路由字段补齐、文案选择、级别记录、`observation.uplinkEmitted()` 和 `sink.send()`。
 2. 各阶段不直接 `sink.send(tool_error)`，而是调用 `ToolErrorReporter.report(input)`。
-3. 各阶段仍保留失败判定边界：inbound invalid、command failure、request lifecycle、request terminal、outbound terminal 不合并成一个大 catch。
+3. 各阶段仍保留失败判定边界：inbound invalid、command failure、request lifecycle 不合并成一个大 catch。
 4. 可以通过抛异常传递到阶段边界的场景：Provider API apply 失败、unsupported invoke、request facts lifecycle failure、outbound facts lifecycle failure。
 5. 不建议通过抛异常统一处理的场景：`ProviderRun.result()` 返回 `outcome: "failed"`，它是 terminal 真源；gateway invalid frame 也不是 runtime command 异常。
 
@@ -224,9 +222,7 @@ type ToolErrorReportInput = {
   stage:
     | 'inbound_invalid'
     | 'command_failure'
-    | 'request_lifecycle'
-    | 'request_terminal'
-    | 'outbound_terminal';
+    | 'request_lifecycle';
   toolSessionId?: string;
   welinkSessionId?: string;
   reason?: 'session_not_found';

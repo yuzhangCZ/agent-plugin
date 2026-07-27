@@ -15,17 +15,15 @@
 type ToolErrorReportStage =
   | 'inbound_invalid'
   | 'command_failure'
-  | 'request_lifecycle'
-  | 'request_terminal'
-  | 'outbound_terminal';
+  | 'request_lifecycle';
 ```
 
-这 5 个 stage 不是前端新协议字段，也不是 Provider public API；它们是 SDK 内部对 `tool_error` 上报位置的归类，方便产品、测试和研发判断“异常发生在哪一段流程、用户会看到什么失败、应该怎么验证”。
+这 3 个 stage 不是前端新协议字段，也不是 Provider public API；它们是 SDK 内部对 `ToolErrorReporter` 上报位置的归类，方便产品、测试和研发判断“异常发生在哪一段流程、用户会看到什么失败、应该怎么验证”。
 
 ### 1.2 需求目标
 
-1. 罗列所有会通过 5 类 stage 上报的 `tool_error` 异常场景。
-2. 罗列不走这 5 类 `tool_error` 的异常场景，说明它们为什么不应该发 `tool_error`。
+1. 罗列所有会通过 3 类 stage 上报的 `tool_error` 异常场景。
+2. 罗列不走这 3 类 `ToolErrorReporter` stage 的异常场景，说明它们当前如何感知失败。
 3. 帮助测试人员按业务场景构造 mock Provider、FakeGateway 或端到端联调用例。
 
 ### 1.3 非目标
@@ -45,8 +43,8 @@ flowchart TD
     B -->|入站协议非法| C["inbound_invalid"]
     B -->|命令执行失败| D["command_failure"]
     B -->|request facts 中途失败| E["request_lifecycle"]
-    B -->|request terminal failed| F["request_terminal"]
-    B -->|outbound run failed| G["outbound_terminal"]
+    B -->|request terminal failed| F["terminal projector 原路径"]
+    B -->|outbound run failed| G["outbound terminal 原路径"]
     B -->|非会话执行失败| H["不走 tool_error<br/>status / diagnostics / 降级响应"]
     C --> Z["前端收到 tool_error"]
     D --> Z
@@ -56,13 +54,14 @@ flowchart TD
 
     classDef report fill:#eef2ff,stroke:#4c6ef5,color:#1f1f1f;
     classDef noReport fill:#e9ecef,stroke:#868e96,color:#1f1f1f;
-    class C,D,E,F,G,Z report;
+    class C,D,E report;
+    class F,G,H noReport;
     class H noReport;
 ```
 
 ### 2.2 方案核心
 
-只有“已经进入某个用户会话或一轮 outbound run，且前端需要结束等待或展示失败”的异常，才归入 5 类 `tool_error` stage；没有稳定会话路由、属于启动/连接/status/查询降级的问题，不走 `tool_error`，而是通过 Promise reject、runtime status、diagnostics、日志或明确降级响应让调用方感知。
+只有需要通过 `ToolErrorReporter` 统一出口上报的异常，才归入 3 类 stage；terminal failed 已恢复 main 分支的 coordinator 原路径，不再定义为 reporter stage。没有稳定会话路由、属于启动/连接/status/查询降级的问题，不走 `tool_error`，而是通过 Promise reject、runtime status、diagnostics、日志或明确降级响应让调用方感知。
 
 ## 3. 时序图
 
@@ -92,8 +91,7 @@ sequenceDiagram
         TER-->>GW: tool_error
     else Provider 返回 failed terminal
         P-->>SDK: result outcome failed
-        SDK->>TER: request_terminal
-        TER-->>GW: tool_error
+        SDK-->>GW: tool_error
     end
     GW-->>FE: 展示失败并结束等待
 ```
@@ -110,8 +108,7 @@ sequenceDiagram
 
     P->>SDK: outbound.emitOutboundRun(facts)
     alt facts 生命周期非法
-        SDK->>TER: outbound_terminal
-        TER-->>GW: tool_error
+        SDK-->>GW: tool_error
     else facts enrich 失败
         SDK-->>SDK: failureRecorded 后 continue
         SDK-->>GW: 可能仍发送 tool_done
@@ -127,13 +124,11 @@ sequenceDiagram
 
 1. `inbound_invalid`：由 `GatewayInboundPolicy` 在 invalid `invoke` 场景调用 `ToolErrorReporter`。
 2. `command_failure`：由 `downstream.ts` 的 command catch 统一调用 `ToolErrorReporter`。
-3. `request_lifecycle`：由 `RequestRunCoordinator` 在 request facts 生命周期失败时调用 `ToolErrorReporter`；request enrich failure 本轮保持 main 分支 `continue` 行为。
-4. `request_terminal`：由 `RequestRunCoordinator` 在 terminal projector 产出 `tool_error` 时调用 `ToolErrorReporter`。
-5. `outbound_terminal`：由 `OutboundCoordinator` 在 outbound run failed terminal 时调用 `ToolErrorReporter`；outbound enrich failure 本轮保持 main 分支 `continue` 行为。
+3. `request_lifecycle`：当前恢复 main 分支发送路径，不再通过 `ToolErrorReporter` 统一出口；request enrich failure 保持 main 分支 `continue` 行为。
 
 ### 4.2 核心实现方式
 
-#### 4.2.1 通过 5 类 stage 上报的 `tool_error` 场景
+#### 4.2.1 通过 3 类 stage 上报的 `tool_error` 场景
 
 | stage | 异常场景 | 业务触发例子 | 技术触发点 | `tool_error.error` | 重要性 | 验证建议 |
 |---|---|---|---|---|---|---|
@@ -149,12 +144,8 @@ sequenceDiagram
 | `command_failure` | request terminal Promise reject | Provider 已返回 `ProviderRun`，但 `result()` 没返回规范 terminal，而是直接 reject | `ProviderRun.result()` reject 后向外抛出，被 command failure catch 收口 | reject 异常 message | P0 | mock `ProviderRun.result()` reject |
 | `request_lifecycle` | request facts 生命周期非法 | Agent 开始回复后，事件顺序错误，前端无法拼出正常消息 | 未 `message.start` 就 `text.delta`、`message.done` 顺序错误、`tool.update` 内容非法等 | `当前请求处理失败，请重试` | P0 | mock facts 输出非法顺序 |
 | `request_lifecycle` | request pending interaction 冲突 | 不同会话或不同上下文复用了同一个 question / permission id，SDK 无法安全路由回复 | validator / interaction registry 抛 `pending_interaction_conflict` | `当前请求处理失败，请重试` | P1 | mock 重复 questionId / permissionId |
-| `request_terminal` | Provider 明确返回 failed terminal | Agent 正常跑到终态，但明确告诉 SDK 本轮失败，例如模型失败、工具失败、远端服务失败 | `ProviderRun.result()` 返回 `{ outcome: "failed", error }` | `error.message`；缺失时用默认失败文案 | P0 | mock `result()` 返回 failed |
-| `request_terminal` | 会话不存在 failed terminal | Agent 返回底层会话不存在，前端可能需要重建会话 | `ProviderRun.result()` failed 且 `error.code === "session_not_found"` | `error.message`，并带 `reason: "session_not_found"` | P0 | mock failed terminal code 为 `session_not_found` |
-| `outbound_terminal` | outbound run facts 生命周期非法 | Provider 主动推送后台任务结果，但 facts 顺序错误 | `emitOutboundRun()` facts 校验失败 | 内部校验错误 message，例如 `text.delta requires an open message` | P0 | 在 `initialize()` 保存 outbound 后调用非法 facts |
-| `outbound_terminal` | outbound run facts 流其它异常 | Provider 主动消息的 async iterable 中途抛错 | `emitOutboundRun()` consume facts 抛出非 enrich 异常 | 异常 message | P1 | mock outbound facts async iterator throw |
 
-#### 4.2.2 不走这 5 类 `tool_error` 的异常场景
+#### 4.2.2 不走这 3 类 `ToolErrorReporter` stage 的异常场景
 
 | 场景 | 业务触发例子 | 当前感知方式 | 不走 `tool_error` 的原因 | 重要性 | 验证建议 |
 |---|---|---|---|---|---|
@@ -164,6 +155,8 @@ sequenceDiagram
 | `runtime.stop()` Provider dispose 失败 | 插件关闭或账号切换时 Provider 释放资源失败 | `runtime.stop()` reject；diagnostics/log 记录失败 | 停止阶段不是某个用户会话执行失败 | P3 | mock `dispose()` throw |
 | `health()` 查询失败 | 前端或宿主查询 Agent 是否在线，Provider 健康检查失败 | status 查询失败或 diagnostics/log；是否需要失败态响应待业务确认 | 状态查询不是会话执行，不应伪装为消息失败 | P2/P3 | mock `health()` throw |
 | `listSlashCommands()` 查询失败 | 用户输入 `/` 查询快捷命令，Provider 查询失败 | 返回空 `slash_commands_result` 降级 | 已有明确降级响应，用户仍可继续输入普通消息 | P2 | mock `listSlashCommands()` throw |
+| request run terminal failed | Agent 正常跑到终态，但明确告诉 SDK 本轮失败，例如模型失败、工具失败、远端服务失败 | `RequestRunCoordinator` 保持 main 分支：terminal projector 产出 `tool_error` 后由原 `uplinkEmitted + sink.send` 路径发送 | 本轮按要求还原 coordinator，不再定义 reporter stage | P0 | mock `result()` 返回 failed |
+| outbound run terminal failed | Provider 主动推送后台任务结果，但 facts 顺序错误或 facts 流抛错 | `OutboundCoordinator` 保持 main 分支：包装 failed terminal 后由原 `uplinkEmitted + sink.send` 路径发送 | 本轮按要求还原 coordinator，不再定义 reporter stage | P0/P1 | mock outbound facts 非法或 async iterator throw |
 | request run facts enrich 失败 | Agent 回复权限结果，但 SDK 找不到对应权限展示上下文 | 维持 main 分支行为：记录 diagnostics 后继续，当前最终仍可能 `tool_done` | 本轮按要求不改变原逻辑，不抛异常、不新增 `tool_error` | P1 | mock request facts 输出孤立 `permission.reply` |
 | `emitOutboundRun()` facts enrich 失败 | Provider 主动推送权限相关结果，但缺少前端展示上下文 | 维持 main 分支行为：记录 diagnostics 后继续，当前最终仍可能 `tool_done` | 本轮按要求不改变原逻辑，不抛异常、不新增 `tool_error` | P1 | mock outbound run 输出孤立 `permission.reply` |
 | `emitOutboundMessage()` 老接口 facts 失败 | 旧 Provider 使用单批主动消息接口推送异常 facts | 生命周期非法时 Promise reject；enrich 失败维持 main 分支行为，仅记录 diagnostics 后继续 | 老接口没有 run terminal 语义；新接入应迁移 `emitOutboundRun()` | P2 | mock `emitOutboundMessage()` 非法 facts 和孤立 `permission.reply` |
@@ -175,7 +168,7 @@ sequenceDiagram
 
 1. `tool_error` 协议字段不变，仍是 `type`、`toolSessionId?`、`welinkSessionId?`、`error`、`reason?`。
 2. `stage` 只在 SDK 内部使用，不要求前端或 gateway 解析。
-3. `request_terminal` 与 `outbound_terminal` 只在 terminal projector 结果为 `tool_error` 时走 reporter；`tool_done` 仍按原路径发送。
+3. terminal failed 场景已恢复 main 分支原路径，`tool_error` 与 `tool_done` 均由 coordinator 直接 `uplinkEmitted + sink.send`。
 4. `command_failure` 不接管 `fact_sequence_invalid`、`pending_interaction_conflict` 这类 request lifecycle 错误，避免同一 run 重复上报。
 5. 没有稳定会话路由或发送通道不可用的异常，不通过 `tool_error` 伪造用户消息失败。
 
@@ -183,8 +176,8 @@ sequenceDiagram
 
 1. `GatewayInboundPolicy.handle()`：负责 invalid `invoke` 的 `inbound_invalid`。
 2. `attachRuntimeDriverHandlers()`：负责 command catch 后的 `command_failure`。
-3. `RequestRunCoordinator.executeRun()`：负责 `request_lifecycle` 与 `request_terminal`。
-4. `OutboundCoordinator.emitOutboundRun()`：负责 `outbound_terminal`。
+3. `RequestRunCoordinator.executeRun()`：保持 main 分支 request facts / terminal 原发送路径。
+4. `OutboundCoordinator.emitOutboundRun()`：保持 main 分支 outbound terminal 原发送路径。
 5. `DefaultRunTerminalSignalProjector`：只负责 terminal 语义投影，最终发送由 reporter 或原 `tool_done` 路径处理。
 
 ### 4.5 文档需要同步修改的内容
@@ -240,8 +233,8 @@ sequenceDiagram
 1. 构造 invalid `invoke`，验证 `inbound_invalid` 的 `tool_error`。
 2. 构造 unsupported action、`createSession()` throw、`runMessage()` throw、pending interaction missing，验证 `command_failure`。
 3. 构造 request facts 顺序非法、重复 permission/question id，验证 `request_lifecycle`；孤立 `permission.reply` 验证保持 main 分支 continue 行为。
-4. 构造 `ProviderRun.result()` failed 与 `session_not_found`，验证 `request_terminal`。
-5. 构造 `emitOutboundRun()` 非法 facts、async iterator throw，验证 `outbound_terminal`。
+4. 构造 `ProviderRun.result()` failed 与 `session_not_found`，验证 request terminal 原路径仍发送 `tool_error`。
+5. 构造 `emitOutboundRun()` 非法 facts、async iterator throw，验证 outbound terminal 原路径仍发送 `tool_error`。
 
 ### 9.2 兼容测试
 
@@ -252,10 +245,10 @@ sequenceDiagram
 
 ### 9.3 文档一致性检查
 
-1. 对照本文 4.2.1，确认每个 `tool_error` 生成点都能归入 5 类 stage。
-2. 对照本文 4.2.2，确认不走 `tool_error` 的异常都有替代感知方式。
+1. 对照本文 4.2.1，确认每个 `ToolErrorReporter` 生成点都能归入 3 类 stage。
+2. 对照本文 4.2.2，确认不走 reporter stage 的异常都有替代感知方式。
 3. 对照 `ToolErrorReporter.ts`，确认新增 stage 时同步更新本文。
 
 ## 10. 最终建议
 
-最终结论：推荐用本文作为 `bridge-runtime-sdk` 的 `tool_error stage` 阅读矩阵。测试和产品评审时先按 5 类 stage 判断异常是否应前端可见，再按“不走 `tool_error` 的异常场景”确认是否已有 status、diagnostics、Promise reject 或降级响应。后续如新增 `tool_error` 场景，应先归入现有 5 类；只有出现全新的流程边界时，再考虑扩展 stage 类型。
+最终结论：推荐用本文作为 `bridge-runtime-sdk` 的 `tool_error stage` 阅读矩阵。测试和产品评审时先按 3 类 reporter stage 判断异常是否由统一出口上报，再按“不走 reporter stage 的异常场景”确认是否已有原 terminal 路径、status、diagnostics、Promise reject 或降级响应。后续如新增 `ToolErrorReporter` 场景，应先归入现有 3 类；只有出现全新的流程边界时，再考虑扩展 stage 类型。

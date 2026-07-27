@@ -9,9 +9,7 @@ import { ToolErrorMessageCatalog, type ToolErrorMessageKey } from '../projectors
 export type ToolErrorReportStage =
   | 'inbound_invalid'
   | 'command_failure'
-  | 'request_lifecycle'
-  | 'request_terminal'
-  | 'outbound_terminal';
+  | 'request_lifecycle';
 
 export type ToolErrorReportInput = {
   stage: ToolErrorReportStage;

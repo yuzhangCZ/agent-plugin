@@ -1,6 +1,5 @@
 import type { ProviderFact, ProviderRun } from '../../domain/provider.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
-import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../constants/gateway-messages.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { RunTerminalSignalProjector } from '../projectors/index.ts';
@@ -65,13 +64,8 @@ export class RequestRunCoordinator {
           toolSessionId: input.toolSessionId,
           welinkSessionId: input.welinkSessionId,
         });
-        this.pipeline.toolErrorReporter.report({
-          stage: 'request_lifecycle',
-          welinkSessionId: uplink.welinkSessionId,
-          toolSessionId: uplink.toolSessionId,
-          error: uplink.error,
-          reason: uplink.reason,
-        });
+        this.pipeline.observation.uplinkEmitted(uplink);
+        await this.pipeline.sink.send(uplink);
       }
       throw factsResult.reason;
     }
@@ -87,16 +81,6 @@ export class RequestRunCoordinator {
       welinkSessionId: input.welinkSessionId,
       runId: input.runId,
     });
-    if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
-      this.pipeline.toolErrorReporter.report({
-        stage: 'request_terminal',
-        welinkSessionId: uplink.welinkSessionId,
-        toolSessionId: uplink.toolSessionId,
-        error: uplink.error,
-        reason: uplink.reason,
-      });
-      return;
-    }
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }
