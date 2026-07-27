@@ -42,9 +42,11 @@ export class CommandFailureToolErrorProjector {
     if (!input.summary.toolSessionId && !input.summary.welinkSessionId) {
       return null;
     }
+    if (!this.isSupportedAction(input.summary.action)) {
+      return null;
+    }
 
-    const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
-    const errorMessage = this.resolveErrorMessage(input.error, unsupportedDownstreamAction);
+    const errorMessage = this.resolveErrorMessage(input.error);
     if (!errorMessage) {
       return null;
     }
@@ -56,11 +58,7 @@ export class CommandFailureToolErrorProjector {
     };
   }
 
-  private resolveErrorMessage(error: unknown, unsupportedDownstreamAction: boolean): string | null {
-    if (unsupportedDownstreamAction) {
-      return this.catalog.get('unsupported_action');
-    }
-
+  private resolveErrorMessage(error: unknown): string | null {
     if (error instanceof RuntimeContractError) {
       switch (error.code) {
         case 'run_already_active':
@@ -81,7 +79,12 @@ export class CommandFailureToolErrorProjector {
     return normalizeErrorMessage(error);
   }
 
-  private isUnsupportedDownstreamAction(error: unknown): boolean {
-    return error instanceof Error && error.message.startsWith('Unsupported downstream action:');
+  private isSupportedAction(action: string | undefined): boolean {
+    return action === 'chat'
+      || action === 'create_session'
+      || action === 'question_reply'
+      || action === 'permission_reply'
+      || action === 'close_session'
+      || action === 'abort_session';
   }
 }
