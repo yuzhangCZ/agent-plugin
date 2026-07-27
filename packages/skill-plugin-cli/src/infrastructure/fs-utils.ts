@@ -1,6 +1,5 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 
 export async function readOptionalTextFile(filePath: string): Promise<string | null> {
   try {
@@ -14,8 +13,9 @@ export async function readOptionalTextFile(filePath: string): Promise<string | n
 }
 
 export async function writeFileAtomically(filePath: string, content: string): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempDir = await mkdtemp(join(tmpdir(), "skill-plugin-cli-"));
+  const targetDir = dirname(filePath);
+  await mkdir(targetDir, { recursive: true });
+  const tempDir = await mkdtemp(join(targetDir, ".skill-plugin-cli-"));
   const tempPath = join(tempDir, "config.tmp");
   try {
     await writeFile(tempPath, content, "utf8");
