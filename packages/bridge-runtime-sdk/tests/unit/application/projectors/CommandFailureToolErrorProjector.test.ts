@@ -41,7 +41,6 @@ test('command failure projector maps pending_interaction_not_found to catalog me
 
   assert.deepEqual(message, {
     type: 'tool_error',
-    welinkSessionId: 'welink-1',
     error: '当前交互已失效，请刷新后重试',
   });
 });
@@ -78,7 +77,6 @@ test('command failure projector maps unsupported actions when route fields exist
   assert.deepEqual(message, {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    welinkSessionId: 'welink-1',
     error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
   });
 });
@@ -122,7 +120,7 @@ test('command failure projector reports non-catalog errors for unsupported route
   });
 });
 
-test('command failure projector keeps welinkSessionId when it is the only route field', () => {
+test('command failure projector omits welinkSessionId when it is the only route field', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -136,12 +134,11 @@ test('command failure projector keeps welinkSessionId when it is the only route 
 
   assert.deepEqual(message, {
     type: 'tool_error',
-    welinkSessionId: 'welink-1',
     error: 'future action failed',
   });
 });
 
-test('command failure projector keeps welinkSessionId for create_session failures without toolSessionId', () => {
+test('command failure projector omits welinkSessionId for create_session failures without toolSessionId', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -155,7 +152,6 @@ test('command failure projector keeps welinkSessionId for create_session failure
 
   assert.deepEqual(message, {
     type: 'tool_error',
-    welinkSessionId: 'welink-create-1',
     error: 'create_session_failed',
   });
 });

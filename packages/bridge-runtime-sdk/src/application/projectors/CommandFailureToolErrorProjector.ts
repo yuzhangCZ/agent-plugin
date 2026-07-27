@@ -42,11 +42,8 @@ export class CommandFailureToolErrorProjector {
     if (!input.summary.toolSessionId && !input.summary.welinkSessionId) {
       return null;
     }
-    const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
-    const shouldKeepWelinkSessionId = unsupportedDownstreamAction
-      || input.summary.action === 'create_session'
-      || !input.summary.toolSessionId;
 
+    const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
     const errorMessage = this.resolveErrorMessage(input.error, unsupportedDownstreamAction);
     if (!errorMessage) {
       return null;
@@ -54,9 +51,6 @@ export class CommandFailureToolErrorProjector {
 
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
-      ...(shouldKeepWelinkSessionId && input.summary.welinkSessionId
-        ? { welinkSessionId: input.summary.welinkSessionId }
-        : {}),
       ...(input.summary.toolSessionId ? { toolSessionId: input.summary.toolSessionId } : {}),
       error: errorMessage,
     };
