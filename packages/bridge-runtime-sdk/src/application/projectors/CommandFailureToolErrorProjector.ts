@@ -43,8 +43,8 @@ export class CommandFailureToolErrorProjector {
       return null;
     }
     const unsupportedDownstreamAction = this.isUnsupportedDownstreamAction(input.error);
-    const shouldKeepWelinkSessionId = unsupportedDownstreamAction || input.summary.action === 'create_session';
-    if (!this.isSupportedAction(input.summary.action) && !unsupportedDownstreamAction) {
+    const shouldKeepWelinkSessionId = input.summary.action === 'create_session';
+    if (!this.isSupportedAction(input.summary.action)) {
       return null;
     }
 
