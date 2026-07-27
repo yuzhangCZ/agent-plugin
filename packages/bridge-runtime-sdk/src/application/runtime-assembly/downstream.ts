@@ -50,7 +50,6 @@ export function attachRuntimeDriverHandlers(input: {
           if (toolError) {
             input.toolErrorReporter.report({
               stage: 'command_failure',
-              level: isUnsupportedDownstreamAction(error) ? 'P0' : 'P1',
               welinkSessionId: toolError.welinkSessionId,
               toolSessionId: toolError.toolSessionId,
               error: toolError.error,

@@ -13,11 +13,8 @@ export type ToolErrorReportStage =
   | 'request_terminal'
   | 'outbound_terminal';
 
-export type ToolErrorReportLevel = 'P0' | 'P1' | 'P2' | 'P3';
-
 export type ToolErrorReportInput = {
   stage: ToolErrorReportStage;
-  level: ToolErrorReportLevel;
   toolSessionId?: string;
   welinkSessionId?: string;
   reason?: ToolErrorMessage['reason'];

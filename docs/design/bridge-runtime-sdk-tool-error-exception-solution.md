@@ -227,7 +227,6 @@ type ToolErrorReportInput = {
     | 'request_lifecycle'
     | 'request_terminal'
     | 'outbound_terminal';
-  level: 'P0' | 'P1' | 'P2' | 'P3';
   toolSessionId?: string;
   welinkSessionId?: string;
   reason?: 'session_not_found';

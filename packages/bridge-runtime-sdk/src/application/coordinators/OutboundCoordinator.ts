@@ -169,7 +169,6 @@ export class OutboundCoordinator {
     if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
       this.pipeline.toolErrorReporter.report({
         stage: 'outbound_terminal',
-        level: 'P0',
         toolSessionId: uplink.toolSessionId,
         error: uplink.error,
         reason: uplink.reason,

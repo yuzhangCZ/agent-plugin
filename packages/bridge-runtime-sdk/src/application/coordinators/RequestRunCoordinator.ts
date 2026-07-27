@@ -67,7 +67,6 @@ export class RequestRunCoordinator {
         });
         this.pipeline.toolErrorReporter.report({
           stage: 'request_lifecycle',
-          level: 'P1',
           welinkSessionId: uplink.welinkSessionId,
           toolSessionId: uplink.toolSessionId,
           error: uplink.error,
@@ -91,7 +90,6 @@ export class RequestRunCoordinator {
     if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
       this.pipeline.toolErrorReporter.report({
         stage: 'request_terminal',
-        level: 'P0',
         welinkSessionId: uplink.welinkSessionId,
         toolSessionId: uplink.toolSessionId,
         error: uplink.error,

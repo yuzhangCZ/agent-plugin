@@ -56,7 +56,6 @@ export class GatewayInboundPolicy implements InboundPolicy {
 
     this.toolErrorReporter.report({
       stage: 'inbound_invalid',
-      level: 'P0',
       welinkSessionId: frame.welinkSessionId,
       toolSessionId: frame.toolSessionId,
       error: this.buildInvalidInvokeToolError(frame.violation.violation),
