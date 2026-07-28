@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
+import { extParametersSchema } from '../../ext-parameters.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
 const skillPermissionAskEventPropertiesSchema = z
@@ -11,6 +12,7 @@ const skillPermissionAskEventPropertiesSchema = z
     permType: requiredTrimmedString,
     title: z.string(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    extParameters: extParametersSchema.optional(),
   })
   .passthrough()
   .superRefine((value, ctx) => {
@@ -22,13 +24,14 @@ const skillPermissionAskEventPropertiesSchema = z
       });
     }
   })
-  .transform(({ messageId, partId, permissionId, permType, title, metadata }) => ({
+  .transform(({ messageId, partId, permissionId, permType, title, metadata, extParameters }) => ({
     ...(messageId === undefined ? {} : { messageId }),
     partId,
     permissionId,
     permType,
     title,
     ...(metadata === undefined ? {} : { metadata }),
+    ...(extParameters === undefined ? {} : { extParameters }),
   }));
 
 const skillPermissionAskEventBaseSchema = z.object({
@@ -44,6 +47,7 @@ const skillPermissionReplyEventBaseSchema = z.object({
     permType: requiredTrimmedString.optional(),
     messageId: requiredTrimmedString.optional(),
     partId: requiredTrimmedString.optional(),
+    extParameters: extParametersSchema.optional(),
   }),
 });
 

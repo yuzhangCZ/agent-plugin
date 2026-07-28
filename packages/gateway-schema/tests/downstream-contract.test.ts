@@ -441,6 +441,112 @@ test('normalizeDownstream preserves empty chat payload extParameters object', ()
   });
 });
 
+test('normalizeDownstream preserves optional extParameters on every downstream action', () => {
+  const extParameters = {
+    requestId: 'ext-1',
+    nested: {
+      enabled: true,
+    },
+  };
+  const cases = [
+    [
+      'chat',
+      createChatInvokeMessage({
+        payload: { toolSessionId: 'tool-chat-ext-all', text: 'hello', extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'create_session',
+      createGatewayWireCreateSessionInvokeMessage({
+        payload: { title: 'session with ext', extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'close_session',
+      createCloseSessionInvokeMessage({
+        payload: { toolSessionId: 'tool-close-ext-all', extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'abort_session',
+      createAbortSessionInvokeMessage({
+        payload: { toolSessionId: 'tool-abort-ext-all', extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'query_slash_commands',
+      createQuerySlashCommandsInvokeMessage({
+        payload: { extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'permission_reply',
+      createPermissionReplyInvokeMessage({
+        payload: { permissionId: 'permission-ext-all', response: 'once', extParameters },
+      }),
+      extParameters,
+    ],
+    [
+      'question_reply',
+      createQuestionReplyInvokeMessage({
+        payload: { questionId: 'question-ext-all', answer: 'ok', extParameters },
+      }),
+      extParameters,
+    ],
+  ] as const;
+
+  for (const [name, input, expectedExtParameters] of cases) {
+    const result = normalizeDownstream(input);
+    assert.equal(result.ok, true, name);
+    if (!result.ok || result.value.type !== 'invoke') {
+      continue;
+    }
+
+    assert.deepStrictEqual(result.value.payload.extParameters, expectedExtParameters, name);
+  }
+});
+
+test('normalizeDownstream preserves null extParameters on every downstream action', () => {
+  const cases = [
+    createChatInvokeMessage({
+      payload: { toolSessionId: 'tool-chat-null-ext-all', text: 'hello', extParameters: null },
+    }),
+    createGatewayWireCreateSessionInvokeMessage({
+      payload: { title: 'session with null ext', extParameters: null },
+    }),
+    createCloseSessionInvokeMessage({
+      payload: { toolSessionId: 'tool-close-null-ext-all', extParameters: null },
+    }),
+    createAbortSessionInvokeMessage({
+      payload: { toolSessionId: 'tool-abort-null-ext-all', extParameters: null },
+    }),
+    createQuerySlashCommandsInvokeMessage({
+      payload: { extParameters: null },
+    }),
+    createPermissionReplyInvokeMessage({
+      payload: { permissionId: 'permission-null-ext-all', response: 'once', extParameters: null },
+    }),
+    createQuestionReplyInvokeMessage({
+      payload: { questionId: 'question-null-ext-all', answer: 'ok', extParameters: null },
+    }),
+  ];
+
+  for (const input of cases) {
+    const result = normalizeDownstream(input);
+    assert.equal(result.ok, true, input.action);
+    if (!result.ok || result.value.type !== 'invoke') {
+      continue;
+    }
+
+    assert.equal(result.value.payload.extParameters, null, input.action);
+  }
+});
+
 test('normalizeDownstream drops blank optional chat compat fields', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
@@ -516,27 +622,6 @@ test('normalizeDownstream rejects array chat extParameters', () => {
         toolSessionId: 'tool-chat-array-ext-parameters',
         text: 'hello',
         extParameters: ['invalid-array'],
-      },
-    }),
-  );
-
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'invalid_field_value',
-    field: 'payload.extParameters',
-    messageType: 'invoke',
-    action: 'chat',
-  });
-});
-
-test('normalizeDownstream rejects null chat extParameters', () => {
-  const result = normalizeDownstream(
-    createChatInvokeMessage({
-      payload: {
-        toolSessionId: 'tool-chat-null-ext-parameters',
-        text: 'hello',
-        extParameters: null,
       },
     }),
   );
@@ -662,7 +747,8 @@ test('normalizeDownstream preserves arbitrary businessExtParam values', () => {
   }
 });
 
-test('normalizeDownstream rejects non JSON object platformExtParam', () => {
+test('normalizeDownstream preserves non JSON object platformExtParam without internal validation', () => {
+  const compute = () => true;
   const result = normalizeDownstream(
     createChatInvokeMessage({
       payload: {
@@ -670,24 +756,25 @@ test('normalizeDownstream rejects non JSON object platformExtParam', () => {
         text: 'hello',
         extParameters: {
           platformExtParam: {
-            compute: () => true,
+            compute,
           },
         },
       },
     }),
   );
 
-  assert.equal(result.ok, false);
-  assertWireViolationShape(result.error, {
-    stage: 'payload',
-    code: 'invalid_field_value',
-    field: 'payload.extParameters.platformExtParam',
-    messageType: 'invoke',
-    action: 'chat',
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.deepStrictEqual(result.value.payload.extParameters, {
+    platformExtParam: {
+      compute,
+    },
   });
 });
 
-test('normalizeDownstream rejects non object platformExtParam values', () => {
+test('normalizeDownstream preserves arbitrary platformExtParam values without internal validation', () => {
   const cases = [
     ['platformExtParam', null],
     ['platformExtParam', ['array']],
@@ -708,14 +795,11 @@ test('normalizeDownstream rejects non object platformExtParam values', () => {
       }),
     );
 
-    assert.equal(result.ok, false, key);
-    assertWireViolationShape(result.error, {
-      stage: 'payload',
-      code: 'invalid_field_value',
-      field: `payload.extParameters.${key}`,
-      messageType: 'invoke',
-      action: 'chat',
-    });
+    assert.equal(result.ok, true, key);
+    if (!result.ok) {
+      continue;
+    }
+    assert.deepStrictEqual(result.value.payload.extParameters, { [key]: value });
   }
 });
 

@@ -27,6 +27,9 @@ export class ReplyQuestionUseCase implements ReplyQuestionUseCasePort {
         traceId: command.traceId,
         questionId: command.source.payload.questionId,
         answers: command.source.payload.answers,
+        ...(command.source.payload.extParameters !== undefined
+          ? { extParameters: command.source.payload.extParameters }
+          : {}),
       });
       this.observation.usecaseSucceeded('reply_question', command.traceId);
     } catch (error) {

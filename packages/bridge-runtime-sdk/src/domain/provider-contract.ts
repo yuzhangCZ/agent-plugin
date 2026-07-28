@@ -162,6 +162,7 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -171,6 +172,7 @@ export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -179,6 +181,7 @@ export interface ProviderPermissionReplyInput {
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -188,6 +191,7 @@ export interface ProviderAbortSessionInput {
   traceId: string;
   toolSessionId: string;
   runIds: string[];
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -224,6 +228,8 @@ export interface ProviderFactBase {
   // 子代理 envelope 提示字段；不参与 runtime session ownership、校验或回复路由。
   subagentSessionId?: string;
   subagentName?: string;
+  // 上行业务扩展字段；Runtime SDK 只透传到 tool_event.event.properties.extParameters。
+  extParameters?: ExtParameters;
 }
 
 /**

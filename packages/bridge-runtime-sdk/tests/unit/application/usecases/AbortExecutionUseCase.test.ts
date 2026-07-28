@@ -19,14 +19,14 @@ class RecordingObservation {
   }
 }
 
-function createCommand() {
+function createCommand(payload: Record<string, unknown> = {}) {
   return {
     kind: 'abort_execution',
     traceId: 'trace-abort',
     source: {
       type: 'invoke',
       action: 'abort_session',
-      payload: { toolSessionId: 'tool-1' },
+      payload: { toolSessionId: 'tool-1', ...payload },
     },
   } as never;
 }
@@ -60,6 +60,34 @@ test('AbortExecutionUseCase forwards active run id and clears permission present
   assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-active'] }]);
   assert.deepEqual(cleared, ['tool-1']);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
+});
+
+test('AbortExecutionUseCase forwards optional extParameters to provider', async () => {
+  const abortCalls: unknown[] = [];
+  const useCase = new AbortExecutionUseCase(
+    {
+      async abortExecution(input: unknown) {
+        abortCalls.push(input);
+        return { applied: true as const };
+      },
+    } as never,
+    {
+      getRequestRunState() {
+        return { activeRunIds: ['run-active'] };
+      },
+    } as never,
+    { clearSession() {} } as never,
+    new RecordingObservation() as never,
+  );
+
+  await useCase.execute(createCommand({ extParameters: { requestId: 'ext-abort' } }));
+
+  assert.deepEqual(abortCalls, [{
+    traceId: 'trace-abort',
+    toolSessionId: 'tool-1',
+    runIds: ['run-active'],
+    extParameters: { requestId: 'ext-abort' },
+  }]);
 });
 
 test('AbortExecutionUseCase forwards empty run id set when no active run exists', async () => {

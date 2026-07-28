@@ -1,5 +1,3 @@
-import type { JsonValue } from '../../shared/boundary-types.ts';
-
 export interface PlatformExtParam {
   [key: string]: unknown;
   businessSessionDomain?: string;
@@ -8,8 +6,4 @@ export interface PlatformExtParam {
   allowedSlashCommands?: string[];
 }
 
-export interface ExtParameters {
-  [key: string]: unknown;
-  businessExtParam?: JsonValue;
-  platformExtParam?: PlatformExtParam;
-}
+export type ExtParameters = Record<string, unknown> | null;

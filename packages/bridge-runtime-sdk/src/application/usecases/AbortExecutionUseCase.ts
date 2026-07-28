@@ -36,6 +36,9 @@ export class AbortExecutionUseCase implements AbortExecutionUseCasePort {
         traceId: command.traceId,
         toolSessionId: command.source.payload.toolSessionId,
         runIds,
+        ...(command.source.payload.extParameters !== undefined
+          ? { extParameters: command.source.payload.extParameters }
+          : {}),
       });
       this.factEnricher.clearSession(command.source.payload.toolSessionId);
       this.observation.usecaseSucceeded('abort_execution', command.traceId, context);

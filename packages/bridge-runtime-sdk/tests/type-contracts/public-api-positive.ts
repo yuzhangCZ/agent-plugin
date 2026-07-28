@@ -9,6 +9,9 @@ import type {
   BridgeRuntimeStatusSnapshot,
   OutboundFact,
   ProviderAbortSessionInput,
+  ProviderCloseSessionInput,
+  ProviderPermissionReplyInput,
+  ProviderQuestionReplyInput,
   RequestRunPolicyOptions,
   RuntimeDiagnostics,
   RuntimeOutboundEmitter,
@@ -39,6 +42,31 @@ const providerAbortSessionInput: ProviderAbortSessionInput = {
   traceId: 'trace-1',
   toolSessionId: 'tool-session-1',
   runIds: ['run-1'],
+  extParameters: { requestId: 'ext-abort' },
+};
+const providerCloseSessionInput: ProviderCloseSessionInput = {
+  traceId: 'trace-1',
+  toolSessionId: 'tool-session-1',
+  extParameters: null,
+};
+const providerQuestionReplyInput: ProviderQuestionReplyInput = {
+  traceId: 'trace-1',
+  questionId: 'question-1',
+  answers: [['yes']],
+  extParameters: { requestId: 'ext-question' },
+};
+const providerPermissionReplyInput: ProviderPermissionReplyInput = {
+  traceId: 'trace-1',
+  permissionId: 'permission-1',
+  reply: 'once',
+  extParameters: { requestId: 'ext-permission' },
+};
+const outboundFactWithExtParameters: OutboundFact = {
+  type: 'text.done',
+  messageId: 'message-1',
+  partId: 'part-1',
+  content: 'hello',
+  extParameters: { requestId: 'ext-fact' },
 };
 const startRequestRunTrace: RuntimeTraceProviderCall = {
   command: 'startRequestRun',
@@ -84,6 +112,10 @@ void gatewayTransportErrorCode;
 void runtimeDiagnostics;
 void runtimeOptionsWithPolicy;
 void providerAbortSessionInput;
+void providerCloseSessionInput;
+void providerQuestionReplyInput;
+void providerPermissionReplyInput;
+void outboundFactWithExtParameters;
 void startRequestRunTrace;
 void abortExecutionTrace;
 void explicitSnapshot;
