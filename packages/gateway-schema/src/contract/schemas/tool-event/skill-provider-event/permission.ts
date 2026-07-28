@@ -31,7 +31,7 @@ const skillPermissionAskEventPropertiesSchema = z
     permType,
     title,
     ...(metadata === undefined ? {} : { metadata }),
-    ...(extParameters === undefined ? {} : { extParameters }),
+    extParameters,
   }));
 
 const skillPermissionAskEventBaseSchema = z.object({

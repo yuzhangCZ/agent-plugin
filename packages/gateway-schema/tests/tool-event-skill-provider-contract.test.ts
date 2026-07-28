@@ -32,6 +32,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         toolCallId: 'call-q-1',
         status: 'running',
         extParam: { scene: 'confirm' },
+        extParameters: undefined,
         questions: [
           {
             question: '继续执行吗？',
@@ -51,6 +52,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         permType: 'file_write',
         title: '允许写文件',
         metadata: { path: '/tmp/a.ts' },
+        extParameters: undefined,
       },
     },
     {
@@ -306,6 +308,7 @@ test('validateToolEvent preserves empty skill provider permission.ask title', ()
     permissionId: 'permission-1',
     permType: 'file_write',
     title: '',
+    extParameters: undefined,
   });
 });
 

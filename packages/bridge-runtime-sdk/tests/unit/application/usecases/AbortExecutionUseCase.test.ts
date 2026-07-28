@@ -57,7 +57,12 @@ test('AbortExecutionUseCase forwards active run id and clears permission present
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-active'] }]);
+  assert.deepEqual(abortCalls, [{
+    traceId: 'trace-abort',
+    toolSessionId: 'tool-1',
+    runIds: ['run-active'],
+    extParameters: undefined,
+  }]);
   assert.deepEqual(cleared, ['tool-1']);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
 });
@@ -112,7 +117,12 @@ test('AbortExecutionUseCase forwards empty run id set when no active run exists'
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: [] }]);
+  assert.deepEqual(abortCalls, [{
+    traceId: 'trace-abort',
+    toolSessionId: 'tool-1',
+    runIds: [],
+    extParameters: undefined,
+  }]);
 });
 
 test('AbortExecutionUseCase forwards all active run ids', async () => {
@@ -137,7 +147,12 @@ test('AbortExecutionUseCase forwards all active run ids', async () => {
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(abortCalls, [{ traceId: 'trace-abort', toolSessionId: 'tool-1', runIds: ['run-1', 'run-2'] }]);
+  assert.deepEqual(abortCalls, [{
+    traceId: 'trace-abort',
+    toolSessionId: 'tool-1',
+    runIds: ['run-1', 'run-2'],
+    extParameters: undefined,
+  }]);
 });
 
 test('AbortExecutionUseCase records failed observation and does not swallow provider failure', async () => {

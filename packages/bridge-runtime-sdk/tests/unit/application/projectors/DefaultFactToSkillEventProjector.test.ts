@@ -9,7 +9,7 @@ test('DefaultFactToSkillEventProjector maps message lifecycle and text facts int
   assert.deepEqual(projector.project({ type: 'message.start', messageId: 'msg-1' }), [{
     protocol: 'cloud',
     type: 'step.start',
-    properties: { messageId: 'msg-1' },
+    properties: { messageId: 'msg-1', extParameters: undefined },
   }]);
   assert.deepEqual(projector.project({
     type: 'text.delta',
@@ -23,6 +23,7 @@ test('DefaultFactToSkillEventProjector maps message lifecycle and text facts int
       messageId: 'msg-1',
       partId: 'part-1',
       content: 'hello',
+      extParameters: undefined,
     },
   }]);
   assert.deepEqual(projector.project({
@@ -39,6 +40,7 @@ test('DefaultFactToSkillEventProjector maps message lifecycle and text facts int
       tokens: { input: 1, output: 2 },
       cost: 0.1,
       reason: 'stop',
+      extParameters: undefined,
     },
   }]);
 });
@@ -60,6 +62,7 @@ test('DefaultFactToSkillEventProjector maps interaction facts with compatibility
       partId: 'part-1',
       questionId: 'question-1',
       toolCallId: 'question-1',
+      extParameters: undefined,
       questions: [{ question: 'Continue?', options: [{ label: 'Yes' }], multiSelect: false }],
     },
   }]);
@@ -76,6 +79,7 @@ test('DefaultFactToSkillEventProjector maps interaction facts with compatibility
       permissionId: 'permission-1',
       permType: 'shell',
       title: '',
+      extParameters: undefined,
     },
   }]);
 });

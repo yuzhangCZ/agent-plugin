@@ -4,7 +4,6 @@ import { SKILL_EVENT_PROTOCOL } from '../constants/gateway-messages.ts';
 import type {
   MessageDoneFact,
   MessageStartFact,
-  ProviderFact,
   PermissionAskFact,
   QuestionAskFact,
   SessionErrorFact,
@@ -46,10 +45,6 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
     return [event];
   }
 
-  private toExtParametersProperty(fact: Pick<ProviderFact, 'extParameters'>) {
-    return fact.extParameters !== undefined ? { extParameters: fact.extParameters } : {};
-  }
-
   private projectStreamingContentFact(
     fact: TextDeltaFact | TextDoneFact | ThinkingDeltaFact | ThinkingDoneFact,
   ): SkillProviderEvent[] {
@@ -60,7 +55,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         messageId: fact.messageId,
         partId: fact.partId,
         content: fact.content,
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -79,7 +74,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         ...(fact.input !== undefined ? { input: fact.input } : {}),
         ...(fact.output !== undefined ? { output: fact.output } : {}),
         ...(fact.error ? { error: fact.error } : {}),
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -97,7 +92,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         ...(fact.status ? { status: fact.status } : {}),
         ...(fact.extParam !== undefined ? { extParam: fact.extParam } : {}),
         questions: this.toQuestionItems(fact),
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -129,7 +124,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         permType: fact.permType,
         title: fact.title ?? '',
         ...(fact.metadata ? { metadata: fact.metadata } : {}),
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -144,7 +139,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
         ...(fact.permType ? { permType: fact.permType } : {}),
         ...(fact.messageId ? { messageId: fact.messageId } : {}),
         ...(fact.partId ? { partId: fact.partId } : {}),
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -155,7 +150,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       type: 'step.start',
       properties: {
         messageId: fact.messageId,
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -167,7 +162,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       properties: {
         messageId: fact.messageId,
         ...this.toMessageDoneProperties(fact),
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -186,7 +181,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       type: 'session.title',
       properties: {
         title: fact.title,
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }
@@ -197,7 +192,7 @@ export class DefaultFactToSkillEventProjector implements FactToSkillEventProject
       type: 'session.error',
       properties: {
         error: fact.error.message,
-        ...this.toExtParametersProperty(fact),
+        extParameters: fact.extParameters,
       },
     });
   }

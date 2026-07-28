@@ -37,9 +37,7 @@ export class ListSlashCommandsUseCase implements ListSlashCommandsUseCasePort {
     try {
       const result = await this.handlers.listSlashCommands({
         traceId: command.traceId,
-        ...(command.source.payload?.extParameters !== undefined
-          ? { extParameters: command.source.payload.extParameters }
-          : {}),
+        extParameters: command.source.payload?.extParameters,
       });
       slashCommands = result.slashCommands;
     } catch (error) {

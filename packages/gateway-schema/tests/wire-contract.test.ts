@@ -40,6 +40,7 @@ test('normalizeDownstream canonicalizes supported invoke shapes', () => {
     payload: {
       title: 'hello',
       assistantId: 'persona-1',
+      extParameters: undefined,
     },
   });
 });

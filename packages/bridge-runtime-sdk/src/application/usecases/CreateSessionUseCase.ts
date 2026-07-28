@@ -37,9 +37,7 @@ export class CreateSessionUseCase implements CreateSessionUseCasePort {
         traceId: command.traceId,
         title: command.source.payload.title,
         assistantId: command.source.payload.assistantId,
-        ...(command.source.payload.extParameters !== undefined
-          ? { extParameters: command.source.payload.extParameters }
-          : {}),
+        extParameters: command.source.payload.extParameters,
       });
       this.sessionRegistry.ensure({
         toolSessionId: result.toolSessionId,

@@ -48,7 +48,7 @@ const skillQuestionEventPropertiesSchema = z
     ...(toolCallId === undefined ? {} : { toolCallId }),
     ...(status === undefined ? {} : { status }),
     ...(extParam === undefined ? {} : { extParam }),
-    ...(extParameters === undefined ? {} : { extParameters }),
+    extParameters,
     questions,
   }));
 

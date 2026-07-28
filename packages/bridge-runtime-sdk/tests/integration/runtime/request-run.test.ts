@@ -266,10 +266,11 @@ test('start_request_run does not synthesize extParameters from legacy imGroupId'
     runId: capturedInput?.runId,
     toolSessionId: 'tool-legacy-im',
     text: 'hi',
+    extParameters: undefined,
   });
 });
 
-test('start_request_run omits absent extParameters in provider runMessage input', async () => {
+test('start_request_run keeps absent extParameters as undefined in provider runMessage input', async () => {
   const connection = new FakeGatewayClient();
   let capturedInput: Record<string, unknown> | undefined;
   const runtime = await createBridgeRuntime(
@@ -315,7 +316,8 @@ test('start_request_run omits absent extParameters in provider runMessage input'
   await flushEvents();
 
   assert.ok(capturedInput);
-  assert.equal('extParameters' in capturedInput, false);
+  assert.equal('extParameters' in capturedInput, true);
+  assert.equal(capturedInput.extParameters, undefined);
 });
 
 test('request run projects session.error exactly once before terminal tool_error', async () => {
@@ -395,6 +397,7 @@ test('request run projects session.error exactly once before terminal tool_error
       type: 'session.error',
       properties: {
         error: 'agent offline',
+        extParameters: undefined,
       },
     },
   });

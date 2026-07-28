@@ -54,7 +54,12 @@ test('ReplyPermissionUseCase consumes pending permission token and forwards repl
   await useCase.execute(createCommand());
 
   assert.deepEqual(consumed, [{ kind: 'permission', tokenId: 'permission-1' }]);
-  assert.deepEqual(replies, [{ traceId: 'trace-permission', permissionId: 'permission-1', reply: 'once' }]);
+  assert.deepEqual(replies, [{
+    traceId: 'trace-permission',
+    permissionId: 'permission-1',
+    reply: 'once',
+    extParameters: undefined,
+  }]);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
 });
 

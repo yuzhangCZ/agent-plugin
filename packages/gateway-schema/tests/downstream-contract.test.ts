@@ -50,6 +50,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
           assistantAccount: 'assistant-account-a',
           sendUserAccount: 'sender-account-a',
           imGroupId: 'group-a',
+          extParameters: undefined,
         },
       },
     ],
@@ -65,6 +66,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         payload: {
           title: 'gateway-wire session',
           assistantId: 'persona-gateway',
+          extParameters: undefined,
         },
       },
     ],
@@ -80,6 +82,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         action: 'close_session',
         payload: {
           toolSessionId: 'tool-close',
+          extParameters: undefined,
         },
       },
     ],
@@ -95,6 +98,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         action: 'abort_session',
         payload: {
           toolSessionId: 'tool-abort',
+          extParameters: undefined,
         },
       },
     ],
@@ -145,6 +149,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         payload: {
           permissionId: 'perm-1',
           response: 'once',
+          extParameters: undefined,
         },
       },
     ],
@@ -164,6 +169,7 @@ test('normalizeDownstream accepts the full downstream contract', () => {
         payload: {
           questionId: 'question-1',
           answers: [['ok']],
+          extParameters: undefined,
         },
       },
     ],
@@ -218,7 +224,7 @@ test('normalizeDownstream ignores legacy create_session payload fields in the sh
     type: 'invoke',
     welinkSessionId: 'wl-gateway-legacy-create',
     action: 'create_session',
-    payload: {},
+    payload: { extParameters: undefined },
   });
   assert.equal('sessionId' in result.value.payload, false);
   assert.equal('metadata' in result.value.payload, false);
@@ -316,6 +322,7 @@ test('normalizeDownstream trims optional chat compat fields and preserves top-le
       assistantAccount: 'assistant-account-trim',
       sendUserAccount: 'sender-account-trim',
       imGroupId: 'group-trim',
+      extParameters: undefined,
     },
   });
 });
@@ -345,6 +352,7 @@ test('normalizeDownstream accepts null chat compat fields and omits them after n
     payload: {
       toolSessionId: 'tool-chat-null-compat',
       text: 'hello',
+      extParameters: undefined,
     },
   });
 });
@@ -572,11 +580,12 @@ test('normalizeDownstream drops blank optional chat compat fields', () => {
     payload: {
       toolSessionId: 'tool-chat-blank',
       text: 'hello',
+      extParameters: undefined,
     },
   });
 });
 
-test('normalizeDownstream omits absent chat payload extParameters', () => {
+test('normalizeDownstream keeps absent chat payload extParameters as undefined after direct assignment', () => {
   const result = normalizeDownstream(
     createChatInvokeMessage({
       payload: {
@@ -591,7 +600,8 @@ test('normalizeDownstream omits absent chat payload extParameters', () => {
     return;
   }
 
-  assert.equal('extParameters' in result.value.payload, false);
+  assert.equal('extParameters' in result.value.payload, true);
+  assert.equal(result.value.payload.extParameters, undefined);
 });
 
 test('normalizeDownstream rejects non-boolean chat suppressReply', () => {
@@ -909,6 +919,7 @@ test('normalizeDownstream accepts question_reply without welinkSessionId through
     payload: {
       questionId: 'question-1',
       answers: [['ok']],
+      extParameters: undefined,
     },
   });
 });
@@ -930,6 +941,7 @@ test('normalizeDownstream accepts structured question_reply answers', () => {
     payload: {
       questionId: 'question-structured-1',
       answers: [['A'], ['B', 'C']],
+      extParameters: undefined,
     },
   });
 });
@@ -951,6 +963,7 @@ test('normalizeDownstream accepts serialized structured question_reply answer', 
     payload: {
       questionId: 'question-serialized-answer-1',
       answers: [['A'], ['B', 'C']],
+      extParameters: undefined,
     },
   });
 });
@@ -973,6 +986,7 @@ test('normalizeDownstream prefers structured question_reply answers over legacy 
     payload: {
       questionId: 'question-structured-2',
       answers: [['A'], ['B', 'C']],
+      extParameters: undefined,
     },
   });
 });
@@ -994,6 +1008,7 @@ test('normalizeDownstream treats non-json question_reply answer as legacy string
     payload: {
       questionId: 'question-non-json-answer-1',
       answers: [['[not json']],
+      extParameters: undefined,
     },
   });
 });
@@ -1015,6 +1030,7 @@ test('normalizeDownstream accepts empty legacy question_reply answer string', ()
     payload: {
       questionId: 'question-empty-legacy-answer-1',
       answers: [['']],
+      extParameters: undefined,
     },
   });
 });
@@ -1040,6 +1056,7 @@ test('normalizeDownstream treats non-array json question_reply answer as legacy 
       payload: {
         questionId: input.questionId,
         answers: [[input.answer]],
+        extParameters: undefined,
       },
     });
   }
@@ -1062,6 +1079,7 @@ test('normalizeDownstream accepts question_reply using legacy toolCallId alias',
     payload: {
       questionId: 'question-legacy-1',
       answers: [['ok']],
+      extParameters: undefined,
     },
   });
 });
@@ -1084,6 +1102,7 @@ test('normalizeDownstream prefers questionId over toolCallId for question_reply'
     payload: {
       questionId: 'question-primary-1',
       answers: [['ok']],
+      extParameters: undefined,
     },
   });
 });
@@ -1112,6 +1131,7 @@ test('normalizeDownstream accepts empty serialized question_reply answer arrays'
       payload: {
         questionId: input.questionId,
         answers: input.answers,
+        extParameters: undefined,
       },
     });
   }
@@ -1173,6 +1193,7 @@ test('normalizeDownstream accepts question_reply empty structured answers', () =
     payload: {
       questionId: 'question-empty-answers-1',
       answers: [],
+      extParameters: undefined,
     },
   });
 });
@@ -1194,6 +1215,7 @@ test('normalizeDownstream accepts question_reply empty answer group', () => {
     payload: {
       questionId: 'question-empty-answer-group-1',
       answers: [[]],
+      extParameters: undefined,
     },
   });
 });
@@ -1215,6 +1237,7 @@ test('normalizeDownstream accepts question_reply empty answer item', () => {
     payload: {
       questionId: 'question-empty-answer-item-1',
       answers: [['A'], ['']],
+      extParameters: undefined,
     },
   });
 });

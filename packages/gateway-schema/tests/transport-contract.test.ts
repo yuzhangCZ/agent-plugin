@@ -130,6 +130,54 @@ test('validateGatewayUplinkBusinessMessage only accepts uplink business messages
   assert.equal(controlResult.ok, false);
 });
 
+test('non-tool_event uplink business messages do not carry extParameters', () => {
+  const cases = [
+    {
+      type: 'tool_done',
+      toolSessionId: 'tool-1',
+      extParameters: { requestId: 'ext-terminal' },
+    },
+    {
+      type: 'tool_error',
+      toolSessionId: 'tool-1',
+      error: 'failed',
+      extParameters: { requestId: 'ext-error' },
+    },
+    {
+      type: 'session_created',
+      welinkSessionId: 'wl-1',
+      toolSessionId: 'tool-1',
+      extParameters: { requestId: 'ext-session' },
+    },
+    {
+      type: 'status_response',
+      opencodeOnline: true,
+      extParameters: { requestId: 'ext-status' },
+    },
+    {
+      ...createSlashCommandsResultMessage(),
+      extParameters: { requestId: 'ext-slash' },
+      payload: {
+        ...createSlashCommandsResultMessage().payload,
+        extParameters: { requestId: 'ext-slash-payload' },
+      },
+    },
+  ];
+
+  for (const message of cases) {
+    const result = validateGatewayUplinkBusinessMessage(message);
+    assert.equal(result.ok, true, message.type);
+    if (!result.ok) {
+      continue;
+    }
+
+    assert.equal('extParameters' in result.value, false, message.type);
+    if ('payload' in result.value) {
+      assert.equal('extParameters' in result.value.payload, false, message.type);
+    }
+  }
+});
+
 test('validateGatewayUpstreamTransportMessage rejects legacy slash_commands_result welinkSessionId', () => {
   const result = validateGatewayUpstreamTransportMessage({
     type: 'slash_commands_result',

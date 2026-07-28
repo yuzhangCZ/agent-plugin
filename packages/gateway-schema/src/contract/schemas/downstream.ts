@@ -46,7 +46,7 @@ export const chatPayloadSchema = z
     ...(payload.assistantAccount ? { assistantAccount: payload.assistantAccount } : {}),
     ...(payload.sendUserAccount ? { sendUserAccount: payload.sendUserAccount } : {}),
     ...(payload.imGroupId ? { imGroupId: payload.imGroupId } : {}),
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type ChatPayload = z.output<typeof chatPayloadSchema>;
 
@@ -59,7 +59,7 @@ export const createSessionPayloadSchema = z
   .transform((payload) => ({
     ...(payload.title ? { title: payload.title } : {}),
     ...(payload.assistantId ? { assistantId: payload.assistantId } : {}),
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type CreateSessionPayload = z.output<typeof createSessionPayloadSchema>;
 
@@ -70,7 +70,7 @@ export const closeSessionPayloadSchema = z
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type CloseSessionPayload = z.output<typeof closeSessionPayloadSchema>;
 
@@ -81,7 +81,7 @@ export const abortSessionPayloadSchema = z
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type AbortSessionPayload = z.output<typeof abortSessionPayloadSchema>;
 
@@ -94,7 +94,7 @@ export const permissionReplyPayloadSchema = z
   .transform((payload) => ({
     permissionId: payload.permissionId,
     response: payload.response,
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchema>;
 
@@ -124,7 +124,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: payload.answers,
-        ...(extParameters !== undefined ? { extParameters } : {}),
+        extParameters,
       };
     }
 
@@ -144,7 +144,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: [[payload.answer]],
-        ...(extParameters !== undefined ? { extParameters } : {}),
+        extParameters,
       };
     }
 
@@ -152,7 +152,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: [[payload.answer]],
-        ...(extParameters !== undefined ? { extParameters } : {}),
+        extParameters,
       };
     }
 
@@ -169,7 +169,7 @@ export const questionReplyPayloadSchema = z
     return {
       questionId: payload.questionId ?? payload.toolCallId!,
       answers: structuredAnswer.data,
-      ...(extParameters !== undefined ? { extParameters } : {}),
+      extParameters,
     };
   });
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
@@ -179,8 +179,8 @@ export const querySlashCommandsPayloadSchema = z
     extParameters: extParametersSchema.optional(),
   })
   .transform((payload) => ({
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
-  }))
+    extParameters: payload.extParameters,
+  }));
 
 export type QuerySlashCommandsPayload = z.output<typeof querySlashCommandsPayloadSchema>;
 

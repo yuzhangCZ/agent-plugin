@@ -54,7 +54,12 @@ test('ReplyQuestionUseCase consumes pending question token and forwards normaliz
   await useCase.execute(createCommand());
 
   assert.deepEqual(consumed, [{ kind: 'question', tokenId: 'question-1' }]);
-  assert.deepEqual(replies, [{ traceId: 'trace-question', questionId: 'question-1', answers: [['yes'], ['no']] }]);
+  assert.deepEqual(replies, [{
+    traceId: 'trace-question',
+    questionId: 'question-1',
+    answers: [['yes'], ['no']],
+    extParameters: undefined,
+  }]);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
 });
 
