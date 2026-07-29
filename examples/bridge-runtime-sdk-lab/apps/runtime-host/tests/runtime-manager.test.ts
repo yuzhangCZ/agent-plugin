@@ -75,6 +75,48 @@ test('stops the previous runtime before replacing it', async () => {
   assert.equal(stopCount, 1);
 });
 
+test('stops and clears runtime snapshot when gateway mode changes', async () => {
+  let stopCount = 0;
+  const manager = new RuntimeManager({
+    createRuntime: async () => ({
+      start: async () => undefined,
+      stop: async () => {
+        stopCount += 1;
+      },
+      probe: async () => ({ state: 'ready', latencyMs: 3 }),
+      getStatus: () => ({ state: 'ready', failureReason: null }),
+      getDiagnostics: () => ({
+        gatewayState: 'ready',
+        lastReadyAt: 1,
+        lastInboundAt: null,
+        lastOutboundAt: null,
+        lastHeartbeatAt: null,
+        providerCalls: [],
+        facts: [],
+        uplinks: [],
+        terminals: [],
+        interactions: [],
+        derivedEvents: [],
+        failures: [],
+      }),
+    }),
+  });
+
+  await manager.create({
+    url: 'ws://localhost:8081/ws/agent',
+    auth: { ak: 'test-ak', sk: 'test-sk' },
+    register: { channel: 'opencode', toolVersion: 'sdk-lab' },
+  });
+
+  const snapshot = await manager.setMode('mock-gateway');
+
+  assert.equal(stopCount, 1);
+  assert.equal(snapshot.mode, 'mock-gateway');
+  assert.equal(snapshot.gateway, undefined);
+  assert.equal(snapshot.status, undefined);
+  assert.equal(snapshot.diagnostics, undefined);
+});
+
 test('clears gateway downstream panel without clearing event stream', () => {
   const manager = new RuntimeManager();
   manager.events.append('sdk.log.info', '「onMessage」===>「{"type":"invoke","action":"chat","payload":{"toolSessionId":"tool-before"}}」');

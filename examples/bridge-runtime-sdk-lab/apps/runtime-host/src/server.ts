@@ -127,7 +127,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (mode === 'mock-gateway') {
       await mockGateway.start();
     }
-    sendJson(res, 200, actionResult('mode.set', manager.setMode(mode as GatewayMode)));
+    sendJson(res, 200, actionResult('mode.set', await manager.setMode(mode as GatewayMode)));
     return;
   }
   if (req.method === 'POST' && url.pathname === '/api/mock-gateway/start') {

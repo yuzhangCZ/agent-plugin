@@ -55,7 +55,17 @@ export class RuntimeManager {
     return this.#events;
   }
 
-  setMode(mode: GatewayMode): RuntimeSnapshot {
+  async setMode(mode: GatewayMode): Promise<RuntimeSnapshot> {
+    const previousMode = this.#mode;
+    if (this.#runtime && previousMode !== mode) {
+      await this.#runtime.stop();
+      this.#runtime = undefined;
+      this.#gateway = undefined;
+      this.#events.append('runtime.mode_switch.stopped', 'Runtime stopped before gateway mode switch', {
+        from: previousMode,
+        to: mode,
+      });
+    }
     this.#mode = mode;
     this.#events.append('runtime.mode.changed', `Gateway mode changed to ${mode}`, { mode });
     return this.snapshot();

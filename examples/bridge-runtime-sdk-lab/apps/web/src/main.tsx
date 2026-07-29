@@ -373,6 +373,7 @@ function App(): React.JSX.Element {
             <button className={mode === 'real-gateway' ? 'selected' : ''} onClick={() => void updateMode('real-gateway')}>真实</button>
             <button className={mode === 'mock-gateway' ? 'selected' : ''} onClick={() => void updateMode('mock-gateway')}>Mock</button>
           </div>
+          <p className="muted compact-note">切换模式会断开当前 runtime，需重新初始化并启动。</p>
         </section>
 
         <section className="panel">
