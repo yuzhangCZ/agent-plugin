@@ -211,7 +211,7 @@
 - `reconnectBaseMs=1000`
 - `reconnectMaxMs=30000`
 - `reconnectJitter=full`
-- `reconnectMaxElapsedMs=600000`
+- `reconnectMaxElapsedMs=2400000`
 - 指数退避，最大 30s；`full jitter` 时在 `0..cappedDelay` 间随机
 
 ### NFR-MB-03 安全
