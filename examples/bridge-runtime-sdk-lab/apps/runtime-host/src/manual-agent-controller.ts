@@ -80,22 +80,42 @@ export class ManualAgentController {
   submitFact(value: unknown): ManualAgentFactResult {
     const state = this.requireActiveRun();
     const fact = normalizeProviderFact(value);
-    if (state.factsClosed) {
-      throw new Error('Manual run facts are already closed');
-    }
-    const waiter = state.waiters.shift();
-    if (waiter) {
-      waiter({ value: fact, done: false });
-    } else {
-      state.queue.push(fact);
-    }
-    this.#events.append('manual_agent.fact.submitted', `Manual ProviderFact submitted: ${fact.type}`, {
-      fact,
+    this.enqueueFact(state, fact);
+    return {
+      accepted: true,
       queuedFactCount: state.queue.length,
+      submittedFactCount: 1,
+    };
+  }
+
+  submitTextResponse(value: unknown): ManualAgentFactResult {
+    const state = this.requireActiveRun();
+    const textDoneFact = normalizeTextDoneFact(value, state.context);
+    const content = typeof textDoneFact.content === 'string' ? textDoneFact.content : 'Manual response chunk';
+    const facts: ProviderFact[] = [
+      { type: 'message.start', messageId: textDoneFact.messageId },
+      {
+        type: 'text.delta',
+        messageId: textDoneFact.messageId,
+        partId: textDoneFact.partId,
+        content,
+      },
+      textDoneFact,
+      { type: 'message.done', messageId: textDoneFact.messageId, reason: 'completed' },
+    ];
+    for (const fact of facts) {
+      this.enqueueFact(state, fact);
+    }
+    this.#events.append('manual_agent.text_response.submitted', 'Manual text response facts submitted', {
+      textDoneFact,
+      submittedFactCount: facts.length,
+      queuedFactCount: state.queue.length,
+      context: state.context,
     });
     return {
       accepted: true,
       queuedFactCount: state.queue.length,
+      submittedFactCount: facts.length,
     };
   }
 
@@ -158,6 +178,22 @@ export class ManualAgentController {
     }
     return this.#activeRun;
   }
+
+  private enqueueFact(state: ManualRunState, fact: ProviderFact): void {
+    if (state.factsClosed) {
+      throw new Error('Manual run facts are already closed');
+    }
+    const waiter = state.waiters.shift();
+    if (waiter) {
+      waiter({ value: fact, done: false });
+    } else {
+      state.queue.push(fact);
+    }
+    this.#events.append('manual_agent.fact.submitted', `Manual ProviderFact submitted: ${fact.type}`, {
+      fact,
+      queuedFactCount: state.queue.length,
+    });
+  }
 }
 
 function normalizeProviderFact(value: unknown): ProviderFact {
@@ -166,6 +202,20 @@ function normalizeProviderFact(value: unknown): ProviderFact {
     throw new Error('ProviderFact must be a JSON object with a string type');
   }
   return record as unknown as ProviderFact;
+}
+
+function normalizeTextDoneFact(value: unknown, context: ManualAgentContext): Extract<ProviderFact, { type: 'text.done' }> {
+  const record = asRecord(value);
+  if (!record || record.type !== 'text.done') {
+    throw new Error('Text response shortcut requires the editor JSON to be a text.done ProviderFact');
+  }
+  return {
+    ...record,
+    type: 'text.done',
+    messageId: typeof record.messageId === 'string' && record.messageId.length > 0 ? record.messageId : context.messageId,
+    partId: typeof record.partId === 'string' && record.partId.length > 0 ? record.partId : context.textPartId,
+    content: typeof record.content === 'string' ? record.content : 'Manual response chunk',
+  } as Extract<ProviderFact, { type: 'text.done' }>;
 }
 
 function toTerminalResult(input: ManualAgentTerminalInput): ProviderTerminalResult {

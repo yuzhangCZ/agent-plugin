@@ -47,6 +47,51 @@ test('manual agent templates use active run identifiers', () => {
   assert.equal(controller.snapshot().activeRun?.toolSessionId, 'tool-1');
 });
 
+test('manual agent submits a contract ordered batch from an edited text.done fact', async () => {
+  const controller = new ManualAgentController(new EventStore());
+  controller.setEnabled(true);
+  const run = controller.startRun(runInput);
+  const iterator = run.facts[Symbol.asyncIterator]();
+
+  const result = controller.submitTextResponse({
+    type: 'text.done',
+    messageId: 'msg-custom',
+    partId: 'prt-custom',
+    content: 'hello manual',
+    metadata: { source: 'edited-fact' },
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.submittedFactCount, 4);
+  assert.deepEqual(await iterator.next(), {
+    done: false,
+    value: { type: 'message.start', messageId: 'msg-custom' },
+  });
+  assert.deepEqual(await iterator.next(), {
+    done: false,
+    value: {
+      type: 'text.delta',
+      messageId: 'msg-custom',
+      partId: 'prt-custom',
+      content: 'hello manual',
+    },
+  });
+  assert.deepEqual(await iterator.next(), {
+    done: false,
+    value: {
+      type: 'text.done',
+      messageId: 'msg-custom',
+      partId: 'prt-custom',
+      content: 'hello manual',
+      metadata: { source: 'edited-fact' },
+    },
+  });
+  assert.deepEqual(await iterator.next(), {
+    done: false,
+    value: { type: 'message.done', messageId: 'msg-custom', reason: 'completed' },
+  });
+});
+
 test('manual agent failed terminal resolves ProviderRun.result with ProviderError', async () => {
   const controller = new ManualAgentController(new EventStore());
   controller.setEnabled(true);

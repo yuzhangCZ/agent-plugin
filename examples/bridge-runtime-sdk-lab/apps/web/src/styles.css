@@ -372,6 +372,28 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.sequence-warning {
+  margin: 0;
+  padding: 9px 10px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.manual-quick-response {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) max-content;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #dce5f1;
+  border-radius: 8px;
+}
+
 .manual-agent-editor textarea {
   min-height: 260px;
   padding: 12px;
@@ -747,6 +769,7 @@ button:disabled {
   .grid,
   .downstream-layout,
   .manual-agent-layout,
+  .manual-quick-response,
   .scenario-form {
     grid-template-columns: 1fr 1fr;
   }
@@ -763,6 +786,7 @@ button:disabled {
   .grid,
   .downstream-layout,
   .manual-agent-layout,
+  .manual-quick-response,
   .scenario-form,
   .two-col {
     grid-template-columns: 1fr;

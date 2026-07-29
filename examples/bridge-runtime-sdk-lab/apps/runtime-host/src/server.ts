@@ -77,6 +77,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJson(res, 200, actionResult('manual_agent.fact', manualAgent.submitFact(body?.fact)));
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/text-response') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.text_response', manualAgent.submitTextResponse(body?.textDoneFact)));
+    return;
+  }
   if (req.method === 'POST' && url.pathname === '/api/manual-agent/terminal') {
     const body = asRecord(await readJson(req));
     const outcome = body?.outcome === 'failed' || body?.outcome === 'aborted' ? body.outcome : 'completed';

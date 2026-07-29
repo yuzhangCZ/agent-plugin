@@ -162,10 +162,15 @@ export interface ManualAgentTemplate {
 export interface ManualAgentFactResult {
   accepted: true;
   queuedFactCount: number;
+  submittedFactCount?: number;
 }
 
 export interface ManualAgentTerminalInput {
   outcome: ManualAgentTerminalOutcome;
   message?: string;
   code?: string;
+}
+
+export interface ManualAgentTextResponseInput {
+  textDoneFact: unknown;
 }

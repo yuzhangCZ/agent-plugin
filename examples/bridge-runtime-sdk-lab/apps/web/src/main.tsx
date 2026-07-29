@@ -300,6 +300,35 @@ function App(): React.JSX.Element {
     }
   }, [manualTerminal, refresh]);
 
+  const submitManualTextResponse = useCallback(async () => {
+    setBusyAction('manual-text-response');
+    try {
+      const textDoneFact = JSON.parse(manualFactText) as unknown;
+      const factResult = await api<RuntimeActionResult>('/api/manual-agent/text-response', {
+        method: 'POST',
+        body: JSON.stringify({ textDoneFact }),
+      });
+      const terminalResult = await api<RuntimeActionResult>('/api/manual-agent/terminal', {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'completed' }),
+      });
+      setLastResult({
+        ok: factResult.ok && terminalResult.ok,
+        action: 'manual_agent.text_response.completed',
+        payload: {
+          facts: factResult,
+          terminal: terminalResult,
+        },
+        error: factResult.error ?? terminalResult.error,
+      });
+      await refresh();
+    } catch (error) {
+      setLastResult(toClientErrorResult('manual_agent.text_response', error));
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [manualFactText, refresh]);
+
   const runDownstreamScenario = useCallback(async () => {
     setBusyAction('downstream');
     try {
@@ -531,8 +560,26 @@ function App(): React.JSX.Element {
                 </select>
               </label>
               <p className="muted">{selectedManualTemplate?.description ?? '选择模板后会按当前 active run 自动填充常用字段。'}</p>
+              {requiresOpenMessage(selectedManualTemplateId) ? (
+                <p className="sequence-warning">该模板依赖已打开的 message。若当前编辑区是 text.done，可用右侧补齐按钮自动补 message.start/text.delta/message.done/terminal。</p>
+              ) : null}
             </div>
             <div className="manual-agent-editor">
+              <div className="manual-quick-response">
+                <p className="muted">
+                  当前编辑区必须是 `text.done`，会保留你编辑的全部字段。
+                </p>
+                <button
+                  className="primary"
+                  onClick={() => void submitManualTextResponse()}
+                  disabled={busyAction === 'manual-text-response' || !(snapshot.manualAgent?.activeRun)}
+                >
+                  按当前 text.done 补齐并完成
+                </button>
+              </div>
+              <p className="muted">
+                {'补齐顺序：message.start -> text.delta -> 当前 text.done -> message.done -> completed。'}
+              </p>
               <textarea
                 value={manualFactText}
                 onChange={(event) => setManualFactText(event.target.value)}
@@ -1062,6 +1109,17 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function requiresOpenMessage(templateId: string): boolean {
+  return [
+    'thinking.delta',
+    'text.delta',
+    'text.done',
+    'tool.update.running',
+    'tool.update.completed',
+    'question.ask',
+  ].includes(templateId);
 }
 
 function normalizeScenarioForCommand(scenario: ProviderScenarioConfig): ProviderScenarioConfig {

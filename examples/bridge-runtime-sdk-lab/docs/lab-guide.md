@@ -205,10 +205,11 @@ Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `Pro
 3. 打开 `手动 ProviderFact 上报` 开关。
 4. 让宿主用户发消息，或在 Mock 模式运行 `chat 正常`。
 5. 面板出现 active run 上下文：`toolSessionId`、`runId`、`messageId`、`textPartId`。
-6. 选择模板，例如 `message.start`，编辑 JSON 后点击“上报 Fact”。
-7. 继续提交 `text.delta`、`text.done`、`message.done` 等 facts。
-8. 点击 `完成 completed`、`失败 failed` 或 `中止 aborted` 结束 terminal。
-9. 在 `Gateway Uplink` 和 `Tool Error` 面板观察 SDK 真实生成的上行。
+6. 快速验证文本响应时，选择 `text.done` 模板，在编辑区补充或修改完整 JSON 字段，点击“按当前 text.done 补齐并完成”。
+7. 精细验证单条 fact 时，选择模板，例如 `message.start`，编辑 JSON 后点击“上报 Fact”。
+8. 继续提交 `text.delta`、`text.done`、`message.done` 等 facts。
+9. 点击 `完成 completed`、`失败 failed` 或 `中止 aborted` 结束 terminal。
+10. 在 `Gateway Uplink` 和 `Tool Error` 面板观察 SDK 真实生成的上行。
 
 常用模板包括：
 
@@ -230,7 +231,9 @@ Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `Pro
 2. terminal 通过按钮提交，不属于 ProviderFact 模板。
 3. 手动模式开启后，`runMessage` 不受 Provider 场景里 `runMessage=throw/failed_run` 等 kind 干扰。
 4. 如果提交非法 JSON，前端会在最近结果中展示 JSON parse 错误。
-5. 如果提交结构合法但不符合 SDK ProviderFact 契约，应通过 SDK diagnostics、`tool_error` 或上行校验行为观察结果。
+5. `text.delta`、`text.done`、`tool.update`、`question.ask` 依赖已打开的 message，单独提交 `text.done` 会触发 `fact_sequence_invalid`。
+6. “按当前 text.done 补齐并完成”只补顺序，不裁剪 `text.done` 的其它字段；`text.delta` 会复用当前 `text.done.content`。
+7. 如果提交结构合法但不符合 SDK ProviderFact 契约，应通过 SDK diagnostics、`tool_error` 或上行校验行为观察结果。
 
 ## 8. Stage Matrix Lab
 
