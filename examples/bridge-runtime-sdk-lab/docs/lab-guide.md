@@ -192,7 +192,47 @@ Provider 场景用于配置 `TestProvider` 的行为。点击“应用场景”�
 | initialize 失败 | `initialize` | `throw` | `0` |
 | dispose 失败 | `dispose` | `throw` | `0` |
 
-## 7. Stage Matrix Lab
+## 7. Manual Agent Report
+
+Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `ProviderFact`，验证 SDK 从 Provider fact 到 gateway uplink 的真实转换链路。
+
+默认关闭时，`TestProvider.runMessage()` 继续使用自动 facts 流；开启后，下一次 gateway 下行 `chat` 触发 `runMessage()` 时，TestProvider 会创建一个 pending manual run，等待前端提交 facts 和 terminal。
+
+使用步骤：
+
+1. 切换到真实或 Mock gateway。
+2. 点击“初始化”和“启动”。
+3. 打开 `手动 ProviderFact 上报` 开关。
+4. 让宿主用户发消息，或在 Mock 模式运行 `chat 正常`。
+5. 面板出现 active run 上下文：`toolSessionId`、`runId`、`messageId`、`textPartId`。
+6. 选择模板，例如 `message.start`，编辑 JSON 后点击“上报 Fact”。
+7. 继续提交 `text.delta`、`text.done`、`message.done` 等 facts。
+8. 点击 `完成 completed`、`失败 failed` 或 `中止 aborted` 结束 terminal。
+9. 在 `Gateway Uplink` 和 `Tool Error` 面板观察 SDK 真实生成的上行。
+
+常用模板包括：
+
+- `message.start`
+- `thinking.delta`
+- `text.delta`
+- `text.done`
+- `tool.update running`
+- `tool.update completed`
+- `question.ask`
+- `permission.ask`
+- `session.title`
+- `session.error`
+- `message.done`
+
+注意：
+
+1. 前端编辑的是 `ProviderFact`，不是 gateway `tool_event`。
+2. terminal 通过按钮提交，不属于 ProviderFact 模板。
+3. 手动模式开启后，`runMessage` 不受 Provider 场景里 `runMessage=throw/failed_run` 等 kind 干扰。
+4. 如果提交非法 JSON，前端会在最近结果中展示 JSON parse 错误。
+5. 如果提交结构合法但不符合 SDK ProviderFact 契约，应通过 SDK diagnostics、`tool_error` 或上行校验行为观察结果。
+
+## 8. Stage Matrix Lab
 
 Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error` stage 矩阵落成可点击场景。
 
@@ -204,7 +244,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 4. Runtime 状态进入 `ready` 或可解释状态。
 5. 选择矩阵场景并点击“运行矩阵场景”。
 
-### 7.1 场景触发源
+### 8.1 场景触发源
 
 | Trigger | 含义 | 例子 |
 |---|---|---|
@@ -212,7 +252,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 | `provider_outbound` | TestProvider 主动调用 outbound emitter | emitOutboundRun facts 非法 |
 | `mock_gateway_disconnect` | MockGateway 主动断开 SDK 连接 | gateway 运行中不可用 |
 
-### 7.2 Stage 含义
+### 8.2 Stage 含义
 
 | Stage | 中文理解 | 是否期待 tool_error |
 |---|---|---|
@@ -225,7 +265,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 | `lifecycle_status` | runtime/gateway lifecycle 状态异常 | 不期待 |
 | `success` | 正常成功或明确降级响应 | 不期待 tool_error |
 
-### 7.3 推荐验证路径
+### 8.3 推荐验证路径
 
 按下面顺序跑，能快速覆盖主链路：
 
@@ -269,9 +309,9 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
     - 验证：gateway 不可用不递归发 `tool_error`
     - 预期：无 `tool_error`，通过 status/diagnostics 感知
 
-## 8. 结果面板说明
+## 9. 结果面板说明
 
-### 8.1 Gateway Downstream
+### 9.1 Gateway Downstream
 
 展示 SDK 从 gateway 收到的最近下行报文，并以格式化 JSON 展示。
 
@@ -292,7 +332,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 
 注意：完整下行报文可能包含真实业务内容。截图、导出或提交日志前请确认没有敏感信息。
 
-### 8.2 Gateway Uplink
+### 9.2 Gateway Uplink
 
 展示 SDK 发往 gateway 的全部上行消息，包括：
 
@@ -307,7 +347,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 
 这个面板用来判断“是否有符合契约的上行数据”。
 
-### 8.3 Tool Error
+### 9.3 Tool Error
 
 只筛选展示上行中的 `tool_error`。
 
@@ -319,7 +359,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 - `welinkSessionId`：创建会话或兼容路由 ID。
 - `reason`：结构化原因，目前重点看 `session_not_found`。
 
-### 8.4 最近结果
+### 9.4 最近结果
 
 展示最近一次 HTTP API 返回值。适合查看：
 
@@ -327,7 +367,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 - `/api/downstream/run` 的完整 `DownstreamRunResult`。
 - `matchedExpectation` 是否为 `true`。
 
-### 8.5 事件流
+### 9.5 事件流
 
 展示 runtime-host 记录的事件和 SDK logger 输出。适合排查：
 
@@ -336,9 +376,9 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 - gateway 是否 ready。
 - diagnostics 是否记录 failure。
 
-## 9. 常见测试目标
+## 10. 常见测试目标
 
-### 9.1 测真实 gateway 连接
+### 10.1 测真实 gateway 连接
 
 1. 切换到 `真实` 模式。
 2. 点击“初始化”。
@@ -352,7 +392,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 
 注意：真实模式的下行数据来自真实 gateway，`Stage Matrix Lab` 不负责向真实 gateway 注入测试消息。
 
-### 9.2 测 Mock 下行 tool_error
+### 10.2 测 Mock 下行 tool_error
 
 1. 切换到 `Mock` 模式。
 2. 点击“初始化”。
@@ -361,7 +401,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 5. 点击“运行矩阵场景”。
 6. 查看 `Gateway Downstream`、`Gateway Uplink` 和 `Tool Error`。
 
-### 9.3 自由组合 Provider 行为
+### 10.3 自由组合 Provider 行为
 
 示例：把原本正常 chat 改成 Provider 抛错。
 
@@ -374,7 +414,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 4. 点击“运行矩阵场景”。
 5. 预期：原本应 `tool_done`，现在变成 `command_failure tool_error`。
 
-### 9.4 测 diagnostics-only
+### 10.4 测 diagnostics-only
 
 1. Mock 模式初始化并启动。
 2. 选择 `chat enrich failure 继续`。
@@ -384,7 +424,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
    - `Gateway Uplink` 可能仍有正常终态。
    - failures/diagnostics 里有 enrich failure 记录。
 
-## 10. 注意事项
+## 11. 注意事项
 
 1. `初始化` 不会连接 gateway，`启动` 才会连接。
 2. 真实模式初始化时使用 `.opencode/message-bridge.jsonc`；前端不会覆盖 `ak/sk`。
@@ -394,7 +434,7 @@ Mock 模式下，实验室自己注入的下行会展示 `raw`，方便对照原
 6. `diagnostics_only`、`failure_only`、`lifecycle_status` 场景没有 `tool_error` 可能是正确结果。
 7. 实验台会对敏感字段做展示脱敏，但不要把真实密钥写入文档、截图或提交记录。
 
-## 11. 验证命令
+## 12. 验证命令
 
 修改实验台后建议运行：
 

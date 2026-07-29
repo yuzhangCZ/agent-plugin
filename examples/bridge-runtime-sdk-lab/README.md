@@ -3,7 +3,7 @@
 Bridge Runtime SDK Lab 是 `@wecode/bridge-runtime-sdk` 的本地集成验收实验台。它包含：
 
 - `apps/runtime-host`：Node 服务，读取 `.opencode/message-bridge.jsonc`，持有 `BridgeRuntime` 实例，并实现可配置测试 Provider。
-- `apps/web`：React/Vite 前端，用于触发 Runtime API、设置 Provider 场景、运行 stage 矩阵场景、查看 gateway downstream/uplink、`tool_error`、事件流与 diagnostics。
+- `apps/web`：React/Vite 前端，用于触发 Runtime API、设置 Provider 场景、手动上报 ProviderFact、运行 stage 矩阵场景、查看 gateway downstream/uplink、`tool_error`、事件流与 diagnostics。
 - `packages/shared`：前后端共享类型。
 
 完整使用说明见 [docs/lab-guide.md](docs/lab-guide.md)。

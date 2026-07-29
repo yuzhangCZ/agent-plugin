@@ -10,6 +10,7 @@ import { getDownstreamScenarios } from './downstream-scenarios.ts';
 import { DownstreamScenarioRunner } from './downstream-runner.ts';
 import { EventStore } from './event-store.ts';
 import { LabMockGateway } from './mock-gateway.ts';
+import { ManualAgentController } from './manual-agent-controller.ts';
 import { RuntimeManager } from './runtime-manager.ts';
 import { asRecord, sanitizeForDisplay } from './sanitize.ts';
 import { TestProvider } from './test-provider.ts';
@@ -18,8 +19,9 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = resolve(currentDir, '../../../../..');
 const port = Number(process.env.PORT ?? 4321);
 const events = new EventStore();
-const provider = new TestProvider(events);
-const manager = new RuntimeManager({ events, provider });
+const manualAgent = new ManualAgentController(events);
+const provider = new TestProvider(events, manualAgent);
+const manager = new RuntimeManager({ events, provider, getManualAgentSnapshot: () => manualAgent.snapshot() });
 const mockGateway = new LabMockGateway(events);
 const downstreamRunner = new DownstreamScenarioRunner({
   gateway: mockGateway,
@@ -59,6 +61,30 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
   if (req.method === 'POST' && url.pathname === '/api/downstreams/clear') {
     sendJson(res, 200, actionResult('downstreams.clear', manager.clearGatewayDownstreams()));
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/api/manual-agent/templates') {
+    sendRawJson(res, 200, manualAgent.templates());
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/mode') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.mode', manualAgent.setEnabled(body?.enabled === true)));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/fact') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.fact', manualAgent.submitFact(body?.fact)));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/terminal') {
+    const body = asRecord(await readJson(req));
+    const outcome = body?.outcome === 'failed' || body?.outcome === 'aborted' ? body.outcome : 'completed';
+    sendJson(res, 200, actionResult('manual_agent.terminal', manualAgent.finishActiveRun({
+      outcome,
+      message: stringField(body, 'message'),
+      code: stringField(body, 'code'),
+    })));
     return;
   }
   if (req.method === 'POST' && url.pathname === '/api/runtime/create') {
@@ -200,6 +226,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   setCorsHeaders(res);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(sanitizeForDisplay(body), null, 2));
+}
+
+function sendRawJson(res: ServerResponse, status: number, body: unknown): void {
+  setCorsHeaders(res);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body, null, 2));
 }
 
 function setCorsHeaders(res: ServerResponse): void {

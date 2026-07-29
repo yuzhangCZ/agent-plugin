@@ -276,6 +276,11 @@ select:focus {
   background: #eef3f9;
 }
 
+.danger {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -295,6 +300,95 @@ button:disabled {
 
 .large {
   min-height: 160px;
+}
+
+.manual-agent-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(360px, 1.4fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.manual-agent-controls,
+.manual-agent-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.manual-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #dce5f1;
+  border-radius: 8px;
+}
+
+.manual-toggle-row span {
+  color: #253149;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.manual-toggle-row button {
+  min-width: 58px;
+  height: 30px;
+  color: #64748b;
+  background: #e2e8f0;
+  border: 0;
+  border-radius: 6px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.manual-toggle-row button.selected {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.manual-context {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px 10px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #dce5f1;
+  border-radius: 8px;
+}
+
+.manual-context span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.manual-context strong {
+  overflow: hidden;
+  color: #1f2a44;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.manual-agent-editor textarea {
+  min-height: 260px;
+  padding: 12px;
+  resize: vertical;
+  color: #d9e8ff;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.manual-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .scenario-form {
@@ -652,6 +746,7 @@ button:disabled {
   .control-band,
   .grid,
   .downstream-layout,
+  .manual-agent-layout,
   .scenario-form {
     grid-template-columns: 1fr 1fr;
   }
@@ -667,6 +762,7 @@ button:disabled {
   .control-band,
   .grid,
   .downstream-layout,
+  .manual-agent-layout,
   .scenario-form,
   .two-col {
     grid-template-columns: 1fr;

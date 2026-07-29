@@ -8,7 +8,7 @@ import type {
   ThirdPartyAgentProvider,
 } from '@wecode/bridge-runtime-sdk';
 import { createBridgeRuntime } from '@wecode/bridge-runtime-sdk';
-import type { GatewayMode, RuntimeSnapshot, SafeGatewayConfig } from '@agent-plugin/bridge-runtime-sdk-lab-shared';
+import type { GatewayMode, ManualAgentSnapshot, RuntimeSnapshot, SafeGatewayConfig } from '@agent-plugin/bridge-runtime-sdk-lab-shared';
 
 import { toSafeGatewayConfig } from './config-loader.ts';
 import { buildGatewayDownstreamViews } from './downstream-view.ts';
@@ -21,6 +21,7 @@ type RuntimeFactory = (options: BridgeRuntimeOptions) => Promise<BridgeRuntime>;
 export interface RuntimeManagerOptions {
   createRuntime?: RuntimeFactory;
   provider?: ThirdPartyAgentProvider;
+  getManualAgentSnapshot?: () => ManualAgentSnapshot;
   events?: EventStore;
 }
 
@@ -32,6 +33,7 @@ export interface RuntimeCreateResult {
 export class RuntimeManager {
   readonly #createRuntime: RuntimeFactory;
   readonly #provider: ThirdPartyAgentProvider;
+  readonly #getManualAgentSnapshot?: () => ManualAgentSnapshot;
   readonly #events: EventStore;
   #runtime: BridgeRuntime | undefined;
   #gateway: SafeGatewayConfig | undefined;
@@ -41,6 +43,7 @@ export class RuntimeManager {
   constructor(options: RuntimeManagerOptions = {}) {
     this.#events = options.events ?? new EventStore();
     this.#provider = options.provider ?? new TestProvider(this.#events);
+    this.#getManualAgentSnapshot = options.getManualAgentSnapshot;
     this.#createRuntime = options.createRuntime ?? createBridgeRuntime;
   }
 
@@ -133,6 +136,7 @@ export class RuntimeManager {
       status: this.getStatus(),
       diagnostics: this.getDiagnostics(),
       downstreams: buildGatewayDownstreamViews(downstreamEvents, this.#mode),
+      manualAgent: this.#getManualAgentSnapshot?.(),
       events,
     };
   }

@@ -24,6 +24,8 @@ import type {
   GatewayMode,
   LabGatewayDownstreamView,
   LabEvent,
+  ManualAgentTemplate,
+  ManualAgentTerminalOutcome,
   ProviderScenarioConfig,
   RuntimeActionResult,
   RuntimeSnapshot,
@@ -86,6 +88,13 @@ function App(): React.JSX.Element {
   const [lastResult, setLastResult] = useState<RuntimeActionResult | undefined>();
   const [downstreamResult, setDownstreamResult] = useState<DownstreamRunResult | undefined>();
   const [downstreamScenarios, setDownstreamScenarios] = useState<DownstreamScenario[]>([]);
+  const [manualTemplates, setManualTemplates] = useState<ManualAgentTemplate[]>([]);
+  const [selectedManualTemplateId, setSelectedManualTemplateId] = useState('message.start');
+  const [manualFactText, setManualFactText] = useState('{}');
+  const [manualTerminal, setManualTerminal] = useState({
+    message: 'Manual agent reported failure',
+    code: 'internal_error',
+  });
   const [selectedDownstreamId, setSelectedDownstreamId] = useState('invalid-chat-missing-text');
   const [busyAction, setBusyAction] = useState<string | undefined>();
   const [mode, setMode] = useState<GatewayMode>('real-gateway');
@@ -123,7 +132,14 @@ function App(): React.JSX.Element {
     if (scenarios.length > 0 && !scenarios.some((item) => item.id === selectedDownstreamId)) {
       setSelectedDownstreamId(scenarios[0]?.id ?? '');
     }
-  }, [selectedDownstreamId]);
+    const templates = await api<ManualAgentTemplate[]>('/api/manual-agent/templates');
+    setManualTemplates(templates);
+    const selectedTemplate = templates.find((item) => item.id === selectedManualTemplateId) ?? templates[0];
+    if (selectedTemplate) {
+      setSelectedManualTemplateId(selectedTemplate.id);
+      setManualFactText(JSON.stringify(selectedTemplate.fact, null, 2));
+    }
+  }, [selectedDownstreamId, selectedManualTemplateId]);
 
   useEffect(() => {
     void refresh();
@@ -151,6 +167,7 @@ function App(): React.JSX.Element {
   const selectedDownstream = downstreamScenarios.find((item) => item.id === selectedDownstreamId);
   const groupedDownstream = useMemo(() => groupScenarios(downstreamScenarios), [downstreamScenarios]);
   const availableScenarioKinds = scenarioKindsByCommand[scenario.command] ?? ['success'];
+  const selectedManualTemplate = manualTemplates.find((item) => item.id === selectedManualTemplateId);
 
   const runRuntimeAction = useCallback(async (action: (typeof runtimeButtons)[number]['id']) => {
     setBusyAction(action);
@@ -224,6 +241,64 @@ function App(): React.JSX.Element {
     }
     setSnapshot((current) => ({ ...current, downstreams: [] }));
   }, []);
+
+  const setManualMode = useCallback(async (enabled: boolean) => {
+    const result = await api<RuntimeActionResult>('/api/manual-agent/mode', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+    setLastResult(result);
+    await refresh();
+  }, [refresh]);
+
+  const applyManualTemplate = useCallback((templateId: string) => {
+    const template = manualTemplates.find((item) => item.id === templateId);
+    setSelectedManualTemplateId(templateId);
+    if (template) {
+      setManualFactText(JSON.stringify(template.fact, null, 2));
+    }
+  }, [manualTemplates]);
+
+  const formatManualFact = useCallback(() => {
+    try {
+      setManualFactText((current) => JSON.stringify(JSON.parse(current), null, 2));
+    } catch (error) {
+      setLastResult(toClientErrorResult('manual_agent.format', error));
+    }
+  }, []);
+
+  const submitManualFact = useCallback(async () => {
+    setBusyAction('manual-fact');
+    try {
+      const fact = JSON.parse(manualFactText) as unknown;
+      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/fact', {
+        method: 'POST',
+        body: JSON.stringify({ fact }),
+      }));
+      await refresh();
+    } catch (error) {
+      setLastResult(toClientErrorResult('manual_agent.fact', error));
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [manualFactText, refresh]);
+
+  const finishManualRun = useCallback(async (outcome: ManualAgentTerminalOutcome) => {
+    setBusyAction(`manual-${outcome}`);
+    try {
+      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/terminal', {
+        method: 'POST',
+        body: JSON.stringify({
+          outcome,
+          message: manualTerminal.message,
+          code: manualTerminal.code,
+        }),
+      }));
+      await refresh();
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [manualTerminal, refresh]);
 
   const runDownstreamScenario = useCallback(async () => {
     setBusyAction('downstream');
@@ -417,6 +492,93 @@ function App(): React.JSX.Element {
             <button className="secondary wide" onClick={() => void runQrAuth()} disabled={busyAction === 'qrcode'}>
               qrcodeAuth.run
             </button>
+          </div>
+        </section>
+
+        <section className="panel manual-agent-panel">
+          <div className="section-title">
+            <TerminalSquare size={16} />
+            <span>Manual Agent Report</span>
+          </div>
+          <div className="manual-agent-layout">
+            <div className="manual-agent-controls">
+              <div className="manual-toggle-row">
+                <span>手动 ProviderFact 上报</span>
+                <button
+                  className={snapshot.manualAgent?.enabled ? 'selected' : ''}
+                  onClick={() => void setManualMode(!(snapshot.manualAgent?.enabled ?? false))}
+                >
+                  {snapshot.manualAgent?.enabled ? '开启' : '关闭'}
+                </button>
+              </div>
+              <div className="manual-context">
+                <span>toolSessionId</span>
+                <strong>{snapshot.manualAgent?.activeRun?.toolSessionId ?? '-'}</strong>
+                <span>runId</span>
+                <strong>{snapshot.manualAgent?.activeRun?.runId ?? '-'}</strong>
+                <span>messageId</span>
+                <strong>{snapshot.manualAgent?.activeRun?.messageId ?? '-'}</strong>
+                <span>textPartId</span>
+                <strong>{snapshot.manualAgent?.activeRun?.textPartId ?? '-'}</strong>
+              </div>
+              <label>
+                <span>模板</span>
+                <select value={selectedManualTemplateId} onChange={(event) => applyManualTemplate(event.target.value)}>
+                  {manualTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>{template.title}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="muted">{selectedManualTemplate?.description ?? '选择模板后会按当前 active run 自动填充常用字段。'}</p>
+            </div>
+            <div className="manual-agent-editor">
+              <textarea
+                value={manualFactText}
+                onChange={(event) => setManualFactText(event.target.value)}
+                spellCheck={false}
+              />
+              <div className="manual-action-row">
+                <button className="secondary" onClick={formatManualFact}>格式化 JSON</button>
+                <button
+                  className="primary"
+                  onClick={() => void submitManualFact()}
+                  disabled={busyAction === 'manual-fact' || !(snapshot.manualAgent?.activeRun)}
+                >
+                  上报 Fact
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void finishManualRun('completed')}
+                  disabled={busyAction === 'manual-completed' || !(snapshot.manualAgent?.activeRun)}
+                >
+                  完成 completed
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void finishManualRun('aborted')}
+                  disabled={busyAction === 'manual-aborted' || !(snapshot.manualAgent?.activeRun)}
+                >
+                  中止 aborted
+                </button>
+                <button
+                  className="secondary danger"
+                  onClick={() => void finishManualRun('failed')}
+                  disabled={busyAction === 'manual-failed' || !(snapshot.manualAgent?.activeRun)}
+                >
+                  失败 failed
+                </button>
+              </div>
+              <div className="two-col">
+                <label>
+                  <span>Failed code</span>
+                  <input value={manualTerminal.code} onChange={(event) => setManualTerminal({ ...manualTerminal, code: event.target.value })} />
+                </label>
+                <label>
+                  <span>Failed message</span>
+                  <input value={manualTerminal.message} onChange={(event) => setManualTerminal({ ...manualTerminal, message: event.target.value })} />
+                </label>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -860,6 +1022,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`Request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+function toClientErrorResult(action: string, error: unknown): RuntimeActionResult {
+  return {
+    ok: false,
+    action,
+    error: {
+      name: error instanceof Error ? error.name : 'Error',
+      message: error instanceof Error ? error.message : String(error),
+    },
+  };
 }
 
 function readStatusState(status: unknown): string {

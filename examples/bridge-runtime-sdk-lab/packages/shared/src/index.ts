@@ -54,6 +54,7 @@ export interface RuntimeSnapshot {
   status?: unknown;
   diagnostics?: unknown;
   downstreams?: LabGatewayDownstreamView[];
+  manualAgent?: ManualAgentSnapshot;
   events: LabEvent[];
 }
 
@@ -128,4 +129,43 @@ export interface DownstreamRunResult {
   failures: unknown[];
   matchedExpectation: boolean;
   note?: string;
+}
+
+export type ManualAgentTerminalOutcome = 'completed' | 'failed' | 'aborted';
+
+export interface ManualAgentContext {
+  runId: string;
+  traceId: string;
+  toolSessionId: string;
+  welinkSessionId?: string;
+  text: string;
+  messageId: string;
+  textPartId: string;
+  thinkingPartId: string;
+  toolPartId: string;
+  toolCallId: string;
+}
+
+export interface ManualAgentSnapshot {
+  enabled: boolean;
+  activeRun?: ManualAgentContext;
+  queuedFactCount: number;
+}
+
+export interface ManualAgentTemplate {
+  id: string;
+  title: string;
+  description: string;
+  fact: unknown;
+}
+
+export interface ManualAgentFactResult {
+  accepted: true;
+  queuedFactCount: number;
+}
+
+export interface ManualAgentTerminalInput {
+  outcome: ManualAgentTerminalOutcome;
+  message?: string;
+  code?: string;
 }

@@ -18,6 +18,7 @@ import type {
 import type { ProviderScenarioConfig, ProviderScenarioKind } from '@agent-plugin/bridge-runtime-sdk-lab-shared';
 
 import { EventStore } from './event-store.ts';
+import { ManualAgentController } from './manual-agent-controller.ts';
 
 const DEFAULT_SCENARIO: ProviderScenarioConfig = {
   command: '*',
@@ -26,11 +27,17 @@ const DEFAULT_SCENARIO: ProviderScenarioConfig = {
 
 export class TestProvider implements ThirdPartyAgentProvider {
   readonly #events: EventStore;
+  readonly #manualAgent: ManualAgentController;
   readonly #scenarios = new Map<string, ProviderScenarioConfig>();
   #context: ProviderRuntimeContext | undefined;
 
-  constructor(events: EventStore) {
+  constructor(events: EventStore, manualAgent = new ManualAgentController(events)) {
     this.#events = events;
+    this.#manualAgent = manualAgent;
+  }
+
+  get manualAgent(): ManualAgentController {
+    return this.#manualAgent;
   }
 
   setScenario(config: ProviderScenarioConfig): void {
@@ -71,6 +78,14 @@ export class TestProvider implements ThirdPartyAgentProvider {
   }
 
   async runMessage(input: ProviderRunMessageInput): Promise<ProviderRun> {
+    if (this.#manualAgent.enabled) {
+      this.#events.append('provider.call', 'Provider runMessage called in manual mode', {
+        command: 'runMessage',
+        input,
+        scenario: { command: 'runMessage', kind: 'manual' },
+      });
+      return this.#manualAgent.startRun(input);
+    }
     const scenario = await this.#beforeCall('runMessage', input);
     const facts = factStreamForScenario(scenario.kind);
     return {
