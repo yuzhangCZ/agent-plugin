@@ -47,7 +47,7 @@ const providerAbortSessionInput: ProviderAbortSessionInput = {
 const providerCloseSessionInput: ProviderCloseSessionInput = {
   traceId: 'trace-1',
   toolSessionId: 'tool-session-1',
-  extParameters: null,
+  extParameters: { requestId: 'ext-close' },
 };
 const providerQuestionReplyInput: ProviderQuestionReplyInput = {
   traceId: 'trace-1',

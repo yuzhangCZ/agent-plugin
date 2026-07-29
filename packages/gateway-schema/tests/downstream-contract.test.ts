@@ -519,7 +519,7 @@ test('normalizeDownstream preserves optional extParameters on every downstream a
   }
 });
 
-test('normalizeDownstream preserves null extParameters on every downstream action', () => {
+test('normalizeDownstream rejects null extParameters on every downstream action', () => {
   const cases = [
     createChatInvokeMessage({
       payload: { toolSessionId: 'tool-chat-null-ext-all', text: 'hello', extParameters: null },
@@ -546,12 +546,18 @@ test('normalizeDownstream preserves null extParameters on every downstream actio
 
   for (const input of cases) {
     const result = normalizeDownstream(input);
-    assert.equal(result.ok, true, input.action);
-    if (!result.ok || result.value.type !== 'invoke') {
+    assert.equal(result.ok, false, input.action);
+    if (result.ok) {
       continue;
     }
 
-    assert.equal(result.value.payload.extParameters, null, input.action);
+    assertWireViolationShape(result.error, {
+      stage: 'payload',
+      code: 'invalid_field_value',
+      field: 'payload.extParameters',
+      messageType: 'invoke',
+      action: input.action,
+    });
   }
 });
 

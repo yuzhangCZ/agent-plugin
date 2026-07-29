@@ -1,1 +1,1 @@
-export type ExtParameters = Record<string, unknown> | null;
+export type ExtParameters = Record<string, unknown>;

@@ -124,7 +124,7 @@ test('DefaultFactToSkillEventProjector maps fact extParameters into skill event 
   }
 });
 
-test('DefaultFactToSkillEventProjector preserves null fact extParameters', () => {
+test('DefaultFactToSkillEventProjector keeps absent fact extParameters as undefined after direct assignment', () => {
   const projector = new DefaultFactToSkillEventProjector();
 
   assert.deepEqual(projector.project({
@@ -132,7 +132,6 @@ test('DefaultFactToSkillEventProjector preserves null fact extParameters', () =>
     messageId: 'msg-1',
     partId: 'part-1',
     content: 'hello',
-    extParameters: null,
   }), [{
     protocol: 'cloud',
     type: 'text.done',
@@ -140,7 +139,7 @@ test('DefaultFactToSkillEventProjector preserves null fact extParameters', () =>
       messageId: 'msg-1',
       partId: 'part-1',
       content: 'hello',
-      extParameters: null,
+      extParameters: undefined,
     },
   }]);
 });

@@ -172,7 +172,7 @@ test('validateToolEvent preserves optional extParameters on every skill provider
   }
 });
 
-test('validateToolEvent preserves null skill provider extParameters', () => {
+test('validateToolEvent rejects null skill provider extParameters', () => {
   const result = validateToolEvent({
     protocol: 'cloud',
     type: 'text.done',
@@ -184,12 +184,15 @@ test('validateToolEvent preserves null skill provider extParameters', () => {
     },
   });
 
-  assert.equal(result.ok, true);
-  if (!result.ok) {
+  assert.equal(result.ok, false);
+  if (result.ok) {
     return;
   }
 
-  assert.equal(result.value.properties.extParameters, null);
+  assertWireViolationShape(result.error, {
+    stage: 'event',
+    eventType: 'text.done',
+  });
 });
 
 test('validateToolEvent rejects non-object skill provider extParameters', () => {

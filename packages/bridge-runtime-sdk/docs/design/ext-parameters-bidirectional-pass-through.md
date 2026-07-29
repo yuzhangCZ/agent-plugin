@@ -31,9 +31,9 @@
 
 说明：
 
-1. `chat` 与 `query_slash_commands` 在现状中已经支持 object 形态透传，但还不支持 `null`，且内部 `platformExtParam` 仍存在额外校验。
+1. `chat` 与 `query_slash_commands` 在现状中已经支持 object 形态透传，但内部 `platformExtParam` 仍存在额外校验。
 2. `create_session` 的“部分支持”不是协议契约支持，而是 SDK usecase 通过临时 cast 读取字段；预期改造后应由 `CreateSessionPayload` schema 明确声明。
-3. 所有 action 的预期口径统一为：`payload.extParameters` 可选，类型为顶层 `object | null`；未提供时 SDK 内部对象值为 `undefined`，`null` 原样透传。
+3. 所有 action 的预期口径统一为：`payload.extParameters` 可选，类型为顶层 plain object；未提供时 SDK 内部对象值为 `undefined`，`null` 不作为合法值。
 
 上行事件现状如下：
 
@@ -94,24 +94,24 @@ opencode provider 事件属于旧兼容协议，不作为本方案扩展字段�
 1. `ExtParameters` 当前是带 `businessExtParam`、`platformExtParam` 语义提示的 TypeScript interface。
 2. `extParametersSchema` 当前要求 plain object。
 3. `extParametersSchema` 当前不校验 `businessExtParam`，但会校验 `platformExtParam` 必须是 JSON object。
-4. 这与新口径“`object | null`，字段可选，SDK 内部可直接赋值为 `undefined`，不校验内部结构”不一致。
+4. 这与新口径“plain object，字段可选，SDK 内部可直接赋值为 `undefined`，不校验内部结构”不一致。
 
 本次需求是让 SDK 支持下行和上行扩展字段 `extParameters`：
 
 1. `gateway -> sdk -> agent`：所有 downstream action 支持 `extParameters`。
 2. `agent -> sdk -> gateway`：所有当前 SDK 产出的上行 event 都支持可选 `event.properties.extParameters`，按当前 `tool_event` 契约透传给 gateway。
-3. `extParameters` 是非必要字段参数，类型为 `object | null`；在 TypeScript 中对应 `Record<string, unknown> | null`。
+3. `extParameters` 是非必要字段参数，字段可选；传入时类型为 plain object，在 TypeScript 中对应 `Record<string, unknown>`。
 
 ### 1.2 需求目标
 
 1. 先明确当前下行 action 的支持矩阵，区分“schema 已支持”“SDK 临时透传”“完全未支持”。
 2. 明确当前所有上行业务消息和 SDK 产出的 cloud/skill provider events 均不支持名为 `extParameters` 的统一字段。
 3. 基于当前上行协议契约确认所有当前 SDK 上行 event 的 `extParameters` 应挂在 `tool_event.event.properties.extParameters`。
-4. 统一 `gateway-schema` 的 `ExtParameters` 类型与 schema：允许 `Record<string, unknown> | null`，不再校验内部字段和值。
+4. 统一 `gateway-schema` 的 `ExtParameters` 类型与 schema：允许 `Record<string, unknown>`，不再校验内部字段和值。
 5. 所有 `INVOKE_ACTIONS` 对应 payload 都支持可选 `extParameters`，包括 `chat`、`create_session`、`close_session`、`permission_reply`、`abort_session`、`question_reply`、`query_slash_commands`。
-6. `bridge-runtime-sdk` 将下行 action 的可选 `payload.extParameters` 原样传给对应 provider handler input；字段未提供时 provider input 的 `extParameters` 为 `undefined`，`null` 表示显式空值。
+6. `bridge-runtime-sdk` 将下行 action 的可选 `payload.extParameters` 原样传给对应 provider handler input；字段未提供时 provider input 的 `extParameters` 为 `undefined`。
 7. 所有当前 SDK 上行 fact / public contract event 支持 agent 产出 `extParameters`。
-8. 更新契约测试，覆盖 object、null、空对象、内部任意值、不存在字段、所有 action 透传、所有当前 SDK 上行 event 透传。
+8. 更新契约测试，覆盖 object、空对象、内部任意值、不存在字段、拒绝 null、所有 action 透传、所有当前 SDK 上行 event 透传。
 
 ### 1.3 非目标
 
@@ -119,7 +119,7 @@ opencode provider 事件属于旧兼容协议，不作为本方案扩展字段�
 2. 不从旧字段合成 `extParameters`，例如不从 `imGroupId` 或账号字段推导。
 3. 不改变 gateway 连接、鉴权、注册、心跳或重连协议。
 4. 不调整 `tool_done` 终态消息语义，不把 text part 级扩展字段迁移到 run terminal 消息。
-5. 不在本方案中直接实现 Android、iOS、HarmonyOS 原生 SDK；但需要在影响范围中说明 object/null 对应关系。
+5. 不在本方案中直接实现 Android、iOS、HarmonyOS 原生 SDK；但需要在影响范围中说明可选 object 对应关系。
 
 ## 2. 方案图
 
@@ -133,7 +133,7 @@ flowchart TD
     D --> E["Agent emits upstream events"]
     E --> F["SDK 投影 tool_event 给 gateway"]
 
-    C --> C1["payload.extParameters<br/>object | null<br/>optional"]
+    C --> C1["payload.extParameters<br/>plain object<br/>optional"]
     C1 --> D1["provider input.extParameters"]
     D1 --> E1["ProviderFact.extParameters<br/>all upstream events"]
     E1 --> F1["tool_event.event.properties.extParameters<br/>all current SDK events"]
@@ -144,7 +144,7 @@ flowchart TD
 
 ### 2.2 方案核心
 
-先以代码现状为依据列清下行 action 与上行 message/event shape，再以 `gateway-schema` 作为协议真源，把 `extParameters` 收敛为顶层 `object | null` 可选透传字段；SDK 只做存在性传递，不解释内部结构。
+先以代码现状为依据列清下行 action 与上行 message/event shape，再以 `gateway-schema` 作为协议真源，把 `extParameters` 收敛为顶层 plain object 可选透传字段；SDK 只做存在性传递，不解释内部结构。
 
 ## 3. 时序图
 
@@ -190,15 +190,15 @@ sequenceDiagram
    - 明确 `close_session`、`abort_session`、`question_reply`、`permission_reply` 当前未支持。
    - 在方案中保留上行业务消息和当前 SDK 产出的 cloud/skill provider event 支持矩阵，明确当前没有上行消息或事件支持名为 `extParameters` 的统一字段。
 2. `packages/gateway-schema/src/contract/types/ext-parameters.ts`
-   - 将 `ExtParameters` 从结构化 interface 调整为 `Record<string, unknown> | null`。
-   - 跨语言描述为 `object | null`；Java/Kotlin/HarmonyOS 可映射为 `Map<String, Object>`、`JsonNode` 或平台等价 JSON object。
+   - 将 `ExtParameters` 从结构化 interface 调整为 `Record<string, unknown>`。
+   - 跨语言描述为可选 object；Java/Kotlin/HarmonyOS 可映射为可选 `Map<String, Object>`、`JsonNode` 或平台等价 JSON object。
    - 如仍保留 `PlatformExtParam` 类型，只作为兼容导出或示例类型，不参与 schema 内部校验。
 3. `packages/gateway-schema/src/contract/schemas/downstream.ts`
-   - `extParametersSchema` 改为仅接受 `null` 或 plain object。
+   - `extParametersSchema` 改为仅接受 plain object。
    - 删除 `platformExtParam` 的 JSON object 递归校验。
    - 为 `createSessionPayloadSchema`、`closeSessionPayloadSchema`、`abortSessionPayloadSchema`、`permissionReplyPayloadSchema`、`questionReplyPayloadSchema` 增加可选 `extParameters` 字段。
-   - 已有 `chatPayloadSchema`、`querySlashCommandsPayloadSchema` 保留字段，但更新 null 与内部任意值语义。
-   - 字段未提供时归一化对象可直接保留 `extParameters: undefined`；`null` 只表示 gateway 显式传入空扩展上下文。
+   - 已有 `chatPayloadSchema`、`querySlashCommandsPayloadSchema` 保留字段，但更新为可选 object 与内部任意值语义。
+   - 字段未提供时归一化对象可直接保留 `extParameters: undefined`；`null` 不再是合法输入。
 4. 上行 event 落点确认
    - 当前 SDK 上行 event 作为 `tool_event.event` 发送时，其事件内容位于 `event.properties`。
    - 当前 run 终态 `tool_done` 是独立上行业务消息，尚无 `payload`。
@@ -208,17 +208,17 @@ sequenceDiagram
 5. `packages/gateway-schema/src/contract/schemas/tool-event/skill-provider-event/*`
    - 为所有当前 SDK 产出的 cloud/skill provider event properties 增加可选 `extParameters`。
    - 覆盖 `text.delta`、`text.done`、`thinking.delta`、`thinking.done`、`tool.update`、`question`、`permission.ask`、`permission.reply`、`step.start`、`step.done`、`session.status`、`session.title`、`session.error`。
-   - `extParameters` 顶层只验证 object 或 null，不校验内部值。
+   - `extParameters` 顶层只验证 plain object，不校验内部值。
    - `toolDoneMessageSchema` 不新增 `payload.extParameters`。
 6. `packages/bridge-runtime-sdk/src/domain/provider.ts` 与 `packages/bridge-runtime-sdk/src/domain/provider-contract.ts`
    - 在所有 provider command input 增加可选 `extParameters?: ExtParameters`。
-   - 推荐 provider input 使用可选 `extParameters?: ExtParameters`，`undefined` 表示 gateway 未提供扩展参数，`null` 表示 gateway 显式传入空扩展上下文。
+   - 推荐 provider input 使用可选 `extParameters?: ExtParameters`，`undefined` 表示 gateway 未提供扩展参数。
    - 所有当前 SDK 上行 fact 增加可选 `extParameters?: ExtParameters`。
    - `ProviderTerminalResult` 不新增 `extParameters`，避免终态结果与 event fact 形成双真源。
 7. `packages/bridge-runtime-sdk/src/application/usecases/*`
    - `CreateSessionUseCase` 去掉临时 cast，直接读取 typed `command.source.payload.extParameters`。
-   - `StartRequestRunUseCase` 保持 `chat` 透传，并确保 `null` 不被遗漏。
-   - `ListSlashCommandsUseCase` 保持 `query_slash_commands` 透传，并确保 `null` 不被遗漏。
+   - `StartRequestRunUseCase` 保持 `chat` object 透传。
+   - `ListSlashCommandsUseCase` 保持 `query_slash_commands` object 透传。
    - `CloseSessionUseCase`、`AbortExecutionUseCase`、`ReplyQuestionUseCase`、`ReplyPermissionUseCase` 将 `payload.extParameters` 传给 provider handler input。
 8. 上行 projector / coordinator
    - 由 `DefaultFactToSkillEventProjector` 在所有 cloud/skill provider event 投影中直接透传 fact 的 `extParameters`。
@@ -229,25 +229,25 @@ sequenceDiagram
 
 核心原则是“先确认现状与落点，再做协议边界轻校验，业务内容不解释”。
 
-下行侧在 `gateway-schema` 归一化阶段只判断 `payload.extParameters` 是否为 `undefined`、`null` 或 plain object。`undefined` 表示 wire 字段未提供，SDK 内部对象可直接赋值为 `extParameters: undefined`；`null` 表示 gateway 显式传入空扩展上下文；plain object 原样传递。数组、字符串、数字、布尔值、函数、Date 等非 plain object 仍应拒绝，因为不满足 `object | null` 的顶层类型约束。
+下行侧在 `gateway-schema` 归一化阶段只判断 `payload.extParameters` 是否为 `undefined` 或 plain object。`undefined` 表示 wire 字段未提供，SDK 内部对象可直接赋值为 `extParameters: undefined`；plain object 原样传递。`null`、数组、字符串、数字、布尔值、函数、Date 等非 plain object 仍应拒绝，因为不满足顶层 object 类型约束。
 
-SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters` 赋给 provider input。provider 可按自身业务理解对象内容，但 SDK 不承担兼容、迁移或脱敏语义。`undefined` 和 `null` 都是合法输入状态：`undefined` 表示未提供，`null` 表示显式空值。
+SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters` 赋给 provider input。provider 可按自身业务理解对象内容，但 SDK 不承担兼容、迁移或脱敏语义。`undefined` 表示未提供；传入字段时必须是 object。
 
 上行侧以各类 `ProviderFact.extParameters` 为 agent 生成扩展字段的唯一来源。按照当前已有协议，provider fact 被投影为 `tool_event.event`，其事件内容位于 `properties`；因此 `extParameters` 应进入 `tool_event.event.properties.extParameters`。`tool_done` 只表示 run terminal，不承载 event 级扩展字段。
 
 ### 4.3 兼容与边界
 
 1. 兼容点：wire 字段可选，旧 gateway、旧 agent 不传 `extParameters` 时输出不变。
-2. 兼容点：`undefined` 和 `null` 都合法；SDK 不把未提供字段强制改写为 `null`。
-3. 兼容点：`null` 从原先被拒绝变为合法输入，是放宽校验，不破坏旧合法报文。
+2. 兼容点：`undefined` 合法；SDK 不把未提供字段强制改写为 `null`。
+3. 行为约束：`null` 不是合法输入，避免可选字段再引入第二种空值语义。
 4. 兼容点：原已支持的 `chat`、`query_slash_commands` object 透传行为保留。
 5. 行为变化：`platformExtParam` 不再要求 JSON object；内部值允许任意 unknown。该变化需在协议文档中明确，避免调用方误以为 schema 会兜底序列化安全。
-6. 边界条件：数组不属于本方案的 `object | null`，应继续拒绝。
-7. 边界条件：`Date`、class instance 等非 plain object 是否接受需统一口径；推荐继续拒绝，只接受 plain object 或 null，避免 wire 层出现不可预测序列化结果。
+6. 边界条件：数组不属于本方案的 object，应继续拒绝。
+7. 边界条件：`Date`、class instance 等非 plain object 应继续拒绝，只接受 plain object，避免 wire 层出现不可预测序列化结果。
 8. 边界条件：多个上行 event 都带 `extParameters` 时，各自随对应 `tool_event` 发送，不做终态覆盖。
 9. 降级策略：provider 未返回 `extParameters` 时，SDK 内部 event properties 可直接带 `extParameters: undefined`；JSON wire 序列化不会产生实际字段。
 10. 失败策略：provider 返回非法 fact 顺序时仍 fail-closed，不因 extParameters 存在改变终态投影规则。
-11. 跨平台影响：Android、iOS、HarmonyOS 如直接消费 gateway 协议，需要同步“object | null、内部不校验、上行落点为 `tool_event.event.properties.extParameters`”的契约；本仓库 TypeScript SDK 不直接修改原生端代码。
+11. 跨平台影响：Android、iOS、HarmonyOS 如直接消费 gateway 协议，需要同步“字段可选、传入时为 object、内部不校验、上行落点为 `tool_event.event.properties.extParameters`”的契约；本仓库 TypeScript SDK 不直接修改原生端代码。
 
 ### 4.4 相关接口联动
 
@@ -275,7 +275,7 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 ### 4.5 文档需要同步修改的内容
 
 1. `packages/gateway-schema/docs/gateway-schema-architecture.md`
-   - 补充 `extParameters` 是共享协议边界字段，schema 只校验顶层 `object | null`。
+   - 补充 `extParameters` 是共享协议边界字段，schema 只校验顶层 plain object。
 2. `packages/bridge-runtime-sdk/docs/architecture/bridge-runtime-sdk-architecture.md`
    - 补充下行 action 到 provider SPI 的 `extParameters` 透传，以及 `ProviderFact.extParameters -> tool_event.event.properties.extParameters` 投影规则。
 3. `packages/bridge-runtime-sdk/docs/design/interface/bridge-runtime-sdk-integration.md`
@@ -289,9 +289,9 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 | 文档位置 | 当前文档状态 | 受影响原因 | 后续建议修改 |
 |---|---|---|---|
 | `2.1 Changelog` | 当前最新未发布条目是 `2026-07-14`。 | public provider input 与 fact contract 增加可选字段，属于 SDK 集成契约变更。 | 增加 `feat:` 条目，说明所有 provider handler input 与所有 ProviderFact 支持可选 `extParameters`。 |
-| `ProviderCreateSessionInput` | 已列 `extParameters`。 | 代码改造后该字段从临时 cast 变为 schema + public contract 正式字段。 | 保留字段，但说明类型为 `ExtParameters = Record<string, unknown> | null`，字段可选，SDK 不校验内部结构。 |
-| `ProviderListSlashCommandsInput` | 已列 `extParameters`。 | 现有文档语义仍与 `runMessage` 复用，但需要补充 `null` 与内部不校验。 | 更新字段说明，明确缺失、`null`、object 三种状态。 |
-| `ProviderRunMessageInput` | 已列 `extParameters`，并有 `businessExtParam` / `platformExtParam` 结构化表格。 | 代码改造后 `ExtParameters` 不再是固定结构 interface，`businessExtParam`、`platformExtParam` 只能作为示例字段，不是 schema 校验字段。 | 将“扩展类型”改为顶层 `Record<string, unknown> | null`；下线“当前正式支持值”或改成业务示例，避免误导为 SDK 校验规则。 |
+| `ProviderCreateSessionInput` | 已列 `extParameters`。 | 代码改造后该字段从临时 cast 变为 schema + public contract 正式字段。 | 保留字段，但说明类型为 `ExtParameters = Record<string, unknown>`，字段可选，SDK 不校验内部结构。 |
+| `ProviderListSlashCommandsInput` | 已列 `extParameters`。 | 现有文档语义仍与 `runMessage` 复用，但需要补充内部不校验。 | 更新字段说明，明确缺失与 object 两种状态。 |
+| `ProviderRunMessageInput` | 已列 `extParameters`，并有 `businessExtParam` / `platformExtParam` 结构化表格。 | 代码改造后 `ExtParameters` 不再是固定结构 interface，`businessExtParam`、`platformExtParam` 只能作为示例字段，不是 schema 校验字段。 | 将“扩展类型”改为顶层 `Record<string, unknown>`；下线“当前正式支持值”或改成业务示例，避免误导为 SDK 校验规则。 |
 | `ProviderQuestionReplyInput` | 当前未列 `extParameters`。 | `question_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
 | `ProviderPermissionReplyInput` | 当前未列 `extParameters`。 | `permission_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
 | `ProviderCloseSessionInput` | 当前未列 `extParameters`。 | `close_session.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
@@ -303,8 +303,8 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 
 接口文档同步时建议采用以下描述口径：
 
-1. `ExtParameters` 类型：`Record<string, unknown> | null`，跨语言可映射为 `Map<String, Object>`、`JsonNode` 或平台等价 JSON object / null。
-2. 字段状态：`undefined` 表示 gateway 或 agent 未提供扩展参数；`null` 表示显式空扩展上下文；object 原样透传。
+1. `ExtParameters` 类型：`Record<string, unknown>`，跨语言可映射为可选 `Map<String, Object>`、`JsonNode` 或平台等价 JSON object。
+2. 字段状态：`undefined` 表示 gateway 或 agent 未提供扩展参数；object 原样透传；`null` 非法。
 3. 下行：所有 provider handler input 都可接收可选 `extParameters`。
 4. 上行：所有 ProviderFact 都可携带可选 `extParameters`，SDK 投影到 `tool_event.event.properties.extParameters`。
 5. 非目标：`ProviderTerminalResult`、`tool_done`、`tool_error` 不新增 extParameters。
@@ -360,18 +360,18 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 
 1. `packages/gateway-schema/tests/downstream-contract.test.ts`
    - 所有 `INVOKE_ACTIONS` payload 支持 `extParameters: {}`。
-   - 所有 `INVOKE_ACTIONS` payload 支持 `extParameters: null`。
+   - 所有 `INVOKE_ACTIONS` payload 拒绝 `extParameters: null`。
    - `extParameters` 内部允许任意 unknown 值，不校验 `platformExtParam`。
    - 字段未提供时 normalize 后的 SDK 内部对象保留 `extParameters: undefined`。
    - 数组、字符串、数字、布尔值作为顶层 `extParameters` 时拒绝。
 2. `packages/gateway-schema/tests/transport-contract.test.ts` 或 `wire-contract.test.ts`
    - 验证现有 `tool_done`、`tool_error`、`session_created`、`status_response`、`slash_commands_result` 不支持 `extParameters`。
-   - 验证所有当前 SDK 上行 event 的 `properties.extParameters` 支持 object、null 与 `undefined`。
+   - 验证所有当前 SDK 上行 event 的 `properties.extParameters` 支持 object 与 `undefined`，拒绝 `null`。
    - 验证 `tool_done` 保持现有 terminal 消息形状，不新增 `payload.extParameters`。
 3. `packages/bridge-runtime-sdk` usecase 单测
-   - `StartRequestRunUseCase` 保持 object/null 透传。
+   - `StartRequestRunUseCase` 保持 object 透传。
    - `CreateSessionUseCase` 去掉 cast 后仍透传。
-   - `ListSlashCommandsUseCase` 保持 object/null 透传。
+   - `ListSlashCommandsUseCase` 保持 object 透传。
    - 新增 `CloseSessionUseCase`、`AbortExecutionUseCase`、`ReplyQuestionUseCase`、`ReplyPermissionUseCase` extParameters 透传断言。
 4. `packages/bridge-runtime-sdk` projector/coordinator 单测
    - 覆盖 `DefaultFactToSkillEventProjector` 对所有当前 SDK 上行 fact `extParameters` 的直接透传。
@@ -382,9 +382,9 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 
 1. 旧报文不含 `extParameters`：downstream normalize、provider input、上行输出均与现状一致。
 2. 旧 provider 不读取新增 handler input 字段：TypeScript 结构兼容，不要求 provider 立即改造。
-3. `extParameters: null` 不被条件展开遗漏。
-4. gateway-client 发送 `tool_event.event.properties.extParameters` 时能通过 gateway-schema 上行校验。
-5. 外部原生 SDK 影响待确认：Android、iOS、HarmonyOS 如复用协议，需要各自 contract case 对齐 object/null 口径。
+3. `extParameters: null` 会被 schema 拒绝。
+4. gateway-client 发送 `tool_event.event.properties.extParameters` object 时能通过 gateway-schema 上行校验。
+5. 外部原生 SDK 影响待确认：Android、iOS、HarmonyOS 如复用协议，需要各自 contract case 对齐可选 object 口径。
 
 ### 9.3 文档一致性检查
 
