@@ -76,9 +76,6 @@ importers:
       execa:
         specifier: ^9.6.1
         version: 9.6.1
-      is-unicode-supported:
-        specifier: ^2.1.0
-        version: 2.1.0
       qrcode-terminal:
         specifier: ^0.12.0
         version: 0.12.0

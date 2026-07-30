@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import isUnicodeSupported from "is-unicode-supported";
 import {
   TerminalCliPresenter,
   chooseQrRenderer,
@@ -334,38 +333,65 @@ test("TerminalCliPresenter renders plain URL when hyperlink support is disabled"
   assert.match(stdout, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-4\n/u);
 });
 
-test("chooseQrRenderer returns small branch when probe returns true", () => {
-  const choice = chooseQrRenderer(() => true);
-  assert.equal(choice.kind, "qrcode-terminal.small");
-  assert.equal(choice.reason, "is-unicode-supported=true");
-});
-
-test("chooseQrRenderer returns ANSI branch with static reason when probe returns false", () => {
-  const choice = chooseQrRenderer(() => false);
+test("chooseQrRenderer returns ANSI branch for classic Windows console (win32 + no modern env)", () => {
+  const choice = chooseQrRenderer({}, "win32");
   assert.equal(choice.kind, "qrcode-terminal.ansi");
-  assert.equal(choice.reason, "is-unicode-supported=false");
+  assert.equal(choice.reason, "is-classic-windows-console=true");
 });
 
-test("chooseQrRenderer with real is-unicode-supported library returns matching kind on this CI", () => {
-  const realDetected = isUnicodeSupported();
+test("chooseQrRenderer returns small branch for non-win32 platforms", () => {
+  for (const platform of ["darwin", "linux", "freebsd", "openbsd"] as const) {
+    const choice = chooseQrRenderer({}, platform);
+    assert.equal(
+      choice.kind,
+      "qrcode-terminal.small",
+      `platform=${platform} should pick small branch`,
+    );
+    assert.equal(choice.reason, "is-classic-windows-console=false");
+  }
+});
+
+test("chooseQrRenderer returns small branch for win32 with WT_SESSION set (Windows Terminal)", () => {
+  const choice = chooseQrRenderer({ WT_SESSION: "{abc-123}" }, "win32");
+  assert.equal(choice.kind, "qrcode-terminal.small");
+  assert.equal(choice.reason, "is-classic-windows-console=false");
+});
+
+test("chooseQrRenderer returns small branch for win32 with TERM_PROGRAM set (VS Code / Terminus / WezTerm / JetBrains WebStorm / Alacritty)", () => {
+  const variants = ["vscode", "WezTerm", "Alacritty", "WebStorm", "IntelliJ", "GoLand", "Terminus-Sublime"];
+  for (const tp of variants) {
+    const choice = chooseQrRenderer({ TERM_PROGRAM: tp }, "win32");
+    assert.equal(
+      choice.kind,
+      "qrcode-terminal.small",
+      `TERM_PROGRAM=${tp} should pick small branch`,
+    );
+  }
+});
+
+test("chooseQrRenderer returns small branch for win32 with ConEmuPID set (ConEmu 原生)", () => {
+  const choice = chooseQrRenderer({ ConEmuPID: "1234" }, "win32");
+  assert.equal(choice.kind, "qrcode-terminal.small");
+});
+
+test("chooseQrRenderer with real process env on this CI returns matching kind", () => {
   const choice = chooseQrRenderer();
-  const expectedKind = realDetected
-    ? "qrcode-terminal.small"
-    : "qrcode-terminal.ansi";
-  assert.equal(
-    choice.kind,
-    expectedKind,
-    `real isUnicodeSupported()=${realDetected} on platform=${process.platform} TERM=${process.env.TERM}; got ${choice.kind}`,
-  );
+  const expectedKind = choice.reason === "is-classic-windows-console=true"
+    ? "qrcode-terminal.ansi"
+    : "qrcode-terminal.small";
+  assert.equal(choice.kind, expectedKind);
   assert.equal(
     choice.reason,
-    realDetected ? "is-unicode-supported=true" : "is-unicode-supported=false",
+    choice.kind === "qrcode-terminal.ansi"
+      ? "is-classic-windows-console=true"
+      : "is-classic-windows-console=false",
   );
 });
 
-test("renderQrCode (production default) does not throw on real is-unicode-supported", () => {
+test("renderQrCode (production default) does not throw", () => {
   const out = renderQrCode("https://example.com/qr-real");
-  if (isUnicodeSupported()) {
+  const choice = chooseQrRenderer();
+  if (choice.kind === "qrcode-terminal.small") {
     assert.ok(
       out.includes("▀") || out.includes("▄") || out.includes("█"),
       "small branch should emit half-block or full-block chars",
@@ -378,34 +404,27 @@ test("renderQrCode (production default) does not throw on real is-unicode-suppor
   }
 });
 
-test("chooseQrRenderer: documented coverage matrix (injected stub controls outcome)", () => {
-  // The real detection happens inside is-unicode-supported; we exercise the
-  // chooseQrRenderer wrapper with explicit stubs. Production code passes the
-  // real is-unicode-supported default.
-  //
-  // The `supported: true` cases below reflect what `is-unicode-supported@2.1.0`
-  // returns for each terminal — see docs/qrcode-terminal-rendering-solution.md
-  // §5.3 for the full list.
-  const cases: Array<{ name: string; supported: boolean; expectedKind: QrRendererChoice["kind"] }> = [
-    { name: "Windows Terminal", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "VS Code integrated", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "ConEmu + cmder 任务", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "mintty (TERM=xterm-256color)", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "Alacritty (TERM=alacritty lowercase)", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "rxvt-unicode", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "JetBrains-JediTerm", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "Terminus (TERMINUS_SUBLIME 老版本)", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "Terminus ≥0.2.27 (TERM_PROGRAM=Terminus-Sublime)", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "PowerShell 在 WT/ConEmu/VSCode 内启动（父终端传染）", supported: true, expectedKind: "qrcode-terminal.small" },
-    { name: "PowerShell 裸启动 (无父终端 env)", supported: false, expectedKind: "qrcode-terminal.ansi" },
-    { name: "cmd 1903+ 裸启动 (无 env, 库漏判)", supported: false, expectedKind: "qrcode-terminal.ansi" },
-    { name: "ConEmu 原生 (仅 ConEmuPID, 库漏判)", supported: false, expectedKind: "qrcode-terminal.ansi" },
-    { name: "WezTerm (TERM_PROGRAM=WezTerm, 库不认)", supported: false, expectedKind: "qrcode-terminal.ansi" },
-    { name: "Alacritty (TERM_PROGRAM=Alacritty, 库只认小写 TERM=alacritty)", supported: false, expectedKind: "qrcode-terminal.ansi" },
-    { name: "JetBrains WebStorm/IntelliJ/GoLand (库只认 JetBrains-JediTerm)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+test("chooseQrRenderer: documented coverage matrix (injected env/platform controls outcome)", () => {
+  // chooseQrRenderer wraps isClassicWindowsConsole (4-condition: win32 + no
+  // WT_SESSION + no TERM_PROGRAM + no ConEmuPID). Cases below reflect what the
+  // check returns — see docs/qrcode-terminal-rendering-solution.md §5.3 for
+  // the full list.
+  const cases: Array<{ name: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; expectedKind: QrRendererChoice["kind"] }> = [
+    { name: "Windows Terminal", env: { WT_SESSION: "{abc}" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "VS Code integrated", env: { TERM_PROGRAM: "vscode" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "ConEmu + cmder 任务 (ConEmuPID set)", env: { ConEmuPID: "123" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "ConEmu 原生 (仅 ConEmuPID)", env: { ConEmuPID: "123" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "WezTerm (TERM_PROGRAM=WezTerm)", env: { TERM_PROGRAM: "WezTerm" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "Alacritty (TERM_PROGRAM=Alacritty)", env: { TERM_PROGRAM: "Alacritty" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "JetBrains WebStorm (TERM_PROGRAM=WebStorm)", env: { TERM_PROGRAM: "WebStorm" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "PowerShell 在 WT 内启动 (父终端传染 WT_SESSION)", env: { WT_SESSION: "{abc}" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "cmd 1903+ 裸启动 (无 env, win32)", env: {}, platform: "win32", expectedKind: "qrcode-terminal.ansi" },
+    { name: "PowerShell 裸启动 (无 env, win32)", env: {}, platform: "win32", expectedKind: "qrcode-terminal.ansi" },
+    { name: "macOS (darwin)", env: {}, platform: "darwin", expectedKind: "qrcode-terminal.small" },
+    { name: "Linux (linux)", env: {}, platform: "linux", expectedKind: "qrcode-terminal.small" },
   ];
   for (const c of cases) {
-    const choice = chooseQrRenderer(() => c.supported);
+    const choice = chooseQrRenderer(c.env, c.platform);
     assert.equal(
       choice.kind,
       c.expectedKind,
@@ -425,9 +444,7 @@ test("qrSnapshot in verbose mode emits renderer diagnostic for the production de
     });
   });
 
-  const expectedKind = isUnicodeSupported()
-    ? "qrcode-terminal.small"
-    : "qrcode-terminal.ansi";
+  const expectedKind = chooseQrRenderer().kind;
   assert.match(
     stdout,
     new RegExp(

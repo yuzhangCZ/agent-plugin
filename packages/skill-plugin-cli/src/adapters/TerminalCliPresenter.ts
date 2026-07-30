@@ -1,5 +1,4 @@
 import process from "node:process";
-import isUnicodeSupported from "is-unicode-supported";
 import qrcodeTerminal from "qrcode-terminal";
 import supportsHyperlinks from "supports-hyperlinks";
 import type { Presenter } from "../domain/ports.ts";
@@ -20,12 +19,13 @@ function writeStderr(message: string) {
  * 终端二维码渲染分支选择。
  *
  * @remarks
- * 基于 `is-unicode-supported` 库（白名单 10 个已知终端）做能力门控。
- * - true  → `qrcode-terminal` half-block 模式（紧凑，1 模块/字符 + 2 模块/文本行）
- * - false → `qrcode-terminal` ANSI 反相模式（依赖 VT，每模块 2 字符宽）
+ * 基于 `isClassicWindowsConsole` 三元负向判定：
+ * - true  → `qrcode-terminal` ANSI 反相模式（依赖 VT，每模块 2 字符宽，不依赖字体字形）
+ * - false → `qrcode-terminal` half-block 模式（紧凑，1 模块/字符 + 2 模块/文本行）
  *
- * 库漏判 cmd.exe / PowerShell 独立启动 / ConEmu 原生 / WezTerm / JetBrains
- * WebStorm 等 6+ 终端；这些终端走 ANSI fallback，可扫但视觉变宽。
+ * `isClassicWindowsConsole` 仅在 win32 平台且无 `WT_SESSION` / `TERM_PROGRAM` /
+ * `ConEmuPID` 时返回 true，对应"裸 cmd.exe / powershell.exe"场景。其余一律
+ * 视为现代终端（macOS / Linux / 任何带现代终端模拟器包装的 Windows）。
  */
 export interface QrRendererChoice {
   readonly kind: "qrcode-terminal.small" | "qrcode-terminal.ansi";
@@ -33,12 +33,13 @@ export interface QrRendererChoice {
 }
 
 export function chooseQrRenderer(
-  probe: () => boolean = isUnicodeSupported,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): QrRendererChoice {
-  if (probe()) {
-    return { kind: "qrcode-terminal.small", reason: "is-unicode-supported=true" };
+  if (isClassicWindowsConsole(env, platform)) {
+    return { kind: "qrcode-terminal.ansi", reason: "is-classic-windows-console=true" };
   }
-  return { kind: "qrcode-terminal.ansi", reason: "is-unicode-supported=false" };
+  return { kind: "qrcode-terminal.small", reason: "is-classic-windows-console=false" };
 }
 
 /**
@@ -65,8 +66,17 @@ export function renderQrCode(data: string): string {
   return rendered;
 }
 
-function probeHyperlinkSupport() {
-  if (!isUnicodeSupported()) {
+function isClassicWindowsConsole(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
+  if (platform !== "win32") {
+    return false;
+  }
+
+  // 经典 cmd.exe / powershell.exe 保持纯 URL，避免输出不可见控制序列。
+  return !env.WT_SESSION && !env.TERM_PROGRAM && !env.ConEmuPID;
+}
+
+function probeHyperlinkSupport(env = process.env, platform = process.platform) {
+  if (isClassicWindowsConsole(env, platform)) {
     return false;
   }
 
