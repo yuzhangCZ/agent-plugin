@@ -1,6 +1,6 @@
 import type { ProviderCommandError, ProviderError } from './errors.ts';
 import type {
-  DownstreamExtParameters,
+  ExtParameters,
   UpstreamExtParameters,
 } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
 
@@ -198,7 +198,7 @@ export interface ProviderCreateSessionInput {
   traceId: string;
   title?: string;
   assistantId?: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderCreateSessionResult {
@@ -213,7 +213,7 @@ export interface ProviderSlashCommand {
 
 export interface ProviderListSlashCommandsInput {
   traceId: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderListSlashCommandsResult {
@@ -227,7 +227,7 @@ export interface ProviderRunMessageInput {
   text: string;
   assistantId?: string;
   // extParameters 来自 personal chat payload，SDK 仅透传，不参与业务语义处理。
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -241,20 +241,20 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderAbortSessionInput {
@@ -266,7 +266,7 @@ export interface ProviderAbortSessionInput {
    * 无 active run 时传入空数组；provider 根据自身 session/run 状态决定实际中止范围。
    */
   runIds: string[];
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 export interface EmitOutboundMessageInput {

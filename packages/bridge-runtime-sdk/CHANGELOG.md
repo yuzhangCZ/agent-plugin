@@ -2,9 +2,9 @@
 
 changelog 条目统一使用 `feat:`、`fix:`、`docs:` 前缀；真实 public contract 破坏性变更使用 `!` 标记。
 
-## 2026-08-12 (1.0.5)
+## 2026-08-12 (1.0.6)
 
-- docs: `TextDoneFact` 新增 `extParameters` 可选字段说明；该字段用于透传 agent/provider 生成的上行业务扩展参数，SDK 上报落点为 `tool_event.event.properties.extParameters`。
+- feat: `TextDoneFact` 新增 `extParameters` 可选字段，用于携带 agent/provider 生成的上行业务扩展参数。
 
 ## 2026-07-14（未发布）
 

@@ -8,7 +8,7 @@ export interface PlatformExtParam {
   allowedSlashCommands?: string[];
 }
 
-export interface DownstreamExtParameters {
+export interface ExtParameters {
   [key: string]: unknown;
   businessExtParam?: JsonValue;
   platformExtParam?: PlatformExtParam;

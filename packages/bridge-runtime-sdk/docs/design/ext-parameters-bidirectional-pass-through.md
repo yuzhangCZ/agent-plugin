@@ -100,7 +100,7 @@ opencode provider 事件属于旧兼容协议，不作为本方案扩展字段�
 
 1. `gateway -> sdk -> agent`：所有 downstream action 支持 `extParameters`。
 2. `agent -> sdk -> gateway`：所有当前 SDK 产出的上行 event 都支持可选 `event.properties.extParameters`，按当前 `tool_event` 契约透传给 gateway。
-3. `extParameters` 是非必要字段参数，字段可选；下行使用 `DownstreamExtParameters`，保留 `PlatformExtParam` / `platformExtParam` 定义；上行使用 `UpstreamExtParameters = Record<string, unknown>`。
+3. `extParameters` 是非必要字段参数，字段可选；下行使用 `ExtParameters`，保留 `PlatformExtParam` / `platformExtParam` 定义；上行使用 `UpstreamExtParameters = Record<string, unknown>`。
 
 ### 1.2 需求目标
 
@@ -190,8 +190,8 @@ sequenceDiagram
    - 明确 `close_session`、`abort_session`、`question_reply`、`permission_reply` 当前未支持。
    - 在方案中保留上行业务消息和当前 SDK 产出的 cloud/skill provider event 支持矩阵，明确当前没有上行消息或事件支持名为 `extParameters` 的统一字段。
 2. `packages/gateway-schema/src/contract/types/ext-parameters.ts`
-   - 拆分 `DownstreamExtParameters` 与 `UpstreamExtParameters`。
-   - `DownstreamExtParameters` 保留 `businessExtParam`、`platformExtParam?: PlatformExtParam` 和 `PlatformExtParam` 字段定义。
+   - 拆分 `ExtParameters` 与 `UpstreamExtParameters`。
+   - `ExtParameters` 保留 `businessExtParam`、`platformExtParam?: PlatformExtParam` 和 `PlatformExtParam` 字段定义。
    - `UpstreamExtParameters` 使用 `Record<string, unknown>`，不绑定下行平台扩展结构。
 3. `packages/gateway-schema/src/contract/schemas/downstream.ts`
    - 下行使用 `downstreamExtParametersSchema`，接受 plain object，并保留 `platformExtParam` 的 JSON object 校验。
@@ -211,8 +211,8 @@ sequenceDiagram
    - `extParameters` 顶层只验证 plain object，不绑定下行 `platformExtParam` 结构。
    - `toolDoneMessageSchema` 不新增 `payload.extParameters`。
 6. `packages/bridge-runtime-sdk/src/domain/provider.ts` 与 `packages/bridge-runtime-sdk/src/domain/provider-contract.ts`
-   - 在所有 provider command input 增加可选 `extParameters?: DownstreamExtParameters`。
-   - 推荐 provider input 使用可选 `extParameters?: DownstreamExtParameters`，`undefined` 表示 gateway 未提供扩展参数。
+   - 在所有 provider command input 增加可选 `extParameters?: ExtParameters`。
+   - 推荐 provider input 使用可选 `extParameters?: ExtParameters`，`undefined` 表示 gateway 未提供扩展参数。
    - 所有当前 SDK 上行 fact 增加可选 `extParameters?: UpstreamExtParameters`。
    - `ProviderTerminalResult` 不新增 `extParameters`，避免终态结果与 event fact 形成双真源。
 7. `packages/bridge-runtime-sdk/src/application/usecases/*`
@@ -231,7 +231,7 @@ sequenceDiagram
 
 下行侧在 `gateway-schema` 归一化阶段判断 `payload.extParameters` 是否为 `undefined` 或 plain object，并保留 `platformExtParam` 的 JSON object 可序列化性校验。`undefined` 表示 wire 字段未提供，SDK 内部对象可直接赋值为 `extParameters: undefined`；plain object 原样传递。`null`、数组、字符串、数字、布尔值、函数、Date 等非 plain object 仍应拒绝；`platformExtParam` 不是 JSON object 时也应拒绝。
 
-SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters` 赋给 provider input。provider 可按下行 `DownstreamExtParameters` 理解 `platformExtParam`，但 SDK 不承担业务语义处理、迁移或脱敏语义。`undefined` 表示未提供；传入字段时必须是 object。
+SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters` 赋给 provider input。provider 可按下行 `ExtParameters` 理解 `platformExtParam`，但 SDK 不承担业务语义处理、迁移或脱敏语义。`undefined` 表示未提供；传入字段时必须是 object。
 
 上行侧以各类 `ProviderFact.extParameters` 为 agent 生成扩展字段的唯一来源，类型为 `UpstreamExtParameters = Record<string, unknown>`。按照当前已有协议，provider fact 被投影为 `tool_event.event`，其事件内容位于 `properties`；因此 `extParameters` 应进入 `tool_event.event.properties.extParameters`。`tool_done` 只表示 run terminal，不承载 event 级扩展字段。
 
@@ -289,13 +289,13 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 | 文档位置 | 当前文档状态 | 受影响原因 | 后续建议修改 |
 |---|---|---|---|
 | `2.1 Changelog` | 当前最新未发布条目是 `2026-07-14`。 | public provider input 与 fact contract 增加可选字段，属于 SDK 集成契约变更。 | 增加 `feat:` 条目，说明所有 provider handler input 与所有 ProviderFact 支持可选 `extParameters`。 |
-| `ProviderCreateSessionInput` | 已列 `extParameters`。 | 代码改造后该字段从临时 cast 变为 schema + public contract 正式字段。 | 保留字段，说明类型为 `DownstreamExtParameters`，字段可选。 |
-| `ProviderListSlashCommandsInput` | 已列 `extParameters`。 | 现有文档语义仍与 `runMessage` 复用。 | 更新字段说明，明确缺失与 `DownstreamExtParameters` 两种状态。 |
-| `ProviderRunMessageInput` | 已列 `extParameters`，并有 `businessExtParam` / `platformExtParam` 结构化表格。 | 下行 provider input 继续保留 `platformExtParam` 结构；上行 fact 不复用该结构。 | 将下行扩展类型改为 `DownstreamExtParameters`，将上行 fact 扩展类型改为 `UpstreamExtParameters`。 |
-| `ProviderQuestionReplyInput` | 当前未列 `extParameters`。 | `question_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: DownstreamExtParameters`。 |
-| `ProviderPermissionReplyInput` | 当前未列 `extParameters`。 | `permission_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: DownstreamExtParameters`。 |
-| `ProviderCloseSessionInput` | 当前未列 `extParameters`。 | `close_session.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: DownstreamExtParameters`。 |
-| `ProviderAbortSessionInput` | 当前未列 `extParameters`。 | `abort_session.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: DownstreamExtParameters`。 |
+| `ProviderCreateSessionInput` | 已列 `extParameters`。 | 代码改造后该字段从临时 cast 变为 schema + public contract 正式字段。 | 保留字段，说明类型为 `ExtParameters`，字段可选。 |
+| `ProviderListSlashCommandsInput` | 已列 `extParameters`。 | 现有文档语义仍与 `runMessage` 复用。 | 更新字段说明，明确缺失与 `ExtParameters` 两种状态。 |
+| `ProviderRunMessageInput` | 已列 `extParameters`，并有 `businessExtParam` / `platformExtParam` 结构化表格。 | 下行 provider input 继续保留 `platformExtParam` 结构；上行 fact 不复用该结构。 | 将下行扩展类型改为 `ExtParameters`，将上行 fact 扩展类型改为 `UpstreamExtParameters`。 |
+| `ProviderQuestionReplyInput` | 当前未列 `extParameters`。 | `question_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
+| `ProviderPermissionReplyInput` | 当前未列 `extParameters`。 | `permission_reply.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
+| `ProviderCloseSessionInput` | 当前未列 `extParameters`。 | `close_session.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
+| `ProviderAbortSessionInput` | 当前未列 `extParameters`。 | `abort_session.payload.extParameters` 预期透传给 provider。 | 在字段表增加 `extParameters?: ExtParameters`。 |
 | `ProviderFactBase` / facts 章节 | 当前只说明 `subagentSessionId?`、`subagentName?`。 | 所有当前 SDK 上行 fact 预期继承 `extParameters?: UpstreamExtParameters`，作为 agent 生成扩展字段来源。 | 在 `ProviderFactBase` 字段表增加 `extParameters`，说明投影到 `tool_event.event.properties.extParameters`。 |
 | 文本流 / thinking / tool / question / permission / step / session fact 示例 | 当前示例不包含 `extParameters`。 | 集成方需要知道每个 event 都可以按需携带 ext。 | 在一个通用 fact 示例中展示即可，不必每个 fact 都重复；强调各 event 独立透传。 |
 | `ProviderTerminalResult` | 当前只有 `outcome`、`usage`、`error`。 | 本方案不把 `extParameters` 放进 `tool_done` 或 `tool_error`。 | 明确 `ProviderTerminalResult` 不承载 `extParameters`；terminal 上报保持现有 `tool_done/tool_error` 形状。 |
@@ -303,7 +303,7 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 
 接口文档同步时建议采用以下描述口径：
 
-1. 下行类型：`DownstreamExtParameters`，保留 `businessExtParam` 与 `platformExtParam?: PlatformExtParam`。
+1. 下行类型：`ExtParameters`，保留 `businessExtParam` 与 `platformExtParam?: PlatformExtParam`。
 2. 上行类型：`UpstreamExtParameters = Record<string, unknown>`，跨语言可映射为可选 `Map<String, Object>`、`JsonNode` 或平台等价 JSON object。
 3. 字段状态：`undefined` 表示 gateway 或 agent 未提供扩展参数；object 原样透传；`null` 非法。
 4. 下行：所有 provider handler input 都可接收可选 `extParameters`。
@@ -396,7 +396,7 @@ SDK usecase 不读取内部字段，只把 normalized payload 的 `extParameters
 
 ## 10. 最终建议
 
-最终结论：推荐先完成现状梳理，再进入实现。下行侧采用“保留 `DownstreamExtParameters` / `PlatformExtParam` 结构 + `bridge-runtime-sdk` 全 action 可选透传”的方案；上行侧采用“`UpstreamExtParameters = Record<string, unknown>`，所有当前 SDK event 在 `tool_event.event.properties.extParameters` 可选透传”的方案，不采用 `tool_done.payload.extParameters`。
+最终结论：推荐先完成现状梳理，再进入实现。下行侧采用“保留 `ExtParameters` / `PlatformExtParam` 结构 + `bridge-runtime-sdk` 全 action 可选透传”的方案；上行侧采用“`UpstreamExtParameters = Record<string, unknown>`，所有当前 SDK event 在 `tool_event.event.properties.extParameters` 可选透传”的方案，不采用 `tool_done.payload.extParameters`。
 
 取舍原因：该方案把协议字段真源放在 `gateway-schema`，符合仓库分层规则；下行继续保留既有 `platformExtParam` 结构提示，降低老业务迁移成本；上行不复用下行平台字段结构，能满足 agent 生成扩展字段的灵活性；当前 SDK 上行事件都通过 `tool_event.event.properties` 表达事件字段，所以把 `extParameters` 放在 `properties` 是最小契约扩展。SDK 只承担 contract 与透传责任，不解释业务字段语义。
 

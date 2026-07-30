@@ -906,7 +906,7 @@ sequenceDiagram
 | `messageId` | `string` | 是 | 所属消息标识。 |
 | `partId` | `string` | 是 | 文本片段标识。 |
 | `content` | `string` | 是 | 当前片段最终内容。 |
-| `extParameters` | `UpstreamExtParameters` | 否 | 上行业务扩展字段；SDK 透传到 `tool_event.event.properties.extParameters`，仅要求顶层为 object，内部字段不由 SDK 校验。 |
+| `extParameters` | `UpstreamExtParameters` | 否 | 上行业务扩展字段；用于携带 agent/provider 生成的扩展参数，仅要求顶层为 object，内部字段不由 SDK 校验。 |
 | `raw` | `unknown` | 否 | 宿主原始上下文。 |
 
 #### `ThinkingDeltaFact`

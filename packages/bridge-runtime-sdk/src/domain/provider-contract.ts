@@ -1,5 +1,5 @@
 import type {
-  DownstreamExtParameters,
+  ExtParameters,
   UpstreamExtParameters,
 } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
 
@@ -102,7 +102,7 @@ export interface ProviderCreateSessionInput {
   traceId: string;
   title?: string;
   assistantId?: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -126,7 +126,7 @@ export interface ProviderSlashCommand {
  */
 export interface ProviderListSlashCommandsInput {
   traceId: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -148,7 +148,7 @@ export interface ProviderRunMessageInput {
   /**
    * personal chat payload 字段透传，Runtime SDK 不处理其业务语义。
    */
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -165,7 +165,7 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -175,7 +175,7 @@ export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -184,7 +184,7 @@ export interface ProviderPermissionReplyInput {
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**
@@ -194,7 +194,7 @@ export interface ProviderAbortSessionInput {
   traceId: string;
   toolSessionId: string;
   runIds: string[];
-  extParameters?: DownstreamExtParameters;
+  extParameters?: ExtParameters;
 }
 
 /**

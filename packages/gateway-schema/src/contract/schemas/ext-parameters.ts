@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { DownstreamExtParameters, UpstreamExtParameters } from '../types/ext-parameters.ts';
+import type { ExtParameters, UpstreamExtParameters } from '../types/ext-parameters.ts';
 import { jsonValueSchema } from './tool-event/opencode-provider-event/json.ts';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -17,7 +17,7 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * @remarks gateway-schema 不校验 `businessExtParam`，只校验 `platformExtParam` 的 JSON object 可序列化性；
  * `platformExtParam` 内部业务字段不在这里解释。
  */
-export const downstreamExtParametersSchema: z.ZodType<DownstreamExtParameters> = z
+export const downstreamExtParametersSchema: z.ZodType<ExtParameters> = z
   .custom<Record<string, unknown>>(isPlainObject, {
     message: 'Expected plain object',
   })
@@ -30,7 +30,7 @@ export const downstreamExtParametersSchema: z.ZodType<DownstreamExtParameters> =
       });
     }
   })
-  .transform((extParameters) => extParameters as DownstreamExtParameters);
+  .transform((extParameters) => extParameters as ExtParameters);
 
 /**
  * SDK 上行 event 扩展透传容器。
