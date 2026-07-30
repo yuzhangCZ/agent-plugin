@@ -1,4 +1,5 @@
 import process from "node:process";
+import isUnicodeSupported from "is-unicode-supported";
 import qrcodeTerminal from "qrcode-terminal";
 import supportsHyperlinks from "supports-hyperlinks";
 import type { Presenter } from "../domain/ports.ts";
@@ -15,25 +16,57 @@ function writeStderr(message: string) {
   process.stderr.write(`${message}\n`);
 }
 
-function renderQrCode(data: string) {
+/**
+ * 终端二维码渲染分支选择。
+ *
+ * @remarks
+ * 基于 `is-unicode-supported` 库（白名单 10 个已知终端）做能力门控。
+ * - true  → `qrcode-terminal` half-block 模式（紧凑，1 模块/字符 + 2 模块/文本行）
+ * - false → `qrcode-terminal` ANSI 反相模式（依赖 VT，每模块 2 字符宽）
+ *
+ * 库漏判 cmd.exe / PowerShell 独立启动 / ConEmu 原生 / WezTerm / JetBrains
+ * WebStorm 等 6+ 终端；这些终端走 ANSI fallback，可扫但视觉变宽。
+ */
+export interface QrRendererChoice {
+  readonly kind: "qrcode-terminal.small" | "qrcode-terminal.ansi";
+  readonly reason: string;
+}
+
+export function chooseQrRenderer(
+  probe: () => boolean = isUnicodeSupported,
+): QrRendererChoice {
+  if (probe()) {
+    return { kind: "qrcode-terminal.small", reason: "is-unicode-supported=true" };
+  }
+  return { kind: "qrcode-terminal.ansi", reason: "is-unicode-supported=false" };
+}
+
+/**
+ * 生产默认 QR 渲染入口：按 `chooseQrRenderer` 结果调用 `qrcode-terminal`。
+ *
+ * @remarks
+ * small 模式输出 `▀`/`▄`/`█` 半块字符（紧凑，依赖字体字形）；
+ * ANSI 模式输出 `\033[47m  \033[0m` 等反相背景（依赖 VT）。
+ * 库自身在渲染阶段不抛异常，外层 `qrSnapshot` 的 `try/catch`
+ * 仅兜底 `addData` / `make` 异常与 stdout EPIPE。
+ */
+export function renderQrCode(data: string): string {
+  const choice = chooseQrRenderer();
   let rendered = "";
-  qrcodeTerminal.generate(data, { small: true }, (qrcode) => {
-    rendered = qrcode.replace(/\s*$/u, "");
-  });
+  if (choice.kind === "qrcode-terminal.small") {
+    qrcodeTerminal.generate(data, { small: true }, (qrcode) => {
+      rendered = qrcode.replace(/\s*$/u, "");
+    });
+  } else {
+    qrcodeTerminal.generate(data, (qrcode) => {
+      rendered = qrcode.replace(/\s*$/u, "");
+    });
+  }
   return rendered;
 }
 
-function isClassicWindowsConsole(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
-  if (platform !== "win32") {
-    return false;
-  }
-
-  // 经典 cmd.exe / powershell.exe 保持纯 URL，避免输出不可见控制序列。
-  return !env.WT_SESSION && !env.TERM_PROGRAM && !env.ConEmuPID;
-}
-
-function probeHyperlinkSupport(env = process.env, platform = process.platform) {
-  if (isClassicWindowsConsole(env, platform)) {
+function probeHyperlinkSupport() {
+  if (!isUnicodeSupported()) {
     return false;
   }
 
@@ -166,13 +199,16 @@ function formatRedactedSnapshot(snapshot: unknown) {
 export class TerminalCliPresenter implements Presenter {
   private readonly qrCodeRenderer: (data: string) => string;
   private readonly shouldRenderHyperlink: () => boolean;
+  private readonly verbose: boolean;
 
   constructor(
     qrCodeRenderer: (data: string) => string = renderQrCode,
     shouldRenderHyperlink: () => boolean = probeHyperlinkSupport,
+    verbose: boolean = false,
   ) {
     this.qrCodeRenderer = qrCodeRenderer;
     this.shouldRenderHyperlink = shouldRenderHyperlink;
+    this.verbose = verbose;
   }
 
   installStarted(input: { host: "opencode" | "openclaw"; packageName: string }) {
@@ -261,6 +297,16 @@ export class TerminalCliPresenter implements Presenter {
           writeStdout();
         } else {
           writeStdout("[skill-plugin-cli] 请使用 WeLink 扫码创建助理");
+        }
+        if (this.verbose) {
+          // 区分 production default 与 mock 注入：注入 mock 时拿不到真实 chooseQrRenderer 结果
+          const rendererLabel = this.qrCodeRenderer === renderQrCode
+            ? (() => {
+              const choice = chooseQrRenderer();
+              return `${choice.kind} (${choice.reason})`;
+            })()
+            : "custom-injected";
+          writeStdout(`[skill-plugin-cli][verbose] qrcode renderer: ${rendererLabel}`);
         }
         try {
           writeStdout(this.qrCodeRenderer(snapshot.weUrl));

@@ -1,6 +1,7 @@
 declare module "qrcode-terminal" {
   interface QrcodeTerminalModule {
     generate(input: string, options: { small?: boolean }, callback: (qrcode: string) => void): void;
+    generate(input: string, callback: (qrcode: string) => void): void;
   }
 
   const qrcodeTerminal: QrcodeTerminalModule;

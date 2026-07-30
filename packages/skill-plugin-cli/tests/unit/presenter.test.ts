@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TerminalCliPresenter } from "../../src/adapters/TerminalCliPresenter.ts";
+import isUnicodeSupported from "is-unicode-supported";
+import {
+  TerminalCliPresenter,
+  chooseQrRenderer,
+  renderQrCode,
+  type QrRendererChoice,
+} from "../../src/adapters/TerminalCliPresenter.ts";
 
 function createPresenter(qrCodeRenderer: (data: string) => string = () => "<二维码渲染块>") {
   return new TerminalCliPresenter(qrCodeRenderer, () => false);
@@ -326,4 +332,140 @@ test("TerminalCliPresenter renders plain URL when hyperlink support is disabled"
   });
 
   assert.match(stdout, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-4\n/u);
+});
+
+test("chooseQrRenderer returns small branch when probe returns true", () => {
+  const choice = chooseQrRenderer(() => true);
+  assert.equal(choice.kind, "qrcode-terminal.small");
+  assert.equal(choice.reason, "is-unicode-supported=true");
+});
+
+test("chooseQrRenderer returns ANSI branch with static reason when probe returns false", () => {
+  const choice = chooseQrRenderer(() => false);
+  assert.equal(choice.kind, "qrcode-terminal.ansi");
+  assert.equal(choice.reason, "is-unicode-supported=false");
+});
+
+test("chooseQrRenderer with real is-unicode-supported library returns matching kind on this CI", () => {
+  const realDetected = isUnicodeSupported();
+  const choice = chooseQrRenderer();
+  const expectedKind = realDetected
+    ? "qrcode-terminal.small"
+    : "qrcode-terminal.ansi";
+  assert.equal(
+    choice.kind,
+    expectedKind,
+    `real isUnicodeSupported()=${realDetected} on platform=${process.platform} TERM=${process.env.TERM}; got ${choice.kind}`,
+  );
+  assert.equal(
+    choice.reason,
+    realDetected ? "is-unicode-supported=true" : "is-unicode-supported=false",
+  );
+});
+
+test("renderQrCode (production default) does not throw on real is-unicode-supported", () => {
+  const out = renderQrCode("https://example.com/qr-real");
+  if (isUnicodeSupported()) {
+    assert.ok(
+      out.includes("▀") || out.includes("▄") || out.includes("█"),
+      "small branch should emit half-block or full-block chars",
+    );
+  } else {
+    assert.ok(
+      out.includes(" ") && !out.includes("▀") && !out.includes("▄"),
+      "ANSI branch should emit only ANSI codes + space, no half-blocks",
+    );
+  }
+});
+
+test("chooseQrRenderer: documented coverage matrix (injected stub controls outcome)", () => {
+  // The real detection happens inside is-unicode-supported; we exercise the
+  // chooseQrRenderer wrapper with explicit stubs. Production code passes the
+  // real is-unicode-supported default.
+  //
+  // The `supported: true` cases below reflect what `is-unicode-supported@2.1.0`
+  // returns for each terminal — see docs/qrcode-terminal-rendering-solution.md
+  // §5.3 for the full list.
+  const cases: Array<{ name: string; supported: boolean; expectedKind: QrRendererChoice["kind"] }> = [
+    { name: "Windows Terminal", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "VS Code integrated", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "ConEmu + cmder 任务", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "mintty (TERM=xterm-256color)", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "Alacritty (TERM=alacritty lowercase)", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "rxvt-unicode", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "JetBrains-JediTerm", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "Terminus (TERMINUS_SUBLIME 老版本)", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "Terminus ≥0.2.27 (TERM_PROGRAM=Terminus-Sublime)", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "PowerShell 在 WT/ConEmu/VSCode 内启动（父终端传染）", supported: true, expectedKind: "qrcode-terminal.small" },
+    { name: "PowerShell 裸启动 (无父终端 env)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+    { name: "cmd 1903+ 裸启动 (无 env, 库漏判)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+    { name: "ConEmu 原生 (仅 ConEmuPID, 库漏判)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+    { name: "WezTerm (TERM_PROGRAM=WezTerm, 库不认)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+    { name: "Alacritty (TERM_PROGRAM=Alacritty, 库只认小写 TERM=alacritty)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+    { name: "JetBrains WebStorm/IntelliJ/GoLand (库只认 JetBrains-JediTerm)", supported: false, expectedKind: "qrcode-terminal.ansi" },
+  ];
+  for (const c of cases) {
+    const choice = chooseQrRenderer(() => c.supported);
+    assert.equal(
+      choice.kind,
+      c.expectedKind,
+      `case "${c.name}": expected ${c.expectedKind}, got ${choice.kind}`,
+    );
+  }
+});
+
+test("qrSnapshot in verbose mode emits renderer diagnostic for the production default", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(renderQrCode, () => false, true);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-verbose",
+      pcUrl: "https://pc.example/qr-verbose",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  const expectedKind = isUnicodeSupported()
+    ? "qrcode-terminal.small"
+    : "qrcode-terminal.ansi";
+  assert.match(
+    stdout,
+    new RegExp(
+      `\\[skill-plugin-cli\\]\\[verbose\\] qrcode renderer: ${expectedKind.replace(/\./g, "\\.")} \\([^\\n]*\\)`,
+      "u",
+    ),
+    `expected ${expectedKind} on platform=${process.platform}; got: ${stdout}`,
+  );
+});
+
+test("qrSnapshot in verbose mode reports custom-injected renderer", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(() => "<stub>", () => false, true);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-stub",
+      pcUrl: "https://pc.example/qr-stub",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  assert.match(stdout, /\[skill-plugin-cli\]\[verbose\] qrcode renderer: custom-injected/u);
+});
+
+test("qrSnapshot in non-verbose mode does not emit renderer diagnostic", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(renderQrCode, () => false, false);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-quiet",
+      pcUrl: "https://pc.example/qr-quiet",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  assert.equal(
+    stdout.includes("qrcode renderer:"),
+    false,
+    "non-verbose mode must not emit renderer diagnostic",
+  );
 });
