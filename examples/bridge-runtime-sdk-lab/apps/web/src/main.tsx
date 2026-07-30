@@ -1,23 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity,
-  Bug,
-  Cable,
-  CircleStop,
-  FileJson,
-  Gauge,
-  KeyRound,
-  Pause,
-  Play,
-  Radar,
-  RefreshCw,
-  Send,
-  ShieldCheck,
-  TerminalSquare,
-  Trash2,
-  Zap,
-} from 'lucide-react';
+  ApiOutlined,
+  BugOutlined,
+  CodeOutlined,
+  DashboardOutlined,
+  DeleteOutlined,
+  FileTextOutlined,
+  KeyOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  RadarChartOutlined,
+  ReloadOutlined,
+  SafetyCertificateOutlined,
+  SendOutlined,
+  StopOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import type {
   DownstreamRunResult,
   DownstreamScenario,
@@ -36,12 +35,12 @@ import './styles.css';
 const API_BASE = '';
 
 const runtimeButtons = [
-  { id: 'create', label: '初始化', icon: Cable },
-  { id: 'start', label: '启动', icon: Play },
-  { id: 'stop', label: '停止', icon: CircleStop },
-  { id: 'probe', label: '探测', icon: Radar },
-  { id: 'status', label: '状态', icon: Gauge },
-  { id: 'diagnostics', label: '诊断', icon: FileJson },
+  { id: 'create', label: '初始化', icon: ApiOutlined },
+  { id: 'start', label: '启动', icon: PlayCircleOutlined },
+  { id: 'stop', label: '停止', icon: StopOutlined },
+  { id: 'probe', label: '探测', icon: RadarChartOutlined },
+  { id: 'status', label: '状态', icon: DashboardOutlined },
+  { id: 'diagnostics', label: '诊断', icon: FileTextOutlined },
 ] as const;
 
 const commands = [
@@ -351,7 +350,7 @@ function App(): React.JSX.Element {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <Zap size={18} />
+            <ThunderboltOutlined style={{ fontSize: 18 }} />
           </div>
           <div>
             <h1>Bridge SDK Lab</h1>
@@ -361,7 +360,7 @@ function App(): React.JSX.Element {
 
         <section className="panel">
           <div className="section-title">
-            <ShieldCheck size={16} />
+            <SafetyCertificateOutlined style={{ fontSize: 16 }} />
             <span>Gateway 配置</span>
           </div>
           <label>
@@ -387,7 +386,7 @@ function App(): React.JSX.Element {
             </label>
           </div>
           <div className="auth-row">
-            <KeyRound size={15} />
+            <KeyOutlined style={{ fontSize: 15 }} />
             <span>Auth</span>
             <strong>{snapshot.gateway?.authLoaded ? '已加载' : '未加载'}</strong>
           </div>
@@ -395,7 +394,7 @@ function App(): React.JSX.Element {
 
         <section className="panel">
           <div className="section-title">
-            <Activity size={16} />
+            <DashboardOutlined style={{ fontSize: 16 }} />
             <span>模式</span>
           </div>
           <div className="segmented">
@@ -408,11 +407,11 @@ function App(): React.JSX.Element {
         <section className="panel">
           <div className="section-title split-title">
             <div>
-              <Radar size={16} />
+              <RadarChartOutlined style={{ fontSize: 16 }} />
               <span>Gateway Downstream</span>
             </div>
             <button className="mini-icon-button" onClick={() => void clearDownstreams()} title="清空下行面板">
-              <Trash2 size={14} />
+              <DeleteOutlined style={{ fontSize: 14 }} />
             </button>
           </div>
           <GatewayDownstreamSummary downstreams={snapshot.downstreams ?? []} compact />
@@ -426,7 +425,7 @@ function App(): React.JSX.Element {
             <p>前端触发生命周期操作，真实 gateway 下行触发 Provider SPI。</p>
           </div>
           <button className="icon-button" onClick={() => void refresh()} title="刷新快照">
-            <RefreshCw size={17} />
+            <ReloadOutlined style={{ fontSize: 17 }} />
           </button>
         </header>
 
@@ -435,7 +434,7 @@ function App(): React.JSX.Element {
             const Icon = button.icon;
             return (
               <button key={button.id} className="action-button" onClick={() => void runRuntimeAction(button.id)} disabled={busyAction === button.id}>
-                <Icon size={17} />
+                <Icon style={{ fontSize: 17 }} />
                 <span>{button.label}</span>
               </button>
             );
@@ -445,7 +444,7 @@ function App(): React.JSX.Element {
         <section className="grid">
           <div className="panel large">
             <div className="section-title">
-              <Bug size={16} />
+              <BugOutlined style={{ fontSize: 16 }} />
               <span>Provider 场景</span>
             </div>
             <div className="scenario-form">
@@ -476,7 +475,7 @@ function App(): React.JSX.Element {
                 <input type="number" value={scenario.delayMs ?? 0} onChange={(event) => setScenario({ ...scenario, delayMs: Number(event.target.value) })} />
               </label>
               <button className="primary" onClick={() => void applyScenario()} disabled={busyAction === 'scenario'}>
-                <TerminalSquare size={16} />
+                <CodeOutlined style={{ fontSize: 16 }} />
                 <span>应用场景</span>
               </button>
             </div>
@@ -496,19 +495,19 @@ function App(): React.JSX.Element {
 
           <div className="panel">
             <div className="section-title">
-              <Send size={16} />
+              <SendOutlined style={{ fontSize: 16 }} />
               <span>Outbound</span>
             </div>
             <p className="muted">使用 Provider 保存的 RuntimeOutboundEmitter 触发主动 facts 流。</p>
             <button className="primary wide" onClick={() => void triggerOutbound()} disabled={busyAction === 'outbound'}>
-              <Send size={16} />
+              <SendOutlined style={{ fontSize: 16 }} />
               <span>emitOutboundRun</span>
             </button>
           </div>
 
           <div className="panel">
             <div className="section-title">
-              <Pause size={16} />
+              <PauseCircleOutlined style={{ fontSize: 16 }} />
               <span>二维码授权</span>
             </div>
             <label>
@@ -527,7 +526,7 @@ function App(): React.JSX.Element {
 
         <section className="panel manual-agent-panel">
           <div className="section-title">
-            <TerminalSquare size={16} />
+            <CodeOutlined style={{ fontSize: 16 }} />
             <span>Manual Agent Report</span>
           </div>
           <div className="manual-agent-layout">
@@ -632,7 +631,7 @@ function App(): React.JSX.Element {
 
         <section className="panel downstream-lab">
           <div className="section-title">
-            <Bug size={16} />
+            <BugOutlined style={{ fontSize: 16 }} />
             <span>Stage Matrix Lab</span>
           </div>
           <div className="downstream-layout">
@@ -667,14 +666,14 @@ function App(): React.JSX.Element {
             </div>
             <div className="tool-error-panel">
               <div className="section-title">
-                <Send size={16} />
+                <SendOutlined style={{ fontSize: 16 }} />
                 <span>Gateway Uplink</span>
               </div>
               <GatewayUplinkSummary result={downstreamResult} />
             </div>
             <div className="tool-error-panel">
               <div className="section-title">
-                <ShieldCheck size={16} />
+                <SafetyCertificateOutlined style={{ fontSize: 16 }} />
                 <span>Tool Error</span>
               </div>
               <ToolErrorSummary result={downstreamResult} />
@@ -684,7 +683,7 @@ function App(): React.JSX.Element {
 
         <section className="panel json-panel">
           <div className="section-title">
-            <FileJson size={16} />
+            <FileTextOutlined style={{ fontSize: 16 }} />
             <span>最近结果</span>
           </div>
           <pre>{JSON.stringify(lastResult ?? snapshot, null, 2)}</pre>
@@ -702,7 +701,7 @@ function App(): React.JSX.Element {
 
         <section className="panel">
           <div className="section-title">
-            <Gauge size={16} />
+            <DashboardOutlined style={{ fontSize: 16 }} />
             <span>事件摘要</span>
           </div>
           <div className="metric-row">
@@ -721,7 +720,7 @@ function App(): React.JSX.Element {
 
         <section className="panel event-stream">
           <div className="section-title">
-            <TerminalSquare size={16} />
+            <CodeOutlined style={{ fontSize: 16 }} />
             <span>事件流</span>
           </div>
           {snapshot.events.slice(0, 80).map((event) => (
