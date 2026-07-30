@@ -42,8 +42,19 @@ const providerAbortSessionInput: ProviderAbortSessionInput = {
   traceId: 'trace-1',
   toolSessionId: 'tool-session-1',
   runIds: ['run-1'],
-  extParameters: { requestId: 'ext-abort' },
+  extParameters: {
+    requestId: 'ext-abort',
+    platformExtParam: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'group',
+      businessSessionId: 'session-1',
+      allowedSlashCommands: ['new'],
+    },
+  },
 };
+const downstreamBusinessSessionId: string | undefined = providerAbortSessionInput.extParameters
+  ?.platformExtParam
+  ?.businessSessionId;
 const providerCloseSessionInput: ProviderCloseSessionInput = {
   traceId: 'trace-1',
   toolSessionId: 'tool-session-1',
@@ -68,6 +79,7 @@ const outboundFactWithExtParameters: OutboundFact = {
   content: 'hello',
   extParameters: { requestId: 'ext-fact' },
 };
+const upstreamExtRequestId: unknown = outboundFactWithExtParameters.extParameters?.requestId;
 const startRequestRunTrace: RuntimeTraceProviderCall = {
   command: 'startRequestRun',
   toolSessionId: 'tool-session-1',
@@ -112,10 +124,12 @@ void gatewayTransportErrorCode;
 void runtimeDiagnostics;
 void runtimeOptionsWithPolicy;
 void providerAbortSessionInput;
+void downstreamBusinessSessionId;
 void providerCloseSessionInput;
 void providerQuestionReplyInput;
 void providerPermissionReplyInput;
 void outboundFactWithExtParameters;
+void upstreamExtRequestId;
 void startRequestRunTrace;
 void abortExecutionTrace;
 void explicitSnapshot;

@@ -1,4 +1,7 @@
-import type { ExtParameters } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
+import type {
+  DownstreamExtParameters,
+  UpstreamExtParameters,
+} from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
 
 /**
  * Runtime 向宿主输出 outbound 事实时的统一成功结果。
@@ -99,7 +102,7 @@ export interface ProviderCreateSessionInput {
   traceId: string;
   title?: string;
   assistantId?: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -123,7 +126,7 @@ export interface ProviderSlashCommand {
  */
 export interface ProviderListSlashCommandsInput {
   traceId: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -145,7 +148,7 @@ export interface ProviderRunMessageInput {
   /**
    * personal chat payload 字段透传，Runtime SDK 不处理其业务语义。
    */
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -162,7 +165,7 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -172,7 +175,7 @@ export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -181,7 +184,7 @@ export interface ProviderPermissionReplyInput {
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -191,7 +194,7 @@ export interface ProviderAbortSessionInput {
   traceId: string;
   toolSessionId: string;
   runIds: string[];
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 /**
@@ -229,7 +232,7 @@ export interface ProviderFactBase {
   subagentSessionId?: string;
   subagentName?: string;
   // 上行业务扩展字段；Runtime SDK 只透传到 tool_event.event.properties.extParameters。
-  extParameters?: ExtParameters;
+  extParameters?: UpstreamExtParameters;
 }
 
 /**

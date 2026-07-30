@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { requiredTrimmedString } from '../../shared.ts';
-import { extParametersSchema } from '../../ext-parameters.ts';
+import { upstreamExtParametersSchema } from '../../ext-parameters.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
 const skillPermissionAskEventPropertiesSchema = z
@@ -12,7 +12,7 @@ const skillPermissionAskEventPropertiesSchema = z
     permType: requiredTrimmedString,
     title: z.string(),
     metadata: z.record(z.string(), z.unknown()).optional(),
-    extParameters: extParametersSchema.optional(),
+    extParameters: upstreamExtParametersSchema.optional(),
   })
   .passthrough()
   .superRefine((value, ctx) => {
@@ -47,7 +47,7 @@ const skillPermissionReplyEventBaseSchema = z.object({
     permType: requiredTrimmedString.optional(),
     messageId: requiredTrimmedString.optional(),
     partId: requiredTrimmedString.optional(),
-    extParameters: extParametersSchema.optional(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 

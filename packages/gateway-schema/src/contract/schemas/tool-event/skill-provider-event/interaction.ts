@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { optionalLooseTrimmedStringPreservingEmpty, requiredTrimmedString } from '../../shared.ts';
-import { extParametersSchema } from '../../ext-parameters.ts';
+import { upstreamExtParametersSchema } from '../../ext-parameters.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
 export const skillQuestionOptionSchema = z.object({
@@ -26,7 +26,7 @@ const skillQuestionEventPropertiesSchema = z
     toolCallId: requiredTrimmedString.optional(),
     status: requiredTrimmedString.optional(),
     extParam: z.unknown().optional(),
-    extParameters: extParametersSchema.optional(),
+    extParameters: upstreamExtParametersSchema.optional(),
     questions: z.array(skillQuestionItemSchema).min(1),
   })
   .passthrough()

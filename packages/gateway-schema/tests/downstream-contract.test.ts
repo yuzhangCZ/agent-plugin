@@ -763,7 +763,7 @@ test('normalizeDownstream preserves arbitrary businessExtParam values', () => {
   }
 });
 
-test('normalizeDownstream preserves non JSON object platformExtParam without internal validation', () => {
+test('normalizeDownstream rejects non JSON object platformExtParam', () => {
   const compute = () => true;
   const result = normalizeDownstream(
     createChatInvokeMessage({
@@ -779,18 +779,21 @@ test('normalizeDownstream preserves non JSON object platformExtParam without int
     }),
   );
 
-  assert.equal(result.ok, true);
-  if (!result.ok) {
+  assert.equal(result.ok, false);
+  if (result.ok) {
     return;
   }
-  assert.deepStrictEqual(result.value.payload.extParameters, {
-    platformExtParam: {
-      compute,
-    },
+
+  assertWireViolationShape(result.error, {
+    stage: 'payload',
+    code: 'invalid_field_value',
+    field: 'payload.extParameters.platformExtParam',
+    messageType: 'invoke',
+    action: 'chat',
   });
 });
 
-test('normalizeDownstream preserves arbitrary platformExtParam values without internal validation', () => {
+test('normalizeDownstream rejects non-object platformExtParam values', () => {
   const cases = [
     ['platformExtParam', null],
     ['platformExtParam', ['array']],
@@ -811,11 +814,17 @@ test('normalizeDownstream preserves arbitrary platformExtParam values without in
       }),
     );
 
-    assert.equal(result.ok, true, key);
-    if (!result.ok) {
+    assert.equal(result.ok, false, key);
+    if (result.ok) {
       continue;
     }
-    assert.deepStrictEqual(result.value.payload.extParameters, { [key]: value });
+    assertWireViolationShape(result.error, {
+      stage: 'payload',
+      code: 'invalid_field_value',
+      field: 'payload.extParameters.platformExtParam',
+      messageType: 'invoke',
+      action: 'chat',
+    });
   }
 });
 

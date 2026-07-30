@@ -1,5 +1,8 @@
 import type { ProviderCommandError, ProviderError } from './errors.ts';
-import type { ExtParameters } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
+import type {
+  DownstreamExtParameters,
+  UpstreamExtParameters,
+} from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
 
 /**
  * Provider 终态结果。
@@ -16,7 +19,7 @@ export interface ProviderFactBase {
   subagentSessionId?: string;
   subagentName?: string;
   // provider 生成的上行业务扩展字段，由 projector 放入 tool_event.event.properties.extParameters。
-  extParameters?: ExtParameters;
+  extParameters?: UpstreamExtParameters;
 }
 
 export interface MessageStartFact extends ProviderFactBase {
@@ -195,7 +198,7 @@ export interface ProviderCreateSessionInput {
   traceId: string;
   title?: string;
   assistantId?: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface ProviderCreateSessionResult {
@@ -210,7 +213,7 @@ export interface ProviderSlashCommand {
 
 export interface ProviderListSlashCommandsInput {
   traceId: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface ProviderListSlashCommandsResult {
@@ -224,7 +227,7 @@ export interface ProviderRunMessageInput {
   text: string;
   assistantId?: string;
   // extParameters 来自 personal chat payload，SDK 仅透传，不参与业务语义处理。
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
   context?: {
     assistantAccount?: string;
     sendUserAccount?: string;
@@ -238,20 +241,20 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface ProviderAbortSessionInput {
@@ -263,7 +266,7 @@ export interface ProviderAbortSessionInput {
    * 无 active run 时传入空数组；provider 根据自身 session/run 状态决定实际中止范围。
    */
   runIds: string[];
-  extParameters?: ExtParameters;
+  extParameters?: DownstreamExtParameters;
 }
 
 export interface EmitOutboundMessageInput {
