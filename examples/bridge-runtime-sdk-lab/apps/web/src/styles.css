@@ -751,6 +751,19 @@ button:disabled {
   line-height: 1.45;
 }
 
+.event-detail {
+  max-height: 260px;
+  margin-top: 8px;
+  padding: 9px;
+  overflow: auto;
+  color: #d9e8ff;
+  background: #111827;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 @media (max-width: 1180px) {
   body {
     min-width: 0;

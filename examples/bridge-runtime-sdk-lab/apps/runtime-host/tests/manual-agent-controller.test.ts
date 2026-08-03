@@ -12,17 +12,18 @@ const runInput = {
 };
 
 test('manual agent queues submitted ProviderFacts for an active run', async () => {
-  const controller = new ManualAgentController(new EventStore());
+  const events = new EventStore();
+  const controller = new ManualAgentController(events);
   controller.setEnabled(true);
   const run = controller.startRun(runInput);
   const iterator = run.facts[Symbol.asyncIterator]();
 
-  controller.submitFact({ type: 'message.start', messageId: 'msg-1' });
+  controller.submitFact({ type: 'message.start', messageId: 'msg-1', content: 'visible manual content' });
   controller.submitFact({ type: 'message.done', messageId: 'msg-1', reason: 'completed' });
 
   assert.deepEqual(await iterator.next(), {
     done: false,
-    value: { type: 'message.start', messageId: 'msg-1' },
+    value: { type: 'message.start', messageId: 'msg-1', content: 'visible manual content' },
   });
   assert.deepEqual(await iterator.next(), {
     done: false,
@@ -33,6 +34,8 @@ test('manual agent queues submitted ProviderFacts for an active run', async () =
 
   assert.deepEqual(await iterator.next(), { done: true, value: undefined });
   assert.deepEqual(await run.result(), { outcome: 'completed' });
+  const submittedEvent = events.list().find((event) => event.type === 'manual_agent.fact.submitted');
+  assert.equal(String(submittedEvent?.meta?.rawFactText).includes('visible manual content'), true);
 });
 
 test('manual agent templates use active run identifiers', () => {

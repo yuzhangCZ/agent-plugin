@@ -108,6 +108,7 @@ export class ManualAgentController {
     }
     this.#events.append('manual_agent.text_response.submitted', 'Manual text response facts submitted', {
       textDoneFact,
+      rawTextDoneFactText: safeJsonText(textDoneFact),
       submittedFactCount: facts.length,
       queuedFactCount: state.queue.length,
       context: state.context,
@@ -191,6 +192,7 @@ export class ManualAgentController {
     }
     this.#events.append('manual_agent.fact.submitted', `Manual ProviderFact submitted: ${fact.type}`, {
       fact,
+      rawFactText: safeJsonText(fact),
       queuedFactCount: state.queue.length,
     });
   }
@@ -202,6 +204,14 @@ function normalizeProviderFact(value: unknown): ProviderFact {
     throw new Error('ProviderFact must be a JSON object with a string type');
   }
   return record as unknown as ProviderFact;
+}
+
+function safeJsonText(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function normalizeTextDoneFact(value: unknown, context: ManualAgentContext): Extract<ProviderFact, { type: 'text.done' }> {

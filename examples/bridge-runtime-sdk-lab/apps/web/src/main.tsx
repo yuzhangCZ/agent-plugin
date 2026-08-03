@@ -728,12 +728,21 @@ function App(): React.JSX.Element {
               <time>{new Date(event.at).toLocaleTimeString()}</time>
               <strong>{event.type}</strong>
               <p>{event.message}</p>
+              <EventDetail event={event} />
             </article>
           ))}
         </section>
       </aside>
     </main>
   );
+}
+
+function EventDetail({ event }: { event: LabEvent }): React.JSX.Element | null {
+  const detail = formatEventDetail(event);
+  if (!detail) {
+    return null;
+  }
+  return <pre className="event-detail">{detail}</pre>;
 }
 
 function GatewayDownstreamSummary({
@@ -988,8 +997,8 @@ function stringField(record: Record<string, unknown> | undefined, field: string)
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-function extractGatewayInboundRawText(message: string): string | undefined {
-  if (!message.includes('onMessage')) {
+function extractGatewayRawFrameText(message: string): string | undefined {
+  if (!message.includes('onMessage') && !message.includes('sendMessage')) {
     return undefined;
   }
   const start = message.lastIndexOf('「');
@@ -999,6 +1008,13 @@ function extractGatewayInboundRawText(message: string): string | undefined {
   }
   const rawText = message.slice(start + 1, end);
   return rawText.trim().startsWith('{') ? rawText : undefined;
+}
+
+function extractGatewayInboundRawText(message: string): string | undefined {
+  if (!message.includes('onMessage')) {
+    return undefined;
+  }
+  return extractGatewayRawFrameText(message);
 }
 
 function parseRawRecord(rawText: string): Record<string, unknown> | undefined {
@@ -1108,6 +1124,42 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function formatEventDetail(event: LabEvent): string | undefined {
+  const rawFrameText = extractGatewayRawFrameText(event.message);
+  if (rawFrameText) {
+    return formatJsonText(rawFrameText);
+  }
+
+  const meta = asRecord(event.meta);
+  if (!meta) {
+    return undefined;
+  }
+
+  const rawFactText = stringField(meta, 'rawFactText');
+  if (rawFactText) {
+    return formatJsonText(rawFactText);
+  }
+
+  const rawTextDoneFactText = stringField(meta, 'rawTextDoneFactText');
+  if (rawTextDoneFactText) {
+    return formatJsonText(rawTextDoneFactText);
+  }
+
+  if (event.type.startsWith('manual_agent.') || event.type.startsWith('sdk.log.')) {
+    return JSON.stringify(meta, null, 2);
+  }
+
+  return undefined;
+}
+
+function formatJsonText(rawText: string): string {
+  try {
+    return JSON.stringify(JSON.parse(rawText), null, 2);
+  } catch {
+    return rawText;
+  }
 }
 
 function requiresOpenMessage(templateId: string): boolean {
