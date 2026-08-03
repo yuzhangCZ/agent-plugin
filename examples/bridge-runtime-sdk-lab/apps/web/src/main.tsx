@@ -173,11 +173,13 @@ function App(): React.JSX.Element {
   const statusState = readStatusState(snapshot.status);
   const eventGroups = useMemo(() => groupEvents(snapshot.events), [snapshot.events]);
   const visibleEvents = useMemo(
-    () => snapshot.events.filter((event) => event.id > eventStreamClearedBeforeId && matchesEventStreamFilter(event, eventStreamFilter)),
+    () => [...snapshot.events]
+      .filter((event) => event.id > eventStreamClearedBeforeId && matchesEventStreamFilter(event, eventStreamFilter))
+      .sort((left, right) => right.id - left.id),
     [eventStreamClearedBeforeId, eventStreamFilter, snapshot.events],
   );
   const clearEventStream = useCallback(() => {
-    setEventStreamClearedBeforeId(snapshot.events[0]?.id ?? 0);
+    setEventStreamClearedBeforeId(readLatestEventId(snapshot.events));
   }, [snapshot.events]);
   const selectedDownstream = downstreamScenarios.find((item) => item.id === selectedDownstreamId);
   const groupedDownstream = useMemo(() => groupScenarios(downstreamScenarios), [downstreamScenarios]);
@@ -1157,6 +1159,10 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function readLatestEventId(events: LabEvent[]): number {
+  return events.reduce((latestId, event) => Math.max(latestId, event.id), 0);
 }
 
 function matchesEventStreamFilter(event: LabEvent, filter: EventStreamFilter): boolean {
