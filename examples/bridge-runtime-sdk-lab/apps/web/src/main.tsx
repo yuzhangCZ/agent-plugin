@@ -172,6 +172,7 @@ function App(): React.JSX.Element {
 
   const statusState = readStatusState(snapshot.status);
   const eventGroups = useMemo(() => groupEvents(snapshot.events), [snapshot.events]);
+  const sdkToAgentCalls = useMemo(() => buildSdkToAgentCalls(snapshot.events), [snapshot.events]);
   const visibleEvents = useMemo(
     () => [...snapshot.events]
       .filter((event) => event.id > eventStreamClearedBeforeId && matchesEventStreamFilter(event, eventStreamFilter))
@@ -433,6 +434,14 @@ function App(): React.JSX.Element {
             </button>
           </div>
           <GatewayDownstreamSummary downstreams={snapshot.downstreams ?? []} compact />
+        </section>
+
+        <section className="panel">
+          <div className="section-title">
+            <ApiOutlined style={{ fontSize: 16 }} />
+            <span>{'SDK -> Agent'}</span>
+          </div>
+          <SdkToAgentSummary calls={sdkToAgentCalls} />
         </section>
       </aside>
 
@@ -811,6 +820,40 @@ function GatewayDownstreamSummary({
   );
 }
 
+interface SdkToAgentCallView {
+  id: number;
+  at: number;
+  command?: string;
+  scenarioKind?: string;
+  rawInputText?: string;
+  input?: unknown;
+}
+
+function SdkToAgentSummary({ calls }: { calls: SdkToAgentCallView[] }): React.JSX.Element {
+  if (calls.length === 0) {
+    return <p className="muted">{'SDK 调用 TestProvider API 时，这里会展示最近的 SDK -> Agent 入参。'}</p>;
+  }
+
+  return (
+    <div className="downstream-list compact">
+      {calls.slice(0, 12).map((call) => (
+        <article key={call.id} className="uplink-card">
+          <div>
+            <strong>{call.command ?? 'provider.call'}</strong>
+            <span>{call.scenarioKind ? `scenario=${call.scenarioKind}` : 'scenario=-'}</span>
+          </div>
+          <div className="downstream-meta">
+            <span>sdk-agent</span>
+            <span>provider.call</span>
+            <time>{new Date(call.at).toLocaleTimeString()}</time>
+          </div>
+          <pre>{formatSdkToAgentInput(call)}</pre>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function GatewayUplinkSummary({ result }: { result: DownstreamRunResult | undefined }): React.JSX.Element {
   if (!result) {
     return <p className="muted">运行矩阵场景后，这里会展示 SDK 发往 gateway 的全部上行消息。</p>;
@@ -1159,6 +1202,37 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function buildSdkToAgentCalls(events: LabEvent[]): SdkToAgentCallView[] {
+  return events
+    .map(toSdkToAgentCall)
+    .filter((call): call is SdkToAgentCallView => Boolean(call))
+    .sort((left, right) => right.id - left.id)
+    .slice(0, 80);
+}
+
+function toSdkToAgentCall(event: LabEvent): SdkToAgentCallView | null {
+  if (event.type !== 'provider.call') {
+    return null;
+  }
+  const meta = asRecord(event.meta);
+  const scenario = asRecord(meta?.scenario);
+  return {
+    id: event.id,
+    at: event.at,
+    command: stringField(meta, 'command'),
+    scenarioKind: stringField(scenario, 'kind'),
+    rawInputText: stringField(meta, 'rawInputText'),
+    input: meta?.input,
+  };
+}
+
+function formatSdkToAgentInput(call: SdkToAgentCallView): string {
+  if (call.rawInputText) {
+    return formatJsonText(call.rawInputText);
+  }
+  return JSON.stringify(call.input ?? {}, null, 2);
 }
 
 function readLatestEventId(events: LabEvent[]): number {

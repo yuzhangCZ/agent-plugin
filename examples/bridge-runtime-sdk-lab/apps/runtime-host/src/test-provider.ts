@@ -82,6 +82,7 @@ export class TestProvider implements ThirdPartyAgentProvider {
       this.#events.append('provider.call', 'Provider runMessage called in manual mode', {
         command: 'runMessage',
         input,
+        rawInputText: safeJsonText(input),
         scenario: { command: 'runMessage', kind: 'manual' },
       });
       return this.#manualAgent.startRun(input);
@@ -161,7 +162,12 @@ export class TestProvider implements ThirdPartyAgentProvider {
 
   async #beforeCall(command: string, input: unknown): Promise<ProviderScenarioConfig> {
     const scenario = this.#scenarioFor(command);
-    this.#events.append('provider.call', `Provider ${command} called`, { command, input, scenario });
+    this.#events.append('provider.call', `Provider ${command} called`, {
+      command,
+      input,
+      rawInputText: safeJsonText(input),
+      scenario,
+    });
     await delay(scenario.delayMs ?? 0);
     this.#throwIfNeeded(command, scenario.kind);
     if (scenario.kind === 'timeout') {
@@ -237,6 +243,14 @@ function factStreamForScenario(kind: ProviderScenarioKind): AsyncIterable<Provid
       return enrichFailureFactStream();
     default:
       return defaultFactStream();
+  }
+}
+
+function safeJsonText(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
   }
 }
 
