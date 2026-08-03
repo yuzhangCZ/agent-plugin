@@ -33,6 +33,13 @@ import type {
 import './styles.css';
 
 const API_BASE = '';
+type EventStreamFilter = 'all' | 'onMessage' | 'sendMessage';
+
+const eventStreamFilters: Array<{ id: EventStreamFilter; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'onMessage', label: 'onMessage' },
+  { id: 'sendMessage', label: 'sendMessage' },
+];
 
 const runtimeButtons = [
   { id: 'create', label: '初始化', icon: ApiOutlined },
@@ -96,6 +103,8 @@ function App(): React.JSX.Element {
   });
   const [selectedDownstreamId, setSelectedDownstreamId] = useState('invalid-chat-missing-text');
   const [busyAction, setBusyAction] = useState<string | undefined>();
+  const [eventStreamFilter, setEventStreamFilter] = useState<EventStreamFilter>('all');
+  const [eventStreamClearedBeforeId, setEventStreamClearedBeforeId] = useState(0);
   const [mode, setMode] = useState<GatewayMode>('real-gateway');
   const [config, setConfig] = useState({
     url: '',
@@ -163,6 +172,13 @@ function App(): React.JSX.Element {
 
   const statusState = readStatusState(snapshot.status);
   const eventGroups = useMemo(() => groupEvents(snapshot.events), [snapshot.events]);
+  const visibleEvents = useMemo(
+    () => snapshot.events.filter((event) => event.id > eventStreamClearedBeforeId && matchesEventStreamFilter(event, eventStreamFilter)),
+    [eventStreamClearedBeforeId, eventStreamFilter, snapshot.events],
+  );
+  const clearEventStream = useCallback(() => {
+    setEventStreamClearedBeforeId(snapshot.events[0]?.id ?? 0);
+  }, [snapshot.events]);
   const selectedDownstream = downstreamScenarios.find((item) => item.id === selectedDownstreamId);
   const groupedDownstream = useMemo(() => groupScenarios(downstreamScenarios), [downstreamScenarios]);
   const availableScenarioKinds = scenarioKindsByCommand[scenario.command] ?? ['success'];
@@ -719,11 +735,27 @@ function App(): React.JSX.Element {
         </section>
 
         <section className="panel event-stream">
-          <div className="section-title">
-            <CodeOutlined style={{ fontSize: 16 }} />
-            <span>事件流</span>
+          <div className="section-title split-title">
+            <div>
+              <CodeOutlined style={{ fontSize: 16 }} />
+              <span>事件流</span>
+            </div>
+            <button className="mini-icon-button" onClick={clearEventStream} title="清空事件流显示">
+              <DeleteOutlined style={{ fontSize: 14 }} />
+            </button>
           </div>
-          {snapshot.events.slice(0, 80).map((event) => (
+          <div className="event-filter">
+            {eventStreamFilters.map((filter) => (
+              <button
+                key={filter.id}
+                className={eventStreamFilter === filter.id ? 'selected' : ''}
+                onClick={() => setEventStreamFilter(filter.id)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+          {visibleEvents.slice(0, 80).map((event) => (
             <article key={event.id} className="event-row">
               <time>{new Date(event.at).toLocaleTimeString()}</time>
               <strong>{event.type}</strong>
@@ -731,6 +763,7 @@ function App(): React.JSX.Element {
               <EventDetail event={event} />
             </article>
           ))}
+          {visibleEvents.length === 0 ? <p className="muted">暂无匹配事件。</p> : null}
         </section>
       </aside>
     </main>
@@ -1124,6 +1157,13 @@ function groupScenarios(scenarios: DownstreamScenario[]): Record<string, Downstr
     groups[item.group].push(item);
     return groups;
   }, {});
+}
+
+function matchesEventStreamFilter(event: LabEvent, filter: EventStreamFilter): boolean {
+  if (filter === 'all') {
+    return true;
+  }
+  return event.type.startsWith('sdk.log.') && event.message.includes(filter);
 }
 
 function formatEventDetail(event: LabEvent): string | undefined {
