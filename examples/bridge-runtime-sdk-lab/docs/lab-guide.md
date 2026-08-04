@@ -270,6 +270,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 | `gateway_downstream` | MockGateway 向 SDK 发送下行消息 | chat、create_session、permission_reply |
 | `provider_outbound` | TestProvider 主动调用 outbound emitter | emitOutboundRun facts 非法 |
 | `mock_gateway_disconnect` | MockGateway 主动断开 SDK 连接 | gateway 运行中不可用 |
+| `multi_step` | 一个矩阵场景按顺序执行多步 Provider 配置、下行和等待 | reply Provider 抛错、pending interaction conflict |
 
 ### 8.2 Stage 含义
 
@@ -304,27 +305,39 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
    - 验证：`request_lifecycle`
    - 预期：`tool_error.error` 包含“当前请求处理失败”
 
-5. `chat terminal failed`
-   - 验证：`request_terminal`
-   - 预期：`tool_error.error` 包含 failed terminal message
+5. `question_reply Provider 抛错`
+   - 验证：pending question 注册后 Provider replyQuestion apply failure
+   - 预期：`tool_error.error` 包含 `SDK lab configured replyQuestion failure`
 
-6. `chat terminal session_not_found`
-   - 验证：`request_terminal` reason
-   - 预期：`tool_error.reason = session_not_found`
+6. `permission_reply Provider 抛错`
+   - 验证：pending permission 注册后 Provider replyPermission apply failure
+   - 预期：`tool_error.error` 包含 `SDK lab configured replyPermission failure`
 
-7. `ProviderRun.result reject`
+7. `close_session Provider 抛错`
+   - 验证：closeSession apply failure
+   - 预期：`tool_error.error` 包含 `SDK lab configured closeSession failure`
+
+8. `abort_session Provider 抛错`
+   - 验证：abortSession apply failure
+   - 预期：`tool_error.error` 包含 `SDK lab configured abortSession failure`
+
+9. `ProviderRun.result reject`
    - 验证：terminal Promise reject 兜底
    - 预期：`command_failure tool_error`
 
-8. `emitOutboundRun facts 顺序非法`
-   - 验证：`outbound_terminal`
-   - 预期：outbound `tool_error`
+10. `question pending interaction 冲突`
+   - 验证：两个不同 toolSessionId 复用同一个 questionId
+   - 预期：`request_lifecycle tool_error`
 
-9. `chat enrich failure 继续`
+11. `permission pending interaction 冲突`
+   - 验证：两个不同 toolSessionId 复用同一个 permissionId
+   - 预期：`request_lifecycle tool_error`
+
+12. `chat enrich failure 继续`
    - 验证：diagnostics-only
    - 预期：无 `tool_error`，failures/diagnostics 有记录
 
-10. `mock gateway 主动断开`
+13. `mock gateway 主动断开`
     - 验证：gateway 不可用不递归发 `tool_error`
     - 预期：无 `tool_error`，通过 status/diagnostics 感知
 

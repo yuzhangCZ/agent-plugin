@@ -229,6 +229,75 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
       expected: { outcome: 'tool_error', stage: 'command_failure', errorIncludes: '当前交互已失效' },
     },
     {
+      id: 'question-reply-provider-throws',
+      group: 'Question',
+      title: 'question_reply Provider 抛错',
+      description: '先注册 pending question，再让 Provider replyQuestion 抛错，应在 command_failure 上行 tool_error。',
+      raw: { trigger: 'multi_step', scenario: 'question-reply-provider-throws' },
+      steps: [
+        { kind: 'provider_scenario', scenario: { command: 'runMessage', kind: 'question_conflict' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-question-provider-throw',
+            payload: { toolSessionId: 'tool-question-provider-throw', text: 'ask fixed question' },
+          },
+        },
+        { kind: 'wait_for_uplink', timeoutMs: 1200 },
+        { kind: 'provider_scenario', scenario: { command: 'replyQuestion', kind: 'throw' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'question_reply',
+            welinkSessionId: 'wl-question-provider-throw',
+            payload: { questionId: 'question-conflict-fixed', answers: [['yes']] },
+          },
+        },
+      ],
+      expected: {
+        outcome: 'tool_error',
+        stage: 'command_failure',
+        errorIncludes: 'SDK lab configured replyQuestion failure',
+      },
+    },
+    {
+      id: 'question-pending-interaction-conflict',
+      group: 'Request Lifecycle',
+      title: 'question pending interaction 冲突',
+      description: '两个不同 toolSessionId 注册相同 questionId，应在 request_lifecycle 上行 tool_error。',
+      raw: { trigger: 'multi_step', scenario: 'question-pending-interaction-conflict' },
+      steps: [
+        { kind: 'provider_scenario', scenario: { command: 'runMessage', kind: 'question_conflict' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-question-conflict-a',
+            payload: { toolSessionId: 'tool-question-conflict-a', text: 'first fixed question' },
+          },
+        },
+        { kind: 'wait_for_uplink', timeoutMs: 1200 },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-question-conflict-b',
+            payload: { toolSessionId: 'tool-question-conflict-b', text: 'second fixed question' },
+          },
+        },
+      ],
+      expected: {
+        outcome: 'tool_error',
+        stage: 'request_lifecycle',
+        errorIncludes: '当前请求处理失败',
+      },
+    },
+    {
       id: 'invalid-question-reply-answers',
       group: 'Question',
       title: 'question_reply answers 非 string[][]',
@@ -253,6 +322,75 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         payload: { permissionId: 'permission-missing', response: 'once' },
       },
       expected: { outcome: 'tool_error', stage: 'command_failure', errorIncludes: '当前交互已失效' },
+    },
+    {
+      id: 'permission-reply-provider-throws',
+      group: 'Permission',
+      title: 'permission_reply Provider 抛错',
+      description: '先注册 pending permission，再让 Provider replyPermission 抛错，应在 command_failure 上行 tool_error。',
+      raw: { trigger: 'multi_step', scenario: 'permission-reply-provider-throws' },
+      steps: [
+        { kind: 'provider_scenario', scenario: { command: 'runMessage', kind: 'permission_conflict' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-permission-provider-throw',
+            payload: { toolSessionId: 'tool-permission-provider-throw', text: 'ask fixed permission' },
+          },
+        },
+        { kind: 'wait_for_uplink', timeoutMs: 1200 },
+        { kind: 'provider_scenario', scenario: { command: 'replyPermission', kind: 'throw' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'permission_reply',
+            welinkSessionId: 'wl-permission-provider-throw',
+            payload: { permissionId: 'permission-conflict-fixed', response: 'once' },
+          },
+        },
+      ],
+      expected: {
+        outcome: 'tool_error',
+        stage: 'command_failure',
+        errorIncludes: 'SDK lab configured replyPermission failure',
+      },
+    },
+    {
+      id: 'permission-pending-interaction-conflict',
+      group: 'Request Lifecycle',
+      title: 'permission pending interaction 冲突',
+      description: '两个不同 toolSessionId 注册相同 permissionId，应在 request_lifecycle 上行 tool_error。',
+      raw: { trigger: 'multi_step', scenario: 'permission-pending-interaction-conflict' },
+      steps: [
+        { kind: 'provider_scenario', scenario: { command: 'runMessage', kind: 'permission_conflict' } },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-permission-conflict-a',
+            payload: { toolSessionId: 'tool-permission-conflict-a', text: 'first fixed permission' },
+          },
+        },
+        { kind: 'wait_for_uplink', timeoutMs: 1200 },
+        {
+          kind: 'gateway_downstream',
+          raw: {
+            type: 'invoke',
+            action: 'chat',
+            welinkSessionId: 'wl-permission-conflict-b',
+            payload: { toolSessionId: 'tool-permission-conflict-b', text: 'second fixed permission' },
+          },
+        },
+      ],
+      expected: {
+        outcome: 'tool_error',
+        stage: 'request_lifecycle',
+        errorIncludes: '当前请求处理失败',
+      },
     },
     {
       id: 'invalid-permission-response',
@@ -281,6 +419,24 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
       expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
     },
     {
+      id: 'close-session-provider-throws',
+      group: 'Close',
+      title: 'close_session Provider 抛错',
+      description: '合法 close_session 进入 usecase，Provider closeSession 抛错后上行 tool_error。',
+      raw: {
+        type: 'invoke',
+        action: 'close_session',
+        welinkSessionId: 'wl-close-provider-error',
+        payload: { toolSessionId: 'tool-close-provider-error' },
+      },
+      expected: {
+        outcome: 'tool_error',
+        stage: 'command_failure',
+        errorIncludes: 'SDK lab configured closeSession failure',
+        providerScenario: { command: 'closeSession', kind: 'throw' },
+      },
+    },
+    {
       id: 'abort-session-missing-tool-session',
       group: 'Abort',
       title: 'abort_session 缺少 toolSessionId',
@@ -292,6 +448,24 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         payload: {},
       },
       expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+    },
+    {
+      id: 'abort-session-provider-throws',
+      group: 'Abort',
+      title: 'abort_session Provider 抛错',
+      description: '合法 abort_session 进入 usecase，Provider abortSession 抛错后上行 tool_error。',
+      raw: {
+        type: 'invoke',
+        action: 'abort_session',
+        welinkSessionId: 'wl-abort-provider-error',
+        payload: { toolSessionId: 'tool-abort-provider-error' },
+      },
+      expected: {
+        outcome: 'tool_error',
+        stage: 'command_failure',
+        errorIncludes: 'SDK lab configured abortSession failure',
+        providerScenario: { command: 'abortSession', kind: 'throw' },
+      },
     },
     {
       id: 'slash-commands-provider-throws',

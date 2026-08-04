@@ -340,6 +340,8 @@ function toScenarioKind(value: string | undefined): ProviderScenarioConfig['kind
     case 'facts_throw':
     case 'enrich_failure':
     case 'aborted_run':
+    case 'question_conflict':
+    case 'permission_conflict':
       return value;
     case 'success':
     default:

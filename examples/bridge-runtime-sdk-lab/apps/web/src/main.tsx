@@ -81,6 +81,8 @@ const scenarioKindsByCommand: Record<string, ProviderScenarioConfig['kind'][]> =
     'facts_throw',
     'enrich_failure',
     'aborted_run',
+    'question_conflict',
+    'permission_conflict',
   ],
   replyQuestion: ['success', 'throw', 'timeout'],
   replyPermission: ['success', 'throw', 'timeout'],
@@ -818,7 +820,7 @@ function App(): React.JSX.Element {
                 <span>{selectedDownstream?.description}</span>
                 <code>{selectedDownstream?.expected.stage} / {selectedDownstream?.expected.outcome}</code>
               </div>
-              <pre>{JSON.stringify(selectedDownstream?.raw ?? {}, null, 2)}</pre>
+              <pre>{JSON.stringify(selectedDownstream?.steps ?? selectedDownstream?.raw ?? {}, null, 2)}</pre>
               <button className="primary wide" onClick={() => void runDownstreamScenario()} disabled={busyAction === 'downstream' || mode !== 'mock-gateway'}>
                 运行矩阵场景
               </button>

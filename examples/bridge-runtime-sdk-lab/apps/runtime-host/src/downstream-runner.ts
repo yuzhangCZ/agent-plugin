@@ -29,7 +29,9 @@ export class DownstreamScenarioRunner {
 
     const fromIndex = this.#gateway.receivedMessages.length;
     const failuresFromIndex = this.#getFailures().length;
-    if (scenario.trigger === 'provider_outbound') {
+    if (scenario.steps) {
+      await this.#runSteps(scenario, fromIndex);
+    } else if (scenario.trigger === 'provider_outbound') {
       await this.#provider.emitOutboundRun(scenario.expected.providerScenario?.kind);
     } else if (scenario.trigger === 'mock_gateway_disconnect') {
       this.#gateway.disconnectActive();
@@ -57,6 +59,31 @@ export class DownstreamScenarioRunner {
       toolErrorCount: toolErrors.length,
     });
     return result;
+  }
+
+  async #runSteps(scenario: DownstreamScenario, fromIndex: number): Promise<void> {
+    for (const step of scenario.steps ?? []) {
+      switch (step.kind) {
+        case 'provider_scenario':
+          this.#provider.setScenario(step.scenario);
+          break;
+        case 'gateway_downstream':
+          this.#gateway.send(step.raw);
+          break;
+        case 'provider_outbound':
+          if (step.providerScenario) {
+            this.#provider.setScenario(step.providerScenario);
+          }
+          await this.#provider.emitOutboundRun(step.providerScenario?.kind);
+          break;
+        case 'mock_gateway_disconnect':
+          this.#gateway.disconnectActive();
+          break;
+        case 'wait_for_uplink':
+          await this.#gateway.waitForMessages(fromIndex, step.timeoutMs);
+          break;
+      }
+    }
   }
 }
 

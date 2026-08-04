@@ -2,20 +2,40 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildGatewayDownstreamViews } from '../src/downstream-view.ts';
+import { DownstreamScenarioRunner } from '../src/downstream-runner.ts';
 import { getDownstreamScenarios } from '../src/downstream-scenarios.ts';
+import { EventStore } from '../src/event-store.ts';
+import { LabMockGateway } from '../src/mock-gateway.ts';
+import { RuntimeManager } from '../src/runtime-manager.ts';
+import { TestProvider } from '../src/test-provider.ts';
 
 test('downstream scenarios include explicit tool_error coverage', () => {
   const scenarios = getDownstreamScenarios();
   const toolErrorScenarios = scenarios.filter((scenario) => scenario.expected.outcome === 'tool_error');
 
-  assert.ok(toolErrorScenarios.length >= 12);
+  assert.ok(toolErrorScenarios.length >= 18);
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'invalid-chat-missing-text'));
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'question-reply-pending-missing'));
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'create-session-provider-throws'));
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'chat-invalid-facts'));
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'chat-terminal-session-not-found'));
   assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'outbound-run-invalid-facts'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'question-reply-provider-throws'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'permission-reply-provider-throws'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'close-session-provider-throws'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'abort-session-provider-throws'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'question-pending-interaction-conflict'));
+  assert.ok(toolErrorScenarios.some((scenario) => scenario.id === 'permission-pending-interaction-conflict'));
   assert.ok(toolErrorScenarios.every((scenario) => scenario.expected.stage));
+});
+
+test('multi-step scenarios describe ordered gateway and provider actions', () => {
+  const scenarios = getDownstreamScenarios();
+  const questionProviderThrow = scenarios.find((item) => item.id === 'question-reply-provider-throws');
+
+  assert.equal(questionProviderThrow?.steps?.[0]?.kind, 'provider_scenario');
+  assert.equal(questionProviderThrow?.steps?.some((step) => step.kind === 'wait_for_uplink'), true);
+  assert.equal(questionProviderThrow?.steps?.at(-1)?.kind, 'gateway_downstream');
 });
 
 test('downstream scenarios mark no-route invalid invoke as failure only', () => {
@@ -113,3 +133,62 @@ test('gateway downstream views include mock raw and sdk processed summaries', ()
   assert.equal(views[4]?.raw && typeof views[4].raw, 'object');
   assert.equal(views[4]?.rawText?.includes('"action":"chat"'), true);
 });
+
+test('new stage matrix scenarios execute against sdk and mock gateway', async () => {
+  const events = new EventStore();
+  const gateway = new LabMockGateway(events);
+  const provider = new TestProvider(events);
+  const manager = new RuntimeManager({ events, provider });
+  const runner = new DownstreamScenarioRunner({
+    gateway,
+    provider,
+    events,
+    getFailures: () => manager.getDiagnostics()?.failures ?? [],
+  });
+
+  const started = await gateway.start();
+  try {
+    await manager.create({
+      url: started.url,
+      auth: { ak: 'lab-ak', sk: 'lab-sk' },
+      register: { channel: 'sdk-lab', toolVersion: 'test', pluginVersion: 'test' },
+    });
+    await manager.start();
+    await waitFor(() => gateway.connected);
+
+    const scenarios = getDownstreamScenarios();
+    for (const id of [
+      'question-reply-provider-throws',
+      'permission-reply-provider-throws',
+      'close-session-provider-throws',
+      'abort-session-provider-throws',
+      'question-pending-interaction-conflict',
+      'permission-pending-interaction-conflict',
+    ]) {
+      const scenario = scenarios.find((item) => item.id === id);
+      assert.ok(scenario, `missing scenario ${id}`);
+      let result;
+      try {
+        result = await runner.run(scenario);
+      } catch (error) {
+        const recentEvents = events.list().slice(-12).map((event) => `${event.type}:${event.message}:${JSON.stringify(event.meta ?? {})}`).join(' | ');
+        throw new Error(`${id}: ${error instanceof Error ? error.message : String(error)}; events=${recentEvents}`);
+      }
+      assert.equal(result.matchedExpectation, true, `${id}: ${result.note ?? 'expectation mismatch'}`);
+    }
+  } finally {
+    await manager.stop();
+    await gateway.stop();
+  }
+});
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for condition');
+}

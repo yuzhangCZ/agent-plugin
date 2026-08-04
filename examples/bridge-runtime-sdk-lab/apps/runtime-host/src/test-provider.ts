@@ -260,6 +260,41 @@ async function* enrichFailureFactStream(): AsyncIterable<ProviderFact> {
   yield { type: 'message.done', messageId, reason: 'completed' };
 }
 
+async function* questionConflictFactStream(): AsyncIterable<ProviderFact> {
+  const messageId = `msg_${crypto.randomUUID()}`;
+  yield { type: 'message.start', messageId };
+  yield {
+    type: 'question.ask',
+    messageId,
+    partId: `prt_${crypto.randomUUID()}`,
+    questionId: 'question-conflict-fixed',
+    questions: [
+      {
+        question: '请选择一个固定问题选项',
+        options: [
+          { label: 'yes' },
+          { label: 'no' },
+        ],
+      },
+    ],
+  };
+  yield { type: 'message.done', messageId, reason: 'completed' };
+}
+
+async function* permissionConflictFactStream(): AsyncIterable<ProviderFact> {
+  const messageId = `msg_${crypto.randomUUID()}`;
+  yield { type: 'message.start', messageId };
+  yield {
+    type: 'permission.ask',
+    messageId,
+    partId: `prt_${crypto.randomUUID()}`,
+    permissionId: 'permission-conflict-fixed',
+    permType: 'sdk-lab',
+    title: '允许执行固定授权请求',
+  };
+  yield { type: 'message.done', messageId, reason: 'completed' };
+}
+
 function factStreamForScenario(kind: ProviderScenarioKind): AsyncIterable<ProviderFact> {
   switch (kind) {
     case 'invalid_fact':
@@ -268,6 +303,10 @@ function factStreamForScenario(kind: ProviderScenarioKind): AsyncIterable<Provid
       return throwingFactStream();
     case 'enrich_failure':
       return enrichFailureFactStream();
+    case 'question_conflict':
+      return questionConflictFactStream();
+    case 'permission_conflict':
+      return permissionConflictFactStream();
     default:
       return defaultFactStream();
   }

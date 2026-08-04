@@ -32,7 +32,9 @@ export type ProviderScenarioKind =
   | 'result_reject'
   | 'facts_throw'
   | 'enrich_failure'
-  | 'aborted_run';
+  | 'aborted_run'
+  | 'question_conflict'
+  | 'permission_conflict';
 
 export interface ProviderScenarioConfig {
   command: string;
@@ -104,6 +106,7 @@ export interface DownstreamScenario {
   description: string;
   trigger?: LabScenarioTrigger;
   raw: unknown;
+  steps?: DownstreamScenarioStep[];
   expected: {
     outcome: DownstreamExpectedOutcome;
     stage: ToolErrorStage;
@@ -112,6 +115,27 @@ export interface DownstreamScenario {
     providerScenario?: ProviderScenarioConfig;
   };
 }
+
+export type DownstreamScenarioStep =
+  | {
+      kind: 'provider_scenario';
+      scenario: ProviderScenarioConfig;
+    }
+  | {
+      kind: 'gateway_downstream';
+      raw: unknown;
+    }
+  | {
+      kind: 'provider_outbound';
+      providerScenario?: ProviderScenarioConfig;
+    }
+  | {
+      kind: 'mock_gateway_disconnect';
+    }
+  | {
+      kind: 'wait_for_uplink';
+      timeoutMs?: number;
+    };
 
 export interface ToolErrorView {
   error: string;

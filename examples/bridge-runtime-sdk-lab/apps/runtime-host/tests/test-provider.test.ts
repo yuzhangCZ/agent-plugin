@@ -59,10 +59,49 @@ test('provider emits manual outbound run to selected tool session', async () => 
   }]);
 });
 
+test('provider conflict facts use fixed interaction targets', async () => {
+  const events = new EventStore();
+  const provider = new TestProvider(events);
+  provider.setScenario({ command: 'runMessage', kind: 'question_conflict' });
+
+  const questionRun = await provider.runMessage({
+    traceId: 'trace-question',
+    runId: 'run-question',
+    toolSessionId: 'tool-question',
+    text: 'question conflict',
+  });
+
+  assert.equal(
+    (await collect(questionRun.facts)).some((fact) => {
+      return isRecord(fact) && fact.type === 'question.ask' && fact.questionId === 'question-conflict-fixed';
+    }),
+    true,
+  );
+
+  provider.setScenario({ command: 'runMessage', kind: 'permission_conflict' });
+  const permissionRun = await provider.runMessage({
+    traceId: 'trace-permission',
+    runId: 'run-permission',
+    toolSessionId: 'tool-permission',
+    text: 'permission conflict',
+  });
+
+  assert.equal(
+    (await collect(permissionRun.facts)).some((fact) => {
+      return isRecord(fact) && fact.type === 'permission.ask' && fact.permissionId === 'permission-conflict-fixed';
+    }),
+    true,
+  );
+});
+
 async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
   const collected: T[] = [];
   for await (const item of items) {
     collected.push(item);
   }
   return collected;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

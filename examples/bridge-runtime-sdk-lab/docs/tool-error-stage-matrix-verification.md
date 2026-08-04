@@ -56,16 +56,16 @@ Related:
 | 2 | `command_failure` | unsupported invoke action | 可直接验证 | `unsupported-invoke-action` | 上行 `tool_error`，error 包含“不支持” |
 | 3 | `command_failure` | 新建会话失败 | 可直接验证 | `create-session-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured createSession failure` |
 | 4 | `command_failure` | 发送消息启动失败 | 可直接验证 | `chat-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured runMessage failure` |
-| 5 | `command_failure` | 同会话重复发送 | 当前不能直接验证 | 建议新增 `chat-run-already-active` 场景 | 上行 `tool_error`，error 为“当前会话正在处理中，请稍后再试” |
+| 5 | `command_failure` | 同会话重复发送 | 当前不能直接验证 | 需要 Fake driver 或 core-level 并发注入 | 上行 `tool_error`，error 为“当前会话正在处理中，请稍后再试” |
 | 6 | `command_failure` | question 回复 pending 不存在 | 可直接验证 | `question-reply-pending-missing` | 上行 `tool_error`，error 包含“当前交互已失效” |
-| 7 | `command_failure` | question 回复 Provider 抛错 | 可间接验证 | 真实 gateway + Manual Agent Report + Provider 场景 `replyQuestion=throw` | 上行 `tool_error`，error 包含 Provider 异常 message |
+| 7 | `command_failure` | question 回复 Provider 抛错 | 可直接验证 | `question-reply-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured replyQuestion failure` |
 | 8 | `command_failure` | permission 回复 pending 不存在 | 可直接验证 | `permission-reply-pending-missing` | 上行 `tool_error`，error 包含“当前交互已失效” |
-| 9 | `command_failure` | permission 回复 Provider 抛错 | 可间接验证 | 真实 gateway + Manual Agent Report + Provider 场景 `replyPermission=throw` | 上行 `tool_error`，error 包含 Provider 异常 message |
-| 10 | `command_failure` | 关闭会话失败 | 当前不能直接验证 | 建议新增 `close-session-provider-throws` 场景 | 上行 `tool_error`，error 包含 `SDK lab configured closeSession failure` |
-| 11 | `command_failure` | 中止执行失败 | 当前不能直接验证 | 建议新增 `abort-session-provider-throws` 场景 | 上行 `tool_error`，error 包含 `SDK lab configured abortSession failure` |
+| 9 | `command_failure` | permission 回复 Provider 抛错 | 可直接验证 | `permission-reply-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured replyPermission failure` |
+| 10 | `command_failure` | 关闭会话失败 | 可直接验证 | `close-session-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured closeSession failure` |
+| 11 | `command_failure` | 中止执行失败 | 可直接验证 | `abort-session-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured abortSession failure` |
 | 12 | `command_failure` | request terminal Promise reject | 可直接验证 | `chat-result-reject` | 上行 `tool_error`，error 包含 `ProviderRun.result rejection` |
 | 13 | `request_lifecycle` | request facts 生命周期非法 | 可直接验证 | `chat-invalid-facts` | 上行 `tool_error`，error 包含“当前请求处理失败” |
-| 14 | `request_lifecycle` | request pending interaction 冲突 | 当前不能直接验证 | 建议新增重复 `questionId` / `permissionId` 的 mock facts 场景 | 上行 `tool_error`，error 包含“当前请求处理失败” |
+| 14 | `request_lifecycle` | request pending interaction 冲突 | 可直接验证 | `question-pending-interaction-conflict`、`permission-pending-interaction-conflict` | 上行 `tool_error`，error 包含“当前请求处理失败” |
 
 ## 4. 可直接验证场景步骤
 
@@ -129,7 +129,25 @@ Related:
 5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured runMessage failure`。
 6. 在 `Gateway Uplink` 确认 `tool_error.toolSessionId` 与下行 payload 一致。
 
-### 4.5 question 回复 pending 不存在
+### 4.5 同会话重复发送
+
+覆盖场景：序号 5。
+
+当前不能通过 Stage Matrix Lab 直接验证。
+
+原因：
+
+1. `run_already_active` 要求同一 `toolSessionId` 的第一轮 request run 尚未释放时，第二条 chat 已进入 `StartRequestRunUseCase`。
+2. 当前 MockGateway 通过 gateway-client 下发业务消息，实际处理链路会串行透传下行；第二条 chat 会等第一条处理完成后再进入 SDK，无法稳定构造 active run 冲突。
+3. 即使在 TestProvider 内部尝试 reentrant 注入第二条下行，也仍会被 gateway-client 串行化，不能产生预期 `tool_error`。
+
+可改造方向：
+
+1. 增加 Fake driver 验证入口，绕过 gateway-client 的串行消息派发，直接并发触发 SDK runtime driver handler。
+2. 或增加 core-level test harness，直接并发调用 `start_request_run` usecase。
+3. 改造完成后新增 `chat-run-already-active` 矩阵场景，预期 stage 为 `command_failure`，error 包含“当前会话正在处理中”。
+
+### 4.6 question 回复 pending 不存在
 
 覆盖场景：序号 6。
 
@@ -161,7 +179,24 @@ Mock 快速验证步骤：
 - 真实 gateway 路径模拟的是：宿主侧仍保留旧 question 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再回复时触发 `pending_interaction_not_found`。
 - 它不验证 Provider `replyQuestion()` 抛错，因为 pending 不存在时不会调用 Provider。
 
-### 4.6 permission 回复 pending 不存在
+### 4.7 question 回复 Provider 抛错
+
+覆盖场景：序号 7。
+
+步骤：
+
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `question_reply Provider 抛错`。
+3. 点击 `运行矩阵场景`。
+4. 在 payload 预览中确认该场景会先发送 chat 注册固定 `questionId=question-conflict-fixed`，等待上行后再配置 `replyQuestion=throw` 并发送 `question_reply`。
+5. 在 `SDK -> Agent` 确认 SDK 先调用 `runMessage()`，后调用 `replyQuestion()`。
+6. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured replyQuestion failure`。
+
+说明：
+
+- 该场景不依赖真实宿主卡片点击，MockGateway 会自动构造合法 reply 下行。
+
+### 4.8 permission 回复 pending 不存在
 
 覆盖场景：序号 8。
 
@@ -193,7 +228,44 @@ Mock 快速验证步骤：
 - 真实 gateway 路径模拟的是：宿主侧仍保留旧 permission 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再点击时触发 `pending_interaction_not_found`。
 - 它不验证 Provider `replyPermission()` 抛错，因为 pending 不存在时不会调用 Provider。
 
-### 4.7 ProviderRun.result reject
+### 4.9 permission 回复 Provider 抛错
+
+覆盖场景：序号 9。
+
+步骤：
+
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `permission_reply Provider 抛错`。
+3. 点击 `运行矩阵场景`。
+4. 在 payload 预览中确认该场景会先发送 chat 注册固定 `permissionId=permission-conflict-fixed`，等待上行后再配置 `replyPermission=throw` 并发送 `permission_reply`。
+5. 在 `SDK -> Agent` 确认 SDK 先调用 `runMessage()`，后调用 `replyPermission()`。
+6. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured replyPermission failure`。
+
+### 4.10 关闭会话失败
+
+覆盖场景：序号 10。
+
+步骤：
+
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `close_session Provider 抛错`。
+3. 点击 `运行矩阵场景`。
+4. 在 `SDK -> Agent` 确认 SDK 调用了 `provider.closeSession()`。
+5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured closeSession failure`。
+
+### 4.11 中止执行失败
+
+覆盖场景：序号 11。
+
+步骤：
+
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `abort_session Provider 抛错`。
+3. 点击 `运行矩阵场景`。
+4. 在 `SDK -> Agent` 确认 SDK 调用了 `provider.abortSession()`。
+5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured abortSession failure`。
+
+### 4.12 ProviderRun.result reject
 
 覆盖场景：序号 12。
 
@@ -205,7 +277,7 @@ Mock 快速验证步骤：
 4. 在 `SDK -> Agent` 确认 SDK 调用了 `provider.runMessage()`。
 5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含 `SDK lab configured ProviderRun.result rejection`。
 
-### 4.8 request facts 生命周期非法
+### 4.13 request facts 生命周期非法
 
 覆盖场景：序号 13。
 
@@ -235,207 +307,67 @@ Mock 快速验证步骤：
 - 手动验证时不要点击“按当前 text.done 补齐并完成”，该按钮会自动补齐 `message.start -> text.delta -> text.done -> message.done`，无法触发本场景。
 - 如需验证更多 facts 顺序问题，例如 `message.done` 重复、`tool.update` 字段非法，应新增细分 mock facts 场景或允许 Stage Matrix 编辑 raw facts。
 
-## 5. 可间接验证场景步骤
-
-### 5.1 question 回复 Provider 抛错
-
-覆盖场景：序号 7。
-
-当前可行路径依赖真实 gateway 和宿主侧交互：
-
-1. 切换到真实 gateway。
-2. 点击 `初始化` 和 `启动`。
-3. 开启 `手动 ProviderFact 上报`。
-4. 让宿主用户发送一条 chat 消息，使 SDK 调用 `runMessage()` 并在 Manual Agent Report 出现 active run。
-5. 在 Manual Agent Report 选择 `message.start` 并上报。
-6. 选择 `question.ask`，编辑问题内容后上报。
-7. 在宿主侧确认出现 question 卡片。
-8. 在 Provider 场景面板设置 `command=replyQuestion`、`kind=throw`、`delay=0`，点击 `应用场景`。
-9. 在宿主侧回复 question 卡片。
-10. 在实验室右侧事件流筛选 `onMessage`，确认收到 `question_reply` 下行。
-11. 筛选 `sendMessage`，确认 SDK 上行 `tool_error`，error 包含 `SDK lab configured replyQuestion failure`。
-
-当前限制：
-
-- Mock 模式没有“根据已注册 questionId 自动构造 reply 下行”的按钮。
-- Stage Matrix Lab 的 raw 只预览不可编辑，无法直接把动态 `questionId` 注入到 `question_reply` 场景。
-- 因此该路径依赖真实宿主侧 UI 能展示并点击 question 卡片。
-
-可改造方向：
-
-1. 在 Manual Agent Report 上报 `question.ask` 后，把最新 `questionId` 暴露为可点击回复目标。
-2. 新增 `Reply Interaction Lab` 面板，自动读取 pending question/permission，构造合法 `question_reply` / `permission_reply` 下行。
-3. 新增 Stage Matrix 场景 `question-reply-provider-throws`，运行前先通过 mock facts 注册 pending question，再配置 `replyQuestion=throw` 并注入 reply 下行。
-
-### 5.2 permission 回复 Provider 抛错
-
-覆盖场景：序号 9。
-
-当前可行路径依赖真实 gateway 和宿主侧交互：
-
-1. 切换到真实 gateway。
-2. 点击 `初始化` 和 `启动`。
-3. 开启 `手动 ProviderFact 上报`。
-4. 让宿主用户发送一条 chat 消息，使 SDK 调用 `runMessage()` 并在 Manual Agent Report 出现 active run。
-5. 在 Manual Agent Report 选择 `message.start` 并上报。
-6. 选择 `permission.ask`，编辑授权文案后上报。
-7. 在宿主侧确认出现 permission 卡片。
-8. 在 Provider 场景面板设置 `command=replyPermission`、`kind=throw`、`delay=0`，点击 `应用场景`。
-9. 在宿主侧点击授权或拒绝。
-10. 在实验室右侧事件流筛选 `onMessage`，确认收到 `permission_reply` 下行。
-11. 筛选 `sendMessage`，确认 SDK 上行 `tool_error`，error 包含 `SDK lab configured replyPermission failure`。
-
-当前限制和可改造方向同 question 回复 Provider 抛错。
-
-## 6. 当前不能直接验证的场景
-
-### 6.1 同会话重复发送
-
-覆盖场景：序号 5。
-
-不能直接验证原因：
-
-1. Stage Matrix Lab 目前每个场景只发送一条固定下行。
-2. `run_already_active` 需要同一个 `toolSessionId` 的第一轮 request run 仍未结束时，再发送第二条 chat。
-3. 当前 `TestProvider` 的 `timeout` 能让 run 长时间不结束，但 Stage Matrix 没有内置“两次同 toolSessionId chat”的组合场景，也没有可编辑 raw 注入入口。
-
-可以通过改造实验室完善：
-
-1. 新增 Stage Matrix 场景 `chat-run-already-active`。
-2. 场景执行逻辑：
-   - 配置 `runMessage=timeout` 或开启 manual mode 并保持 terminal 不完成。
-   - 发送第一条 `chat`，`toolSessionId=tool-run-active`。
-   - 立即发送第二条 `chat`，复用同一个 `toolSessionId=tool-run-active`。
-   - 捕获第二条下行对应的 `tool_error`。
-3. 预期：stage 为 `command_failure`，error 为“当前会话正在处理中，请稍后再试”。
-
-### 6.2 关闭会话失败
-
-覆盖场景：序号 10。
-
-不能直接验证原因：
-
-1. `TestProvider.closeSession()` 已支持通过 Provider 场景 `closeSession=throw` 抛错。
-2. 但 Stage Matrix 当前只有 `close_session 缺少 toolSessionId` 的入站非法场景，没有合法 `close_session` + Provider 抛错场景。
-3. 前端 Stage Matrix raw 只展示不可编辑，无法临时注入合法 close 下行并绑定 `closeSession=throw`。
-
-可以通过改造实验室完善：
-
-1. 新增 Stage Matrix 场景 `close-session-provider-throws`。
-2. raw 示例：
-
-   ```json
-   {
-     "type": "invoke",
-     "action": "close_session",
-     "welinkSessionId": "wl-close-provider-error",
-     "payload": {
-       "toolSessionId": "tool-close-provider-error"
-     }
-   }
-   ```
-
-3. expected 配置 `providerScenario: { "command": "closeSession", "kind": "throw" }`。
-4. 预期：上行 `tool_error`，stage 为 `command_failure`，error 包含 `SDK lab configured closeSession failure`。
-
-### 6.3 中止执行失败
-
-覆盖场景：序号 11。
-
-不能直接验证原因：
-
-1. `TestProvider.abortSession()` 已支持通过 Provider 场景 `abortSession=throw` 抛错。
-2. 但 Stage Matrix 当前只有 `abort_session 缺少 toolSessionId` 的入站非法场景，没有合法 `abort_session` + Provider 抛错场景。
-
-可以通过改造实验室完善：
-
-1. 新增 Stage Matrix 场景 `abort-session-provider-throws`。
-2. raw 示例：
-
-   ```json
-   {
-     "type": "invoke",
-     "action": "abort_session",
-     "welinkSessionId": "wl-abort-provider-error",
-     "payload": {
-       "toolSessionId": "tool-abort-provider-error"
-     }
-   }
-   ```
-
-3. expected 配置 `providerScenario: { "command": "abortSession", "kind": "throw" }`。
-4. 预期：上行 `tool_error`，stage 为 `command_failure`，error 包含 `SDK lab configured abortSession failure`。
-
-### 6.4 request pending interaction 冲突
+### 4.14 request pending interaction 冲突
 
 覆盖场景：序号 14。
 
-不能直接验证原因：
+question 冲突步骤：
 
-1. `pending_interaction_conflict` 要求两个不同 `toolSessionId` 注册相同的 `questionId` 或 `permissionId`。
-2. 当前 `TestProvider` 的 `question.ask` / `permission.ask` 模板会生成随机 ID。
-3. Manual Agent Report 可以手动编辑 ID，但一次 active run 只对应一个 `toolSessionId`，同 session 重复 ID 会被 SDK 按幂等处理，不触发 conflict。
-4. Stage Matrix 当前没有“两轮不同 toolSessionId + 相同 questionId/permissionId”的组合 mock facts 场景。
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `question pending interaction 冲突`。
+3. 点击 `运行矩阵场景`。
+4. 在 payload 预览中确认该场景会对两个不同 `toolSessionId` 输出相同 `questionId=question-conflict-fixed`。
+5. 在 `Tool Error` 确认 stage 为 `request_lifecycle`，error 包含“当前请求处理失败”。
 
-可以通过改造实验室完善：
+permission 冲突步骤：
 
-1. 在 `TestProvider` 增加 `ProviderScenarioKind`：
-   - `question_conflict`
-   - `permission_conflict`
-2. 在 `DownstreamScenarioRunner` 增加组合场景能力，支持一个场景发送多条下行。
-3. 新增 Stage Matrix 场景：
-   - 第一条 chat：`toolSessionId=tool-conflict-a`，facts 输出 `question.ask questionId=question-conflict-fixed`。
-   - 第二条 chat：`toolSessionId=tool-conflict-b`，facts 输出相同 `questionId=question-conflict-fixed`。
-4. 预期：第二条 run 在 `request_lifecycle` 阶段上行 `tool_error`，error 包含“当前请求处理失败”。
-5. permission 冲突同理，固定 `permissionId=permission-conflict-fixed`。
+1. 在 Mock 模式启动 runtime。
+2. 在 `Stage Matrix Lab` 选择 `permission pending interaction 冲突`。
+3. 点击 `运行矩阵场景`。
+4. 在 payload 预览中确认该场景会对两个不同 `toolSessionId` 输出相同 `permissionId=permission-conflict-fixed`。
+5. 在 `Tool Error` 确认 stage 为 `request_lifecycle`，error 包含“当前请求处理失败”。
 
-## 7. 建议新增实验室能力
+说明：
 
-为让 4.2.1 全量场景都能在实验室内稳定闭环，建议新增以下能力：
+- 该场景验证 `InteractionCoordinator.registerFromFact()` 检测到跨会话复用 reply target 后抛出 `pending_interaction_conflict`。
+- 同一 `toolSessionId` 重复 question/permission ID 会被 SDK 视为幂等吸收，不触发本场景。
+
+## 5. 已增强实验室能力
+
+本轮已补齐以下能力：
 
 1. Stage Matrix 支持组合步骤
-   - 一个场景可包含多步：配置 Provider、发送第一条下行、等待指定事件、发送第二条下行、断言 uplink。
-   - 用于 `run_already_active`、pending interaction conflict、reply Provider 抛错。
+   - 一个场景可按顺序配置 Provider、发送多条下行、等待上行后再继续。
+   - 用于 reply Provider 抛错、pending interaction conflict。
 
-2. Stage Matrix 支持动态 facts 场景
-   - `TestProvider` 增加固定 ID 的 `question.ask` / `permission.ask` facts。
-   - 支持 facts 中途抛错、重复 ID、跨 session 冲突等精细变体。
+2. Stage Matrix 支持固定 interaction facts
+   - `TestProvider` 新增 `question_conflict` 和 `permission_conflict` kind。
+   - 固定输出 `questionId=question-conflict-fixed` 或 `permissionId=permission-conflict-fixed`，用于构造 reply 和跨会话冲突。
 
-3. 新增 Reply Interaction Lab
-   - 展示 SDK 已注册的 pending `questionId` / `permissionId`。
-   - 提供按钮构造合法 `question_reply` / `permission_reply` 下行。
-   - 可在发送前配置 `replyQuestion=throw` 或 `replyPermission=throw`。
+3. 新增 Provider 抛错矩阵场景
+   - `question-reply-provider-throws`
+   - `permission-reply-provider-throws`
+   - `close-session-provider-throws`
+   - `abort-session-provider-throws`
 
-4. Stage Matrix raw 编辑器
-   - 当前界面只展示 scenario raw。
-   - 增加“复制为自定义 raw / 运行自定义 raw”后，可临时验证合法 close、abort、reply 等变体。
+4. Stage Matrix 多步骤预览
+   - 多步骤场景在 payload 预览中展示 `steps`，便于确认每一步下行和 Provider 配置。
 
-5. Scenario 断言增强
-   - 当前结果主要按 uplink 类型、errorIncludes、reason 判断。
-   - 建议补充断言 `toolSessionId`、`welinkSessionId`、事件顺序、Provider API 是否被调用、是否没有额外 `tool_done`。
+## 6. 总结
 
-## 8. 总结
-
-当前实验室已能直接验证本文范围内 14 个可拆分场景里的 8 个：
+当前实验室已能直接验证本文范围内 13 个可拆分场景：
 
 - `inbound_invalid` 主链路
 - unsupported action
 - createSession throw
 - runMessage throw
 - pending question/permission 不存在
+- replyQuestion/replyPermission Provider 抛错
+- closeSession/abortSession Provider 抛错
 - ProviderRun.result reject
 - request facts 生命周期非法
-
-仍需改造后才能稳定直接验证的场景有 4 个：
-
-- 同会话重复发送 `run_already_active`
-- closeSession Provider 抛错
-- abortSession Provider 抛错
 - request pending interaction conflict
 
-可通过真实 gateway + Manual Agent Report 间接验证的场景有 2 个：
+`request_terminal` 和 `outbound_terminal` 两类 stage 仍不纳入本文验证范围。
 
-- replyQuestion Provider 抛错
-- replyPermission Provider 抛错
-
-推荐优先补齐 Stage Matrix 组合步骤和 Reply Interaction Lab。这样可以把真实宿主侧依赖降到最低，让本文范围内的 `4.2.1` 场景都能通过 Mock 模式稳定回归。
+本文范围内仍不能通过当前实验室直接验证的场景是同会话重复发送 `run_already_active`，需要新增 Fake driver 或 core-level 并发注入能力。
