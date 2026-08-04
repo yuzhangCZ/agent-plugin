@@ -4,6 +4,8 @@ import type { GatewayRuntimeContext, GatewayRuntimeStatePort } from './GatewayRu
 import { getErrorDetails, getErrorMessage } from '../telemetry/error-detail-mapper.ts';
 import { ReconnectContinueSignal } from './ReconnectContinueSignal.ts';
 
+const SLEEP_DRIFT_THRESHOLD_MS = 60_000;
+
 /**
  * 重连编排器，负责策略决策、调度触发与 attempt 级别日志。
  */
@@ -60,11 +62,24 @@ export class ReconnectOrchestrator {
     };
     this.context.logger?.warn?.('gateway.reconnect.scheduled', reconnectLogFields);
 
+    const expectedFireAt = this.now() + reconnectDecision.delayMs;
     this.scheduler.schedule(async () => {
       if (!this.state.isCurrentGeneration(generation)
         || this.state.isManuallyDisconnected()
         || this.context.abortSignal?.aborted) {
         return;
+      }
+
+      const driftMs = this.now() - expectedFireAt;
+      if (driftMs > SLEEP_DRIFT_THRESHOLD_MS) {
+        const suspendedMs = this.policy.recordSuspendedDuration(driftMs);
+        this.context.logger?.warn?.('gateway.reconnect.sleep_drift_detected', {
+          attempt: reconnectDecision.attempt,
+          reconnectAttempts: reconnectDecision.attempt,
+          driftMs,
+          suspendedMs,
+          thresholdMs: SLEEP_DRIFT_THRESHOLD_MS,
+        });
       }
 
       const exhaustedDecision = this.policy.getExhaustedDecision();
@@ -93,5 +108,9 @@ export class ReconnectOrchestrator {
         });
       }
     }, reconnectDecision.delayMs);
+  }
+
+  private now(): number {
+    return this.context.options.clock?.now() ?? Date.now();
   }
 }

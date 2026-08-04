@@ -90,14 +90,5 @@ export interface MessageBridgePlugin {
   stop(): Promise<void>;
 }
 
-export const DEFAULT_CONFIG = {
-  heartbeatIntervalMs: 30000,
-  reconnectBaseMs: 1000,
-  reconnectMaxMs: 30000,
-  reconnectMaxElapsedMs: 600000,
-  sdkTimeoutMs: 10000,
-  configVersion: 1,
-} as const;
-
 export const AGENT_ID_PREFIX = 'bridge-';
 export const PROTOCOL_VERSION = '1.0';

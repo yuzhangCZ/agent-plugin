@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TerminalCliPresenter } from "../../src/adapters/TerminalCliPresenter.ts";
+import {
+  TerminalCliPresenter,
+  chooseQrRenderer,
+  renderQrCode,
+  type QrRendererChoice,
+} from "../../src/adapters/TerminalCliPresenter.ts";
 
 function createPresenter(qrCodeRenderer: (data: string) => string = () => "<二维码渲染块>") {
   return new TerminalCliPresenter(qrCodeRenderer, () => false);
@@ -326,4 +331,158 @@ test("TerminalCliPresenter renders plain URL when hyperlink support is disabled"
   });
 
   assert.match(stdout, /\[skill-plugin-cli\] pc WeLink 创建助理地址: https:\/\/pc\.example\/qr-4\n/u);
+});
+
+test("chooseQrRenderer returns ANSI branch for classic Windows console (win32 + no modern env)", () => {
+  const choice = chooseQrRenderer({}, "win32");
+  assert.equal(choice.kind, "qrcode-terminal.ansi");
+  assert.equal(choice.reason, "is-classic-windows-console=true");
+});
+
+test("chooseQrRenderer returns small branch for non-win32 platforms", () => {
+  for (const platform of ["darwin", "linux", "freebsd", "openbsd"] as const) {
+    const choice = chooseQrRenderer({}, platform);
+    assert.equal(
+      choice.kind,
+      "qrcode-terminal.small",
+      `platform=${platform} should pick small branch`,
+    );
+    assert.equal(choice.reason, "is-classic-windows-console=false");
+  }
+});
+
+test("chooseQrRenderer returns small branch for win32 with WT_SESSION set (Windows Terminal)", () => {
+  const choice = chooseQrRenderer({ WT_SESSION: "{abc-123}" }, "win32");
+  assert.equal(choice.kind, "qrcode-terminal.small");
+  assert.equal(choice.reason, "is-classic-windows-console=false");
+});
+
+test("chooseQrRenderer returns small branch for win32 with TERM_PROGRAM set (VS Code / Terminus / WezTerm / JetBrains WebStorm / Alacritty)", () => {
+  const variants = ["vscode", "WezTerm", "Alacritty", "WebStorm", "IntelliJ", "GoLand", "Terminus-Sublime"];
+  for (const tp of variants) {
+    const choice = chooseQrRenderer({ TERM_PROGRAM: tp }, "win32");
+    assert.equal(
+      choice.kind,
+      "qrcode-terminal.small",
+      `TERM_PROGRAM=${tp} should pick small branch`,
+    );
+  }
+});
+
+test("chooseQrRenderer returns small branch for win32 with ConEmuPID set (ConEmu 原生)", () => {
+  const choice = chooseQrRenderer({ ConEmuPID: "1234" }, "win32");
+  assert.equal(choice.kind, "qrcode-terminal.small");
+});
+
+test("chooseQrRenderer with real process env on this CI returns matching kind", () => {
+  const choice = chooseQrRenderer();
+  const expectedKind = choice.reason === "is-classic-windows-console=true"
+    ? "qrcode-terminal.ansi"
+    : "qrcode-terminal.small";
+  assert.equal(choice.kind, expectedKind);
+  assert.equal(
+    choice.reason,
+    choice.kind === "qrcode-terminal.ansi"
+      ? "is-classic-windows-console=true"
+      : "is-classic-windows-console=false",
+  );
+});
+
+test("renderQrCode (production default) does not throw", () => {
+  const out = renderQrCode("https://example.com/qr-real");
+  const choice = chooseQrRenderer();
+  if (choice.kind === "qrcode-terminal.small") {
+    assert.ok(
+      out.includes("▀") || out.includes("▄") || out.includes("█"),
+      "small branch should emit half-block or full-block chars",
+    );
+  } else {
+    assert.ok(
+      out.includes(" ") && !out.includes("▀") && !out.includes("▄"),
+      "ANSI branch should emit only ANSI codes + space, no half-blocks",
+    );
+  }
+});
+
+test("chooseQrRenderer: documented coverage matrix (injected env/platform controls outcome)", () => {
+  // chooseQrRenderer wraps isClassicWindowsConsole (4-condition: win32 + no
+  // WT_SESSION + no TERM_PROGRAM + no ConEmuPID). Cases below reflect what the
+  // check returns — see docs/qrcode-terminal-rendering-solution.md §5.3 for
+  // the full list.
+  const cases: Array<{ name: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; expectedKind: QrRendererChoice["kind"] }> = [
+    { name: "Windows Terminal", env: { WT_SESSION: "{abc}" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "VS Code integrated", env: { TERM_PROGRAM: "vscode" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "ConEmu + cmder 任务 (ConEmuPID set)", env: { ConEmuPID: "123" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "ConEmu 原生 (仅 ConEmuPID)", env: { ConEmuPID: "123" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "WezTerm (TERM_PROGRAM=WezTerm)", env: { TERM_PROGRAM: "WezTerm" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "Alacritty (TERM_PROGRAM=Alacritty)", env: { TERM_PROGRAM: "Alacritty" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "JetBrains WebStorm (TERM_PROGRAM=WebStorm)", env: { TERM_PROGRAM: "WebStorm" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "PowerShell 在 WT 内启动 (父终端传染 WT_SESSION)", env: { WT_SESSION: "{abc}" }, platform: "win32", expectedKind: "qrcode-terminal.small" },
+    { name: "cmd 1903+ 裸启动 (无 env, win32)", env: {}, platform: "win32", expectedKind: "qrcode-terminal.ansi" },
+    { name: "PowerShell 裸启动 (无 env, win32)", env: {}, platform: "win32", expectedKind: "qrcode-terminal.ansi" },
+    { name: "macOS (darwin)", env: {}, platform: "darwin", expectedKind: "qrcode-terminal.small" },
+    { name: "Linux (linux)", env: {}, platform: "linux", expectedKind: "qrcode-terminal.small" },
+  ];
+  for (const c of cases) {
+    const choice = chooseQrRenderer(c.env, c.platform);
+    assert.equal(
+      choice.kind,
+      c.expectedKind,
+      `case "${c.name}": expected ${c.expectedKind}, got ${choice.kind}`,
+    );
+  }
+});
+
+test("qrSnapshot in verbose mode emits renderer diagnostic for the production default", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(renderQrCode, () => false, true);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-verbose",
+      pcUrl: "https://pc.example/qr-verbose",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  const expectedKind = chooseQrRenderer().kind;
+  assert.match(
+    stdout,
+    new RegExp(
+      `\\[skill-plugin-cli\\]\\[verbose\\] qrcode renderer: ${expectedKind.replace(/\./g, "\\.")} \\([^\\n]*\\)`,
+      "u",
+    ),
+    `expected ${expectedKind} on platform=${process.platform}; got: ${stdout}`,
+  );
+});
+
+test("qrSnapshot in verbose mode reports custom-injected renderer", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(() => "<stub>", () => false, true);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-stub",
+      pcUrl: "https://pc.example/qr-stub",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  assert.match(stdout, /\[skill-plugin-cli\]\[verbose\] qrcode renderer: custom-injected/u);
+});
+
+test("qrSnapshot in non-verbose mode does not emit renderer diagnostic", () => {
+  const { stdout } = captureIo(() => {
+    const presenter = new TerminalCliPresenter(renderQrCode, () => false, false);
+    presenter.qrSnapshot({
+      type: "qrcode_generated",
+      weUrl: "https://example.com/qr-quiet",
+      pcUrl: "https://pc.example/qr-quiet",
+      expiresAt: "2026-04-28T08:12:00.000Z",
+    });
+  });
+
+  assert.equal(
+    stdout.includes("qrcode renderer:"),
+    false,
+    "non-verbose mode must not emit renderer diagnostic",
+  );
 });
