@@ -77,7 +77,7 @@ test('command failure projector maps unsupported actions when route fields exist
   assert.deepEqual(message, {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
+    error: 'Unsupported downstream action: unsupported_action',
   });
 });
 
@@ -96,7 +96,7 @@ test('command failure projector maps unsupported downstream errors to catalog me
   assert.deepEqual(message, {
     type: 'tool_error',
     toolSessionId: 'tool-1',
-    error: '暂不支持该操作类型，请检查版本后重试 (unsupported_action)',
+    error: 'Unsupported downstream action: chat',
   });
 });
 
