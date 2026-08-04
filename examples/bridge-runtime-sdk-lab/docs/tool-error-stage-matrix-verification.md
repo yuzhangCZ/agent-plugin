@@ -12,7 +12,9 @@ Related:
 
 ## 1. 文档目的
 
-本文用于说明如何使用 Bridge Runtime SDK Lab 验证 `docs/design/bridge-runtime-sdk-tool-error-stage-matrix.md` 中 `4.2.1 通过 5 类 stage 上报的 tool_error 场景`。
+本文用于说明如何使用 Bridge Runtime SDK Lab 验证 `docs/design/bridge-runtime-sdk-tool-error-stage-matrix.md` 中 `4.2.1` 的本轮纳入范围场景。
+
+本轮验证范围不包含 `request_terminal` 和 `outbound_terminal` 两类 stage。对应场景从本文步骤中移除，不作为实验室验证项。
 
 验证结论分为：
 
@@ -64,10 +66,6 @@ Related:
 | 12 | `command_failure` | request terminal Promise reject | 可直接验证 | `chat-result-reject` | 上行 `tool_error`，error 包含 `ProviderRun.result rejection` |
 | 13 | `request_lifecycle` | request facts 生命周期非法 | 可直接验证 | `chat-invalid-facts` | 上行 `tool_error`，error 包含“当前请求处理失败” |
 | 14 | `request_lifecycle` | request pending interaction 冲突 | 当前不能直接验证 | 建议新增重复 `questionId` / `permissionId` 的 mock facts 场景 | 上行 `tool_error`，error 包含“当前请求处理失败” |
-| 15 | `request_terminal` | Provider 明确返回 failed terminal | 可直接验证 | `chat-terminal-failed` | 上行 `tool_error`，error 包含 `SDK lab configured failed run` |
-| 16 | `request_terminal` | 会话不存在 failed terminal | 可直接验证 | `chat-terminal-session-not-found` | 上行 `tool_error`，reason 为 `session_not_found` |
-| 17 | `outbound_terminal` | outbound run facts 生命周期非法 | 可直接验证 | `outbound-run-invalid-facts` | 上行 `tool_error`，error 包含 `text.delta` |
-| 18 | `outbound_terminal` | outbound run facts 流其它异常 | 可直接验证 | `outbound-run-facts-throw` | 上行 `tool_error`，error 包含 `facts iterator failure` |
 
 ## 4. 可直接验证场景步骤
 
@@ -135,7 +133,7 @@ Related:
 
 覆盖场景：序号 6。
 
-步骤：
+Mock 快速验证步骤：
 
 1. 在 Mock 模式启动 runtime。
 2. 在 `Stage Matrix Lab` 选择 `question_reply pending 不存在`。
@@ -143,16 +141,31 @@ Related:
 4. 在 `Gateway Downstream` 确认下行动作为 `question_reply`，`questionId` 为不存在的 ID。
 5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含“当前交互已失效”。
 
+真实 gateway + 手动上报验证步骤：
+
+1. 切换到真实 gateway。
+2. 点击 `初始化` 和 `启动`。
+3. 开启 `手动 ProviderFact 上报`。
+4. 让宿主用户发送一条 chat 消息，使 SDK 调用 `runMessage()` 并在 Manual Agent Report 出现 active run。
+5. 在 Manual Agent Report 选择 `message.start` 并上报。
+6. 选择 `question.ask`，确认 `questionId`，必要时编辑问题内容后上报。
+7. 在宿主侧确认 question 卡片已经展示。
+8. 在实验室点击 `停止`，再点击 `启动`；如需要更彻底清空本地 pending 状态，可执行 `停止` -> `初始化` -> `启动`。
+9. 在宿主侧回复刚才的 question 卡片。
+10. 在 `Gateway Downstream` 或右侧事件流筛选 `onMessage`，确认 SDK 收到 `question_reply` 下行。
+11. 在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
+
 说明：
 
 - 该场景验证的是 `InteractionCoordinator.consume()` 找不到 pending question 后的失败收口。
+- 真实 gateway 路径模拟的是：宿主侧仍保留旧 question 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再回复时触发 `pending_interaction_not_found`。
 - 它不验证 Provider `replyQuestion()` 抛错，因为 pending 不存在时不会调用 Provider。
 
 ### 4.6 permission 回复 pending 不存在
 
 覆盖场景：序号 8。
 
-步骤：
+Mock 快速验证步骤：
 
 1. 在 Mock 模式启动 runtime。
 2. 在 `Stage Matrix Lab` 选择 `permission_reply pending 不存在`。
@@ -160,9 +173,24 @@ Related:
 4. 在 `Gateway Downstream` 确认下行动作为 `permission_reply`，`permissionId` 为不存在的 ID。
 5. 在 `Tool Error` 确认 stage 为 `command_failure`，error 包含“当前交互已失效”。
 
+真实 gateway + 手动上报验证步骤：
+
+1. 切换到真实 gateway。
+2. 点击 `初始化` 和 `启动`。
+3. 开启 `手动 ProviderFact 上报`。
+4. 让宿主用户发送一条 chat 消息，使 SDK 调用 `runMessage()` 并在 Manual Agent Report 出现 active run。
+5. 在 Manual Agent Report 选择 `message.start` 并上报。
+6. 选择 `permission.ask`，确认 `permissionId`，必要时编辑授权内容后上报。
+7. 在宿主侧确认 permission 卡片已经展示。
+8. 在实验室点击 `停止`，再点击 `启动`；如需要更彻底清空本地 pending 状态，可执行 `停止` -> `初始化` -> `启动`。
+9. 在宿主侧点击刚才的 permission 卡片，例如授权一次、始终授权或拒绝。
+10. 在 `Gateway Downstream` 或右侧事件流筛选 `onMessage`，确认 SDK 收到 `permission_reply` 下行。
+11. 在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
+
 说明：
 
 - 该场景验证的是 `InteractionCoordinator.consume()` 找不到 pending permission 后的失败收口。
+- 真实 gateway 路径模拟的是：宿主侧仍保留旧 permission 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再点击时触发 `pending_interaction_not_found`。
 - 它不验证 Provider `replyPermission()` 抛错，因为 pending 不存在时不会调用 Provider。
 
 ### 4.7 ProviderRun.result reject
@@ -181,7 +209,7 @@ Related:
 
 覆盖场景：序号 13。
 
-步骤：
+Mock 快速验证步骤：
 
 1. 在 Mock 模式启动 runtime。
 2. 在 `Stage Matrix Lab` 选择 `chat facts 顺序非法`。
@@ -189,59 +217,23 @@ Related:
 4. 在事件流中查看 `provider.call` 和后续 failure 记录。
 5. 在 `Tool Error` 确认 stage 为 `request_lifecycle`，error 包含“当前请求处理失败”。
 
+真实 gateway + 手动上报验证步骤：
+
+1. 切换到真实 gateway。
+2. 点击 `初始化` 和 `启动`。
+3. 开启 `手动 ProviderFact 上报`。
+4. 让宿主用户发送一条 chat 消息，使 SDK 调用 `runMessage()` 并在 Manual Agent Report 出现 active run。
+5. 不上报 `message.start`。
+6. 在 Manual Agent Report 选择 `text.delta`，确认 JSON 中有当前 active run 的 `messageId`、`partId` 和 `content` 后，点击 `上报 Fact`。
+7. 按需点击 `完成 completed` 走完流程；如果 SDK 已在非法 fact 阶段终止，本步可能已经无法继续提交，按页面状态观察即可。
+8. 在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前请求处理失败，请重试”。
+
 说明：
 
 - 当前内置 `invalid_fact` 是未先发送 `message.start` 就发送 `text.delta`。
+- 真实 gateway 路径模拟的是：mock agent 输出的 ProviderFact 缺少必要前置生命周期事件，SDK 无法把下行 request 正常投影成 gateway 上行消息。
+- 手动验证时不要点击“按当前 text.done 补齐并完成”，该按钮会自动补齐 `message.start -> text.delta -> text.done -> message.done`，无法触发本场景。
 - 如需验证更多 facts 顺序问题，例如 `message.done` 重复、`tool.update` 字段非法，应新增细分 mock facts 场景或允许 Stage Matrix 编辑 raw facts。
-
-### 4.9 Provider 明确返回 failed terminal
-
-覆盖场景：序号 15。
-
-步骤：
-
-1. 在 Mock 模式启动 runtime。
-2. 在 `Stage Matrix Lab` 选择 `chat terminal failed`。
-3. 点击 `运行矩阵场景`。
-4. 在 `Tool Error` 确认 stage 为 `request_terminal`，error 包含 `SDK lab configured failed run`。
-5. 在 `Gateway Uplink` 确认本轮没有被当作正常 `tool_done` 闭环。
-
-### 4.10 会话不存在 failed terminal
-
-覆盖场景：序号 16。
-
-步骤：
-
-1. 在 Mock 模式启动 runtime。
-2. 在 `Stage Matrix Lab` 选择 `chat terminal session_not_found`。
-3. 点击 `运行矩阵场景`。
-4. 在 `Tool Error` 确认 stage 为 `request_terminal`。
-5. 确认 `reason` 为 `session_not_found`，error 包含 `SDK lab configured missing session`。
-
-### 4.11 outbound run facts 生命周期非法
-
-覆盖场景：序号 17。
-
-步骤：
-
-1. 在 Mock 模式启动 runtime。
-2. 在 `Stage Matrix Lab` 选择 `emitOutboundRun facts 顺序非法`。
-3. 点击 `运行矩阵场景`。
-4. 在事件流中确认 `provider_outbound` 触发了 `context.outbound.emitOutboundRun()`。
-5. 在 `Tool Error` 确认 stage 为 `outbound_terminal`，error 包含 `text.delta`。
-6. 在 `Gateway Uplink` 或事件流 `sendMessage` 查看完整 `tool_error` 上行。
-
-### 4.12 outbound run facts 流其它异常
-
-覆盖场景：序号 18。
-
-步骤：
-
-1. 在 Mock 模式启动 runtime。
-2. 在 `Stage Matrix Lab` 选择 `emitOutboundRun facts iterator 抛错`。
-3. 点击 `运行矩阵场景`。
-4. 在 `Tool Error` 确认 stage 为 `outbound_terminal`，error 包含 `SDK lab configured facts iterator failure`。
-5. 在事件流筛选 `sendMessage`，确认 SDK 发送了 `tool_error`。
 
 ## 5. 可间接验证场景步骤
 
@@ -424,7 +416,7 @@ Related:
 
 ## 8. 总结
 
-当前实验室已能直接验证 `4.2.1` 中 18 个可拆分场景里的 12 个：
+当前实验室已能直接验证本文范围内 14 个可拆分场景里的 8 个：
 
 - `inbound_invalid` 主链路
 - unsupported action
@@ -433,10 +425,6 @@ Related:
 - pending question/permission 不存在
 - ProviderRun.result reject
 - request facts 生命周期非法
-- failed terminal
-- session_not_found terminal
-- outbound invalid facts
-- outbound facts iterator throw
 
 仍需改造后才能稳定直接验证的场景有 4 个：
 
@@ -450,4 +438,4 @@ Related:
 - replyQuestion Provider 抛错
 - replyPermission Provider 抛错
 
-推荐优先补齐 Stage Matrix 组合步骤和 Reply Interaction Lab。这样可以把真实宿主侧依赖降到最低，让 `4.2.1` 所有 stage 场景都能通过 Mock 模式稳定回归。
+推荐优先补齐 Stage Matrix 组合步骤和 Reply Interaction Lab。这样可以把真实宿主侧依赖降到最低，让本文范围内的 `4.2.1` 场景都能通过 Mock 模式稳定回归。
