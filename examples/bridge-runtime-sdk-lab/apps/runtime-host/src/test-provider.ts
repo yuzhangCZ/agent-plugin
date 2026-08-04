@@ -160,6 +160,27 @@ export class TestProvider implements ThirdPartyAgentProvider {
     });
   }
 
+  async emitManualOutboundRun(input: {
+    toolSessionId: string;
+    runId: string;
+    trigger: string;
+    facts: ProviderFact[];
+  }): Promise<AppliedResult> {
+    if (!this.#context) {
+      throw new Error('Provider runtime context is not initialized');
+    }
+    this.#events.append('provider.outbound.manual', 'Provider manual outbound run emitted', {
+      input,
+      rawInputText: safeJsonText(input),
+    });
+    return this.#context.outbound.emitOutboundRun({
+      toolSessionId: input.toolSessionId,
+      runId: input.runId,
+      trigger: input.trigger,
+      facts: toAsyncIterable(input.facts),
+    });
+  }
+
   async #beforeCall(command: string, input: unknown): Promise<ProviderScenarioConfig> {
     const scenario = this.#scenarioFor(command);
     this.#events.append('provider.call', `Provider ${command} called`, {
@@ -206,6 +227,12 @@ async function* defaultFactStream(): AsyncIterable<ProviderFact> {
   yield { type: 'text.delta', messageId, partId: textPartId, content: 'SDK lab response chunk' };
   yield { type: 'text.done', messageId, partId: textPartId, content: 'SDK lab response chunk' };
   yield { type: 'message.done', messageId, reason: 'completed' };
+}
+
+async function* toAsyncIterable(facts: ProviderFact[]): AsyncIterable<ProviderFact> {
+  for (const fact of facts) {
+    yield fact;
+  }
 }
 
 async function* invalidFactStream(): AsyncIterable<ProviderFact> {

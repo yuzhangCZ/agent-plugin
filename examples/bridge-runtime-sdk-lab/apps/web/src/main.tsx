@@ -34,6 +34,7 @@ import './styles.css';
 
 const API_BASE = '';
 type EventStreamFilter = 'all' | 'onMessage' | 'sendMessage';
+type ManualReportMode = 'request' | 'outbound';
 
 const eventStreamFilters: Array<{ id: EventStreamFilter; label: string }> = [
   { id: 'all', label: '全部' },
@@ -95,8 +96,14 @@ function App(): React.JSX.Element {
   const [downstreamResult, setDownstreamResult] = useState<DownstreamRunResult | undefined>();
   const [downstreamScenarios, setDownstreamScenarios] = useState<DownstreamScenario[]>([]);
   const [manualTemplates, setManualTemplates] = useState<ManualAgentTemplate[]>([]);
+  const [manualReportMode, setManualReportMode] = useState<ManualReportMode>('request');
   const [selectedManualTemplateId, setSelectedManualTemplateId] = useState('message.start');
   const [manualFactText, setManualFactText] = useState('{}');
+  const [manualOutboundTarget, setManualOutboundTarget] = useState({
+    toolSessionId: '',
+    runId: '',
+    trigger: 'sdk-lab',
+  });
   const [manualTerminal, setManualTerminal] = useState({
     message: 'Manual agent reported failure',
     code: 'internal_error',
@@ -133,6 +140,15 @@ function App(): React.JSX.Element {
         channel: next.gateway?.register.channel ?? current.channel,
         toolVersion: next.gateway?.register.toolVersion ?? current.toolVersion,
         pluginVersion: next.gateway?.register.pluginVersion ?? current.pluginVersion,
+      }));
+    }
+    if (next.manualAgent?.outbound) {
+      setManualOutboundTarget((current) => ({
+        toolSessionId: next.manualAgent?.outbound.target.toolSessionId === 'tool_pending'
+          ? current.toolSessionId
+          : next.manualAgent?.outbound.target.toolSessionId ?? current.toolSessionId,
+        runId: next.manualAgent?.outbound.target.runId ?? current.runId,
+        trigger: next.manualAgent?.outbound.trigger ?? current.trigger,
       }));
     }
     const scenarios = await api<DownstreamScenario[]>('/api/downstream/scenarios');
@@ -186,6 +202,8 @@ function App(): React.JSX.Element {
   const groupedDownstream = useMemo(() => groupScenarios(downstreamScenarios), [downstreamScenarios]);
   const availableScenarioKinds = scenarioKindsByCommand[scenario.command] ?? ['success'];
   const selectedManualTemplate = manualTemplates.find((item) => item.id === selectedManualTemplateId);
+  const manualOutbound = snapshot.manualAgent?.outbound;
+  const hasManualOutboundTarget = Boolean(manualOutbound?.target.toolSessionId && manualOutbound.target.toolSessionId !== 'tool_pending');
 
   const runRuntimeAction = useCallback(async (action: (typeof runtimeButtons)[number]['id']) => {
     setBusyAction(action);
@@ -289,7 +307,7 @@ function App(): React.JSX.Element {
     setBusyAction('manual-fact');
     try {
       const fact = JSON.parse(manualFactText) as unknown;
-      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/fact', {
+      setLastResult(await api<RuntimeActionResult>(manualReportMode === 'outbound' ? '/api/manual-agent/outbound/fact' : '/api/manual-agent/fact', {
         method: 'POST',
         body: JSON.stringify({ fact }),
       }));
@@ -299,7 +317,7 @@ function App(): React.JSX.Element {
     } finally {
       setBusyAction(undefined);
     }
-  }, [manualFactText, refresh]);
+  }, [manualFactText, manualReportMode, refresh]);
 
   const finishManualRun = useCallback(async (outcome: ManualAgentTerminalOutcome) => {
     setBusyAction(`manual-${outcome}`);
@@ -322,17 +340,17 @@ function App(): React.JSX.Element {
     setBusyAction('manual-text-response');
     try {
       const textDoneFact = JSON.parse(manualFactText) as unknown;
-      const factResult = await api<RuntimeActionResult>('/api/manual-agent/text-response', {
+      const factResult = await api<RuntimeActionResult>(manualReportMode === 'outbound' ? '/api/manual-agent/outbound/text-response' : '/api/manual-agent/text-response', {
         method: 'POST',
         body: JSON.stringify({ textDoneFact }),
       });
-      const terminalResult = await api<RuntimeActionResult>('/api/manual-agent/terminal', {
+      const terminalResult = await api<RuntimeActionResult>(manualReportMode === 'outbound' ? '/api/manual-agent/outbound/send' : '/api/manual-agent/terminal', {
         method: 'POST',
-        body: JSON.stringify({ outcome: 'completed' }),
+        body: JSON.stringify(manualReportMode === 'outbound' ? {} : { outcome: 'completed' }),
       });
       setLastResult({
         ok: factResult.ok && terminalResult.ok,
-        action: 'manual_agent.text_response.completed',
+        action: manualReportMode === 'outbound' ? 'manual_agent.outbound.text_response.sent' : 'manual_agent.text_response.completed',
         payload: {
           facts: factResult,
           terminal: terminalResult,
@@ -345,7 +363,53 @@ function App(): React.JSX.Element {
     } finally {
       setBusyAction(undefined);
     }
-  }, [manualFactText, refresh]);
+  }, [manualFactText, manualReportMode, refresh]);
+
+  const applyOutboundTarget = useCallback(async () => {
+    setBusyAction('manual-outbound-target');
+    try {
+      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/outbound/target', {
+        method: 'POST',
+        body: JSON.stringify(manualOutboundTarget),
+      }));
+      await refresh();
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [manualOutboundTarget, refresh]);
+
+  const useLatestOutboundTarget = useCallback(() => {
+    const toolSessionId = readLatestToolSessionId(snapshot);
+    if (toolSessionId) {
+      setManualOutboundTarget((current) => ({ ...current, toolSessionId }));
+    }
+  }, [snapshot]);
+
+  const sendManualOutboundRun = useCallback(async () => {
+    setBusyAction('manual-outbound-send');
+    try {
+      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/outbound/send', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }));
+      await refresh();
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [refresh]);
+
+  const clearManualOutboundFacts = useCallback(async () => {
+    setBusyAction('manual-outbound-clear');
+    try {
+      setLastResult(await api<RuntimeActionResult>('/api/manual-agent/outbound/clear', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }));
+      await refresh();
+    } finally {
+      setBusyAction(undefined);
+    }
+  }, [refresh]);
 
   const runDownstreamScenario = useCallback(async () => {
     setBusyAction('downstream');
@@ -567,16 +631,59 @@ function App(): React.JSX.Element {
                   {snapshot.manualAgent?.enabled ? '开启' : '关闭'}
                 </button>
               </div>
-              <div className="manual-context">
-                <span>toolSessionId</span>
-                <strong>{snapshot.manualAgent?.activeRun?.toolSessionId ?? '-'}</strong>
-                <span>runId</span>
-                <strong>{snapshot.manualAgent?.activeRun?.runId ?? '-'}</strong>
-                <span>messageId</span>
-                <strong>{snapshot.manualAgent?.activeRun?.messageId ?? '-'}</strong>
-                <span>textPartId</span>
-                <strong>{snapshot.manualAgent?.activeRun?.textPartId ?? '-'}</strong>
+              <div className="segmented">
+                <button className={manualReportMode === 'request' ? 'selected' : ''} onClick={() => setManualReportMode('request')}>响应下行</button>
+                <button className={manualReportMode === 'outbound' ? 'selected' : ''} onClick={() => setManualReportMode('outbound')}>主动 Outbound</button>
               </div>
+              {manualReportMode === 'request' ? (
+                <div className="manual-context">
+                  <span>toolSessionId</span>
+                  <strong>{snapshot.manualAgent?.activeRun?.toolSessionId ?? '-'}</strong>
+                  <span>runId</span>
+                  <strong>{snapshot.manualAgent?.activeRun?.runId ?? '-'}</strong>
+                  <span>messageId</span>
+                  <strong>{snapshot.manualAgent?.activeRun?.messageId ?? '-'}</strong>
+                  <span>textPartId</span>
+                  <strong>{snapshot.manualAgent?.activeRun?.textPartId ?? '-'}</strong>
+                </div>
+              ) : (
+                <div className="manual-outbound-target">
+                  <label>
+                    <span>目标 toolSessionId</span>
+                    <input
+                      value={manualOutboundTarget.toolSessionId}
+                      onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, toolSessionId: event.target.value })}
+                      placeholder="从真实下行 payload.toolSessionId 填入"
+                    />
+                  </label>
+                  <div className="two-col">
+                    <label>
+                      <span>runId</span>
+                      <input value={manualOutboundTarget.runId} onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, runId: event.target.value })} />
+                    </label>
+                    <label>
+                      <span>trigger</span>
+                      <input value={manualOutboundTarget.trigger} onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, trigger: event.target.value })} />
+                    </label>
+                  </div>
+                  <div className="manual-action-row">
+                    <button className="secondary" onClick={useLatestOutboundTarget}>使用最近下行</button>
+                    <button className="primary" onClick={() => void applyOutboundTarget()} disabled={busyAction === 'manual-outbound-target'}>
+                      应用目标
+                    </button>
+                  </div>
+                  <div className="manual-context">
+                    <span>target</span>
+                    <strong>{manualOutbound?.target.toolSessionId ?? '-'}</strong>
+                    <span>runId</span>
+                    <strong>{manualOutbound?.target.runId ?? '-'}</strong>
+                    <span>trigger</span>
+                    <strong>{manualOutbound?.trigger ?? '-'}</strong>
+                    <span>queued</span>
+                    <strong>{manualOutbound?.queuedFactCount ?? 0}</strong>
+                  </div>
+                </div>
+              )}
               <label>
                 <span>模板</span>
                 <select value={selectedManualTemplateId} onChange={(event) => applyManualTemplate(event.target.value)}>
@@ -593,18 +700,22 @@ function App(): React.JSX.Element {
             <div className="manual-agent-editor">
               <div className="manual-quick-response">
                 <p className="muted">
-                  当前编辑区必须是 `text.done`，会保留你编辑的全部字段。
+                  {manualReportMode === 'outbound'
+                    ? '当前编辑区必须是 `text.done`，会补齐 facts 队列并发送到目标 toolSessionId。'
+                    : '当前编辑区必须是 `text.done`，会保留你编辑的全部字段。'}
                 </p>
                 <button
                   className="primary"
                   onClick={() => void submitManualTextResponse()}
-                  disabled={busyAction === 'manual-text-response' || !(snapshot.manualAgent?.activeRun)}
+                  disabled={busyAction === 'manual-text-response' || (manualReportMode === 'request' ? !(snapshot.manualAgent?.activeRun) : !hasManualOutboundTarget)}
                 >
-                  按当前 text.done 补齐并完成
+                  {manualReportMode === 'outbound' ? '按当前 text.done 补齐并发送 Outbound' : '按当前 text.done 补齐并完成'}
                 </button>
               </div>
               <p className="muted">
-                {'补齐顺序：message.start -> text.delta -> 当前 text.done -> message.done -> completed。'}
+                {manualReportMode === 'outbound'
+                  ? '补齐顺序：message.start -> text.delta -> 当前 text.done -> message.done -> emitOutboundRun。'
+                  : '补齐顺序：message.start -> text.delta -> 当前 text.done -> message.done -> completed。'}
               </p>
               <textarea
                 value={manualFactText}
@@ -616,32 +727,54 @@ function App(): React.JSX.Element {
                 <button
                   className="primary"
                   onClick={() => void submitManualFact()}
-                  disabled={busyAction === 'manual-fact' || !(snapshot.manualAgent?.activeRun)}
+                  disabled={busyAction === 'manual-fact' || (manualReportMode === 'request' ? !(snapshot.manualAgent?.activeRun) : !hasManualOutboundTarget)}
                 >
-                  上报 Fact
+                  {manualReportMode === 'outbound' ? '加入 Outbound 队列' : '上报 Fact'}
                 </button>
-                <button
-                  className="secondary"
-                  onClick={() => void finishManualRun('completed')}
-                  disabled={busyAction === 'manual-completed' || !(snapshot.manualAgent?.activeRun)}
-                >
-                  完成 completed
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() => void finishManualRun('aborted')}
-                  disabled={busyAction === 'manual-aborted' || !(snapshot.manualAgent?.activeRun)}
-                >
-                  中止 aborted
-                </button>
-                <button
-                  className="secondary danger"
-                  onClick={() => void finishManualRun('failed')}
-                  disabled={busyAction === 'manual-failed' || !(snapshot.manualAgent?.activeRun)}
-                >
-                  失败 failed
-                </button>
+                {manualReportMode === 'outbound' ? (
+                  <>
+                    <button
+                      className="secondary"
+                      onClick={() => void sendManualOutboundRun()}
+                      disabled={busyAction === 'manual-outbound-send' || !hasManualOutboundTarget || (manualOutbound?.queuedFactCount ?? 0) === 0}
+                    >
+                      发送 Outbound Run
+                    </button>
+                    <button
+                      className="secondary danger"
+                      onClick={() => void clearManualOutboundFacts()}
+                      disabled={busyAction === 'manual-outbound-clear' || (manualOutbound?.queuedFactCount ?? 0) === 0}
+                    >
+                      清空队列
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="secondary"
+                      onClick={() => void finishManualRun('completed')}
+                      disabled={busyAction === 'manual-completed' || !(snapshot.manualAgent?.activeRun)}
+                    >
+                      完成 completed
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => void finishManualRun('aborted')}
+                      disabled={busyAction === 'manual-aborted' || !(snapshot.manualAgent?.activeRun)}
+                    >
+                      中止 aborted
+                    </button>
+                    <button
+                      className="secondary danger"
+                      onClick={() => void finishManualRun('failed')}
+                      disabled={busyAction === 'manual-failed' || !(snapshot.manualAgent?.activeRun)}
+                    >
+                      失败 failed
+                    </button>
+                  </>
+                )}
               </div>
+              {manualReportMode === 'outbound' ? <OutboundQueuePreview facts={manualOutbound?.queuedFacts ?? []} /> : null}
               <div className="two-col">
                 <label>
                   <span>Failed code</span>
@@ -787,6 +920,18 @@ function EventDetail({ event }: { event: LabEvent }): React.JSX.Element | null {
     return null;
   }
   return <pre className="event-detail">{detail}</pre>;
+}
+
+function OutboundQueuePreview({ facts }: { facts: unknown[] }): React.JSX.Element {
+  if (facts.length === 0) {
+    return <p className="muted">Outbound facts 队列为空。加入 fact 后再发送到目标 toolSessionId。</p>;
+  }
+  return (
+    <div className="outbound-queue">
+      <strong>Outbound Facts Queue ({facts.length})</strong>
+      <pre>{JSON.stringify(facts, null, 2)}</pre>
+    </div>
+  );
 }
 
 function GatewayDownstreamSummary({
@@ -1237,6 +1382,14 @@ function formatSdkToAgentInput(call: SdkToAgentCallView): string {
 
 function readLatestEventId(events: LabEvent[]): number {
   return events.reduce((latestId, event) => Math.max(latestId, event.id), 0);
+}
+
+function readLatestToolSessionId(snapshot: RuntimeSnapshot): string | undefined {
+  const downstreamTool = snapshot.downstreams?.find((downstream) => downstream.toolSessionId)?.toolSessionId;
+  if (downstreamTool) {
+    return downstreamTool;
+  }
+  return snapshot.manualAgent?.activeRun?.toolSessionId;
 }
 
 function matchesEventStreamFilter(event: LabEvent, filter: EventStreamFilter): boolean {

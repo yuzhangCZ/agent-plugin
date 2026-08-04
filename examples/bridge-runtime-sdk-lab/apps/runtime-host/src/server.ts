@@ -82,6 +82,34 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJson(res, 200, actionResult('manual_agent.text_response', manualAgent.submitTextResponse(body?.textDoneFact)));
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/outbound/target') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.outbound.target', manualAgent.setOutboundTarget({
+      toolSessionId: stringField(body, 'toolSessionId'),
+      runId: stringField(body, 'runId'),
+      trigger: stringField(body, 'trigger'),
+    })));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/outbound/fact') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.outbound.fact', manualAgent.queueOutboundFact(body?.fact)));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/outbound/text-response') {
+    const body = asRecord(await readJson(req));
+    sendJson(res, 200, actionResult('manual_agent.outbound.text_response', manualAgent.queueOutboundTextResponse(body?.textDoneFact)));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/outbound/clear') {
+    sendJson(res, 200, actionResult('manual_agent.outbound.clear', manualAgent.clearOutboundFacts()));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/manual-agent/outbound/send') {
+    await provider.emitManualOutboundRun(manualAgent.drainOutboundRun());
+    sendJson(res, 200, actionResult('manual_agent.outbound.send', manualAgent.snapshot()));
+    return;
+  }
   if (req.method === 'POST' && url.pathname === '/api/manual-agent/terminal') {
     const body = asRecord(await readJson(req));
     const outcome = body?.outcome === 'failed' || body?.outcome === 'aborted' ? body.outcome : 'completed';

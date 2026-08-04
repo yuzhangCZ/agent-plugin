@@ -372,6 +372,11 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.manual-outbound-target {
+  display: grid;
+  gap: 10px;
+}
+
 .sequence-warning {
   margin: 0;
   padding: 9px 10px;
@@ -392,6 +397,29 @@ button:disabled {
   background: #f8fafc;
   border: 1px solid #dce5f1;
   border-radius: 8px;
+}
+
+.outbound-queue {
+  display: grid;
+  gap: 8px;
+}
+
+.outbound-queue strong {
+  color: #253149;
+  font-size: 12px;
+}
+
+.outbound-queue pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: #d9e8ff;
+  background: #111827;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .manual-agent-editor textarea {

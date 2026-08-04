@@ -198,7 +198,7 @@ Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `Pro
 
 默认关闭时，`TestProvider.runMessage()` 继续使用自动 facts 流；开启后，下一次 gateway 下行 `chat` 触发 `runMessage()` 时，TestProvider 会创建一个 pending manual run，等待前端提交 facts 和 terminal。
 
-使用步骤：
+### 7.1 响应下行 Request Run
 
 1. 切换到真实或 Mock gateway。
 2. 点击“初始化”和“启动”。
@@ -210,6 +210,21 @@ Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `Pro
 8. 继续提交 `text.delta`、`text.done`、`message.done` 等 facts。
 9. 点击 `完成 completed`、`失败 failed` 或 `中止 aborted` 结束 terminal。
 10. 在 `Gateway Uplink` 和 `Tool Error` 面板观察 SDK 真实生成的上行。
+
+### 7.2 主动 Outbound
+
+主动 Outbound 用于验证 mock agent 主动调用 `context.outbound.emitOutboundRun()` 的链路，目标会话由 `toolSessionId` 显式指定。
+
+1. 切换到真实 gateway。
+2. 点击“初始化”和“启动”。
+3. 让宿主用户先发一条消息，或从 `Gateway Downstream` 面板确认目标会话的 `toolSessionId`。
+4. 在 Manual Agent Report 中切换到 `主动 Outbound`。
+5. 点击“使用最近下行”，或手动填写目标 `toolSessionId`。
+6. 按需编辑 `runId` 和 `trigger`，点击“应用目标”。
+7. 选择模板并点击“加入 Outbound 队列”，或选择 `text.done` 后点击“按当前 text.done 补齐并发送 Outbound”。
+8. 如果是逐条加入队列，确认 `Outbound Facts Queue` 后点击“发送 Outbound Run”。
+9. 在右侧事件流筛选 `sendMessage`，观察 SDK 发往 gateway 的 `tool_event`、`tool_done` 或 `tool_error`。
+10. 在宿主真实会话中确认主动消息是否进入目标 `toolSessionId` 对应的会话。
 
 常用模板包括：
 
@@ -233,7 +248,8 @@ Manual Agent Report 用于在 `runMessage()` 场景中手动编辑并提交 `Pro
 4. 如果提交非法 JSON，前端会在最近结果中展示 JSON parse 错误。
 5. `text.delta`、`text.done`、`tool.update`、`question.ask` 依赖已打开的 message，单独提交 `text.done` 会触发 `fact_sequence_invalid`。
 6. “按当前 text.done 补齐并完成”只补顺序，不裁剪 `text.done` 的其它字段；`text.delta` 会复用当前 `text.done.content`。
-7. 如果提交结构合法但不符合 SDK ProviderFact 契约，应通过 SDK diagnostics、`tool_error` 或上行校验行为观察结果。
+7. 主动 Outbound 的会话关联完全依赖目标 `toolSessionId`，填错会导致消息进入错误会话或无法在宿主侧定位。
+8. 如果提交结构合法但不符合 SDK ProviderFact 契约，应通过 SDK diagnostics、`tool_error` 或上行校验行为观察结果。
 
 ## 8. Stage Matrix Lab
 

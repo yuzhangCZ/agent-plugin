@@ -1,6 +1,7 @@
 import type {
   ManualAgentContext,
   ManualAgentFactResult,
+  ManualAgentOutboundTargetInput,
   ManualAgentSnapshot,
   ManualAgentTemplate,
   ManualAgentTerminalInput,
@@ -20,10 +21,17 @@ interface ManualRunState {
   factsClosed: boolean;
 }
 
+interface ManualOutboundState {
+  context: ManualAgentContext;
+  trigger: string;
+  facts: ProviderFact[];
+}
+
 export class ManualAgentController {
   readonly #events: EventStore;
   #enabled = false;
   #activeRun: ManualRunState | undefined;
+  #outbound: ManualOutboundState = createOutboundState();
 
   constructor(events: EventStore) {
     this.#events = events;
@@ -120,6 +128,101 @@ export class ManualAgentController {
     };
   }
 
+  setOutboundTarget(input: ManualAgentOutboundTargetInput): ManualAgentSnapshot {
+    const previousFacts = this.#outbound.facts;
+    this.#outbound = createOutboundState({
+      toolSessionId: input.toolSessionId,
+      runId: input.runId,
+      trigger: input.trigger,
+      facts: previousFacts,
+    });
+    this.#events.append('manual_agent.outbound.target_changed', 'Manual outbound target changed', {
+      target: this.#outbound.context,
+      trigger: this.#outbound.trigger,
+    });
+    return this.snapshot();
+  }
+
+  queueOutboundFact(value: unknown): ManualAgentFactResult {
+    const fact = normalizeProviderFact(value);
+    this.#outbound.facts.push(fact);
+    this.#events.append('manual_agent.outbound.fact_queued', `Manual outbound ProviderFact queued: ${fact.type}`, {
+      fact,
+      rawFactText: safeJsonText(fact),
+      queuedFactCount: this.#outbound.facts.length,
+      target: this.#outbound.context,
+    });
+    return {
+      accepted: true,
+      queuedFactCount: this.#outbound.facts.length,
+      submittedFactCount: 1,
+    };
+  }
+
+  queueOutboundTextResponse(value: unknown): ManualAgentFactResult {
+    const textDoneFact = normalizeTextDoneFact(value, this.#outbound.context);
+    const content = typeof textDoneFact.content === 'string' ? textDoneFact.content : 'Manual response chunk';
+    const facts: ProviderFact[] = [
+      { type: 'message.start', messageId: textDoneFact.messageId },
+      {
+        type: 'text.delta',
+        messageId: textDoneFact.messageId,
+        partId: textDoneFact.partId,
+        content,
+      },
+      textDoneFact,
+      { type: 'message.done', messageId: textDoneFact.messageId, reason: 'completed' },
+    ];
+    this.#outbound.facts.push(...facts);
+    this.#events.append('manual_agent.outbound.text_response_queued', 'Manual outbound text response facts queued', {
+      textDoneFact,
+      rawTextDoneFactText: safeJsonText(textDoneFact),
+      submittedFactCount: facts.length,
+      queuedFactCount: this.#outbound.facts.length,
+      target: this.#outbound.context,
+    });
+    return {
+      accepted: true,
+      queuedFactCount: this.#outbound.facts.length,
+      submittedFactCount: facts.length,
+    };
+  }
+
+  clearOutboundFacts(): ManualAgentSnapshot {
+    this.#outbound.facts = [];
+    this.#events.append('manual_agent.outbound.cleared', 'Manual outbound facts queue cleared', {
+      target: this.#outbound.context,
+    });
+    return this.snapshot();
+  }
+
+  drainOutboundRun(): { toolSessionId: string; runId: string; trigger: string; facts: ProviderFact[] } {
+    if (this.#outbound.context.toolSessionId === 'tool_pending') {
+      throw new Error('Manual outbound target toolSessionId is required');
+    }
+    if (this.#outbound.facts.length === 0) {
+      throw new Error('Manual outbound facts queue is empty');
+    }
+    const run = {
+      toolSessionId: this.#outbound.context.toolSessionId,
+      runId: this.#outbound.context.runId,
+      trigger: this.#outbound.trigger,
+      facts: [...this.#outbound.facts],
+    };
+    this.#outbound.facts = [];
+    this.#outbound = createOutboundState({
+      toolSessionId: run.toolSessionId,
+      trigger: run.trigger,
+    });
+    this.#events.append('manual_agent.outbound.drained', 'Manual outbound facts drained for emitOutboundRun', {
+      toolSessionId: run.toolSessionId,
+      runId: run.runId,
+      trigger: run.trigger,
+      factCount: run.facts.length,
+    });
+    return run;
+  }
+
   finishActiveRun(input: ManualAgentTerminalInput): ManualAgentSnapshot {
     const state = this.#activeRun;
     if (!state || state.terminal) {
@@ -145,11 +248,17 @@ export class ManualAgentController {
       enabled: this.#enabled,
       activeRun: this.#activeRun?.context,
       queuedFactCount: this.#activeRun?.queue.length ?? 0,
+      outbound: {
+        target: this.#outbound.context,
+        trigger: this.#outbound.trigger,
+        queuedFactCount: this.#outbound.facts.length,
+        queuedFacts: this.#outbound.facts,
+      },
     };
   }
 
   templates(): ManualAgentTemplate[] {
-    const context = this.#activeRun?.context ?? createPlaceholderContext();
+    const context = this.#activeRun?.context ?? this.#outbound.context ?? createPlaceholderContext();
     return createTemplates(context);
   }
 
@@ -268,6 +377,27 @@ function createPlaceholderContext(): ManualAgentContext {
     thinkingPartId: 'prt_thinking_manual',
     toolPartId: 'prt_tool_manual',
     toolCallId: 'tool_call_manual',
+  };
+}
+
+function createOutboundState(input: ManualAgentOutboundTargetInput & { facts?: ProviderFact[] } = {}): ManualOutboundState {
+  const toolSessionId = typeof input.toolSessionId === 'string' && input.toolSessionId.trim().length > 0
+    ? input.toolSessionId.trim()
+    : 'tool_pending';
+  return {
+    context: {
+      runId: typeof input.runId === 'string' && input.runId.trim().length > 0 ? input.runId.trim() : `run_${crypto.randomUUID()}`,
+      traceId: `trace_${crypto.randomUUID()}`,
+      toolSessionId,
+      text: 'manual outbound message',
+      messageId: `msg_${crypto.randomUUID()}`,
+      textPartId: `prt_${crypto.randomUUID()}`,
+      thinkingPartId: `prt_${crypto.randomUUID()}`,
+      toolPartId: `prt_${crypto.randomUUID()}`,
+      toolCallId: `tool_${crypto.randomUUID()}`,
+    },
+    trigger: typeof input.trigger === 'string' && input.trigger.trim().length > 0 ? input.trigger.trim() : 'sdk-lab',
+    facts: input.facts ?? [],
   };
 }
 

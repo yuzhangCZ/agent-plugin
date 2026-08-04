@@ -150,6 +150,14 @@ export interface ManualAgentSnapshot {
   enabled: boolean;
   activeRun?: ManualAgentContext;
   queuedFactCount: number;
+  outbound: ManualAgentOutboundSnapshot;
+}
+
+export interface ManualAgentOutboundSnapshot {
+  target: ManualAgentContext;
+  trigger: string;
+  queuedFactCount: number;
+  queuedFacts: unknown[];
 }
 
 export interface ManualAgentTemplate {
@@ -173,4 +181,10 @@ export interface ManualAgentTerminalInput {
 
 export interface ManualAgentTextResponseInput {
   textDoneFact: unknown;
+}
+
+export interface ManualAgentOutboundTargetInput {
+  toolSessionId?: string;
+  runId?: string;
+  trigger?: string;
 }
