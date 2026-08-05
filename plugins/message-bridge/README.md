@@ -278,7 +278,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 | `gateway.reconnect.maxMs` | `30000` |
 | `gateway.reconnect.exponential` | `true` |
 | `gateway.reconnect.jitter` | `full` |
-| `gateway.reconnect.maxElapsedMs` | `600000` |
+| `gateway.reconnect.maxElapsedMs` | `2400000` |
 | `gateway.ping.intervalMs` | `30000` |
 | `gateway.ping.pongTimeoutMs` | `10000` |
 | `sdk.timeoutMs` | `10000` |
@@ -292,7 +292,7 @@ CLI 不会提示输入 `gateway.url`；已有值会保留，缺失时回退到 b
 - `exponential=true` 时按截断指数退避计算目标间隔：`1s -> 2s -> 4s -> 8s -> 16s -> 30s -> 30s ...`
 - `exponential=false` 时固定按 `baseMs` 重试，仍受 `maxMs` 截断
 - `jitter=full` 时，实际重连延迟会在 `0..cappedDelay` 范围内随机
-- `maxElapsedMs=600000` 表示单轮自动重连总时长最多 10 分钟；超时后停止自动重连，连接保持 `DISCONNECTED`
+- `maxElapsedMs=2400000` 表示单轮自动重连总时长最多 40 分钟；超时后停止自动重连，连接保持 `DISCONNECTED`
 
 ## 日志
 

@@ -10,12 +10,14 @@ import type { GatewayClientRuntimeDependencies } from '../application/GatewayCli
 import { DefaultOutboundProtocolGate } from '../application/protocol/OutboundProtocolGate.ts';
 import { GATEWAY_RECONNECT_JITTER, type GatewayReconnectConfig } from '../domain/reconnect.ts';
 
+export const DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS = 2400000;
+
 const DEFAULT_RECONNECT_CONFIG: Required<GatewayReconnectConfig> = {
   baseMs: 1000,
   maxMs: 30000,
   exponential: true,
   jitter: GATEWAY_RECONNECT_JITTER.NONE,
-  maxElapsedMs: 600000,
+  maxElapsedMs: DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS,
   enabled: true,
 };
 

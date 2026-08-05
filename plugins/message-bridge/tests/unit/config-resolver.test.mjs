@@ -22,7 +22,7 @@ describe('ConfigResolver debug defaults', () => {
       const config = await new ConfigResolver().resolveConfig(tempHome);
       assert.deepStrictEqual(config.gateway, DEFAULT_BRIDGE_CONFIG.gateway);
       assert.strictEqual(config.gateway.reconnect.jitter, 'full');
-      assert.strictEqual(config.gateway.reconnect.maxElapsedMs, 600000);
+      assert.strictEqual(config.gateway.reconnect.maxElapsedMs, 2400000);
       assert.deepStrictEqual(config.sdk, DEFAULT_BRIDGE_CONFIG.sdk);
       assert.deepStrictEqual(config.events, DEFAULT_BRIDGE_CONFIG.events);
       assert.strictEqual(config.enabled, DEFAULT_BRIDGE_CONFIG.enabled);

@@ -200,7 +200,7 @@ export function createTestConfig(overrides = {}) {
         maxMs: 30000,
         exponential: true,
         jitter: 'full',
-        maxElapsedMs: 600000,
+        maxElapsedMs: 2400000,
       }
     },
     sdk: {
