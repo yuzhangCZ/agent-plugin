@@ -138,6 +138,7 @@ test("question_reply accepts legacy toolCallId alias", () => {
   assert.deepEqual(result.value.payload, {
     questionId: "question_legacy_1",
     answers: [["ok"]],
+    extParameters: undefined,
   });
 });
 
@@ -156,6 +157,7 @@ test("question_reply prefers questionId when questionId and toolCallId both exis
   assert.deepEqual(result.value.payload, {
     questionId: "question_primary_1",
     answers: [["ok"]],
+    extParameters: undefined,
   });
 });
 
