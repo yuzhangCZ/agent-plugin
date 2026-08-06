@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { MESSAGE_PART_STATE_STATUSES } from '../../../literals/tool-event.ts';
+import { upstreamExtParametersSchema } from '../../ext-parameters.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
 const requiredProtocolString = z.string().min(1);
@@ -11,6 +12,7 @@ const skillTextDeltaEventBaseSchema = z.object({
     messageId: requiredProtocolString,
     partId: requiredProtocolString,
     content: z.string(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 
@@ -20,6 +22,7 @@ const skillTextDoneEventBaseSchema = z.object({
     messageId: requiredProtocolString,
     partId: requiredProtocolString,
     content: z.string(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 
@@ -29,6 +32,7 @@ const skillThinkingDeltaEventBaseSchema = z.object({
     messageId: requiredProtocolString,
     partId: requiredProtocolString,
     content: z.string(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 
@@ -38,6 +42,7 @@ const skillThinkingDoneEventBaseSchema = z.object({
     messageId: requiredProtocolString,
     partId: requiredProtocolString,
     content: z.string(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 
@@ -53,6 +58,7 @@ const skillToolUpdateEventBaseSchema = z.object({
     input: z.record(z.string(), z.unknown()).optional(),
     output: z.string().optional(),
     error: z.string().optional(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 

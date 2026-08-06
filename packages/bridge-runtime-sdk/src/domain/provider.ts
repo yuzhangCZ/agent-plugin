@@ -1,4 +1,8 @@
 import type { ProviderCommandError, ProviderError } from './errors.ts';
+import type {
+  ExtParameters,
+  UpstreamExtParameters,
+} from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
 
 /**
  * Provider 终态结果。
@@ -14,6 +18,8 @@ export interface ProviderFactBase {
   // 仅透传 provider 提供的子代理 envelope 提示，不承担 runtime session ownership 语义。
   subagentSessionId?: string;
   subagentName?: string;
+  // provider 生成的上行业务扩展字段，由 projector 放入 tool_event.event.properties.extParameters。
+  extParameters?: UpstreamExtParameters;
 }
 
 export interface MessageStartFact extends ProviderFactBase {
@@ -180,8 +186,6 @@ export interface ProviderRun {
   result(): Promise<ProviderTerminalResult>;
 }
 
-import type { ExtParameters } from '../../../gateway-schema/src/contract/types/ext-parameters.ts';
-
 export interface ProviderHealthInput {
   traceId: string;
 }
@@ -237,17 +241,20 @@ export interface ProviderQuestionReplyInput {
   traceId: string;
   questionId: string;
   answers: QuestionAnswer[];
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderPermissionReplyInput {
   traceId: string;
   permissionId: string;
   reply: 'once' | 'always' | 'reject';
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderCloseSessionInput {
   traceId: string;
   toolSessionId: string;
+  extParameters?: ExtParameters;
 }
 
 export interface ProviderAbortSessionInput {
@@ -259,6 +266,7 @@ export interface ProviderAbortSessionInput {
    * 无 active run 时传入空数组；provider 根据自身 session/run 状态决定实际中止范围。
    */
   runIds: string[];
+  extParameters?: ExtParameters;
 }
 
 export interface EmitOutboundMessageInput {

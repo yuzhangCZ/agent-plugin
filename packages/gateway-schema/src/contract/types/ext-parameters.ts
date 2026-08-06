@@ -13,3 +13,5 @@ export interface ExtParameters {
   businessExtParam?: JsonValue;
   platformExtParam?: PlatformExtParam;
 }
+
+export type UpstreamExtParameters = Record<string, unknown>;

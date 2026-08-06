@@ -383,6 +383,7 @@ test('permission.ask preserves empty title during projection', async () => {
         permissionId: 'permission-empty-title',
         permType: 'file_write',
         title: '',
+        extParameters: undefined,
       },
     },
   });
@@ -451,6 +452,7 @@ test('permission.ask defaults missing title to empty string during projection', 
         permissionId: 'permission-missing-title',
         permType: 'file_write',
         title: '',
+        extParameters: undefined,
       },
     },
   });

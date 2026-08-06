@@ -79,6 +79,7 @@ test('runtime consumes legacy question answer by questionId and forwards normali
     traceId: 'trace-fixed',
     questionId: 'question-1',
     answers: [['A']],
+    extParameters: undefined,
   });
 });
 
@@ -151,6 +152,7 @@ test('runtime forwards structured question replies without flattening answers', 
     traceId: 'trace-fixed',
     questionId: 'question-1',
     answers: [['A'], ['B', 'C']],
+    extParameters: undefined,
   });
 });
 
@@ -219,6 +221,7 @@ test('runtime consumes permission replies by permissionId and forwards reply con
     traceId: 'trace-fixed',
     permissionId: 'permission-1',
     reply: 'always',
+    extParameters: undefined,
   });
 });
 

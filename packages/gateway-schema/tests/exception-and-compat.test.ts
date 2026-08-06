@@ -54,7 +54,7 @@ test('the canonical shared normalizer does not depend on legacy create_session p
     type: 'invoke',
     welinkSessionId: 'wl-gateway-legacy-create',
     action: 'create_session',
-    payload: {},
+    payload: { extParameters: undefined },
   });
   assert.equal('sessionId' in result.value.payload, false);
   assert.equal('metadata' in result.value.payload, false);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { upstreamExtParametersSchema } from '../../ext-parameters.ts';
 import { requiredTrimmedString } from '../../shared.ts';
 import { withCloudProtocol } from '../shared-protocol.ts';
 
@@ -7,6 +8,7 @@ const skillStepStartEventBaseSchema = z.object({
   type: z.literal('step.start'),
   properties: z.object({
     messageId: requiredTrimmedString,
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 
@@ -17,6 +19,7 @@ const skillStepDoneEventBaseSchema = z.object({
     tokens: z.record(z.string(), z.number()).optional(),
     cost: z.number().optional(),
     reason: requiredTrimmedString.optional(),
+    extParameters: upstreamExtParametersSchema.optional(),
   }),
 });
 

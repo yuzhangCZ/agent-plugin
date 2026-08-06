@@ -90,6 +90,7 @@ test('question.ask projects cloud questions payload and omits legacy flat fields
         toolCallId: 'call-question-1',
         status: 'running',
         extParam: { scene: 'confirm' },
+        extParameters: undefined,
         questions: [
           {
             question: 'Pick one',
