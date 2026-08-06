@@ -9,6 +9,9 @@ import type {
   BridgeRuntimeStatusSnapshot,
   OutboundFact,
   ProviderAbortSessionInput,
+  ProviderCloseSessionInput,
+  ProviderPermissionReplyInput,
+  ProviderQuestionReplyInput,
   RequestRunPolicyOptions,
   RuntimeDiagnostics,
   RuntimeOutboundEmitter,
@@ -39,7 +42,44 @@ const providerAbortSessionInput: ProviderAbortSessionInput = {
   traceId: 'trace-1',
   toolSessionId: 'tool-session-1',
   runIds: ['run-1'],
+  extParameters: {
+    requestId: 'ext-abort',
+    platformExtParam: {
+      businessSessionDomain: 'im',
+      businessSessionType: 'group',
+      businessSessionId: 'session-1',
+      allowedSlashCommands: ['new'],
+    },
+  },
 };
+const downstreamBusinessSessionId: string | undefined = providerAbortSessionInput.extParameters
+  ?.platformExtParam
+  ?.businessSessionId;
+const providerCloseSessionInput: ProviderCloseSessionInput = {
+  traceId: 'trace-1',
+  toolSessionId: 'tool-session-1',
+  extParameters: { requestId: 'ext-close' },
+};
+const providerQuestionReplyInput: ProviderQuestionReplyInput = {
+  traceId: 'trace-1',
+  questionId: 'question-1',
+  answers: [['yes']],
+  extParameters: { requestId: 'ext-question' },
+};
+const providerPermissionReplyInput: ProviderPermissionReplyInput = {
+  traceId: 'trace-1',
+  permissionId: 'permission-1',
+  reply: 'once',
+  extParameters: { requestId: 'ext-permission' },
+};
+const outboundFactWithExtParameters: OutboundFact = {
+  type: 'text.done',
+  messageId: 'message-1',
+  partId: 'part-1',
+  content: 'hello',
+  extParameters: { requestId: 'ext-fact' },
+};
+const upstreamExtRequestId: unknown = outboundFactWithExtParameters.extParameters?.requestId;
 const startRequestRunTrace: RuntimeTraceProviderCall = {
   command: 'startRequestRun',
   toolSessionId: 'tool-session-1',
@@ -84,6 +124,12 @@ void gatewayTransportErrorCode;
 void runtimeDiagnostics;
 void runtimeOptionsWithPolicy;
 void providerAbortSessionInput;
+void downstreamBusinessSessionId;
+void providerCloseSessionInput;
+void providerQuestionReplyInput;
+void providerPermissionReplyInput;
+void outboundFactWithExtParameters;
+void upstreamExtRequestId;
 void startRequestRunTrace;
 void abortExecutionTrace;
 void explicitSnapshot;

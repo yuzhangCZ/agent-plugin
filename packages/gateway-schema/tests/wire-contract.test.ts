@@ -2,14 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createGatewayWireMessageUpdatedEvent,
   createQuerySlashCommandsInvokeMessage,
   createSlashCommandsResultMessage,
 } from '../../test-support/fixtures/index.mjs';
-import {
-  assertProjectedMessageUpdatedShape,
-  assertWireViolationShape,
-} from '../../test-support/assertions/index.mjs';
 import { RecordingProtocolFailureReporter } from '../src/adapters/reporters/recording-protocol-failure-reporter.ts';
 import {
   gatewayWireProtocolSchema,
@@ -40,6 +35,7 @@ test('normalizeDownstream canonicalizes supported invoke shapes', () => {
     payload: {
       title: 'hello',
       assistantId: 'persona-1',
+      extParameters: undefined,
     },
   });
 });

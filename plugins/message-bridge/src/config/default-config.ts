@@ -16,7 +16,7 @@ export const DEFAULT_BRIDGE_CONFIG = {
       maxMs: 30000,
       exponential: true,
       jitter: RECONNECT_JITTER.FULL,
-      maxElapsedMs: 600000,
+      maxElapsedMs: 2400000,
     },
     ping: {
       intervalMs: 30000,

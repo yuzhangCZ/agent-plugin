@@ -132,7 +132,7 @@ test('runtime preserves stream fact content verbatim when projecting uplinks', a
     event: {
       protocol: 'cloud',
       type: 'text.delta',
-      properties: { messageId: 'msg-1', partId: 'part-1', content: originalContent },
+      properties: { messageId: 'msg-1', partId: 'part-1', content: originalContent, extParameters: undefined },
     },
   });
   assert.deepEqual(connection.sent[2], {
@@ -148,6 +148,7 @@ test('runtime preserves stream fact content verbatim when projecting uplinks', a
         toolName: 'bash',
         status: 'error',
         ...toolContent,
+        extParameters: undefined,
       },
     },
   });

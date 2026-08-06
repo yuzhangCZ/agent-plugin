@@ -97,6 +97,7 @@ test('abort_session forwards active run ids and sends tool_done when run resolve
     traceId: 'trace-fixed',
     toolSessionId: 'tool-1',
     runIds: [capturedRunId],
+    extParameters: undefined,
   });
   assert.deepEqual(runtime.getDiagnostics().providerCalls.find((call) => call.command === 'abortExecution'), {
     command: 'abortExecution',

@@ -19,14 +19,14 @@ class RecordingObservation {
   }
 }
 
-function createCommand() {
+function createCommand(payload: Record<string, unknown> = {}) {
   return {
     kind: 'close_session',
     traceId: 'trace-close',
     source: {
       type: 'invoke',
       action: 'close_session',
-      payload: { toolSessionId: 'tool-1' },
+      payload: { toolSessionId: 'tool-1', ...payload },
     },
   } as never;
 }
@@ -58,10 +58,33 @@ test('CloseSessionUseCase forwards closeSession and clears local session state',
 
   await useCase.execute(createCommand());
 
-  assert.deepEqual(closeCalls, [{ traceId: 'trace-close', toolSessionId: 'tool-1' }]);
+  assert.deepEqual(closeCalls, [{ traceId: 'trace-close', toolSessionId: 'tool-1', extParameters: undefined }]);
   assert.deepEqual(cleared, ['tool-1']);
   assert.deepEqual(deleted, ['tool-1']);
   assert.deepEqual(observation.events.map((event) => event.method), ['usecaseStarted', 'usecaseSucceeded']);
+});
+
+test('CloseSessionUseCase forwards optional extParameters to provider', async () => {
+  const closeCalls: unknown[] = [];
+  const useCase = new CloseSessionUseCase(
+    {
+      async closeSession(input: unknown) {
+        closeCalls.push(input);
+        return { applied: true as const };
+      },
+    } as never,
+    { delete() {} } as never,
+    { clearSession() {} } as never,
+    new RecordingObservation() as never,
+  );
+
+  await useCase.execute(createCommand({ extParameters: { requestId: 'ext-close' } }));
+
+  assert.deepEqual(closeCalls, [{
+    traceId: 'trace-close',
+    toolSessionId: 'tool-1',
+    extParameters: { requestId: 'ext-close' },
+  }]);
 });
 
 test('CloseSessionUseCase records failed observation when provider throws', async () => {

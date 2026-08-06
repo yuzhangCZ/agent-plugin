@@ -103,7 +103,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'step.start',
-        properties: { messageId: 'msg-1' },
+        properties: { messageId: 'msg-1', extParameters: undefined },
       },
     },
     {
@@ -112,7 +112,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'text.delta',
-        properties: { messageId: 'msg-1', partId: 'part-1', content: 'hello' },
+        properties: { messageId: 'msg-1', partId: 'part-1', content: 'hello', extParameters: undefined },
       },
     },
     {
@@ -121,7 +121,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'step.done',
-        properties: { messageId: 'msg-1' },
+        properties: { messageId: 'msg-1', extParameters: undefined },
       },
     },
     {
@@ -130,7 +130,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'step.start',
-        properties: { messageId: 'msg-2' },
+        properties: { messageId: 'msg-2', extParameters: undefined },
       },
     },
     {
@@ -139,7 +139,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'text.delta',
-        properties: { messageId: 'msg-2', partId: 'part-2', content: 'again' },
+        properties: { messageId: 'msg-2', partId: 'part-2', content: 'again', extParameters: undefined },
       },
     },
     {
@@ -148,7 +148,7 @@ test('emitOutboundRun projects multiple assistant messages in one outbound strea
       event: {
         protocol: 'cloud',
         type: 'step.done',
-        properties: { messageId: 'msg-2' },
+        properties: { messageId: 'msg-2', extParameters: undefined },
       },
     },
     {

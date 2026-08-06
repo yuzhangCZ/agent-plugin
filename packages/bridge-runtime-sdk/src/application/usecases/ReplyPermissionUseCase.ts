@@ -27,6 +27,7 @@ export class ReplyPermissionUseCase implements ReplyPermissionUseCasePort {
         traceId: command.traceId,
         permissionId: command.source.payload.permissionId,
         reply: command.source.payload.response,
+        extParameters: command.source.payload.extParameters,
       });
       this.observation.usecaseSucceeded('reply_permission', command.traceId);
     } catch (error) {

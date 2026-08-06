@@ -32,6 +32,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         toolCallId: 'call-q-1',
         status: 'running',
         extParam: { scene: 'confirm' },
+        extParameters: undefined,
         questions: [
           {
             question: '继续执行吗？',
@@ -51,6 +52,7 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
         permType: 'file_write',
         title: '允许写文件',
         metadata: { path: '/tmp/a.ts' },
+        extParameters: undefined,
       },
     },
     {
@@ -93,6 +95,132 @@ test('validateToolEvent accepts all skill provider white-list events', () => {
       protocol: 'cloud',
       type: item.type,
       properties: item.properties,
+    });
+  }
+});
+
+test('validateToolEvent preserves optional extParameters on every skill provider event', () => {
+  const extParameters = {
+    requestId: 'ext-event-1',
+    nested: {
+      enabled: true,
+    },
+  };
+  const cases = [
+    { type: 'text.delta', properties: { messageId: 'msg-1', partId: 'part-1', content: 'he' } },
+    { type: 'text.done', properties: { messageId: 'msg-1', partId: 'part-1', content: 'hello' } },
+    { type: 'thinking.delta', properties: { messageId: 'msg-1', partId: 'part-2', content: 'th' } },
+    { type: 'thinking.done', properties: { messageId: 'msg-1', partId: 'part-2', content: 'thinking' } },
+    {
+      type: 'tool.update',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-3',
+        toolName: 'bash',
+        status: 'running',
+        toolCallId: 'call-1',
+      },
+    },
+    {
+      type: 'question',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-4',
+        questionId: 'question-1',
+        questions: [{ question: '继续执行吗？', options: [{ label: '是' }] }],
+      },
+    },
+    {
+      type: 'permission.ask',
+      properties: {
+        partId: 'part-5',
+        permissionId: 'perm-1',
+        permType: 'file_write',
+        title: '允许写文件',
+      },
+    },
+    {
+      type: 'permission.reply',
+      properties: {
+        permissionId: 'perm-1',
+        response: 'once',
+      },
+    },
+    { type: 'step.start', properties: { messageId: 'msg-1' } },
+    { type: 'step.done', properties: { messageId: 'msg-1' } },
+    { type: 'session.status', properties: { sessionStatus: 'idle' } },
+    { type: 'session.title', properties: { title: '新会话标题' } },
+    { type: 'session.error', properties: { error: 'Agent offline' } },
+  ] as const;
+
+  for (const item of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: item.type,
+      properties: {
+        ...item.properties,
+        extParameters,
+      },
+    });
+
+    assert.equal(result.ok, true, item.type);
+    if (!result.ok) {
+      continue;
+    }
+
+    assert.deepStrictEqual(result.value.properties.extParameters, extParameters, item.type);
+  }
+});
+
+test('validateToolEvent rejects null skill provider extParameters', () => {
+  const result = validateToolEvent({
+    protocol: 'cloud',
+    type: 'text.done',
+    properties: {
+      messageId: 'msg-1',
+      partId: 'part-1',
+      content: 'hello',
+      extParameters: null,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+
+  assertWireViolationShape(result.error, {
+    stage: 'event',
+    eventType: 'text.done',
+  });
+});
+
+test('validateToolEvent rejects non-object skill provider extParameters', () => {
+  const cases = [
+    ['array', ['invalid']],
+    ['primitive', 'invalid'],
+  ] as const;
+
+  for (const [name, extParameters] of cases) {
+    const result = validateToolEvent({
+      protocol: 'cloud',
+      type: 'text.done',
+      properties: {
+        messageId: 'msg-1',
+        partId: 'part-1',
+        content: 'hello',
+        extParameters,
+      },
+    });
+
+    assert.equal(result.ok, false, name);
+    if (result.ok) {
+      continue;
+    }
+
+    assertWireViolationShape(result.error, {
+      stage: 'event',
+      eventType: 'text.done',
     });
   }
 });
@@ -183,6 +311,7 @@ test('validateToolEvent preserves empty skill provider permission.ask title', ()
     permissionId: 'permission-1',
     permType: 'file_write',
     title: '',
+    extParameters: undefined,
   });
 });
 

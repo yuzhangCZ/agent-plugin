@@ -13,6 +13,7 @@ import type { QrCodeAuth } from "@wecode/skill-qrcode-auth";
 
 export interface CreateInstallCliUseCaseOptions {
   qrcodeAuthRuntime?: QrCodeAuth;
+  verbose?: boolean;
 }
 
 class InMemoryProcessTraceSink implements ProcessTraceSink {
@@ -47,7 +48,7 @@ export function createInstallCliUseCase(options: CreateInstallCliUseCaseOptions 
   return new InstallPluginCliUseCase(
     resolveContext,
     registryConfig,
-    new TerminalCliPresenter(),
+    new TerminalCliPresenter(undefined, undefined, options.verbose ?? false),
     new QrCodeAuthAdapter(options.qrcodeAuthRuntime),
     hostAdapters,
     traceSink,

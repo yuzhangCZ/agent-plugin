@@ -62,6 +62,7 @@ test('command failure projector ignores lifecycle runtime contract failures', ()
 });
 
 test('command failure projector maps unsupported actions when route fields exist', () => {
+test('command failure projector maps unsupported actions when route fields exist', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({

@@ -9,15 +9,10 @@ import { ToolErrorMessageCatalog, type ToolErrorMessageKey } from '../projectors
 export type ToolErrorReportStage =
   | 'inbound_invalid'
   | 'command_failure'
-  | 'request_lifecycle'
-  | 'request_terminal'
-  | 'outbound_terminal';
-
-export type ToolErrorReportLevel = 'P0' | 'P1' | 'P2' | 'P3';
+  | 'request_lifecycle';
 
 export type ToolErrorReportInput = {
   stage: ToolErrorReportStage;
-  level: ToolErrorReportLevel;
   toolSessionId?: string;
   welinkSessionId?: string;
   reason?: ToolErrorMessage['reason'];

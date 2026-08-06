@@ -10,8 +10,7 @@ import {
   optionalStrictTrimmedString,
   requiredTrimmedString,
 } from './shared.ts';
-import type { ExtParameters } from '../types/ext-parameters.ts';
-import { jsonValueSchema } from './tool-event/opencode-provider-event/json.ts';
+import { downstreamExtParametersSchema } from './ext-parameters.ts';
 
 const [INVOKE_MESSAGE_TYPE, STATUS_QUERY_MESSAGE_TYPE] = DOWNSTREAM_MESSAGE_TYPES;
 const [
@@ -25,38 +24,10 @@ const [
 ] =
   INVOKE_ACTIONS;
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return isPlainObject(value) && jsonValueSchema.safeParse(value).success;
-}
-
 export const statusQueryMessageSchema = z.object({
   type: z.literal(STATUS_QUERY_MESSAGE_TYPE),
 });
 export type StatusQueryMessage = z.output<typeof statusQueryMessageSchema>;
-
-/**
- * gateway 下行业务扩展透传容器。
- * @remarks gateway-schema 不校验 `businessExtParam`，只校验 `platformExtParam` 的 JSON object 可序列化性；
- * `platformExtParam` 内部业务字段不在这里解释。
- */
-export const extParametersSchema: z.ZodType<ExtParameters> = z
-  .custom<Record<string, unknown>>(isPlainObject, {
-    message: 'Expected plain object',
-  })
-  .superRefine((extParameters, context) => {
-    if (extParameters.platformExtParam !== undefined && !isJsonObject(extParameters.platformExtParam)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'platformExtParam must be a JSON object',
-        path: ['platformExtParam'],
-      });
-    }
-  })
-  .transform((extParameters) => extParameters as ExtParameters);
 
 export const chatPayloadSchema = z
   .object({
@@ -66,7 +37,7 @@ export const chatPayloadSchema = z
     assistantAccount: optionalStrictTrimmedString,
     sendUserAccount: optionalStrictTrimmedString,
     imGroupId: optionalStrictTrimmedString,
-    extParameters: extParametersSchema.optional(),
+    extParameters: downstreamExtParametersSchema.optional(),
   })
   .transform((payload) => ({
     toolSessionId: payload.toolSessionId,
@@ -75,7 +46,7 @@ export const chatPayloadSchema = z
     ...(payload.assistantAccount ? { assistantAccount: payload.assistantAccount } : {}),
     ...(payload.sendUserAccount ? { sendUserAccount: payload.sendUserAccount } : {}),
     ...(payload.imGroupId ? { imGroupId: payload.imGroupId } : {}),
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
+    extParameters: payload.extParameters,
   }));
 export type ChatPayload = z.output<typeof chatPayloadSchema>;
 
@@ -83,27 +54,48 @@ export const createSessionPayloadSchema = z
   .object({
     title: optionalStrictTrimmedString,
     assistantId: optionalStrictTrimmedString,
+    extParameters: downstreamExtParametersSchema.optional(),
   })
   .transform((payload) => ({
     ...(payload.title ? { title: payload.title } : {}),
     ...(payload.assistantId ? { assistantId: payload.assistantId } : {}),
+    extParameters: payload.extParameters,
   }));
 export type CreateSessionPayload = z.output<typeof createSessionPayloadSchema>;
 
-export const closeSessionPayloadSchema = z.object({
-  toolSessionId: requiredTrimmedString,
-});
+export const closeSessionPayloadSchema = z
+  .object({
+    toolSessionId: requiredTrimmedString,
+    extParameters: downstreamExtParametersSchema.optional(),
+  })
+  .transform((payload) => ({
+    toolSessionId: payload.toolSessionId,
+    extParameters: payload.extParameters,
+  }));
 export type CloseSessionPayload = z.output<typeof closeSessionPayloadSchema>;
 
-export const abortSessionPayloadSchema = z.object({
-  toolSessionId: requiredTrimmedString,
-});
+export const abortSessionPayloadSchema = z
+  .object({
+    toolSessionId: requiredTrimmedString,
+    extParameters: downstreamExtParametersSchema.optional(),
+  })
+  .transform((payload) => ({
+    toolSessionId: payload.toolSessionId,
+    extParameters: payload.extParameters,
+  }));
 export type AbortSessionPayload = z.output<typeof abortSessionPayloadSchema>;
 
-export const permissionReplyPayloadSchema = z.object({
-  permissionId: requiredTrimmedString,
-  response: z.enum(PERMISSION_REPLY_RESPONSES),
-});
+export const permissionReplyPayloadSchema = z
+  .object({
+    permissionId: requiredTrimmedString,
+    response: z.enum(PERMISSION_REPLY_RESPONSES),
+    extParameters: downstreamExtParametersSchema.optional(),
+  })
+  .transform((payload) => ({
+    permissionId: payload.permissionId,
+    response: payload.response,
+    extParameters: payload.extParameters,
+  }));
 export type PermissionReplyPayload = z.output<typeof permissionReplyPayloadSchema>;
 
 const questionAnswerSchema = z.array(z.string());
@@ -114,10 +106,12 @@ export const questionReplyPayloadSchema = z
     questionId: optionalStrictTrimmedString,
     toolCallId: optionalStrictTrimmedString,
     answers: questionAnswersSchema.optional(),
+    extParameters: downstreamExtParametersSchema.optional(),
     // legacy answer 只在 answers 缺失时作为兼容输入；JSON 数组字符串代表结构化 answers。
     answer: z.unknown().optional(),
   })
   .transform((payload, context) => {
+    const extParameters = payload.extParameters;
     if (!payload.questionId && !payload.toolCallId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -130,6 +124,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: payload.answers,
+        extParameters,
       };
     }
 
@@ -149,6 +144,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: [[payload.answer]],
+        extParameters,
       };
     }
 
@@ -156,6 +152,7 @@ export const questionReplyPayloadSchema = z
       return {
         questionId: payload.questionId ?? payload.toolCallId!,
         answers: [[payload.answer]],
+        extParameters,
       };
     }
 
@@ -172,17 +169,18 @@ export const questionReplyPayloadSchema = z
     return {
       questionId: payload.questionId ?? payload.toolCallId!,
       answers: structuredAnswer.data,
+      extParameters,
     };
   });
 export type QuestionReplyPayload = z.output<typeof questionReplyPayloadSchema>;
 
 export const querySlashCommandsPayloadSchema = z
   .object({
-    extParameters: extParametersSchema.optional(),
+    extParameters: downstreamExtParametersSchema.optional(),
   })
   .transform((payload) => ({
-    ...(payload.extParameters !== undefined ? { extParameters: payload.extParameters } : {}),
-  }))
+    extParameters: payload.extParameters,
+  }));
 
 export type QuerySlashCommandsPayload = z.output<typeof querySlashCommandsPayloadSchema>;
 
@@ -226,7 +224,7 @@ export const closeSessionInvokeSchema = z
   .transform((message) => ({
     type: INVOKE_MESSAGE_TYPE,
     action: CLOSE_SESSION_ACTION,
-    payload: { toolSessionId: message.payload.toolSessionId },
+    payload: message.payload,
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
   }));
 
@@ -240,7 +238,7 @@ export const abortSessionInvokeSchema = z
   .transform((message) => ({
     type: INVOKE_MESSAGE_TYPE,
     action: ABORT_SESSION_ACTION,
-    payload: { toolSessionId: message.payload.toolSessionId },
+    payload: message.payload,
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
   }));
 
@@ -254,10 +252,7 @@ export const permissionReplyInvokeSchema = z
   .transform((message) => ({
     type: INVOKE_MESSAGE_TYPE,
     action: PERMISSION_REPLY_ACTION,
-    payload: {
-      permissionId: message.payload.permissionId,
-      response: message.payload.response,
-    },
+    payload: message.payload,
     ...(message.welinkSessionId ? { welinkSessionId: message.welinkSessionId } : {}),
   }));
 

@@ -11,7 +11,9 @@ async function main() {
       process.stdout.write(formatHelp());
       return;
     }
-    const useCase = createInstallCliUseCase();
+    const useCase = createInstallCliUseCase({
+      verbose: parsed.verbose,
+    });
     const result = await useCase.execute(parsed);
     process.exitCode = result.status === "success" ? 0 : 1;
   } catch (error) {

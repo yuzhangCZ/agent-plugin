@@ -15,6 +15,11 @@ import type { GatewayWireCodec } from '../src/ports/GatewayWireCodec.ts';
 import { GatewayClientRuntime, type GatewayClientRuntimeDependencies } from '../src/application/GatewayClientRuntime.ts';
 import { BusinessMessageHandler } from '../src/application/handlers/BusinessMessageHandler.ts';
 import { GatewaySchemaCodecAdapter } from '../src/adapters/GatewaySchemaCodecAdapter.ts';
+import { DefaultReconnectPolicy } from '../src/adapters/DefaultReconnectPolicy.ts';
+import {
+  DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS,
+  createGatewayRuntimeDependencies,
+} from '../src/factory/createGatewayRuntimeDependencies.ts';
 
 function statusKind(status: GatewayClientStatus): string {
   if (status.isReady()) {
@@ -221,6 +226,9 @@ function buildFakeDependencies(overrides: Partial<GatewayClientRuntimeDependenci
 class FakeReconnectPolicy {
   startWindow(): void {}
   reset(): void {}
+  recordSuspendedDuration(): number {
+    return 0;
+  }
   scheduleNextAttempt() {
     return {
       ok: true as const,
@@ -820,7 +828,7 @@ test('getStatus derives readiness from the current state snapshot', async () => 
   assert.equal(client.getStatus().isCancelled(), true);
 });
 
-test('default reconnect preset exhausts after maxElapsedMs and does not reconnect forever', async () => {
+test('default reconnect preset excludes delayed timer drift from maxElapsedMs budget', async () => {
   FakeWebSocket.instances = [];
   const logs = {
     debug: [] as Array<{ message: string; meta?: Record<string, unknown> }>,
@@ -869,17 +877,96 @@ test('default reconnect preset exhausts after maxElapsedMs and does not reconnec
     assert.equal(timers.runNext(), true);
     await flushAsyncHandlers();
 
-    assert.equal(FakeWebSocket.instances.length, 1);
+    assert.equal(FakeWebSocket.instances.length, 2);
+    const driftLog = logs.warn.find((entry) => entry.message === 'gateway.reconnect.sleep_drift_detected');
+    assert.ok(driftLog);
+    assert.equal(driftLog.meta?.driftMs, 599_001);
+    assert.equal(driftLog.meta?.suspendedMs, 599_001);
     assert.equal(
       logs.warn.some((entry) => entry.message === 'gateway.reconnect.exhausted'),
-      true,
+      false,
     );
-    assertClosedWithError(client.getStatus(), 'GATEWAY_RECONNECT_EXHAUSTED');
-    assert.equal(client.getStatus().isFailureClosed(), true);
+    assert.equal(client.getStatus().isReconnecting(), true);
   } finally {
     client.disconnect();
     timers.restore();
   }
+});
+
+test('default reconnect preset uses forty minute active elapsed budget', () => {
+  const clock = new FakeClock(0);
+  const dependencies = createGatewayRuntimeDependencies({
+    url: 'ws://localhost:8081/ws/agent',
+    registerMessage: registerMessage(),
+    clock,
+    random: () => 0,
+    webSocketFactory: (url, protocols) => new FakeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
+  const first = dependencies.reconnectPolicy.scheduleNextAttempt();
+  assert.equal(first.ok, true);
+
+  clock.nowMs = 600_001;
+  assert.equal(dependencies.reconnectPolicy.getExhaustedDecision(), null);
+
+  clock.nowMs = DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS + 1;
+  assert.deepEqual(dependencies.reconnectPolicy.getExhaustedDecision(), {
+    ok: false,
+    elapsedMs: 2_400_001,
+    maxElapsedMs: DEFAULT_GATEWAY_RECONNECT_MAX_ELAPSED_MS,
+  });
+});
+
+test('default reconnect policy exhausts after active maxElapsedMs', () => {
+  const clock = new FakeClock(0);
+  const policy = new DefaultReconnectPolicy(
+    {
+      baseMs: 1_000,
+      maxMs: 30_000,
+      exponential: true,
+      jitter: 'none',
+      maxElapsedMs: 2_400_000,
+      enabled: true,
+    },
+    { clock, random: () => 0 },
+  );
+
+  const first = policy.scheduleNextAttempt();
+  assert.equal(first.ok, true);
+
+  clock.nowMs = 2_400_001;
+  assert.deepEqual(policy.getExhaustedDecision(), {
+    ok: false,
+    elapsedMs: 2_400_001,
+    maxElapsedMs: 2_400_000,
+  });
+});
+
+test('default reconnect policy excludes delayed timer drift from elapsed budget', () => {
+  const clock = new FakeClock(0);
+  const policy = new DefaultReconnectPolicy(
+    {
+      baseMs: 1_000,
+      maxMs: 30_000,
+      exponential: true,
+      jitter: 'none',
+      maxElapsedMs: 2_400_000,
+      enabled: true,
+    },
+    { clock, random: () => 0 },
+  );
+
+  const first = policy.scheduleNextAttempt();
+  assert.equal(first.ok, true);
+  assert.equal(first.ok ? first.delayMs : undefined, 1_000);
+
+  clock.nowMs = 8 * 60 * 60 * 1_000;
+  policy.recordSuspendedDuration(clock.nowMs - 1_000);
+
+  assert.equal(policy.getExhaustedDecision(), null);
+  const second = policy.scheduleNextAttempt();
+  assert.equal(second.ok, true);
+  assert.equal(second.ok ? second.elapsedMs : undefined, 1_000);
 });
 
 test('unexpected retryable close uses injected reconnect scheduler instead of runtime setTimeout', async () => {
@@ -2142,6 +2229,9 @@ test('reconnect attempt whitelist close clears reconnecting when next retry is e
       reconnectPolicy: {
         startWindow() {},
         reset() {},
+        recordSuspendedDuration() {
+          return 0;
+        },
         scheduleNextAttempt() {
           scheduleCount += 1;
           if (scheduleCount === 1) {
