@@ -8,13 +8,13 @@
 - `@wecode/skill-openclaw-plugin`
 - `@wecode/bridge-runtime-sdk`
 
-这个 CLI 面向维护者，适用于在开发机上完成构建、校验、发布，以及生成本地 release git 元数据，而不依赖 GitHub release workflow。
+这个 CLI 面向维护者，适用于在开发机上完成构建、校验和发布。CLI 不创建 git commit、不创建 git tag、不执行 git push。
 
 ## 入口
 
 ```bash
-pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
-pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk|dual> ...
+pnpm release:local -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk> --channel <alpha|beta|release> ...
+pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge|message-bridge-openclaw|bridge-runtime-sdk> --channel <alpha|beta|release> ...
 ```
 
 - `release:local` 执行完整发布流程。
@@ -28,9 +28,9 @@ pnpm release:plan -- --target <skill-qrcode-auth|skill-plugin-cli|message-bridge
 - 已执行 `pnpm install --frozen-lockfile`
 - 目标 npm registry 已通过 `.npmrc` 或环境变量配置完成
 - `npm whoami` 在目标 registry 上能成功返回
-- 目标版本号已经明确
+- 目标包 `package.json.version` 是稳定 SemVer 基础版本 `x.y.z`
 - 已准备本次官方发布要注入的默认网关地址
-- 已理解 `npm publish` 和 git 操作不是原子事务
+- 已理解 `npm publish` 成功后同版本不能重复发布
 
 推荐先执行：
 
@@ -42,9 +42,7 @@ npm whoami
 
 如果你使用的是类似 `@wecode:registry=...` 的 scope 私仓配置，CLI 会优先解析该 scope 对应的真实 registry，并对这个 registry 做认证检查，而不是只看默认 registry。
 
-## 当前五个包的发布差异
-
-CLI 对外接口统一，但五个包当前的发布入口不同：
+## 发布目标
 
 - `skill-qrcode-auth` 从 `packages/skill-qrcode-auth` 发布
 - `skill-plugin-cli` 先基于 `packages/skill-plugin-cli` 构建发布专用 tarball，再从 `.tmp/release-pack/*.tgz` 发布
@@ -60,28 +58,31 @@ CLI 对外接口统一，但五个包当前的发布入口不同：
 - `bridge-runtime-sdk` 在本地 release CLI 中会先生成 tarball，再发布该 tarball，避免 publish 阶段依赖切换到包目录
 - `bridge-runtime-sdk` 如需本地排查可读产物，需要显式使用包内 `pnpm run build:dev`
 
-这是当前仓库状态下的有意设计。后续统一为源码根发包的重构问题记录在 [openclaw-root-publish-refactor-issue.md](./openclaw-root-publish-refactor-issue.md)。
+## 通道与版本规则
 
-## 版本输入要求
+`--channel` 必填，只接受：
 
-单包发布必须二选一：
+- `alpha`
+- `beta`
+- `release`
 
-```bash
---version <semver>
---bump <patch|minor|major|prerelease>
-```
+基础版本只接受稳定 SemVer `x.y.z`：
 
-双包发布必须满足以下两种形式之一：
+- 默认读取目标包 `package.json.version`
+- 可用 `--version <x.y.z>` 覆盖基础版本
+- `package.json.version` 和 `--version` 都不能带 `-alpha`、`-beta`、`-rc` 等 prerelease 后缀
 
-```bash
---bump <patch|minor|major|prerelease>
-```
+目标版本和 dist-tag 规则：
 
-或：
+| channel | baseVersion | targetVersion | dist-tag |
+| --- | --- | --- | --- |
+| `alpha` | `1.2.3` | `1.2.3-alpha.<yyyyMMddHHmmss>` | `alpha` |
+| `beta` | `1.2.3` | `1.2.3-beta.<yyyyMMddHHmmss>` | `beta` |
+| `release` | `1.2.3` | `1.2.3` | `latest` |
 
-```bash
---bridge-version <semver> --openclaw-version <semver>
-```
+时间戳固定按 `Asia/Shanghai` 时区生成，格式为 `yyyyMMddHHmmss`。
+
+`--bump`、`--preid`、`--release`、`--target dual`、`--bridge-version`、`--openclaw-version` 已移除，不再兼容。
 
 ## 参数说明
 
@@ -92,41 +93,29 @@ CLI 对外接口统一，但五个包当前的发布入口不同：
 - `--target skill-qrcode-auth`
 - `--target skill-plugin-cli`
 - `--target bridge-runtime-sdk`
-- `--target dual`
 
 ### 版本选择
 
-- `--version <semver>`
-- `--bridge-version <semver>`
-- `--openclaw-version <semver>`
+- `--channel alpha|beta|release`
+- `--version <x.y.z>`
 - `--default-gateway-url <ws://...|wss://...>`
-- `--bump patch|minor|major|prerelease`
-- `--preid <alpha|beta|rc>`  
-  默认值：`beta`
-- `--release stable|prerelease`  
-  可选，用于显式校验 release 类型
 
 ### 执行控制
 
 - `--dry-run`
 - `--skip-publish`
-- `--skip-git`
-- `--push`
-- `--allow-dirty`
-
-非法组合：
-
-- `--skip-publish --push`
+- `--skip-verify`
+- `--install-deps`
+- `--install-deps-update-lockfile`
 
 ## 默认行为
 
 在不额外覆盖参数时：
 
 - 会执行 `npm publish`
-- 会创建本地 git commit 和 git tag
-- 不会推送远程
-- 只有显式传 `--push` 才会把当前分支和新 tag 推到 `origin`
-- `--skip-publish` 不能和 `--push` 一起使用
+- 会执行依赖检查、build、`verify:release` 和 publish readiness
+- 不会执行 `git add`、`git commit`、`git tag`、`git push`
+- 仍会检查目标 release tag 是否已存在；如果 `tagPrefix + targetVersion` 已存在，会在构建或发布前阻断
 - 对于要求构建期默认网关地址的 target，官方发布路径必须显式传 `--default-gateway-url`
 - 该值会作为构建期环境变量 `MB_DEFAULT_GATEWAY_URL` 注入到需要该配置的 build / verify / publish 子进程
 
@@ -135,98 +124,60 @@ CLI 对外接口统一，但五个包当前的发布入口不同：
 - `message-bridge`
 - `message-bridge-openclaw`
 - `bridge-runtime-sdk`
-- `dual`
 
-默认安全模型如下：
+## 示例
 
-1. 发布到 npm
-2. 创建本地 commit 和 tag
-3. 如有需要，再显式推送远程
-
-如果 `npm publish` 成功而后续 git 步骤失败，不要重复发布同一个版本。
-
-## 正式发布示例
-
-给 `skill-qrcode-auth` 发布一个显式版本：
+发布 alpha：
 
 ```bash
-pnpm release:local -- --target skill-qrcode-auth --version 0.1.0
+pnpm release:local -- --target message-bridge --channel alpha --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-给 `message-bridge` 做一次 patch 版本发布：
+发布 beta：
 
 ```bash
-pnpm release:local -- --target message-bridge --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
+pnpm release:local -- --target message-bridge --channel beta --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-给 `message-bridge-openclaw` 发布一个显式版本，并且只保留本地结果：
+发布稳定版本：
 
 ```bash
-pnpm release:local -- --target message-bridge-openclaw --version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
+pnpm release:local -- --target message-bridge --channel release --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-仅预览一次正式发布计划，不改 npm，也不改 git：
+覆盖基础版本并发布 alpha：
 
 ```bash
-pnpm release:plan -- --target message-bridge --version 1.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
+pnpm release:local -- --target message-bridge --channel alpha --version 1.2.4 --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-给 `bridge-runtime-sdk` 发布一个显式版本：
+只预览发布计划：
 
 ```bash
-pnpm release:local -- --target bridge-runtime-sdk --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
+pnpm release:plan -- --target bridge-runtime-sdk --channel beta --version 0.1.0 --default-gateway-url wss://gateway.example.com/ws/agent
 ```
 
-仅预览一次 `bridge-runtime-sdk` 的正式发布计划：
+无需网关注入的包：
 
 ```bash
-pnpm release:plan -- --target bridge-runtime-sdk --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
+pnpm release:local -- --target skill-plugin-cli --channel release --version 0.1.0
 ```
-
-## 预发布示例
-
-给 `message-bridge` 生成下一个 beta 版本：
-
-```bash
-pnpm release:local -- --target message-bridge --bump prerelease --preid beta --default-gateway-url wss://gateway.example.com/ws/agent
-```
-
-给 `message-bridge-openclaw` 发布一个显式 RC 版本：
-
-```bash
-pnpm release:local -- --target message-bridge-openclaw --version 0.2.0-rc.1 --release prerelease --preid rc --default-gateway-url wss://gateway.example.com/ws/agent
-```
-
-## 双包发布示例
-
-两个包按同一种 bump 规则一起发版：
-
-```bash
-pnpm release:local -- --target dual --bump patch --default-gateway-url wss://gateway.example.com/ws/agent
-```
-
-两个包分别指定版本一起发布：
-
-```bash
-pnpm release:local -- --target dual --bridge-version 1.3.0 --openclaw-version 0.2.0 --default-gateway-url wss://gateway.example.com/ws/agent
-```
-
-`dual` 模式不是原子事务。如果第一个包发布成功、第二个包失败，第一个版本可能已经进入 registry。
 
 ## 构建、校验与发布流程
 
 对每个 target，CLI 会依次执行：
 
-1. 解析目标版本和 dist-tag
-2. 执行依赖存在性检查
-3. 对需要网关注入的 target 校验 `--default-gateway-url` 是否存在且为合法 `ws://` / `wss://`
-4. 改写目标包版本
-5. 执行 target 对应的构建步骤
-6. 执行 target 对应的 `verify:release`
-7. 评估 publish readiness contract
-8. 当 readiness 为 `true` 且未指定 `--skip-publish` 时执行发布
-9. 当未指定 `--skip-git` 时创建本地 commit 和 tag
-10. 当显式指定 `--push` 时推送分支和 tag
+1. 解析 `baseVersion`、`targetVersion` 和 dist-tag
+2. 检查目标 release tag 是否已存在
+3. 执行依赖存在性检查
+4. 对需要网关注入的 target 校验 `--default-gateway-url` 是否存在且为合法 `ws://` / `wss://`
+5. 临时改写目标包版本为 `targetVersion`
+6. 执行 target 对应的构建步骤
+7. 执行 target 对应的 `verify:release`
+8. 评估 publish readiness contract
+9. 当 readiness 为 `true` 且未指定 `--skip-publish` 时执行发布
+
+readiness 必须在临时写入 `targetVersion` 之后执行，确保 `manifest-version-match` 校验的是实际发布版本。npm publish、tarball 文件名、readiness 输出和发布计划都使用 `targetVersion`。
 
 其中 `bridge-runtime-sdk` 的官方 release 路径有额外约束：
 
@@ -242,13 +193,15 @@ publish readiness 是进入不可逆 `npm publish` 之前的最后一道门禁�
 - `resolvedPublishRoot`
 - `executedChecks`
 
-## 常见失败场景与恢复
+## 恢复语义
 
-### 工作区不干净
+### Publish 前失败
 
-默认情况下，CLI 会拒绝在脏工作区里执行。
+如果失败发生在 publish 尝试前，CLI 会恢复目标包原始 `package.json.version`。
 
-只有在你明确知道要保留哪些本地改动、并且不希望它们进入 release commit 时，才使用 `--allow-dirty`。
+### Publish 已尝试或成功后失败
+
+如果 publish 已经尝试或成功，CLI 不主动恢复版本，避免本地状态与 registry 状态不一致。先确认 registry 中实际内容，再决定如何修复本地状态或重试新版本。
 
 ### Tag 已存在
 
@@ -263,23 +216,6 @@ publish readiness 是进入不可逆 `npm publish` 之前的最后一道门禁�
 - `message-bridge` / `message-bridge-openclaw` / `bridge-runtime-sdk` 未传 `--default-gateway-url` 时，CLI 会在首次 build 前失败
 - 对这些 target 传入非 `ws://` / `wss://` 地址时，CLI 会在首次 build 前失败
 - `skill-qrcode-auth`、`skill-plugin-cli` 不要求该参数
-
-### 发布成功但 Git 失败
-
-这是最重要的恢复场景：
-
-- 包可能已经成功发布
-- 本地 commit 和 tag 可能缺失或不完整
-- 不要重复发布相同版本
-- 先确认 registry 状态，再手动修复 git 状态
-
-### 双包发布部分成功
-
-如果第一个包已发布、第二个包失败：
-
-- 视第一个包的版本已经被占用
-- 不要盲目重跑相同版本
-- 先确认 registry 中实际内容，再决定补 git 或补第二个包
 
 ## 脚本跨平台约定
 
@@ -301,10 +237,10 @@ pnpm verify:release-local:e2e
 默认行为：
 
 - 把当前工作区复制到临时隔离目录
-- 初始化临时 git 仓库和本地 bare remote
+- 初始化临时 git 仓库
 - 启动临时假 npm registry
-- 对两个包执行真实 `npm publish`
-- 验证 prerelease dist-tag、dual 发布行为、失败恢复、`--push`，以及 tarball 内默认 `gateway.url` 注入结果
+- 执行真实 `npm publish`
+- 验证 beta / release dist-tag、失败恢复，以及 tarball 内默认 `gateway.url` 注入结果
 
 可选环境变量：
 
