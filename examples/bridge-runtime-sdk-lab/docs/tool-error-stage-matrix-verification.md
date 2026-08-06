@@ -172,12 +172,14 @@ Mock 快速验证步骤：
 8. 在实验室点击 `停止`，再点击 `启动`；如需要更彻底清空本地 pending 状态，可执行 `停止` -> `初始化` -> `启动`。
 9. 在宿主侧回复刚才的 question 卡片。
 10. 在 `Gateway Downstream` 或右侧事件流筛选 `onMessage`，确认 SDK 收到 `question_reply` 下行。
-11. 在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
+11. 如果真实 `question_reply` 下行没有携带 `toolSessionId` 或 `welinkSessionId`，预期只在 `Gateway Downstream` 看到 `phase=failed`，`code=pending_interaction_not_found`，`error=question interaction not found`；此时不会再上行 `tool_error`。
+12. 只有当真实 `question_reply` 下行具备可回包路由目标时，才继续在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
 
 说明：
 
 - 该场景验证的是 `InteractionCoordinator.consume()` 找不到 pending question 后的失败收口。
 - 真实 gateway 路径模拟的是：宿主侧仍保留旧 question 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再回复时触发 `pending_interaction_not_found`。
+- Mock 矩阵场景会显式在 `question_reply` 下行中携带 `welinkSessionId`，因此可以稳定验证 `tool_error` 上行；真实 gateway 路径取决于服务端实际下行是否带路由目标。
 - 它不验证 Provider `replyQuestion()` 抛错，因为 pending 不存在时不会调用 Provider。
 
 ### 4.7 question 回复 Provider 抛错
@@ -221,12 +223,14 @@ Mock 快速验证步骤：
 8. 在实验室点击 `停止`，再点击 `启动`；如需要更彻底清空本地 pending 状态，可执行 `停止` -> `初始化` -> `启动`。
 9. 在宿主侧点击刚才的 permission 卡片，例如授权一次、始终授权或拒绝。
 10. 在 `Gateway Downstream` 或右侧事件流筛选 `onMessage`，确认 SDK 收到 `permission_reply` 下行。
-11. 在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
+11. 如果真实 `permission_reply` 下行没有携带 `toolSessionId` 或 `welinkSessionId`，预期只在 `Gateway Downstream` 看到 `phase=failed`，`code=pending_interaction_not_found`，`error=permission interaction not found`；此时不会再上行 `tool_error`。
+12. 只有当真实 `permission_reply` 下行具备可回包路由目标时，才继续在 `Tool Error`、`Gateway Uplink` 或右侧事件流筛选 `sendMessage`，确认上行 `tool_error`，error 包含“当前交互已失效”。
 
 说明：
 
 - 该场景验证的是 `InteractionCoordinator.consume()` 找不到 pending permission 后的失败收口。
 - 真实 gateway 路径模拟的是：宿主侧仍保留旧 permission 卡片，但 SDK 重启后本地 pending registry 已丢失，用户再点击时触发 `pending_interaction_not_found`。
+- Mock 矩阵场景会显式在 `permission_reply` 下行中携带 `welinkSessionId`，因此可以稳定验证 `tool_error` 上行；真实 gateway 路径取决于服务端实际下行是否带路由目标。
 - 它不验证 Provider `replyPermission()` 抛错，因为 pending 不存在时不会调用 Provider。
 
 ### 4.9 permission 回复 Provider 抛错
