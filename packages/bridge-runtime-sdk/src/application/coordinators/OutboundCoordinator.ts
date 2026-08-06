@@ -1,7 +1,6 @@
 import type { ProviderFact, ProviderTerminalResult } from '../../domain/provider.ts';
 import { RuntimeContractError } from '../../domain/errors.ts';
 import { RUNTIME_FAILURE_KIND, RUNTIME_FAILURE_PHASE } from '../constants/runtime.ts';
-import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../constants/gateway-messages.ts';
 import { classifyFact } from '../fact-semantics.ts';
 import { FactSequenceValidator, type LifecycleProfile } from '../fact-sequence-validator.ts';
 import type { SessionRuntimeRegistry } from '../ports/session-runtime-registry.ts';
@@ -166,16 +165,6 @@ export class OutboundCoordinator {
       result,
     });
     this.pipeline.observation.terminalProjected(toolSessionId, result, { runId });
-    if (uplink.type === GATEWAY_UPLINK_MESSAGE_TYPE.toolError) {
-      this.pipeline.toolErrorReporter.report({
-        stage: 'outbound_terminal',
-        level: 'P0',
-        toolSessionId: uplink.toolSessionId,
-        error: uplink.error,
-        reason: uplink.reason,
-      });
-      return;
-    }
     this.pipeline.observation.uplinkEmitted(uplink);
     await this.pipeline.sink.send(uplink);
   }

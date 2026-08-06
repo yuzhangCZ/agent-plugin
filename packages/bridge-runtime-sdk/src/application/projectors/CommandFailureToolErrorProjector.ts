@@ -43,26 +43,19 @@ export class CommandFailureToolErrorProjector {
       return null;
     }
 
-    const errorMessage = this.resolveErrorMessage(input.error, unsupportedDownstreamAction);
+    const errorMessage = this.resolveErrorMessage(input.error);
     if (!errorMessage) {
       return null;
     }
 
     return {
       type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
-      ...(shouldKeepWelinkSessionId && input.summary.welinkSessionId
-        ? { welinkSessionId: input.summary.welinkSessionId }
-        : {}),
       ...(input.summary.toolSessionId ? { toolSessionId: input.summary.toolSessionId } : {}),
       error: errorMessage,
     };
   }
 
-  private resolveErrorMessage(error: unknown, unsupportedDownstreamAction: boolean): string | null {
-    if (unsupportedDownstreamAction) {
-      return this.catalog.get('unsupported_action');
-    }
-
+  private resolveErrorMessage(error: unknown): string | null {
     if (error instanceof RuntimeContractError) {
       switch (error.code) {
         case 'run_already_active':
