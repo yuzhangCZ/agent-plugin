@@ -82,6 +82,8 @@ export class DownstreamScenarioRunner {
         case 'wait_for_uplink':
           await this.#gateway.waitForMessages(fromIndex, step.timeoutMs);
           break;
+        default:
+          throw new Error('Unknown downstream scenario step kind.');
       }
     }
   }

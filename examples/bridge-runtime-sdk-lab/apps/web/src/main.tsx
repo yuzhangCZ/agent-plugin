@@ -342,14 +342,20 @@ function App(): React.JSX.Element {
     setBusyAction('manual-text-response');
     try {
       const textDoneFact = JSON.parse(manualFactText) as unknown;
-      const factResult = await api<RuntimeActionResult>(manualReportMode === 'outbound' ? '/api/manual-agent/outbound/text-response' : '/api/manual-agent/text-response', {
-        method: 'POST',
-        body: JSON.stringify({ textDoneFact }),
-      });
-      const terminalResult = await api<RuntimeActionResult>(manualReportMode === 'outbound' ? '/api/manual-agent/outbound/send' : '/api/manual-agent/terminal', {
-        method: 'POST',
-        body: JSON.stringify(manualReportMode === 'outbound' ? {} : { outcome: 'completed' }),
-      });
+      const factResult = await api<RuntimeActionResult>(
+        manualReportMode === 'outbound' ? '/api/manual-agent/outbound/text-response' : '/api/manual-agent/text-response',
+        {
+          method: 'POST',
+          body: JSON.stringify({ textDoneFact }),
+        },
+      );
+      const terminalResult = await api<RuntimeActionResult>(
+        manualReportMode === 'outbound' ? '/api/manual-agent/outbound/send' : '/api/manual-agent/terminal',
+        {
+          method: 'POST',
+          body: JSON.stringify(manualReportMode === 'outbound' ? {} : { outcome: 'completed' }),
+        },
+      );
       setLastResult({
         ok: factResult.ok && terminalResult.ok,
         action: manualReportMode === 'outbound' ? 'manual_agent.outbound.text_response.sent' : 'manual_agent.text_response.completed',
@@ -661,11 +667,17 @@ function App(): React.JSX.Element {
                   <div className="two-col">
                     <label>
                       <span>runId</span>
-                      <input value={manualOutboundTarget.runId} onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, runId: event.target.value })} />
+                      <input
+                        value={manualOutboundTarget.runId}
+                        onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, runId: event.target.value })}
+                      />
                     </label>
                     <label>
                       <span>trigger</span>
-                      <input value={manualOutboundTarget.trigger} onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, trigger: event.target.value })} />
+                      <input
+                        value={manualOutboundTarget.trigger}
+                        onChange={(event) => setManualOutboundTarget({ ...manualOutboundTarget, trigger: event.target.value })}
+                      />
                     </label>
                   </div>
                   <div className="manual-action-row">
@@ -696,7 +708,10 @@ function App(): React.JSX.Element {
               </label>
               <p className="muted">{selectedManualTemplate?.description ?? '选择模板后会按当前 active run 自动填充常用字段。'}</p>
               {requiresOpenMessage(selectedManualTemplateId) ? (
-                <p className="sequence-warning">该模板依赖已打开的 message。若当前编辑区是 text.done，可用右侧补齐按钮自动补 message.start/text.delta/message.done/terminal。</p>
+                <p className="sequence-warning">
+                  该模板依赖已打开的 message。若当前编辑区是 text.done，可用右侧补齐按钮自动补
+                  message.start/text.delta/message.done/terminal。
+                </p>
               ) : null}
             </div>
             <div className="manual-agent-editor">
@@ -709,7 +724,10 @@ function App(): React.JSX.Element {
                 <button
                   className="primary"
                   onClick={() => void submitManualTextResponse()}
-                  disabled={busyAction === 'manual-text-response' || (manualReportMode === 'request' ? !(snapshot.manualAgent?.activeRun) : !hasManualOutboundTarget)}
+                  disabled={
+                    busyAction === 'manual-text-response'
+                    || (manualReportMode === 'request' ? !(snapshot.manualAgent?.activeRun) : !hasManualOutboundTarget)
+                  }
                 >
                   {manualReportMode === 'outbound' ? '按当前 text.done 补齐并发送 Outbound' : '按当前 text.done 补齐并完成'}
                 </button>
