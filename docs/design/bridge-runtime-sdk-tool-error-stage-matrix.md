@@ -137,7 +137,7 @@ sequenceDiagram
 
 | stage | 异常场景 | 业务触发例子 | 技术触发点 | `tool_error.error` | 重要性 | 验证建议 |
 |---|---|---|---|---|---|---|
-| `inbound_invalid` | 入站 `invoke` 协议校验失败 | 前端点击发送后，下行请求缺字段；或 SDK 新版本要求会话标识，旧版本调用方未传 | gateway-client 输出 invalid `invoke` frame，且 frame 有 `toolSessionId` 或 `welinkSessionId` | `gateway_invalid_invoke:${code}` | P0 | 构造 invalid inbound frame，不需要真实 gateway |
+| `inbound_invalid` | 入站 `invoke` 协议校验失败 | 前端点击发送后，下行请求缺字段；或 SDK 新版本要求会话标识，旧版本调用方未传 | gateway-client 输出 invalid `invoke` frame，且 frame 有 `toolSessionId` 或 `welinkSessionId` | `请求格式异常，请稍后重试 (${code}: ${field})`，例如 `请求格式异常，请稍后重试 (invalid_field_value: payload.text)` | P0 | 构造 invalid inbound frame，不需要真实 gateway |
 | `command_failure` | unsupported invoke action | 前端或 gateway 灰度了新按钮、新 action，例如 `rename_session`，但 SDK 还没支持 | `toRuntimeCommand()` 抛 `Unsupported downstream action` | `暂不支持该操作类型，请检查版本后重试 (unsupported_action)` | P0 | FakeGateway 注入 unknown action |
 | `command_failure` | 新建会话失败 | 用户点击新建会话，第三方 Agent 创建底层会话失败 | `createSession()` 抛错；通常还没有 `toolSessionId` | Provider 异常 message；携带 `welinkSessionId` | P0 | mock Provider `createSession()` throw |
 | `command_failure` | 发送消息启动失败 | 用户发送消息，SDK 准备调用 Agent，但 Agent 服务不可用或参数被拒绝 | `runMessage()` 返回 `ProviderRun` 前抛错 | Provider 异常 message | P0 | mock Provider `runMessage()` throw |

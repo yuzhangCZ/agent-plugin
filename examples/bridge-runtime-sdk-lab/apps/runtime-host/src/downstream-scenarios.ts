@@ -33,7 +33,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         action: 'create_session',
         payload: { title: 'Missing welink' },
       },
-      expected: { outcome: 'failure_only', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'failure_only', stage: 'inbound_invalid' },
     },
     {
       id: 'create-session-provider-throws',
@@ -83,7 +83,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
       id: 'invalid-chat-missing-text',
       group: 'Chat',
       title: 'chat 缺少 text',
-      description: '非法 chat payload 应由 inbound policy fail-closed 并上行 gateway_invalid_invoke tool_error。',
+      description: '非法 chat payload 应由 inbound policy fail-closed，并上行请求格式异常 tool_error。',
       raw: {
         type: 'invoke',
         messageId: 'gw-invalid-chat-missing-text',
@@ -91,7 +91,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-chat',
         payload: { toolSessionId: 'tool-invalid-chat' },
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'invalid-chat-empty-text',
@@ -105,7 +105,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-chat-empty',
         payload: { toolSessionId: 'tool-invalid-chat-empty', text: '   ' },
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'chat-provider-throws',
@@ -308,7 +308,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-question',
         payload: { questionId: 'question-invalid', answers: ['yes'] },
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'permission-reply-pending-missing',
@@ -403,7 +403,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-permission',
         payload: { permissionId: 'permission-invalid', response: 'approve' },
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'close-session-missing-tool-session',
@@ -416,7 +416,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-close',
         payload: {},
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'close-session-provider-throws',
@@ -447,7 +447,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         welinkSessionId: 'wl-invalid-abort',
         payload: {},
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'abort-session-provider-throws',
@@ -496,7 +496,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         toolSessionId: 'tool-invalid-slash',
         payload: {},
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'invalid-ext-parameters',
@@ -513,7 +513,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
           extParameters: { platformExtParam: [] },
         },
       },
-      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'tool_error', stage: 'inbound_invalid', errorIncludes: '请求格式异常，请稍后重试' },
     },
     {
       id: 'invalid-invoke-no-route-target',
@@ -525,7 +525,7 @@ export function getDownstreamScenarios(): DownstreamScenario[] {
         action: 'chat',
         payload: { text: 'missing toolSessionId and welinkSessionId' },
       },
-      expected: { outcome: 'failure_only', stage: 'inbound_invalid', errorIncludes: 'gateway_invalid_invoke' },
+      expected: { outcome: 'failure_only', stage: 'inbound_invalid' },
     },
     {
       id: 'outbound-run-invalid-facts',

@@ -52,7 +52,7 @@ Related:
 
 | 序号 | stage | 4.2.1 场景 | 当前实验室结论 | 推荐验证入口 | 预期 |
 |---|---|---|---|---|---|
-| 1 | `inbound_invalid` | 入站 `invoke` 协议校验失败 | 可直接验证 | `invalid-chat-missing-text`、`invalid-chat-empty-text`、`invalid-slash-missing-trace`、`invalid-ext-parameters` | 上行 `tool_error`，error 包含 `gateway_invalid_invoke` |
+| 1 | `inbound_invalid` | 入站 `invoke` 协议校验失败 | 可直接验证 | `invalid-chat-missing-text`、`invalid-chat-empty-text`、`invalid-slash-missing-trace`、`invalid-ext-parameters` | 上行 `tool_error`，error 包含 `请求格式异常，请稍后重试`；字段非法时包含 `invalid_field_value: ...` |
 | 2 | `command_failure` | unsupported invoke action | 可直接验证 | `unsupported-invoke-action` | 上行 `tool_error`，error 包含“不支持” |
 | 3 | `command_failure` | 新建会话失败 | 可直接验证 | `create-session-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured createSession failure` |
 | 4 | `command_failure` | 发送消息启动失败 | 可直接验证 | `chat-provider-throws` | 上行 `tool_error`，error 包含 `SDK lab configured runMessage failure` |
@@ -83,8 +83,9 @@ Related:
    - `extParameters.platformExtParam 非 JSON object`
 3. 点击 `运行矩阵场景`。
 4. 在 `Gateway Downstream` 查看 mock gateway 发送的非法下行报文。
-5. 在 `Tool Error` 查看 `error` 是否包含 `gateway_invalid_invoke`。
-6. 在 `Gateway Uplink` 或右侧事件流 `sendMessage` 查看完整 `tool_error` 上行。
+5. 在 `Tool Error` 查看 `error` 是否包含 `请求格式异常，请稍后重试`。
+6. 对 `chat 缺少 text` 或 `chat text 为空`，继续确认 `error` 包含 `invalid_field_value: payload.text`。
+7. 在 `Gateway Uplink` 或右侧事件流 `sendMessage` 查看完整 `tool_error` 上行。
 
 不能验证的变体：
 

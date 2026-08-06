@@ -29,6 +29,23 @@ test('downstream scenarios include explicit tool_error coverage', () => {
   assert.ok(toolErrorScenarios.every((scenario) => scenario.expected.stage));
 });
 
+test('inbound invalid scenarios expect user-facing format error messages', () => {
+  const scenarios = getDownstreamScenarios();
+  const inboundInvalidToolErrors = scenarios.filter((scenario) => {
+    return scenario.expected.outcome === 'tool_error' && scenario.expected.stage === 'inbound_invalid';
+  });
+
+  assert.ok(inboundInvalidToolErrors.length > 0);
+  assert.equal(
+    inboundInvalidToolErrors.some((scenario) => scenario.expected.errorIncludes === 'gateway_invalid_invoke'),
+    false,
+  );
+  assert.ok(inboundInvalidToolErrors.every((scenario) => {
+    return scenario.expected.errorIncludes?.startsWith('请求格式异常，请稍后重试')
+      || scenario.expected.errorIncludes?.startsWith('暂不支持该操作类型');
+  }));
+});
+
 test('multi-step scenarios describe ordered gateway and provider actions', () => {
   const scenarios = getDownstreamScenarios();
   const questionProviderThrow = scenarios.find((item) => item.id === 'question-reply-provider-throws');

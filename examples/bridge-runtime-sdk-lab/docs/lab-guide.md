@@ -291,7 +291,7 @@ Stage Matrix Lab 是推荐使用的主验证区。它把文档里的 `tool_error
 
 1. `chat 缺少 text`
    - 验证：`inbound_invalid`
-   - 预期：`tool_error.error` 包含 `gateway_invalid_invoke`
+   - 预期：`tool_error.error` 包含 `请求格式异常，请稍后重试` 和 `invalid_field_value: payload.text`
 
 2. `unsupported invoke action`
    - 验证：`command_failure`
