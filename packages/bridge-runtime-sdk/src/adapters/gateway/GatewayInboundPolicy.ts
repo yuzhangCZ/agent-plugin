@@ -1,11 +1,10 @@
 import type { GatewayInboundFrame } from '@agent-plugin/gateway-client';
 import type { ToolErrorMessage, WireViolation } from '@agent-plugin/gateway-schema';
 
-import { GATEWAY_UPLINK_MESSAGE_TYPE } from '../../application/constants/gateway-messages.ts';
 import { RUNTIME_FAILURE_KIND } from '../../application/constants/runtime.ts';
 import { ToolErrorMessageCatalog } from '../../application/projectors/ToolErrorMessageCatalog.ts';
 import type { InboundPolicy } from '../../application/ports/inbound-policy.ts';
-import type { OutboundSink } from '../../application/ports/outbound-sink.ts';
+import type { ToolErrorReporter } from '../../application/reporters/index.ts';
 import type { RuntimeObservation } from '../../application/runtime-observation/index.ts';
 
 type InvalidInvokeGatewayInboundFrame = Extract<GatewayInboundFrame, { kind: 'invalid' }> & {
@@ -17,16 +16,16 @@ type InvalidInvokeGatewayInboundFrame = Extract<GatewayInboundFrame, { kind: 'in
  */
 export class GatewayInboundPolicy implements InboundPolicy {
   private readonly observation: RuntimeObservation;
-  private readonly sink: OutboundSink;
+  private readonly toolErrorReporter: ToolErrorReporter;
   private readonly catalog: ToolErrorMessageCatalog;
 
   constructor(
     observation: RuntimeObservation,
-    sink: OutboundSink,
+    toolErrorReporter: ToolErrorReporter,
     catalog: ToolErrorMessageCatalog,
   ) {
     this.observation = observation;
-    this.sink = sink;
+    this.toolErrorReporter = toolErrorReporter;
     this.catalog = catalog;
   }
 
@@ -55,14 +54,12 @@ export class GatewayInboundPolicy implements InboundPolicy {
       welinkSessionId: frame.welinkSessionId,
     }, frame.violation.violation.message, frame.violation.violation.code);
 
-    const toolError: ToolErrorMessage = {
-      type: GATEWAY_UPLINK_MESSAGE_TYPE.toolError,
-      ...(frame.welinkSessionId ? { welinkSessionId: frame.welinkSessionId } : {}),
-      ...(frame.toolSessionId ? { toolSessionId: frame.toolSessionId } : {}),
+    this.toolErrorReporter.report({
+      stage: 'inbound_invalid',
+      welinkSessionId: frame.welinkSessionId,
+      toolSessionId: frame.toolSessionId,
       error: this.buildInvalidInvokeToolError(frame.violation.violation),
-    };
-    this.observation.uplinkEmitted(toolError);
-    void this.sink.send(toolError);
+    });
   }
 
   private shouldReplyToInvalidInvoke(frame: GatewayInboundFrame): frame is InvalidInvokeGatewayInboundFrame {

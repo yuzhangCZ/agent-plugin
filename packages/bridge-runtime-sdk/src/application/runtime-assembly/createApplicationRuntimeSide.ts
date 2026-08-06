@@ -18,6 +18,7 @@ import {
   DefaultSkillEventToGatewayMessageProjector,
   ToolErrorMessageCatalog,
 } from '../projectors/index.ts';
+import { ToolErrorReporter } from '../reporters/index.ts';
 import { RuntimeCommandDispatcher } from '../RuntimeCommandDispatcher.ts';
 import type { DefaultRuntimeObservation } from '../runtime-observation/index.ts';
 import { RuntimeCoreService } from '../runtime/RuntimeCoreService.ts';
@@ -43,6 +44,7 @@ export function createApplicationRuntimeSide(
 ): {
   core: RuntimeCoreService;
   commandFailureToolErrorProjector: CommandFailureToolErrorProjector;
+  toolErrorReporter: ToolErrorReporter;
 } {
   const sessionRegistry = new InMemorySessionRuntimeRegistry();
   const pendingInteractionRegistry = new InMemoryPendingInteractionRegistry();
@@ -54,6 +56,7 @@ export function createApplicationRuntimeSide(
   const commandResultProjector = new DefaultGatewayCommandResultProjector();
   const terminalProjector = new DefaultRunTerminalSignalProjector();
   const toolErrorMessageCatalog = new ToolErrorMessageCatalog();
+  const toolErrorReporter = new ToolErrorReporter(sink, observation, toolErrorMessageCatalog);
   const commandFailureToolErrorProjector = new CommandFailureToolErrorProjector(toolErrorMessageCatalog);
   const requestRunFailureToolErrorProjector = new RequestRunFailureToolErrorProjector(toolErrorMessageCatalog);
   const validator = new FactSequenceValidator();
@@ -70,6 +73,7 @@ export function createApplicationRuntimeSide(
       sink,
       factProjector,
       eventProjector,
+      toolErrorReporter,
       observation,
     },
     factEnricher,
@@ -84,6 +88,7 @@ export function createApplicationRuntimeSide(
       sink,
       factProjector,
       eventProjector,
+      toolErrorReporter,
       observation,
     },
     factEnricher,
@@ -126,5 +131,6 @@ export function createApplicationRuntimeSide(
       observation,
     }),
     commandFailureToolErrorProjector,
+    toolErrorReporter,
   };
 }

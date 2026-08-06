@@ -42,9 +42,6 @@ export class CommandFailureToolErrorProjector {
     if (!input.summary.toolSessionId && !input.summary.welinkSessionId) {
       return null;
     }
-    if (!this.isSupportedAction(input.summary.action)) {
-      return null;
-    }
 
     const errorMessage = this.resolveErrorMessage(input.error);
     if (!errorMessage) {
@@ -77,14 +74,5 @@ export class CommandFailureToolErrorProjector {
     }
 
     return normalizeErrorMessage(error);
-  }
-
-  private isSupportedAction(action: string | undefined): boolean {
-    return action === 'chat'
-      || action === 'create_session'
-      || action === 'question_reply'
-      || action === 'permission_reply'
-      || action === 'close_session'
-      || action === 'abort_session';
   }
 }
