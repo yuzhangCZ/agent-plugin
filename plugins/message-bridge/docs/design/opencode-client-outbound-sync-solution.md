@@ -295,8 +295,9 @@ SDK projector 投影为：
 2. OpenCode agent 客户端触发 agent 回复，welink CUI 收到完整 assistant stream。
 3. 一轮主动对话包含用户消息和 agent 回复，SDK 发送最终 `tool_done`。
 4. 主动同步完成后，welink CUI 继续发送消息，仍路由到同一 OpenCode session。
-5. 子 agent session 事件能按现有 `SubagentSessionMapper` 路由到父会话。
-6. 同一 host session 存在 active run 时，OpenCode 客户端主动事件不会被错投到当前 active run。
+5. OpenCode agent 客户端在同一已绑定 session 内连续发送多条消息，每条用户消息及其对应 agent 回复都能按顺序同步到 welink CUI，不丢失消息。
+6. 子 agent session 事件能按现有 `SubagentSessionMapper` 路由到父会话。
+7. 同一 host session 存在 active run 时，OpenCode 客户端主动事件不会被错投到当前 active run。
 
 ### 9.2 兼容测试
 
@@ -306,6 +307,7 @@ SDK projector 投影为：
 4. gateway-schema 仍接受原有 cloud events 和 opencode provider events。
 5. 无法解析 session 的 OpenCode 客户端事件不会错误同步到 welink。
 6. 同 session busy 场景按本阶段保守策略记录 `session_busy`，不产生乱序 tool event。
+7. 由 OpenCode agent 客户端自行创建、未经过 welink CUI 宿主创建或绑定、缺少 welink 侧 `sessionId` 关联的会话，不同步到 welink CUI；只有 welink CUI 宿主创建或绑定且能解析到 `sessionId` 的会话，才允许与 OpenCode agent session 关联并同步。
 
 ### 9.3 文档一致性检查
 
