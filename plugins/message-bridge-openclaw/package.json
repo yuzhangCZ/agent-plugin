@@ -1,6 +1,6 @@
 {
   "name": "@wecode/skill-openclaw-plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OpenClaw channel plugin for bridging ai-gateway to OpenClaw",
   "private": true,
   "type": "module",
