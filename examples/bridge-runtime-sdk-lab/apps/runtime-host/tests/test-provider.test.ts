@@ -1,0 +1,107 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { EventStore } from '../src/event-store.ts';
+import { TestProvider } from '../src/test-provider.ts';
+
+test('provider call events keep raw SDK to agent input text for lab inspection', async () => {
+  const events = new EventStore();
+  const provider = new TestProvider(events);
+
+  await provider.runMessage({
+    traceId: 'trace-1',
+    runId: 'run-1',
+    toolSessionId: 'tool-1',
+    text: 'visible sdk to agent text',
+  });
+
+  const call = events.list().find((event) => event.type === 'provider.call');
+
+  assert.equal(String(call?.meta?.rawInputText).includes('visible sdk to agent text'), true);
+  assert.equal(JSON.stringify(call?.meta?.input).includes('visible sdk to agent text'), false);
+});
+
+test('provider emits manual outbound run to selected tool session', async () => {
+  const events = new EventStore();
+  const provider = new TestProvider(events);
+  const emitted: unknown[] = [];
+  await provider.initialize({
+    outbound: {
+      emitOutboundMessage: async () => ({ applied: true }),
+      emitOutboundRun: async (input) => {
+        emitted.push({
+          toolSessionId: input.toolSessionId,
+          runId: input.runId,
+          facts: await collect(input.facts),
+        });
+        return { applied: true };
+      },
+    },
+  });
+
+  await provider.emitManualOutboundRun({
+    toolSessionId: 'tool-real-session',
+    runId: 'run-manual',
+    trigger: 'sdk-lab',
+    facts: [
+      { type: 'message.start', messageId: 'msg-1' },
+      { type: 'message.done', messageId: 'msg-1', reason: 'completed' },
+    ],
+  });
+
+  assert.deepEqual(emitted, [{
+    toolSessionId: 'tool-real-session',
+    runId: 'run-manual',
+    facts: [
+      { type: 'message.start', messageId: 'msg-1' },
+      { type: 'message.done', messageId: 'msg-1', reason: 'completed' },
+    ],
+  }]);
+});
+
+test('provider conflict facts use fixed interaction targets', async () => {
+  const events = new EventStore();
+  const provider = new TestProvider(events);
+  provider.setScenario({ command: 'runMessage', kind: 'question_conflict' });
+
+  const questionRun = await provider.runMessage({
+    traceId: 'trace-question',
+    runId: 'run-question',
+    toolSessionId: 'tool-question',
+    text: 'question conflict',
+  });
+
+  assert.equal(
+    (await collect(questionRun.facts)).some((fact) => {
+      return isRecord(fact) && fact.type === 'question.ask' && fact.questionId === 'question-conflict-fixed';
+    }),
+    true,
+  );
+
+  provider.setScenario({ command: 'runMessage', kind: 'permission_conflict' });
+  const permissionRun = await provider.runMessage({
+    traceId: 'trace-permission',
+    runId: 'run-permission',
+    toolSessionId: 'tool-permission',
+    text: 'permission conflict',
+  });
+
+  assert.equal(
+    (await collect(permissionRun.facts)).some((fact) => {
+      return isRecord(fact) && fact.type === 'permission.ask' && fact.permissionId === 'permission-conflict-fixed';
+    }),
+    true,
+  );
+});
+
+async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
+  const collected: T[] = [];
+  for await (const item of items) {
+    collected.push(item);
+  }
+  return collected;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}

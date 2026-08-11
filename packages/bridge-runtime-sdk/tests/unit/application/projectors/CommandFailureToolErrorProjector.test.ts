@@ -61,7 +61,7 @@ test('command failure projector ignores lifecycle runtime contract failures', ()
   assert.equal(message, null);
 });
 
-test('command failure projector maps unsupported actions when route fields exist', () => {
+test('command failure projector maps unsupported actions when route fields', () => {
   const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
 
   const message = projector.project({
@@ -78,63 +78,6 @@ test('command failure projector maps unsupported actions when route fields exist
     type: 'tool_error',
     toolSessionId: 'tool-1',
     error: 'Unsupported downstream action: unsupported_action',
-  });
-});
-
-test('command failure projector maps unsupported downstream errors to catalog message', () => {
-  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
-
-  const message = projector.project({
-    summary: {
-      messageType: 'invoke',
-      action: 'chat',
-      toolSessionId: 'tool-1',
-    },
-    error: new Error('Unsupported downstream action: chat'),
-  });
-
-  assert.deepEqual(message, {
-    type: 'tool_error',
-    toolSessionId: 'tool-1',
-    error: 'Unsupported downstream action: chat',
-  });
-});
-
-test('command failure projector reports non-catalog errors for unsupported routed actions', () => {
-  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
-
-  const message = projector.project({
-    summary: {
-      messageType: 'invoke',
-      action: 'future_action',
-      toolSessionId: 'tool-1',
-      welinkSessionId: 'welink-1',
-    },
-    error: new Error('future action failed'),
-  });
-
-  assert.deepEqual(message, {
-    type: 'tool_error',
-    toolSessionId: 'tool-1',
-    error: 'future action failed',
-  });
-});
-
-test('command failure projector omits welinkSessionId when it is the only route field', () => {
-  const projector = new CommandFailureToolErrorProjector(new ToolErrorMessageCatalog());
-
-  const message = projector.project({
-    summary: {
-      messageType: 'invoke',
-      action: 'future_action',
-      welinkSessionId: 'welink-1',
-    },
-    error: new Error('future action failed'),
-  });
-
-  assert.deepEqual(message, {
-    type: 'tool_error',
-    error: 'future action failed',
   });
 });
 

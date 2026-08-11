@@ -1,0 +1,214 @@
+export type GatewayMode = 'real-gateway' | 'mock-gateway';
+
+export interface SafeGatewayConfig {
+  url?: string;
+  authLoaded: boolean;
+  register: {
+    channel: string;
+    toolVersion: string;
+    pluginVersion?: string;
+  };
+}
+
+export interface RuntimeActionResult<TPayload = unknown> {
+  ok: boolean;
+  action: string;
+  payload?: TPayload;
+  error?: {
+    name: string;
+    message: string;
+    code?: string;
+  };
+}
+
+export type ProviderScenarioKind =
+  | 'success'
+  | 'offline'
+  | 'throw'
+  | 'timeout'
+  | 'invalid_fact'
+  | 'failed_run'
+  | 'session_not_found'
+  | 'result_reject'
+  | 'facts_throw'
+  | 'enrich_failure'
+  | 'aborted_run'
+  | 'question_conflict'
+  | 'permission_conflict';
+
+export interface ProviderScenarioConfig {
+  command: string;
+  kind: ProviderScenarioKind;
+  delayMs?: number;
+}
+
+export interface LabEvent {
+  id: number;
+  at: number;
+  type: string;
+  message: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface RuntimeSnapshot {
+  mode: GatewayMode;
+  gateway?: SafeGatewayConfig;
+  status?: unknown;
+  diagnostics?: unknown;
+  downstreams?: LabGatewayDownstreamView[];
+  manualAgent?: ManualAgentSnapshot;
+  events: LabEvent[];
+}
+
+export interface LabGatewayDownstreamView {
+  id: number;
+  at: number;
+  source: GatewayMode | 'sdk-observation';
+  phase: 'received' | 'handled' | 'failed' | 'invalid_invoke_rejected' | 'mock_sent';
+  messageType?: string;
+  action?: string;
+  command?: string;
+  toolSessionId?: string;
+  welinkSessionId?: string;
+  traceId?: string;
+  error?: string;
+  code?: string;
+  raw?: unknown;
+  rawText?: string;
+}
+
+export type DownstreamExpectedOutcome =
+  | 'tool_error'
+  | 'failure_only'
+  | 'diagnostics_only'
+  | 'session_created'
+  | 'tool_done'
+  | 'runtime_failed'
+  | 'status_response'
+  | 'slash_commands_result';
+
+export type LabScenarioTrigger = 'gateway_downstream' | 'provider_outbound' | 'mock_gateway_disconnect';
+
+export type ToolErrorStage =
+  | 'inbound_invalid'
+  | 'command_failure'
+  | 'request_lifecycle'
+  | 'request_terminal'
+  | 'outbound_terminal'
+  | 'diagnostics_only'
+  | 'lifecycle_status'
+  | 'success';
+
+export interface DownstreamScenario {
+  id: string;
+  group: string;
+  title: string;
+  description: string;
+  trigger?: LabScenarioTrigger;
+  raw: unknown;
+  steps?: DownstreamScenarioStep[];
+  expected: {
+    outcome: DownstreamExpectedOutcome;
+    stage: ToolErrorStage;
+    errorIncludes?: string;
+    reason?: string;
+    providerScenario?: ProviderScenarioConfig;
+  };
+}
+
+export type DownstreamScenarioStep =
+  | {
+      kind: 'provider_scenario';
+      scenario: ProviderScenarioConfig;
+    }
+  | {
+      kind: 'gateway_downstream';
+      raw: unknown;
+    }
+  | {
+      kind: 'provider_outbound';
+      providerScenario?: ProviderScenarioConfig;
+    }
+  | {
+      kind: 'mock_gateway_disconnect';
+    }
+  | {
+      kind: 'wait_for_uplink';
+      timeoutMs?: number;
+    };
+
+export interface ToolErrorView {
+  error: string;
+  toolSessionId?: string;
+  welinkSessionId?: string;
+  reason?: string;
+  stage: DownstreamScenario['expected']['stage'];
+}
+
+export interface DownstreamRunResult {
+  scenario: DownstreamScenario;
+  raw: unknown;
+  uplinks: unknown[];
+  toolErrors: ToolErrorView[];
+  failures: unknown[];
+  matchedExpectation: boolean;
+  note?: string;
+}
+
+export type ManualAgentTerminalOutcome = 'completed' | 'failed' | 'aborted';
+
+export interface ManualAgentContext {
+  runId: string;
+  traceId: string;
+  toolSessionId: string;
+  welinkSessionId?: string;
+  text: string;
+  messageId: string;
+  textPartId: string;
+  thinkingPartId: string;
+  toolPartId: string;
+  toolCallId: string;
+}
+
+export interface ManualAgentSnapshot {
+  enabled: boolean;
+  activeRun?: ManualAgentContext;
+  queuedFactCount: number;
+  outbound: ManualAgentOutboundSnapshot;
+}
+
+export interface ManualAgentOutboundSnapshot {
+  target: ManualAgentContext;
+  trigger: string;
+  queuedFactCount: number;
+  queuedFacts: unknown[];
+}
+
+export interface ManualAgentTemplate {
+  id: string;
+  title: string;
+  description: string;
+  fact: unknown;
+}
+
+export interface ManualAgentFactResult {
+  accepted: true;
+  queuedFactCount: number;
+  submittedFactCount?: number;
+}
+
+export interface ManualAgentTerminalInput {
+  outcome: ManualAgentTerminalOutcome;
+  message?: string;
+  code?: string;
+}
+
+export interface ManualAgentTextResponseInput {
+  textDoneFact: unknown;
+}
+
+export interface ManualAgentOutboundTargetInput {
+  toolSessionId?: string;
+  runId?: string;
+  trigger?: string;
+}

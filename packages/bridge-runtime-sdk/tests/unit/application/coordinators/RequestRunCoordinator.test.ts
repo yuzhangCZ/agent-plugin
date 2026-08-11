@@ -43,6 +43,13 @@ function createCoordinator(input: {
           return { type: 'tool_event', toolSessionId: 'tool-1' };
         },
       },
+      toolErrorReporter: {
+        report() {
+          input.events.push('toolErrorReporter.report');
+          input.events.push('observation.uplinkEmitted.tool_error');
+          input.events.push('sink.tool_error');
+        },
+      },
       observation: {
         factReceived() {
           input.events.push('observation.factReceived');

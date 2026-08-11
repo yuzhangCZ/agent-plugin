@@ -1,3 +1,5 @@
 packages:
   - 'packages/*'
   - 'plugins/*'
+  - 'examples/bridge-runtime-sdk-lab/apps/*'
+  - 'examples/bridge-runtime-sdk-lab/packages/*'

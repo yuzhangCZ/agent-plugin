@@ -6,4 +6,5 @@ coverage/
 packages/*/coverage/
 packages/*/dist/
 plugins/*/dist/
+examples/bridge-runtime-sdk-lab/apps/*/dist/
 plugins/message-bridge/release/
