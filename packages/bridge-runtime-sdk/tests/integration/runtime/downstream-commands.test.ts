@@ -197,7 +197,7 @@ test('request-level command failures stay ready and record command_execution_fai
   assert.equal(runtime.getStatus().failureReason, null);
 });
 
-test('create_session command failure projects tool_error with welinkSessionId', async () => {
+test('create_session command failure projects tool_error without a session route', async () => {
   const connection = new FakeGatewayClient();
   const runtime = await createBridgeRuntime(
     createRuntimeOptions(
@@ -239,7 +239,6 @@ test('create_session command failure projects tool_error with welinkSessionId', 
 
   assert.deepEqual(connection.sent.at(-1), {
     type: 'tool_error',
-    welinkSessionId: 'welink-create-1',
     error: 'create_session_failed',
   });
 });
